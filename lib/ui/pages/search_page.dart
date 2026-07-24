@@ -173,7 +173,10 @@ class _SearchPageState extends State<SearchPage> {
 
   void _onSubmit() {
     final text = _controller.text.trim();
-    if (text.isNotEmpty) _search(text);
+    if (text.isNotEmpty) {
+      _focusNode.unfocus();
+      _search(text);
+    }
   }
 
   void _onKeywordTap(String keyword) {

@@ -134,7 +134,7 @@ class _RankPageState extends State<RankPage>
                         crossAxisCount: crossAxisCount,
                         mainAxisSpacing: 10,
                         crossAxisSpacing: 10,
-                        childAspectRatio: 4.2,
+                        childAspectRatio: 3.6,
                       ),
                       itemCount: ranks.length,
                       itemBuilder: (context, index) {
@@ -312,6 +312,16 @@ class _RankCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final size = MediaQuery.sizeOf(context);
+    final isCarMode =
+        size.width > size.height && ThemeController.instance.carModeEnabled;
+
+    final cardPadding = isCarMode ? 14.0 : 10.0;
+    final artworkSize = isCarMode ? 88.0 : 72.0;
+    final nameFontSize = isCarMode ? 17.0 : 15.0;
+    final songFontSize = isCarMode ? 14.0 : 12.0;
+    final spacing = isCarMode ? 16.0 : 14.0;
+    final maxSongs = isCarMode ? 2 : 3;
 
     return Material(
       color: isDark
@@ -322,23 +332,23 @@ class _RankCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: EdgeInsets.all(cardPadding),
           child: Row(
             children: [
               // 封面
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: SizedBox.square(
-                  dimension: 72,
+                  dimension: artworkSize,
                   child: Artwork(
                     url: rank.imageUrl,
-                    size: 72,
+                    size: artworkSize,
                     borderRadius: 10,
                     icon: Icons.leaderboard_rounded,
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
+              SizedBox(width: spacing),
               // 榜单信息
               Expanded(
                 child: Column(
@@ -350,14 +360,14 @@ class _RankCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 15,
+                        fontSize: nameFontSize,
                         fontWeight: FontWeight.w800,
                         color: colorScheme.onSurface,
                       ),
                     ),
                     if (rank.songs.isNotEmpty) ...[
                       const SizedBox(height: 5),
-                      ...rank.songs.take(3).map(
+                      ...rank.songs.take(maxSongs).map(
                             (s) => Padding(
                               padding: const EdgeInsets.only(top: 2),
                               child: Text(
@@ -365,7 +375,7 @@ class _RankCard extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: songFontSize,
                                   color: colorScheme.onSurfaceVariant,
                                 ),
                               ),
@@ -378,7 +388,7 @@ class _RankCard extends StatelessWidget {
               const SizedBox(width: 8),
               Icon(
                 Icons.chevron_right_rounded,
-                size: 22,
+                size: isCarMode ? 26 : 22,
                 color: colorScheme.onSurfaceVariant.withValues(alpha: .5),
               ),
             ],
@@ -520,6 +530,8 @@ class _RankDetailPageState extends State<RankDetailPage> {
               SliverAppBar(
                 pinned: true,
                 expandedHeight: 220,
+                surfaceTintColor: Colors.transparent,
+                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
                 flexibleSpace: FlexibleSpaceBar(
                   title: Text(
                     widget.rank.rankName,
@@ -889,7 +901,7 @@ class _RankSkeleton extends StatelessWidget {
                 crossAxisCount: crossAxisCount,
                 mainAxisSpacing: 10,
                 crossAxisSpacing: 10,
-                childAspectRatio: 4.2,
+                childAspectRatio: 3.6,
               ),
               itemCount: 8,
               itemBuilder: (context, index) => buildItem(),
