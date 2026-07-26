@@ -70,7 +70,7 @@ class _DesktopLyricsSettingsPageState
                 title: '字体大小',
                 value: _settings.fontSize,
                 min: 12,
-                max: 24,
+                max: 48,
                 label: '${_settings.fontSize.round()}sp',
                 onChanged: (v) => _update((s) => s.copyWith(fontSize: v)),
               ),

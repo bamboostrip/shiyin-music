@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../controllers/theme_controller.dart';
-
 /// 自适应布局工具类。
 ///
 /// 平板检测基于 Material Design 的 breakpoint：
@@ -12,10 +10,10 @@ import '../controllers/theme_controller.dart';
 class AdaptiveLayout {
   const AdaptiveLayout._();
 
-  /// 普通平板内容区域的最大宽度。
+  /// 普通平板内容区域的最大宽度（已取消限制，保留常量供网格计算参考）。
   static const double tabletMaxWidth = 800;
 
-  /// 超宽屏内容区域的最大宽度。
+  /// 超宽屏内容区域的最大宽度（已取消限制，保留常量供网格计算参考）。
   static const double wideMaxWidth = 1200;
 
   /// 是否为平板设备。
@@ -51,24 +49,9 @@ class AdaptiveLayout {
 
   /// 根据屏幕宽度计算内容区域的最大宽度。
   ///
-  /// - 宽度 < 600：不限制（手机）
-  /// - 600 ≤ 宽度 < 1200：限制 [tabletMaxWidth]
-  /// - 宽度 ≥ 1200：限制 [wideMaxWidth]
+  /// 已取消最大宽度限制，所有屏幕均铺满显示。
   static double contentMaxWidthFor(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final width = size.width;
-    if (width < 600) return double.infinity;
-
-    // 取消宽度限制是车机横屏专属（让内容铺满宽屏）；
-    // 普通横屏/平板仍按原逻辑限制内容最大宽度，避免行宽过长难读。
-    final isCarLandscape =
-        size.width > size.height && ThemeController.instance.carModeEnabled;
-    if (isCarLandscape) {
-      return double.infinity;
-    }
-
-    if (width < 1200) return tabletMaxWidth;
-    return wideMaxWidth;
+    return double.infinity;
   }
 
   /// 根据屏幕宽度计算网格列数。
@@ -85,8 +68,7 @@ class AdaptiveLayout {
 
 /// 自适应内容内边距。
 ///
-/// 手机端：不施加任何约束，子组件直接渲染。
-/// 平板/超宽端：将内容居中并限制最大宽度，避免内容横向拉伸到难以阅读的宽度。
+/// 已取消最大宽度限制，所有屏幕均铺满显示。
 class AdaptiveContentPadding extends StatelessWidget {
   const AdaptiveContentPadding({
     super.key,
@@ -99,19 +81,6 @@ class AdaptiveContentPadding extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    if (size.width < 600) {
-      return child;
-    }
-    final limit = maxWidth ?? AdaptiveLayout.contentMaxWidthFor(context);
-    if (limit == double.infinity) {
-      return child;
-    }
-    return Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: limit),
-        child: child,
-      ),
-    );
+    return child;
   }
 }
