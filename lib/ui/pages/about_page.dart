@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../config/app_config.dart';
 import '../../services/app_update_service.dart';
 import '../../services/music_api.dart';
+import '../widgets/app_update_widgets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
 
@@ -114,7 +115,9 @@ class _AboutPageState extends State<AboutPage> {
                       Expanded(
                         child: AppUpdateService.isSupportedPlatform
                             ? FilledButton.icon(
-                                onPressed: null,
+                                onPressed: () => checkAppUpdateManually(
+                                  context: context,
+                                ),
                                 icon: const Icon(Icons.system_update_alt_rounded),
                                 label: const Text('检查更新'),
                               )

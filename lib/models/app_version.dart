@@ -48,6 +48,81 @@ class AppVersionInfo {
       releaseDate: DateTime.tryParse(asString(json['releaseDate']) ?? ''),
     );
   }
+
+  /// 从 GitHub Releases API（`/releases/latest`）的 JSON 构造。
+  ///
+  /// - `tag_name`（去掉前导 `v`）作为 [versionName]
+  /// - `body` 作为更新说明 [updateContent]
+  /// - 优先取附件中第一个 `.apk` 的 `browser_download_url` 作为 [downloadUrl]，
+  ///   没有附件时回退到 release 页面 [htmlUrl]
+  /// - GitHub 不提供"强制更新"，故 [forceUpdate] 恒为 false
+  factory AppVersionInfo.fromGitHubRelease(
+    Map<String, dynamic> json, {
+    String htmlUrl = '',
+  }) {
+    final rawTag = asString(json['tag_name']) ?? '';
+    final versionName = stripVersionTagPrefix(rawTag);
+
+    var downloadUrl = '';
+    final assets = json['assets'];
+    if (assets is List) {
+      for (final asset in assets) {
+        if (asset is! Map) continue;
+        final name = asString(asset['name']) ?? '';
+        if (name.toLowerCase().endsWith('.apk')) {
+          downloadUrl = asString(asset['browser_download_url']) ?? '';
+          if (downloadUrl.isNotEmpty) break;
+        }
+      }
+    }
+    final releasePageUrl = asString(json['html_url']) ?? htmlUrl;
+    if (downloadUrl.isEmpty) {
+      downloadUrl = releasePageUrl;
+    }
+
+    return AppVersionInfo(
+      platform: AppUpdatePlatform.android.apiValue,
+      versionName: versionName.isEmpty ? rawTag : versionName,
+      versionCode: semverToCode(versionName),
+      updateContent: asString(json['body']) ?? '',
+      downloadUrl: downloadUrl,
+      forceUpdate: false,
+      releaseDate: DateTime.tryParse(asString(json['published_at']) ?? ''),
+    );
+  }
+}
+
+/// 去掉版本 tag 的前导 `v`/`V` 与首尾空白，例如 `v2.4.0` → `2.4.0`。
+String stripVersionTagPrefix(String tag) {
+  var t = tag.trim();
+  if (t.length > 1 && (t.startsWith('v') || t.startsWith('V'))) {
+    t = t.substring(1);
+  }
+  return t;
+}
+
+/// 取语义化版本的前三段整数（不足补 0，忽略预发布/构建号）。
+List<int> _semverParts(String version) {
+  final core = stripVersionTagPrefix(version).split('-').first.split('+').first;
+  final segs = core.split('.');
+  int at(int i) => i < segs.length ? (int.tryParse(segs[i]) ?? 0) : 0;
+  return [at(0), at(1), at(2)];
+}
+
+/// 语义化版本比较：`a<b` → -1，相等 → 0，`a>b` → 1。
+int compareSemver(String a, String b) {
+  final pa = _semverParts(a);
+  final pb = _semverParts(b);
+  for (var i = 0; i < 3; i++) {
+    if (pa[i] != pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+/// 由语义化版本生成一个单调的整数 code（major*10000 + minor*100 + patch）。
+int semverToCode(String version) {
+  final p = _semverParts(version);
+  return p[0] * 10000 + p[1] * 100 + p[2];
 }
 
 int normalizedVersionCode(Object? value) {

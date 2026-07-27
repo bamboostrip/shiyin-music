@@ -69,7 +69,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _sectionIndex = widget.sectionIndex;
-    _updateService = AppUpdateService(widget.api);
+    _updateService = AppUpdateService();
     final cached = _cachedData;
     if (cached != null) {
       _future = Future.value(cached);

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/app_version.dart';
 import '../../services/app_update_service.dart';
-import '../../services/music_api.dart';
 import 'toast.dart';
 
 class AppUpdateBanner extends StatelessWidget {
@@ -71,7 +70,6 @@ class AppUpdateBanner extends StatelessWidget {
 
 Future<void> checkAppUpdateManually({
   required BuildContext context,
-  required MusicApi api,
 }) async {
   if (!AppUpdateService.isSupportedPlatform) {
     return;
@@ -80,7 +78,7 @@ Future<void> checkAppUpdateManually({
   Toast.info('正在检测更新...');
 
   try {
-    final service = AppUpdateService(api);
+    final service = AppUpdateService();
     final version = await service.checkForUpdate();
     if (!context.mounted) {
       return;
