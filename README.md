@@ -206,8 +206,8 @@
 
 ```bash
 # 克隆仓库（默认分支即无后端 / Rust 引擎版本）
-git clone https://github.com/bamboostrip/kgka_Music_hl_automotive.git
-cd kgka_Music_hl_automotive
+git clone https://github.com/bamboostrip/shiyin-music.git
+cd shiyin-music
 
 # 安装依赖
 flutter pub get

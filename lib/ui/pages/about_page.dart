@@ -12,7 +12,7 @@ class AboutPage extends StatefulWidget {
   const AboutPage({super.key, required this.api});
 
   static final Uri _repositoryUri = Uri.parse(
-    'https://github.com/bamboostrip/kgka_Music_hl_automotive',
+    'https://github.com/bamboostrip/shiyin-music',
   );
 
   final MusicApi api;
@@ -139,7 +139,7 @@ class _AboutPageState extends State<AboutPage> {
                   const _InfoRow(label: '当前版本', value: AppConfig.appVersion),
                   _InfoLinkRow(
                     label: 'GitHub',
-                    value: 'bamboostrip/kgka_Music_hl_automotive',
+                    value: 'bamboostrip/shiyin-music',
                     onTap: () => _openRepository(context),
                   ),
                 ],
