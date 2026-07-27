@@ -19,6 +19,7 @@ import '../services/music_api.dart';
 import '../services/music_audio_handler.dart';
 import '../services/playback_history_service.dart';
 import '../services/playback_stats_service.dart';
+import '../services/vip_background_task.dart';
 import 'download_controller.dart';
 import 'local_music_controller.dart';
 
@@ -92,6 +93,9 @@ class PlayerController extends ChangeNotifier {
 
   /// 本地音乐控制器（由 main.dart 在创建后注入，用于读取内嵌歌词等）。
   LocalMusicController? localMusic;
+
+  /// VIP 领取任务（由 main.dart 在创建后注入，用于播放时按需领取 VIP）。
+  VipBackgroundTask? vipClaim;
 
   PlayerController(this._api, this._audioHandler) {
     unawaited(_restoreSettings());
@@ -423,6 +427,11 @@ class PlayerController extends ChangeNotifier {
         );
       }
     } catch (error) {
+      // VIP 过期：自动领取后重试一次
+      if (error is VipRequiredException && vipClaim != null) {
+        final claimed = await _tryClaimVipAndRetry(song);
+        if (claimed) return;
+      }
       errorMessage = error.toString();
       isPreparing = false;
       notifyListeners();
@@ -495,6 +504,27 @@ class PlayerController extends ChangeNotifier {
       }
       rethrow;
     }
+  }
+
+  /// VIP 过期时自动领取并重试播放，成功返回 true。
+  Future<bool> _tryClaimVipAndRetry(Song song) async {
+    try {
+      final result = await vipClaim!.claimNow(null);
+      if (result.status == VipClaimStatus.success ||
+          result.status == VipClaimStatus.alreadyClaimed) {
+        debugPrint('[KA Music][player] VIP 已领取，重试播放: ${song.title}');
+        final playUrl = await _api.songUrl(song, quality: audioQuality);
+        if (playUrl.url.isNotEmpty) {
+          errorMessage = null;
+          // 重新走完整播放流程
+          unawaited(playSong(song));
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('[KA Music][player] VIP 领取/重试失败: $e');
+    }
+    return false;
   }
 
   /// 返回更低一档的音质；已是最低档时返回 null。

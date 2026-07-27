@@ -46,6 +46,8 @@ class VipBackgroundTask extends ChangeNotifier {
   DateTime? _lastClaimTime;
   // 已成功跑过当日领取的去重 key（identity@date），跨重启持久化。
   String? _lastRunKey;
+  // 记住最近一次有效 session，供 claimNow(null) 回退使用。
+  LoginSession? _lastSession;
 
   bool get autoEnabled => _autoEnabled;
   bool get isClaiming => _isClaiming;
@@ -83,6 +85,7 @@ class VipBackgroundTask extends ChangeNotifier {
 
   /// 静默自动领取：受 [autoEnabled] 与当日去重 key 约束。
   void schedule(LoginSession? session) {
+    if (session?.isValid == true) _lastSession = session;
     if (!_autoEnabled) return;
     if (_isClaiming) return;
     final runKey = _buildRunKey(session);
@@ -104,10 +107,12 @@ class VipBackgroundTask extends ChangeNotifier {
   }
 
   /// 手动领取：跳过当日去重，返回结果供 UI 反馈。
+  /// 传入 null 时回退到最近一次 schedule 记住的 session。
   Future<VipClaimResult> claimNow(LoginSession? session) async {
     await loadPrefsOnce();
     if (_isClaiming) return const VipClaimResult(VipClaimStatus.none, '正在领取中');
-    final runKey = _buildRunKey(session);
+    final effectiveSession = session ?? _lastSession;
+    final runKey = _buildRunKey(effectiveSession);
     if (runKey == null) {
       return const VipClaimResult(VipClaimStatus.failed, '未登录，无法领取');
     }

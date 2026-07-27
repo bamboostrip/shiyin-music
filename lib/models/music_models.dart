@@ -1442,18 +1442,34 @@ class AlbumShopItem {
 }
 
 class PlayUrl {
-  const PlayUrl({required this.url, required this.hash});
+  const PlayUrl({required this.url, required this.hash, this.privStatus = 0});
 
   final String url;
   final String hash;
+
+  /// 权限状态：1 = 需要 VIP，10 = 需要购买专辑。
+  final int privStatus;
+
+  bool get requiresVip => privStatus == 1;
 
   factory PlayUrl.fromJson(Map<String, dynamic> json) {
     final urls = asList(json['url']).whereType<String>().toList();
     return PlayUrl(
       url: urls.isNotEmpty ? urls.first : '',
       hash: asString(json['hash']) ?? '',
+      privStatus: json['priv_status'] is int ? json['priv_status'] as int : 0,
     );
   }
+}
+
+/// 播放地址需要 VIP 权限时抛出，供播放器捕获后自动领取并重试。
+class VipRequiredException implements Exception {
+  const VipRequiredException([this.message = '该歌曲需要 VIP 才能播放']);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 class LyricLine {

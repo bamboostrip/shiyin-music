@@ -556,7 +556,11 @@ class MusicApi {
         'free_part': false,
       }),
     );
-    return PlayUrl.fromJson(json);
+    final playUrl = PlayUrl.fromJson(json);
+    if (playUrl.requiresVip) {
+      throw const VipRequiredException();
+    }
+    return playUrl;
   }
 
   /// 获取云盘歌曲列表（分页）。

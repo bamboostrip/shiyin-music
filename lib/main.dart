@@ -94,7 +94,8 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
     _player = PlayerController(_api, widget.audioHandler)
       ..downloadController = _downloads
       ..cacheService = _cacheService
-      ..localMusic = _localMusic;
+      ..localMusic = _localMusic
+      ..vipClaim = _auth.vipClaim;
     _theme = widget.themeController;
     _auth.restore();
     WidgetsBinding.instance.addPostFrameCallback((_) {
