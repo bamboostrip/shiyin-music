@@ -102,10 +102,11 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
 
       # 打 tag 时自动创建 GitHub Release 并附带 APK。
+      # Release 笔记由 gh CLI 手动创建，此处仅附加 APK；
+      # 若 Release 已存在则只更新附件，不覆盖 body。
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.apk.outputs.path }}
           name: 时音 ${{ github.ref_name }}
-          generate_release_notes: true
