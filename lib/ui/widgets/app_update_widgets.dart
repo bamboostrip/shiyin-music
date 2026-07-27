@@ -79,7 +79,7 @@ Future<void> checkAppUpdateManually({
 
   try {
     final service = AppUpdateService();
-    final version = await service.checkForUpdate();
+    final version = await service.checkForUpdate(manual: true);
     if (!context.mounted) {
       return;
     }
