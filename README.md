@@ -35,13 +35,13 @@
 
 | 分支 | 架构 | 是否需要后端服务器 | 说明 |
 |---|---|:---:|---|
-| **`feature/flutter-rust-bridge`**（默认） | 本地 **Rust 引擎**（经 `flutter_rust_bridge` 调用） | ❌ 否 | 直接由内嵌的 Rust 引擎请求酷狗接口，**完全自包含，开箱即用** |
-| `master` | HTTP **后端代理服务器** | ✅ 是 | 通过远程后端服务器中转酷狗接口，需自行部署/指定 `KA_MUSIC_API_BASE_URL` |
+| **`main`**（默认） | 本地 **Rust 引擎**（经 `flutter_rust_bridge` 调用） | ❌ 否 | 直接由内嵌的 Rust 引擎请求酷狗接口，**完全自包含，开箱即用** |
+| `backend` | HTTP **后端代理服务器** | ✅ 是 | 通过远程后端服务器中转酷狗接口，需自行部署/指定 `KA_MUSIC_API_BASE_URL` |
 
-> 👉 **新用户请用默认分支 `feature/flutter-rust-bridge`**：无需搭建任何服务器。
-> 曾使用后端版本的老用户，请切到 `master`（仍持续维护，但已不是主分支）。
+> 👉 **新用户请用默认分支 `main`**：无需搭建任何服务器。
+> 曾使用后端版本的老用户，请切到 `backend`（仍持续维护，但已不是主分支）。
 >
-> 本文档以下的内容**均以默认分支（无后端 / Rust 引擎）为准**；标注「仅 master」的小节除外。
+> 本文档以下的内容**均以默认分支（无后端 / Rust 引擎）为准**；标注「仅 backend」的小节除外。
 
 ---
 
@@ -314,13 +314,13 @@ flutter run --dart-define=KA_MUSIC_API_BASE_URL=https://your-api.com
 
 ---
 
-## 🧩 仅 master 分支（后端变体）说明
+## 🧩 仅 backend 分支（后端变体）说明
 
-以下内容**只适用于 `master` 分支**，默认分支（无后端）不涉及：
+以下内容**只适用于 `backend` 分支**，默认分支（无后端）不涉及：
 
-- **需要后端服务器**：`master` 通过远程服务器中转酷狗接口，需部署后端并指定 `KA_MUSIC_API_BASE_URL`。
-- **自定义 API 地址**：`master` 支持在设置中配置自定义 API 地址；默认分支接口内嵌于 Rust 引擎，不支持重定向。
-- **接口实现位置**：`master` 的接口走 `lib/core/api_client.dart`（HTTP 客户端）；默认分支则走 `rust/` + `lib/core/rust_api_client.dart`。
+- **需要后端服务器**：`backend` 通过远程服务器中转酷狗接口，需部署后端并指定 `KA_MUSIC_API_BASE_URL`。
+- **自定义 API 地址**：`backend` 支持在设置中配置自定义 API 地址；默认分支接口内嵌于 Rust 引擎，不支持重定向。
+- **接口实现位置**：`backend` 的接口走 `lib/core/api_client.dart`（HTTP 客户端）；默认分支则走 `rust/` + `lib/core/rust_api_client.dart`。
 - 仓库根目录的 `api.json` 描述的是后端变体的 HTTP 接口，默认分支不使用。
 
 ---
