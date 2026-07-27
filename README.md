@@ -234,10 +234,10 @@ flutter run -d linux
 | 变量 | 说明 | 适用分支 |
 |---|---|---|
 | `KA_MUSIC_DEBUG_LYRICS` | 启用歌词调试日志 | 通用 |
-| `KA_MUSIC_API_BASE_URL` | 自定义后端 API 地址 | **仅 master** |
+| `KA_MUSIC_API_BASE_URL` | 自定义后端 API 地址 | **仅 backend** |
 
 ```bash
-# 仅 master（后端变体）需要：编译时指定后端地址
+# 仅 backend（后端变体）需要：编译时指定后端地址
 flutter run --dart-define=KA_MUSIC_API_BASE_URL=https://your-api.com
 ```
 
