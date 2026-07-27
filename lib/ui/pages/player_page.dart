@@ -69,22 +69,26 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.player,
-      builder: (context, _) {
-        final song = widget.player.currentSong;
-        if (song == null) {
-          return const Scaffold(body: SizedBox.shrink());
-        }
+    // 整页排除语义树：Windows 桌面 pop 动画期间 AnimatedBuilder 仍会
+    // 响应 player notifyListeners 重建子树，导致 AXTree 竞态原生崩溃。
+    return ExcludeSemantics(
+      child: AnimatedBuilder(
+        animation: widget.player,
+        builder: (context, _) {
+          final song = widget.player.currentSong;
+          if (song == null) {
+            return const Scaffold(body: SizedBox.shrink());
+          }
 
-        return _PlayerBody(
-          player: widget.player,
-          auth: widget.auth,
-          song: song,
-          onClose: () => Navigator.of(context).pop(),
-          onQueue: () => _showQueue(context),
-        );
-      },
+          return _PlayerBody(
+            player: widget.player,
+            auth: widget.auth,
+            song: song,
+            onClose: () => Navigator.of(context).pop(),
+            onQueue: () => _showQueue(context),
+          );
+        },
+      ),
     );
   }
 

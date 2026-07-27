@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: '3.44.4'
+  FLUTTER_VERSION: '3.44.8'
   JAVA_VERSION: '17'
   NDK_VERSION: '28.2.13676358'
 
@@ -66,25 +66,26 @@ jobs:
           shared-key: android-arm64
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      # 用固定的 CI 调试 keystore 签名（base64 存在 Secret 里），保证每次 tag 签名一致、可覆盖安装。
-      # 若未配置该 Secret，则回退为 CI 现生成的 debug.keystore（签名每次不同，仅适合临时验证）。
-      - name: Prepare signing keystore
+      # 从 Secret 还原 release 签名密钥并生成 key.properties。
+      # 若未配置 Secret，回退为 debug 签名（仅适合临时验证，不可覆盖安装正式版）。
+      - name: Prepare release signing
         env:
-          KEYSTORE_B64: ${{ secrets.CI_DEBUG_KEYSTORE_BASE64 }}
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
         run: |
-          mkdir -p ~/.android
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
-            echo "Using fixed CI debug keystore (stable signature)."
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
+            cat > android/key.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=shiyin
+          keyPassword=$KEYSTORE_PASSWORD
+          EOF
+            echo "Using release keystore from secrets."
           else
-            echo "CI_DEBUG_KEYSTORE_BASE64 not set; generating an ephemeral debug keystore."
-            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+            echo "RELEASE_KEYSTORE_BASE64/PASSWORD not set; falling back to debug signing."
           fi
 
-      # 工程已用 abiFilters 限定 arm64-v8a；release 已绑定 debug 签名配置。
       - name: Build release APK (arm64-v8a)
         run: flutter build apk --release --target-platform android-arm64
 

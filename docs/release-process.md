@@ -10,7 +10,24 @@
 1. 确认所有要发布的修改已合并到 `main`
 2. 确认 CI 在 `main` 上最近一次构建通过（如有）
 
-## 二、升级版本号（三处必须同步）
+## 二、签名配置（已就绪，无需每次操作）
+
+本地和 CI 使用**同一个 release keystore**，签名一致，可互相覆盖安装。
+
+| 项目 | 说明 |
+|------|------|
+| 密钥文件 | `android/app/release.keystore`（已 gitignore，**不可丢失**） |
+| 本地配置 | `android/key.properties`（已 gitignore） |
+| CI 配置 | GitHub Secrets：`RELEASE_KEYSTORE_BASE64` + `RELEASE_KEYSTORE_PASSWORD` |
+| 别名 | `shiyin` |
+| 构建逻辑 | `build.gradle.kts` 检测到 `key.properties` 时用 release 签名，否则回退 debug |
+
+> ⚠️ **密钥密码丢失 = app 永远无法覆盖更新**，务必备份密码和 keystore 文件。
+>
+> 历史说明：v2.4.2 及之前的 CI 构建使用 debug 签名，与当前 release 签名不一致。
+> 从 v2.4.3 起统一为 release 签名，旧版用户需卸载后重装。
+
+## 三、升级版本号（三处必须同步）
 
 | 文件 | 字段 | 示例 |
 |------|------|------|
@@ -25,7 +42,7 @@
 - `versionName`：语义化版本 `major.minor.patch`
 - `versionCode`：`major * 10000 + minor * 100 + patch`（如 `2.4.2` → `20402`，简写 `242`）
 
-## 三、更新更新日志
+## 四、更新更新日志
 
 编辑 `update.md`，在顶部添加新版本条目，格式参考已有版本：
 
@@ -37,7 +54,7 @@
 - 优化 xxx 体验
 ```
 
-## 四、提交并推送
+## 五、提交并推送
 
 ```bash
 git add -A
@@ -45,7 +62,7 @@ git commit -m "release: v2.4.2"
 git push origin main
 ```
 
-## 五、创建 GitHub Release（带详细 changelog）
+## 六、创建 GitHub Release（带详细 changelog）
 
 用 `gh` CLI 创建 Release，**先写 Release 再打 tag**，这样 CI 只附加 APK 不覆盖笔记：
 
@@ -82,7 +99,7 @@ Release 笔记模板：
 > ⚠️ CI workflow 中 **不要** 开启 `generate_release_notes: true`，否则会覆盖手写笔记。
 > 当前 workflow 已配置为仅附加 APK、不覆盖 body。
 
-## 六、确认 CI 构建
+## 七、确认 CI 构建
 
 ```bash
 gh run list --limit 1          # 查看构建状态
@@ -94,7 +111,7 @@ CI 完成后 Release 页面应包含：
 - 手写 changelog
 - `app-release.apk` 附件（arm64-v8a）
 
-## 七、验证
+## 八、验证
 
 - 在设备上安装新 APK，确认「关于」页版本号正确
 - 点击「检查更新」，应提示"当前已是最新版本"

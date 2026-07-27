@@ -153,10 +153,16 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
             transparentBackground: _theme.backgroundEnabled,
           ),
           builder: (context, child) {
-            return _AppBackground(
+            Widget result = _AppBackground(
               themeController: _theme,
               child: _SystemUiOverlay(child: child ?? const SizedBox.shrink()),
             );
+            // Windows 桌面 AXTree 竞态导致原生崩溃（accessibility_bridge.cc），
+            // 整 app 排除语义树彻底规避。Android/iOS 不受影响。
+            if (Platform.isWindows) {
+              result = ExcludeSemantics(child: result);
+            }
+            return result;
           },
           home: AnimatedBuilder(
             animation: _auth,

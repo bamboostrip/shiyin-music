@@ -2,8 +2,8 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '时音';
-  static const appVersion = '2.4.2';
-  static const appVersionCode = '242';
+  static const appVersion = '2.4.3';
+  static const appVersionCode = '243';
 
   static const debugLyrics = bool.fromEnvironment(
     'KA_MUSIC_DEBUG_LYRICS',

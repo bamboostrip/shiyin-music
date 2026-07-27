@@ -1448,6 +1448,7 @@ class PlayUrl {
   final String hash;
 
   /// 权限状态：1 = 需要 VIP，10 = 需要购买专辑。
+  /// 上游可能返回 integer 或 string，统一用 asInt 解析。
   final int privStatus;
 
   bool get requiresVip => privStatus == 1;
@@ -1457,7 +1458,7 @@ class PlayUrl {
     return PlayUrl(
       url: urls.isNotEmpty ? urls.first : '',
       hash: asString(json['hash']) ?? '',
-      privStatus: json['priv_status'] is int ? json['priv_status'] as int : 0,
+      privStatus: asInt(json['priv_status']) ?? 0,
     );
   }
 }

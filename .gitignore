@@ -54,3 +54,7 @@ android/app/src/main/jniLibs/
 .opencode/
 .superpowers/
 .zcode/
+
+# Release signing
+android/app/release.keystore
+key.properties

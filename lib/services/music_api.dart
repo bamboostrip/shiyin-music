@@ -557,7 +557,7 @@ class MusicApi {
       }),
     );
     final playUrl = PlayUrl.fromJson(json);
-    if (playUrl.requiresVip) {
+    if (playUrl.url.isEmpty && playUrl.requiresVip) {
       throw const VipRequiredException();
     }
     return playUrl;
