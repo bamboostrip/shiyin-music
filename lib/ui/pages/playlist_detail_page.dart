@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../config/app_config.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../core/pinyin_utils.dart';
 import '../../models/music_models.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
@@ -188,13 +189,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
     switch (_sortMode) {
       case _SongSortMode.byTitle:
-        list.sort((a, b) => a.title.compareTo(b.title));
+        list.sort((a, b) => PinyinUtils.comparePinyin(a.title, b.title));
         break;
       case _SongSortMode.byArtist:
-        list.sort((a, b) => a.artist.compareTo(b.artist));
+        list.sort((a, b) => PinyinUtils.comparePinyin(a.artist, b.artist));
         break;
       case _SongSortMode.byAlbum:
-        list.sort((a, b) => (a.albumName ?? '').compareTo(b.albumName ?? ''));
+        list.sort((a, b) => PinyinUtils.comparePinyin(a.albumName ?? '', b.albumName ?? ''));
         break;
       case _SongSortMode.defaultOrder:
         break;
