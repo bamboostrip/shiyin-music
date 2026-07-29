@@ -47,11 +47,24 @@ impl KugouEngine {
         query: &str,
         body: Option<&str>,
     ) -> AppResult<String> {
-        let params: HashMap<String, String> = if query.is_empty() {
+        let mut params: HashMap<String, String> = if query.is_empty() {
             HashMap::new()
         } else {
             serde_json::from_str(query).unwrap_or_default()
         };
+
+        // 将 body 中的字段也合并到 params，兼容前端通过 body 传参的情况
+        if let Some(body_str) = body {
+            if let Ok(body_map) = serde_json::from_str::<HashMap<String, Value>>(body_str) {
+                for (k, v) in body_map {
+                    let val = match v {
+                        Value::String(s) => s,
+                        other => other.to_string(),
+                    };
+                    params.entry(k).or_insert(val);
+                }
+            }
+        }
 
         let result = self.dispatch(method, path, &params, body).await?;
         serde_json::to_string(&result).map_err(|e| AppError::Internal(e.to_string()))
