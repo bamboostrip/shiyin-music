@@ -27,7 +27,7 @@ class SettingsPage extends StatelessWidget {
     required this.auth,
     required this.player,
     required this.theme,
-    required this.localMusic,
+    this.localMusic,
     this.cache,
     this.downloads,
   });
@@ -36,7 +36,7 @@ class SettingsPage extends StatelessWidget {
   final AuthController auth;
   final PlayerController player;
   final ThemeController theme;
-  final LocalMusicController localMusic;
+  final LocalMusicController? localMusic;
   final CacheService? cache;
   final DownloadController? downloads;
 
@@ -57,7 +57,7 @@ class SettingsPage extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(title: const Text('设置')),
         body: AnimatedBuilder(
-          animation: Listenable.merge([auth, player, localMusic, theme, auth.vipClaim]),
+          animation: Listenable.merge([auth, player, ?localMusic, theme, auth.vipClaim]),
           builder: (context, _) {
             return AdaptiveContentPadding(
               child: ListView(
@@ -249,27 +249,6 @@ class SettingsPage extends StatelessWidget {
                         ),
                       ],
                     ],
-                  ],
-                ),
-                const SizedBox(height: 24),
-                // Local Music section
-                _SectionHeader(title: '本地'),
-                const SizedBox(height: 8),
-                _SettingsCard(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.computer_rounded,
-                      iconColor: colorScheme.primary,
-                      title: '本地音乐',
-                      subtitle: localMusic.hasPermission
-                          ? '已扫描 ${localMusic.songs.length} 首歌曲'
-                          : '未授权访问音频文件',
-                      onTap: () {
-                        if (!localMusic.hasPermission) {
-                          localMusic.requestPermission();
-                        }
-                      },
-                    ),
                   ],
                 ),
                 const SizedBox(height: 24),
