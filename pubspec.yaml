@@ -1,7 +1,7 @@
 name: shiyin_music
 description: "the best music application"
 publish_to: 'none'
-version: 2.4.3+243
+version: 2.4.4+244
 
 environment:
   sdk: ^3.11.5
