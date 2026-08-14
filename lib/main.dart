@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import 'services/device_info_service.dart';
 import 'services/download_service.dart';
 import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
+import 'services/network_monitor.dart';
 import 'ui/adaptive_layout.dart';
 import 'ui/app_theme.dart';
 import 'ui/pages/app_shell.dart';
@@ -96,6 +98,7 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
       ..cacheService = _cacheService
       ..localMusic = _localMusic
       ..vipClaim = _auth.vipClaim;
+    unawaited(NetworkMonitor.instance.start());
     _theme = widget.themeController;
     _auth.restore();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -106,6 +109,7 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(NetworkMonitor.instance.stop());
     _auth.dispose();
     _player.dispose();
     _downloads.dispose();

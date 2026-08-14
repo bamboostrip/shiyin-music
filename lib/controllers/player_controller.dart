@@ -17,6 +17,7 @@ import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/music_api.dart';
 import '../services/music_audio_handler.dart';
+import '../services/network_monitor.dart';
 import '../services/playback_history_service.dart';
 import '../services/playback_stats_service.dart';
 import '../services/vip_background_task.dart';
@@ -100,6 +101,16 @@ class PlayerController extends ChangeNotifier {
   PlayerController(this._api, this._audioHandler) {
     unawaited(_restoreSettings());
     unawaited(_restorePlaybackState());
+    // 车机切网（WiFi ↔ 蜂窝 ↔ 离线）后恢复网络时，若上一首因断网停在
+    // 错误态，自动重播一次；isRetry 防止失败后再次触发形成循环。
+    _networkRestoredSub =
+        NetworkMonitor.instance.onConnectivityRestored.listen((_) {
+      if (isPreparing || errorMessage == null) return;
+      final song = currentSong;
+      if (song == null) return;
+      debugPrint('[KA Music][player] 网络已恢复，自动重播: ${song.title}');
+      unawaited(playSong(song, isRetry: true));
+    });
     _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
     _desktopLyrics.setVisibilityChangedHandler(_handleDesktopLyricsVisibility);
     _positionSub = audioPlayer.positionStream.listen((value) {
@@ -195,6 +206,7 @@ class PlayerController extends ChangeNotifier {
   late final StreamSubscription<int?> _androidAudioSessionSub;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
+  StreamSubscription<void>? _networkRestoredSub;
   StreamSubscription<Set<AudioDevice>>? _devicesSub;
   Set<AudioDevice>? _previousDevices;
   final Stopwatch _positionClock = Stopwatch();
@@ -354,7 +366,7 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> playSong(Song song, {List<Song>? queue}) async {
+  Future<void> playSong(Song song, {List<Song>? queue, bool isRetry = false}) async {
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
     isPreparing = true;
@@ -431,6 +443,17 @@ class PlayerController extends ChangeNotifier {
       if (error is VipRequiredException && vipClaim != null) {
         final claimed = await _tryClaimVipAndRetry(song);
         if (claimed) return;
+      }
+      // 网络类失败（非 VIP、非首次重试）：短暂等待后自动重试一次。
+      // 车机弱网/网络切换瞬间首次请求常失败，重试后即可恢复；
+      // 确定性错误（如"没有可播放地址"）重试成本低，统一兜底一次。
+      if (!isRetry && error is! VipRequiredException) {
+        errorMessage = '播放失败，正在重试...';
+        notifyListeners();
+        await Future<void>.delayed(const Duration(seconds: 2));
+        debugPrint('[KA Music][player] 播放失败，自动重试: ${song.title} ($error)');
+        await playSong(song, queue: queue, isRetry: true);
+        return;
       }
       errorMessage = error.toString();
       isPreparing = false;
@@ -1939,6 +1962,7 @@ class PlayerController extends ChangeNotifier {
   @override
   void dispose() {
     _pauseListeningTimeTracker();
+    _networkRestoredSub?.cancel();
     _autoResumeTimer?.cancel();
     _sleepTimer?.cancel();
     _positionSub.cancel();

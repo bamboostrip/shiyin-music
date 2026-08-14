@@ -86,6 +86,54 @@ impl KugouEngine {
         params: &HashMap<String, String>,
         body: Option<&str>,
     ) -> AppResult<Value> {
+        let result = self.dispatch_inner(method, path, params, body).await?;
+
+        // 会话失效（status=0 + 20xxx 错误码）时自动刷新 token 并重放一次。
+        // 酷狗 token 会在长期未使用 / 多端登录后被上游作废，车机长时间待机后
+        // 首次播放/加载歌单常命中此情况；此前只能靠用户手动重新登录恢复。
+        // 刷新成功则重放原请求，对用户完全无感；失败则返回原始失败响应。
+        if !Self::is_session_invalid_response(&result)
+            || path.starts_with("/login/")
+            || path.starts_with("/captcha/")
+        {
+            return Ok(result);
+        }
+        let refreshed = login::refresh_token(&self.client, "", &self.session).await;
+        match refreshed {
+            Ok(resp) => {
+                self.persist_login(&resp);
+                tracing::info!(path, "会话已失效，自动刷新 token 后重试原请求");
+                self.dispatch_inner(method, path, params, body).await
+            }
+            Err(e) => {
+                tracing::warn!(path, error = %e, "会话失效且 token 刷新失败，保持原响应");
+                Ok(result)
+            }
+        }
+    }
+
+    /// 判断上游响应是否为"会话失效/需要登录"（status=0 + 20xxx 错误码）。
+    ///
+    /// 实测：/song/url 返回 `{"errcode":20028,"error":"本次请求需要验证","status":0}`，
+    /// /user/playlist 返回 `{"error_code":20017,"status":0}`；20xxx 系列均为登录态类错误。
+    fn is_session_invalid_response(v: &Value) -> bool {
+        if v.get("status").and_then(|s| s.as_i64()) != Some(0) {
+            return false;
+        }
+        let code = v
+            .get("error_code")
+            .and_then(|c| c.as_i64())
+            .or_else(|| v.get("errcode").and_then(|c| c.as_i64()));
+        matches!(code, Some(c) if (20000..20100).contains(&c))
+    }
+
+    async fn dispatch_inner(
+        &mut self,
+        method: &str,
+        path: &str,
+        params: &HashMap<String, String>,
+        body: Option<&str>,
+    ) -> AppResult<Value> {
         let client = &self.client;
         let session = &self.session;
 
@@ -676,4 +724,41 @@ fn value_to_string(v: &Value) -> String {
         return n.to_string();
     }
     String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn session_invalid_detection() {
+        // 实测形态：/song/url 用失效 token
+        assert!(KugouEngine::is_session_invalid_response(&json!({
+            "errcode": 20028, "error": "本次请求需要验证", "status": 0
+        })));
+        // 实测形态：/user/playlist 用失效 token
+        assert!(KugouEngine::is_session_invalid_response(&json!({
+            "error_code": 20017, "status": 0
+        })));
+        // 成功响应不应误判
+        assert!(!KugouEngine::is_session_invalid_response(&json!({
+            "status": 1, "error_code": 0, "url": "https://example.com/a.mp3"
+        })));
+        // 非登录类错误码不应触发刷新
+        assert!(!KugouEngine::is_session_invalid_response(&json!({
+            "status": 0, "error_code": 9001, "err": "缺参"
+        })));
+        // 缺 status 或 status 非 0 不应触发
+        assert!(!KugouEngine::is_session_invalid_response(&json!({
+            "error_code": 20017
+        })));
+        assert!(!KugouEngine::is_session_invalid_response(&json!({
+            "status": 2, "error_code": 20017
+        })));
+        // 无错误码时不应触发
+        assert!(!KugouEngine::is_session_invalid_response(&json!({
+            "status": 0, "msg": "服务内部错误"
+        })));
+    }
 }
