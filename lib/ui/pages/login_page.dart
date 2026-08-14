@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1081,7 +1082,7 @@ class _QrLoginForm extends StatelessWidget {
 /// 形式的 data URI，[Image.network] 无法直接加载，会触发 "Width is zero"
 /// 渲染警告并导致二维码不显示。这里自动识别 data URI 并走 [Image.memory]，
 /// 普通 http(s) URL 仍走 [Image.network]。
-class _QrImage extends StatelessWidget {
+class _QrImage extends StatefulWidget {
   const _QrImage({
     required this.imageUrl,
     required this.size,
@@ -1095,27 +1096,45 @@ class _QrImage extends StatelessWidget {
   final Color iconColor;
 
   @override
+  State<_QrImage> createState() => _QrImageState();
+}
+
+class _QrImageState extends State<_QrImage> {
+  /// 已检测过的图片地址，避免重复解码检测。
+  String? _detectedUrl;
+  bool _inverted = false;
+
+  void _ensureDetected(String url, Uint8List bytes) {
+    if (_detectedUrl == url) return;
+    _detectedUrl = url;
+    _isInvertedQrImage(bytes).then((inverted) {
+      if (!mounted || _detectedUrl != url) return;
+      setState(() => _inverted = inverted);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     Widget fallback() => Container(
-          width: size,
-          height: size,
+          width: widget.size,
+          height: widget.size,
           decoration: BoxDecoration(
-            color: fallbackColor,
+            color: widget.fallbackColor,
             borderRadius: BorderRadius.circular(16),
           ),
           child: Icon(
             Icons.qr_code_2_rounded,
             size: 80,
-            color: iconColor,
+            color: widget.iconColor,
           ),
         );
 
-    // 二维码的“白色”区域在 PNG 里通常是透明的。深色模式下，透明的“白”
+    // 二维码的"白色"区域在 PNG 里通常是透明的。深色模式下，透明的"白"
     // 区域会透出底层近黑的 surface，使二维码变成黑底黑码，手机无法识别。
     // 因此这里始终垫一层纯白背景，保证高对比度，与主题无关。
     Widget withWhiteBackground(Widget image) => Container(
-          width: size,
-          height: size,
+          width: widget.size,
+          height: widget.size,
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
@@ -1123,7 +1142,7 @@ class _QrImage extends StatelessWidget {
           child: image,
         );
 
-    final uri = Uri.tryParse(imageUrl);
+    final uri = Uri.tryParse(widget.imageUrl);
     if (uri == null) return fallback();
 
     // data:image/png;base64,... -> 解码字节后用 Image.memory 渲染
@@ -1131,30 +1150,83 @@ class _QrImage extends StatelessWidget {
     if (data != null) {
       final bytes = data.contentAsBytes();
       if (bytes.isEmpty) return fallback();
-      return withWhiteBackground(
-        Image.memory(
-          bytes,
-          width: size,
-          height: size,
-          fit: BoxFit.contain,
-          cacheWidth: (size * 2).ceil().clamp(1, 512),
-          cacheHeight: (size * 2).ceil().clamp(1, 512),
-          errorBuilder: (_, __, ___) => fallback(),
-        ),
+      _ensureDetected(widget.imageUrl, bytes);
+      Widget image = Image.memory(
+        bytes,
+        width: widget.size,
+        height: widget.size,
+        fit: BoxFit.contain,
+        cacheWidth: (widget.size * 2).ceil().clamp(1, 512),
+        cacheHeight: (widget.size * 2).ceil().clamp(1, 512),
+        errorBuilder: (_, _, _) => fallback(),
       );
+      if (_inverted) {
+        image = ColorFiltered(colorFilter: _invertQrFilter, child: image);
+      }
+      return withWhiteBackground(image);
     }
 
     return withWhiteBackground(
       Image.network(
-        imageUrl,
-        width: size,
-        height: size,
+        widget.imageUrl,
+        width: widget.size,
+        height: widget.size,
         fit: BoxFit.contain,
-        cacheWidth: (size * 2).ceil().clamp(1, 512),
-        cacheHeight: (size * 2).ceil().clamp(1, 512),
-        errorBuilder: (_, __, ___) => fallback(),
+        cacheWidth: (widget.size * 2).ceil().clamp(1, 512),
+        cacheHeight: (widget.size * 2).ceil().clamp(1, 512),
+        errorBuilder: (_, _, _) => fallback(),
       ),
     );
+  }
+}
+
+/// RGB 取反、alpha 保持不变，把"黑底白码"转回标准"黑码白底"。
+final _invertQrFilter = ColorFilter.matrix(<double>[
+  -1, 0, 0, 0, 255, //
+  0, -1, 0, 0, 255, //
+  0, 0, -1, 0, 255, //
+  0, 0, 0, 1, 0, //
+]);
+
+/// 判断二维码图片是否为"黑底白码"的反色图。
+///
+/// 实测酷狗 `/v2/qrcode` 返回的 PNG 是不透明的反色图（调色板仅纯黑/纯白
+/// 两色，白色模块排在黑色背景上）。浅色模式下黑底在浅色页面上轮廓清晰，
+/// 扫描器可以识别反色码；深色模式下黑底与页面近黑 surface 融为一体，只剩
+/// 白色模块漂浮在暗背景上，扫描器无法定位。检测方法：解码后采样四角像素
+/// 的平均亮度，偏暗即为反色图。透明背景的图四角无有效像素，返回 false。
+Future<bool> _isInvertedQrImage(Uint8List bytes) async {
+  final codec = await ui.instantiateImageCodec(bytes);
+  try {
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    try {
+      final w = image.width;
+      final h = image.height;
+      if (w < 10 || h < 10) return false;
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (data == null) return false;
+      var sum = 0;
+      var n = 0;
+      for (final (x0, y0) in [(0, 0), (w - 5, 0), (0, h - 5), (w - 5, h - 5)]) {
+        for (var y = y0; y < y0 + 5; y++) {
+          for (var x = x0; x < x0 + 5; x++) {
+            final i = (y * w + x) * 4;
+            // 跳过透明像素：四角全透明的图不视为反色，由白底容器兜底
+            if (data.getUint8(i + 3) < 128) continue;
+            sum +=
+                data.getUint8(i) + data.getUint8(i + 1) + data.getUint8(i + 2);
+            n += 3;
+          }
+        }
+      }
+      if (n == 0) return false;
+      return sum / n < 128;
+    } finally {
+      image.dispose();
+    }
+  } finally {
+    codec.dispose();
   }
 }
 
