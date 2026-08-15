@@ -171,6 +171,10 @@ class LyricsOverlayService : Service() {
         btnClose = overlayView?.findViewById(R.id.btn_close)
         btnLock = overlayView?.findViewById(R.id.btn_lock)
 
+        // 下一句歌词用原生 TextView 跑马灯（ellipsize=marquee）。悬浮窗
+        // 无焦点窗口，需手动选中才能触发长行滚动。
+        tvNextLyric?.isSelected = true
+
         btnClose?.setOnClickListener {
             hideOverlay(userClosed = true)
             stopSelf()
@@ -279,6 +283,8 @@ class LyricsOverlayService : Service() {
         karaokeView?.post {
             karaokeView?.text = if (current.isEmpty()) "暂无歌词" else current
             karaokeView?.progress = 0f
+            // 先选中再设文本：文本变化触发重排时选中态已就位，跑马灯才会启动
+            tvNextLyric?.isSelected = true
             tvNextLyric?.text = next
             tvNextLyric?.visibility = if (next.isEmpty()) View.GONE else View.VISIBLE
         }
