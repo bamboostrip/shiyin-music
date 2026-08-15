@@ -478,13 +478,29 @@ class MusicApi {
         .toList();
   }
 
+  /// 拉取专辑全部歌曲。
+  ///
+  /// 上游 /v1/album_audio/lite 单页上限 50（超过返回 invalid param），
+  /// 因此按页循环直至拿不满一页，保证全量加载完整。
   Future<List<Song>> albumSongs(
     String id, {
     int page = 1,
     int pageSize = 30,
   }) async {
-    final songPage = await albumSongPage(id, page: page, pageSize: pageSize);
-    return songPage.songs;
+    final limit = pageSize.clamp(1, 50);
+    final songs = <Song>[];
+    var currentPage = page;
+    while (true) {
+      final songPage = await albumSongPage(
+        id,
+        page: currentPage,
+        pageSize: limit,
+      );
+      songs.addAll(songPage.songs);
+      if (songPage.rawItemCount < limit) break;
+      currentPage++;
+    }
+    return songs;
   }
 
   Future<SongPage> albumSongPage(

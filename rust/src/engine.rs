@@ -386,7 +386,12 @@ impl KugouEngine {
 
             ("GET", "/album/shop") => album::album_shop(client, session).await,
             ("GET", "/album/songs") => {
-                let album_id = params.get("album_id").map(|s| s.as_str()).unwrap_or("");
+                // Dart 侧契约参数为 id（旧服务器同款）；兼容 album_id 旧名。
+                let album_id = params
+                    .get("album_id")
+                    .or_else(|| params.get("id"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 let page = params
                     .get("page")
                     .and_then(|s| s.parse().ok())

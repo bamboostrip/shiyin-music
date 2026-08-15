@@ -1618,6 +1618,8 @@ class _AlbumResults extends StatelessWidget {
               title: album.albumName,
               subtitle: album.artistName,
               coverUrl: album.coverUrl,
+              // 标记专辑侧 ID，使 isCollectedAlbum/albumId 走专辑分支（/album/songs）。
+              sourceListId: album.albumId,
             );
             Navigator.of(context).push(
               MaterialPageRoute(
