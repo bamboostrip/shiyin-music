@@ -58,6 +58,7 @@ class LyricsOverlayService : Service() {
         private const val PREFS_NAME = "lyrics_overlay_prefs"
         private const val KEY_POS_X = "pos_x"
         private const val KEY_POS_Y = "pos_y"
+        private const val KEY_WINDOW_WIDTH = "window_width"
         private const val KEY_OPACITY = "opacity"
         private const val KEY_LOCKED = "locked"
         private const val KEY_PASSTHROUGH = "passthrough"
@@ -65,11 +66,18 @@ class LyricsOverlayService : Service() {
         private const val KEY_BACKGROUND_COLOR = "background_color"
         private const val KEY_FONT_SIZE = "font_size"
 
-        // 悬浮窗固定宽度：取屏幕宽度的一定比例并设上限，宽度不随歌词文本长短变化。
+        // 悬浮窗默认宽度：取屏幕宽度的一定比例并设上限，宽度不随歌词文本长短变化。
         // 上限 320dp 沿用原布局 maxWidth 的意图（车机横屏、手机竖屏都保持紧凑），
         // 比例只在屏幕较窄时兜底防止超屏。
         private const val MAX_WINDOW_WIDTH_DP = 320f
         private const val WINDOW_WIDTH_RATIO = 0.9f
+
+        // 用户拖拽手柄可调整的宽度范围：下限保证歌词可读，上限接近全屏。
+        private const val MIN_WINDOW_WIDTH_DP = 160f
+        private const val MAX_WINDOW_WIDTH_RATIO = 0.95f
+
+        // 下一句歌词字号 = 主字号 * 该比例，跟随字体大小设置等比例缩放
+        private const val NEXT_LYRIC_SIZE_RATIO = 0.85f
 
         fun isRunning(context: Context): Boolean {
             val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
@@ -89,6 +97,7 @@ class LyricsOverlayService : Service() {
     private var tvNextLyric: TextView? = null
     private var btnClose: ImageView? = null
     private var btnLock: ImageView? = null
+    private var btnResize: ImageView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var fixedWidthPx = 0
     private var isShowing = false
@@ -167,13 +176,32 @@ class LyricsOverlayService : Service() {
         return START_STICKY
     }
 
-    /** 计算悬浮窗固定宽度（px）：min(屏幕宽 * 0.9, 320dp)，不随歌词文本长度变化。 */
+    /** 计算悬浮窗默认宽度（px）：min(屏幕宽 * 0.9, 320dp)，不随歌词文本长度变化。 */
     private fun computeFixedWidthPx(): Int {
         val displayMetrics = resources.displayMetrics
         val capPx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, MAX_WINDOW_WIDTH_DP, displayMetrics
         ).toInt()
         return (displayMetrics.widthPixels * WINDOW_WIDTH_RATIO).toInt().coerceAtMost(capPx)
+    }
+
+    /** 用户拖拽可调到的最大宽度（px）：屏幕宽 * 0.95，保证窗口边缘仍在屏内。 */
+    private fun maxResizeWidthPx(): Int {
+        return (resources.displayMetrics.widthPixels * MAX_WINDOW_WIDTH_RATIO).toInt()
+    }
+
+    /** 用户拖拽可调到的最小宽度（px）。 */
+    private fun minResizeWidthPx(): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, MIN_WINDOW_WIDTH_DP, resources.displayMetrics
+        ).toInt()
+    }
+
+    /** 读取记忆的窗口宽度：用户拖拽过则用记忆值（限制在可调范围内），否则用默认宽度。 */
+    private fun loadWindowWidthPx(): Int {
+        val saved = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(KEY_WINDOW_WIDTH, 0)
+        if (saved <= 0) return computeFixedWidthPx()
+        return saved.coerceIn(minResizeWidthPx(), maxResizeWidthPx())
     }
 
     private fun showOverlay(title: String, artist: String) {
@@ -188,6 +216,7 @@ class LyricsOverlayService : Service() {
         tvNextLyric = overlayView?.findViewById(R.id.tv_next_lyric)
         btnClose = overlayView?.findViewById(R.id.btn_close)
         btnLock = overlayView?.findViewById(R.id.btn_lock)
+        btnResize = overlayView?.findViewById(R.id.btn_resize)
 
         // 下一句歌词用原生 TextView 跑马灯（ellipsize=marquee）。悬浮窗
         // 无焦点窗口，需手动选中才能触发长行滚动。
@@ -210,9 +239,9 @@ class LyricsOverlayService : Service() {
 
         applySettings()
 
-        // 固定窗口宽度：按当前屏幕尺寸计算一次，横竖屏切换时在
-        // onConfigurationChanged 里重算，保证不随歌词文本长短变化
-        fixedWidthPx = computeFixedWidthPx()
+        // 窗口宽度：优先用用户拖拽后的记忆值（限制在可调范围内），
+        // 没有记忆时用默认固定宽度；横竖屏切换时在 onConfigurationChanged 里重算
+        fixedWidthPx = loadWindowWidthPx()
         layoutParams = WindowManager.LayoutParams(
             fixedWidthPx,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -231,6 +260,7 @@ class LyricsOverlayService : Service() {
         }
 
         setupDragListener(overlayView!!, layoutParams!!)
+        setupResizeListener(btnResize!!, layoutParams!!)
 
         try {
             windowManager?.addView(overlayView, layoutParams)
@@ -293,6 +323,51 @@ class LyricsOverlayService : Service() {
                             .apply()
                     }
                     isDragging
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 右下角手柄：横向拖动调整窗口宽度，松手后记忆宽度。 */
+    private fun setupResizeListener(view: View, lp: WindowManager.LayoutParams) {
+        var initialWidth = 0
+        var initialTouchX = 0f
+        var isResizing = false
+
+        view.setOnTouchListener { _, event ->
+            if (isPassthrough) return@setOnTouchListener false
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialWidth = lp.width
+                    initialTouchX = event.rawX
+                    isResizing = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (isLocked) return@setOnTouchListener false
+                    val dx = event.rawX - initialTouchX
+                    if (!isResizing && abs(dx) > 10) {
+                        isResizing = true
+                    }
+                    if (isResizing) {
+                        lp.width = (initialWidth + dx.toInt())
+                            .coerceIn(minResizeWidthPx(), maxResizeWidthPx())
+                        try {
+                            windowManager?.updateViewLayout(overlayView, lp)
+                        } catch (_: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (isResizing) {
+                        fixedWidthPx = lp.width
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putInt(KEY_WINDOW_WIDTH, lp.width)
+                            .apply()
+                    }
+                    isResizing
                 }
                 else -> false
             }
@@ -393,7 +468,7 @@ class LyricsOverlayService : Service() {
             )
             karaokeView?.textSizeSp = fontSizeSp
 
-            // Next lyric color (slightly dimmer)
+            // Next lyric color (slightly dimmer) and size (scaled with main font)
             val dimAlpha = (Color.alpha(textColor) * 0.5f).toInt().coerceIn(0, 255)
             tvNextLyric?.setTextColor(Color.argb(
                 dimAlpha,
@@ -401,6 +476,9 @@ class LyricsOverlayService : Service() {
                 Color.green(textColor),
                 Color.blue(textColor)
             ))
+            tvNextLyric?.setTextSize(
+                TypedValue.COMPLEX_UNIT_SP, fontSizeSp * NEXT_LYRIC_SIZE_RATIO
+            )
 
             // Lock state: hide buttons when locked (compact mode)
             if (isLocked) {
@@ -408,12 +486,14 @@ class LyricsOverlayService : Service() {
                 btnLock?.visibility = View.VISIBLE
                 btnLock?.setImageResource(android.R.drawable.ic_lock_idle_lock)
                 btnLock?.alpha = 0.4f
+                btnResize?.visibility = View.GONE
             } else {
                 btnClose?.visibility = View.VISIBLE
                 btnLock?.visibility = View.VISIBLE
                 btnLock?.setImageResource(android.R.drawable.ic_lock_lock)
 
                 btnLock?.alpha = 0.7f
+                btnResize?.visibility = View.VISIBLE
             }
 
             // Touch flags
@@ -470,6 +550,7 @@ class LyricsOverlayService : Service() {
         tvNextLyric = null
         btnClose = null
         btnLock = null
+        btnResize = null
         layoutParams = null
         isShowing = false
         notifyVisibilityChanged(visible = false, userClosed = userClosed)
@@ -522,9 +603,11 @@ class LyricsOverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 横竖屏切换后屏幕宽度变化，重算固定宽度并应用到悬浮窗
+        // 横竖屏切换后屏幕宽度变化，按新屏幕钳制窗口宽度并应用到悬浮窗
         if (isShowing) {
-            val newWidth = computeFixedWidthPx()
+            val newWidth = loadWindowWidthPx().coerceIn(
+                minResizeWidthPx(), maxResizeWidthPx()
+            )
             if (newWidth != fixedWidthPx) {
                 fixedWidthPx = newWidth
                 layoutParams?.let { lp ->

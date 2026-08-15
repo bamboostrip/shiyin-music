@@ -39,7 +39,7 @@
                 android:layout_marginTop="3dp"
                 android:text=""
                 android:textColor="#99FFFFFF"
-                android:textSize="12sp"
+                android:textSize="13.6sp"
                 android:singleLine="true"
                 android:ellipsize="marquee"
                 android:marqueeRepeatLimit="marquee_forever" />
@@ -67,5 +67,17 @@
             android:padding="4dp" />
 
     </LinearLayout>
+
+    <!-- 右下角宽度拖拽手柄：拖动时横向调整悬浮窗宽度，宽度记忆保存 -->
+    <ImageView
+        android:id="@+id/btn_resize"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="bottom|end"
+        android:src="@drawable/overlay_resize_grip"
+        android:scaleType="centerInside"
+        android:tint="#66FFFFFF"
+        android:contentDescription="调整宽度"
+        android:padding="6dp" />
 
 </FrameLayout>
