@@ -16,16 +16,9 @@
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
-        <!-- 禁用 Impeller 渲染引擎，回退到 Skia。
-             Flutter 3.29+ 在 Android 默认启用 Impeller，但部分车机 GPU
-             （尤其 PowerVR / 老旧 Mali）的 Impeller 驱动存在渲染缺陷：
-             纯文字区域（无图片纹理）滚动时帧不刷新，表现为界面"冻屏"、
-             滚不动，而含图片的页面正常。Skia 在这些 GPU 上长期稳定，
-             回退后可彻底消除该问题，代价是放弃 Impeller 的部分性能优化
-             （对本音乐 App 影响可忽略）。 -->
-        <meta-data
-            android:name="io.flutter.embedding.android.EnableImpeller"
-            android:value="false" />
+        <!-- A/B 测试：恢复 Flutter 默认 Impeller（Vulkan）渲染引擎，
+             验证 Adreno 702 车机（QCM2290）无冻屏/渲染缺陷后保留；
+             如发现问题，git revert 本提交即回退 Skia。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
