@@ -989,6 +989,7 @@ dependencies = [
  "md-5 0.11.0",
  "num-bigint",
  "rand 0.10.2",
+ "regex",
  "reqwest",
  "rsa",
  "rustls",
@@ -997,6 +998,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

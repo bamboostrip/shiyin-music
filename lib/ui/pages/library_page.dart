@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
+import '../../core/pinyin_utils.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -676,7 +677,7 @@ class _PlaylistTabViewState extends State<_PlaylistTabView> {
     switch (_sortMode) {
       case _PlaylistSortMode.byName:
         final sorted = List<PlaylistSummary>.of(playlists);
-        sorted.sort((a, b) => a.title.compareTo(b.title));
+        sorted.sort((a, b) => PinyinUtils.comparePinyin(a.title, b.title));
         return sorted;
       case _PlaylistSortMode.bySongCount:
         final sorted = List<PlaylistSummary>.of(playlists);

@@ -3,11 +3,19 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppResult;
 
 #[derive(Debug, Serialize, Deserialize)]
+/// 序列化输出与上游 Dart `ExternalPlaylistParseResult` 对齐：
+/// sourcePlatform / playlistName / songNames（Dart 只消费这三个字段）。
+/// 注意 `source_playlist_name` 要映射为 `playlistName`（而非 sourcePlaylistName），
+/// 因此用显式 rename，不能用 rename_all="camelCase" 一揽子转换。
 pub struct ExternalPlaylistResult {
     pub success: bool,
+    #[serde(rename = "errorMessage")]
     pub error_message: String,
+    #[serde(rename = "sourcePlatform")]
     pub source_platform: String,
+    #[serde(rename = "playlistName")]
     pub source_playlist_name: String,
+    #[serde(rename = "songNames")]
     pub song_names: Vec<String>,
 }
 
@@ -30,12 +38,6 @@ impl ExternalPlaylistResult {
             song_names: songs,
         }
     }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ParseRequest {
-    #[serde(rename = "SourceText")]
-    pub source_text: String,
 }
 
 pub async fn parse(client: &reqwest::Client, source_text: &str) -> AppResult<ExternalPlaylistResult> {
@@ -63,6 +65,48 @@ fn extract_url(text: &str) -> String {
     match re.find(text) {
         Some(m) => m.as_str().trim().to_string(),
         None => text.trim().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 输出字段必须为 camelCase，与上游 Dart ExternalPlaylistParseResult
+    /// （sourcePlatform / playlistName / songNames）一致。
+    #[test]
+    fn result_serializes_camel_case() {
+        let r = ExternalPlaylistResult::ok(
+            "网易云",
+            "我的歌单",
+            vec!["歌一".to_string(), "歌二".to_string()],
+        );
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["sourcePlatform"], "网易云");
+        assert_eq!(v["playlistName"], "我的歌单");
+        assert_eq!(v["songNames"], serde_json::json!(["歌一", "歌二"]));
+        assert_eq!(v["success"], true);
+        assert!(v.get("source_platform").is_none());
+        assert!(v.get("playlistName_error").is_none());
+    }
+
+    #[test]
+    fn error_result_has_error_message() {
+        let r = ExternalPlaylistResult::err("链接不能为空。");
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["success"], false);
+        assert_eq!(v["errorMessage"], "链接不能为空。");
+        assert_eq!(v["songNames"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn extract_url_finds_http_link_in_text() {
+        let text = "分享歌单 https://music.163.com/playlist?id=123 快来听";
+        assert_eq!(
+            extract_url(text),
+            "https://music.163.com/playlist?id=123"
+        );
+        assert_eq!(extract_url("not a url"), "not a url");
     }
 }
 

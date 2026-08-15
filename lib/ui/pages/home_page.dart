@@ -2,6 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/app_section.dart';
+import '../design_tokens.dart';
+
 import '../../config/app_config.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -144,6 +147,15 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// 新歌速递失败时返回空列表，不阻塞首页其他板块。
+  Future<List<Song>> _loadTopSongsSafe() async {
+    try {
+      return await widget.api.topSongs();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// 后台静默刷新首页数据。
   ///
   /// 先从缓存显示（已在 initState/_tryRestoreFromCache 中完成），
@@ -154,18 +166,21 @@ class _HomePageState extends State<HomePage> {
         widget.api.dailyRecommend(),
         widget.api.recommendedPlaylists(),
         widget.api.albumShop(),
+        _loadTopSongsSafe(),
       ]);
       if (!mounted) return;
       final data = _HomeData(
         daily: results[0] as DailyRecommend,
         playlists: results[1] as List<PlaylistSummary>,
         albums: results[2] as List<AlbumShopItem>,
+        topSongs: results[3] as List<Song>,
       );
       _cachedData = data;
       await widget.cache.write('cache_home', {
         'daily': data.daily.toCache(),
         'playlists': data.playlists.map((p) => p.toCache()).toList(),
         'albums': data.albums.map((a) => a.toCache()).toList(),
+        'topSongs': data.topSongs.map((song) => song.toCache()).toList(),
       });
       if (!mounted) return;
       _checkAndAutoPlay(data);
@@ -182,17 +197,20 @@ class _HomePageState extends State<HomePage> {
       widget.api.dailyRecommend(),
       widget.api.recommendedPlaylists(),
       widget.api.albumShop(),
+      _loadTopSongsSafe(),
     ]);
     final data = _HomeData(
       daily: results[0] as DailyRecommend,
       playlists: results[1] as List<PlaylistSummary>,
       albums: results[2] as List<AlbumShopItem>,
+      topSongs: results[3] as List<Song>,
     );
     _cachedData = data;
     await widget.cache.write('cache_home', {
       'daily': data.daily.toCache(),
       'playlists': data.playlists.map((p) => p.toCache()).toList(),
       'albums': data.albums.map((a) => a.toCache()).toList(),
+      'topSongs': data.topSongs.map((song) => song.toCache()).toList(),
     });
     _checkAndAutoPlay(data);
     return data;
@@ -232,6 +250,11 @@ class _HomePageState extends State<HomePage> {
       albums: (json['albums'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(AlbumShopItem.fromCache)
+          .toList(),
+      topSongs: (json['topSongs'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(Song.fromCache)
+          .where((song) => song.hash.isNotEmpty)
           .toList(),
     );
   }
@@ -430,6 +453,12 @@ class _HomePageState extends State<HomePage> {
                               playlists: data.playlists,
                               onTap: _openPlaylist,
                             ),
+                            if (data.topSongs.isNotEmpty)
+                              _TopSongRail(
+                                songs: data.topSongs,
+                                onPlay: (song) =>
+                                    _playSong(song, data.topSongs),
+                              ),
                           ],
                         ),
                       ),
@@ -520,7 +549,7 @@ class _RecommendHeader extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-              padding: EdgeInsets.fromLTRB(18, isCarMode ? 4 : 10, 0, 12),
+          padding: EdgeInsets.fromLTRB(18, isCarMode ? 4 : 10, 0, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1275,6 +1304,65 @@ class _HomeSongRow extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// 新歌速递横向区块。
+class _TopSongRail extends StatelessWidget {
+  const _TopSongRail({required this.songs, required this.onPlay});
+
+  final List<Song> songs;
+  final ValueChanged<Song> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppHorizontalRail<Song>(
+      title: '新歌速递',
+      items: songs,
+      height: 162,
+      itemWidth: 110,
+      topPadding: 20,
+      itemBuilder: (context, song) =>
+          _TopSongCard(song: song, onTap: () => onPlay(song)),
+    );
+  }
+}
+
+class _TopSongCard extends StatelessWidget {
+  const _TopSongCard({required this.song, required this.onTap});
+
+  final Song song;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: Artwork(url: song.coverUrl, size: 110),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            song.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          Text(
+            song.artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }
@@ -2262,11 +2350,13 @@ class _HomeData {
     required this.daily,
     required this.playlists,
     required this.albums,
+    this.topSongs = const [],
   });
 
   final DailyRecommend daily;
   final List<PlaylistSummary> playlists;
   final List<AlbumShopItem> albums;
+  final List<Song> topSongs;
 }
 
 class _RadioData {

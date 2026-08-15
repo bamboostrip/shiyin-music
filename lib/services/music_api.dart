@@ -206,14 +206,51 @@ class MusicApi {
     return DailyRecommend.fromJson(json);
   }
 
+  /// 新歌速递。
+  Future<List<Song>> topSongs({
+    int type = 21608,
+    int page = 1,
+  }) async {
+    final raw = await _client.get('/top/song', {
+      'type': type,
+      'page': page,
+    });
+    final json = asMap(raw);
+    final items = raw is List
+        ? raw
+        : asList(json['data'] ?? json['song_list'] ?? _firstListValue(json));
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(Song.fromTopSong)
+        .where((song) => song.hash.isNotEmpty)
+        .toList();
+  }
+
+  /// 新碟上架。
+  Future<List<TopAlbumItem>> topAlbums({
+    int page = 1,
+    int pageSize = 10,
+  }) async {
+    final raw = await _client.get('/top/album', {
+      'page': page,
+      'pagesize': pageSize,
+    });
+    final json = asMap(raw);
+    final data = asMap(json['data']);
+    final items = asList(data['chn'] ?? json['chn']);
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(TopAlbumItem.fromJson)
+        .where((album) => album.id.isNotEmpty)
+        .toList();
+  }
+
   // -------------------------------------------------------------------------
   // 排行榜 (Rank)
   // -------------------------------------------------------------------------
 
   Future<List<RankCategory>> rankList({int withSong = 0}) async {
-    final json = asMap(
-      await _client.get('/rank/list', {'withsong': withSong}),
-    );
+    final json = asMap(await _client.get('/rank/list', {'withsong': withSong}));
     final data = asMap(json['data']);
     final items = asList(
       data['info'] ?? json['info'] ?? json['list'] ?? json['ranks'],
@@ -279,7 +316,10 @@ class MusicApi {
         .toList();
   }
 
-  Future<List<AlbumShopItem>> albumShop({int page = 1, int pageSize = 30}) async {
+  Future<List<AlbumShopItem>> albumShop({
+    int page = 1,
+    int pageSize = 30,
+  }) async {
     final json = asMap(
       await _client.get('/album/shop', {'page': page, 'pagesize': pageSize}),
     );
@@ -376,6 +416,34 @@ class MusicApi {
   Future<ArtistDetail> artistDetail(String id) async {
     final json = asMap(await _client.get('/artist/detail', {'id': id}));
     return ArtistDetail.fromJson(json, id: id);
+  }
+
+  /// 获取歌手专辑列表。
+  Future<List<ArtistAlbum>> artistAlbums(
+    String id, {
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final raw = await _client.get('/artist/albums', {
+      'id': id,
+      'page': page,
+      'pagesize': pageSize,
+      'sort': 'new',
+    });
+    final json = asMap(raw);
+    final items = raw is List
+        ? raw
+        : asList(
+            json['data'] ??
+                json['albums'] ??
+                json['list'] ??
+                _firstListValue(json),
+          );
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(ArtistAlbum.fromJson)
+        .where((album) => album.id.isNotEmpty)
+        .toList();
   }
 
   Future<List<Song>> artistAudios(
@@ -476,6 +544,24 @@ class MusicApi {
     return MusicCommentResponse.fromJson(json);
   }
 
+  /// 获取相似歌单。
+  Future<List<PlaylistSummary>> similarPlaylists(String ids) async {
+    final raw = await _client.get('/playlist/similar', {'ids': ids});
+    final json = asMap(raw);
+    final groups = (raw is List ? raw : asList(json['data']))
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final items = groups.isEmpty
+        ? const <Map<String, dynamic>>[]
+        : asList(
+            groups.first['collection_list'],
+          ).whereType<Map<String, dynamic>>();
+    return items
+        .map(PlaylistSummary.fromSimilar)
+        .where((playlist) => playlist.id.isNotEmpty)
+        .toList();
+  }
+
   Future<PlaylistSummary> playlistInfo(String id) async {
     final json = asMap(await _client.get('/playlist/detail', {'ids': id}));
     return PlaylistSummary.fromDetail(json);
@@ -488,7 +574,11 @@ class MusicApi {
     bool fetchAll = false,
   }) async {
     if (!fetchAll) {
-      final songPage = await playlistSongPage(id, page: page, pageSize: pageSize);
+      final songPage = await playlistSongPage(
+        id,
+        page: page,
+        pageSize: pageSize,
+      );
       return songPage.songs;
     }
 
@@ -543,6 +633,18 @@ class MusicApi {
     );
   }
 
+  /// 获取歌曲高潮片段时间信息，无高潮时返回 null。
+  Future<SongClimax?> songClimax(String hash) async {
+    final raw = await _client.get('/song/climax', {'hash': hash});
+    final json = asMap(raw);
+    final items = raw is List ? raw : asList(json['data']);
+    for (final item in items.whereType<Map<String, dynamic>>()) {
+      final climax = SongClimax.fromJson(item);
+      if (climax.isValid) return climax;
+    }
+    return null;
+  }
+
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
@@ -564,10 +666,7 @@ class MusicApi {
   }
 
   /// 获取云盘歌曲列表（分页）。
-  Future<CloudDriveResult> cloudDrive({
-    int page = 1,
-    int pageSize = 30,
-  }) async {
+  Future<CloudDriveResult> cloudDrive({int page = 1, int pageSize = 30}) async {
     final json = asMap(
       await _client.get('/user/cloud', {'page': page, 'pagesize': pageSize}),
     );
@@ -594,6 +693,19 @@ class MusicApi {
     final url = asString(json['url']) ?? '';
     final hash = asString(json['hash']) ?? song.hash;
     return PlayUrl(url: url, hash: hash);
+  }
+
+  /// 解析网易云 / QQ 音乐歌单分享链接，返回歌单名和歌曲名称列表。
+  Future<ExternalPlaylistParseResult> parseExternalPlaylist(
+    String sourceText,
+  ) async {
+    final json = asMap(
+      await _client.post(
+        '/playlist/external/parse',
+        body: {'sourceText': sourceText},
+      ),
+    );
+    return ExternalPlaylistParseResult.fromJson(json);
   }
 
   Future<void> createPlaylist(String name, {bool private = false}) async {
@@ -642,7 +754,8 @@ class MusicApi {
     List<Song> songs, {
     List<int>? fileIds,
   }) async {
-    final ids = fileIds ??
+    final ids =
+        fileIds ??
         songs
             .map((song) => int.tryParse(song.id) ?? 0)
             .where((id) => id != 0)
@@ -759,11 +872,13 @@ class MusicApi {
     for (final song in songs) {
       for (final artist in song.artists) {
         if (artist.id.isNotEmpty && seen.add(artist.id)) {
-          artists.add(SearchArtistResult(
-            id: artist.id,
-            name: artist.name,
-            avatarUrl: artist.avatarUrl,
-          ));
+          artists.add(
+            SearchArtistResult(
+              id: artist.id,
+              name: artist.name,
+              avatarUrl: artist.avatarUrl,
+            ),
+          );
         } else if (artist.id.isEmpty &&
             artist.name.isNotEmpty &&
             seen.add('name:${artist.name}')) {
@@ -772,7 +887,12 @@ class MusicApi {
       }
     }
     // 搜索接口不返回头像，通过 artistDetail 并行补全
-    final needAvatar = artists.where((a) => a.id.isNotEmpty && (a.avatarUrl == null || a.avatarUrl!.isEmpty)).toList();
+    final needAvatar = artists
+        .where(
+          (a) =>
+              a.id.isNotEmpty && (a.avatarUrl == null || a.avatarUrl!.isEmpty),
+        )
+        .toList();
     if (needAvatar.isNotEmpty) {
       final details = await Future.wait(
         needAvatar.map((a) async {
@@ -785,7 +905,9 @@ class MusicApi {
       );
       for (var i = 0; i < needAvatar.length; i++) {
         final detail = details[i];
-        if (detail != null && detail.avatarUrl != null && detail.avatarUrl!.isNotEmpty) {
+        if (detail != null &&
+            detail.avatarUrl != null &&
+            detail.avatarUrl!.isNotEmpty) {
           final idx = artists.indexOf(needAvatar[i]);
           if (idx >= 0) {
             artists[idx] = SearchArtistResult(
@@ -860,9 +982,11 @@ class MusicApi {
     );
     final searchResponse = await _client.getRaw(searchUri);
     final searchJson = asMap(searchResponse);
-    final rawSongs = asList(searchJson['result'] is Map
-        ? asMap(searchJson['result'])['songs']
-        : searchJson['songs']);
+    final rawSongs = asList(
+      searchJson['result'] is Map
+          ? asMap(searchJson['result'])['songs']
+          : searchJson['songs'],
+    );
     final ids = rawSongs
         .whereType<Map>()
         .map((item) => asInt(asMap(item)['id']))
@@ -1045,15 +1169,41 @@ List<LyricLine> parseLyrics(String? content) {
       .replaceAll(r'\r\n', '\n')
       .replaceAll(r'\n', '\n');
   final krcLines = _parseKrc(normalized);
-  final parsed = krcLines.isNotEmpty ? krcLines : _parseLrc(normalized);
+  final parsed = krcLines.isNotEmpty
+      ? krcLines
+      : _mergeSameTimeTranslation(_parseLrc(normalized));
   if (parsed.isEmpty) {
     return const [];
   }
 
-  final variants = _parseLyricVariants(
-    originalContent: normalized,
-  );
+  final variants = _parseLyricVariants(originalContent: normalized);
   return _mergeLyricVariants(parsed, variants);
+}
+
+/// 合并同一时间戳的相邻歌词行。
+///
+/// LRC 歌词常见的“原文 + 翻译”写法是两行共用同一个时间戳，
+/// 不合并的话翻译会被当成独立的歌词行（有自己独立的卡拉OK进度），
+/// 导致原文瞬间被跳过、翻译进度对不上。这里把第二行并入第一行的
+/// [LyricLine.translation]，与 KRC language 标签的处理保持一致。
+List<LyricLine> _mergeSameTimeTranslation(List<LyricLine> lines) {
+  if (lines.length < 2) {
+    return lines;
+  }
+  final merged = <LyricLine>[];
+  for (final line in lines) {
+    final last = merged.isNotEmpty ? merged.last : null;
+    if (last != null &&
+        last.translation == null &&
+        last.romanization == null &&
+        line.time == last.time &&
+        !_sameLyricText(last.text, line.text)) {
+      merged[merged.length - 1] = last.copyWith(translation: line.text);
+      continue;
+    }
+    merged.add(line);
+  }
+  return merged;
 }
 
 List<LyricLine> _parseKrc(String content) {
@@ -1234,9 +1384,7 @@ int _lyricContentScore(String content) {
   return score;
 }
 
-_ParsedLyricVariants _parseLyricVariants({
-  required String originalContent,
-}) {
+_ParsedLyricVariants _parseLyricVariants({required String originalContent}) {
   // decodedTranslation 是纯文本，没有行号/时间戳信息，无法与主歌词逐行对应。
   // 翻译/音译只从 decodedContent 中的 [language:...] 标签解析，
   // 其 lyricContent 下标与主歌词行序严格一致。
@@ -1278,7 +1426,9 @@ _ParsedLyricVariants _parseKrcLanguageVariants(String content) {
       romanizationByTime: romanizationByTime,
       romanizationByIndex: romanizationByIndex,
     );
-    _debugLyricLog('language: transByIndex=${translationByIndex.length} transByTime=${translationByTime.length} romanByIndex=${romanizationByIndex.length} romanByTime=${romanizationByTime.length}');
+    _debugLyricLog(
+      'language: transByIndex=${translationByIndex.length} transByTime=${translationByTime.length} romanByIndex=${romanizationByIndex.length} romanByTime=${romanizationByTime.length}',
+    );
     for (var i = 0; i < translationByIndex.length; i++) {
       final t = translationByIndex[i];
       if (t.isNotEmpty) {
@@ -1421,7 +1571,9 @@ List<LyricLine> _mergeLyricVariants(
       ),
     );
     if (trans != null && trans.isNotEmpty) {
-      _debugLyricLog('merge[$index]: "${line.text}" → "$trans" (byTime=$byTime nearest=$nearest indexed=$indexed)');
+      _debugLyricLog(
+        'merge[$index]: "${line.text}" → "$trans" (byTime=$byTime nearest=$nearest indexed=$indexed)',
+      );
     }
   }
   return merged;
@@ -1447,7 +1599,9 @@ Map<int, String> _indexedLyricVariants(
       ? 0
       : (lines.length - variant.byIndex.length).clamp(0, lines.length);
 
-  _debugLyricLog('indexedVariants: lines=${lines.length} variants=${variant.byIndex.length} leadingEmpty=$leadingEmpty offset=$offset');
+  _debugLyricLog(
+    'indexedVariants: lines=${lines.length} variants=${variant.byIndex.length} leadingEmpty=$leadingEmpty offset=$offset',
+  );
 
   for (var i = 0; i < variant.byIndex.length; i++) {
     final lineIndex = i + offset;
@@ -1458,7 +1612,9 @@ Map<int, String> _indexedLyricVariants(
       continue;
     }
     result[lineIndex] = text;
-    _debugLyricLog('indexedVariants[$i→$lineIndex]: "${lines[lineIndex].text}" → "$text"');
+    _debugLyricLog(
+      'indexedVariants[$i→$lineIndex]: "${lines[lineIndex].text}" → "$text"',
+    );
   }
 
   _debugLyricLog('indexedVariants: assigned=${result.length} entries');

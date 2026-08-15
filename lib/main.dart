@@ -45,12 +45,14 @@ Future<void> main() async {
   await themeController.detectAutomotive(const DeviceInfoService());
   await themeController.load();
 
-  runApp(KaMusicApp(
-    client: client,
-    api: api,
-    audioHandler: audioHandler,
-    themeController: themeController,
-  ));
+  runApp(
+    KaMusicApp(
+      client: client,
+      api: api,
+      audioHandler: audioHandler,
+      themeController: themeController,
+    ),
+  );
 }
 
 class KaMusicApp extends StatefulWidget {
@@ -157,9 +159,17 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
             transparentBackground: _theme.backgroundEnabled,
           ),
           builder: (context, child) {
-            Widget result = _AppBackground(
-              themeController: _theme,
-              child: _SystemUiOverlay(child: child ?? const SizedBox.shrink()),
+            // 全局字体大小（保留系统无障碍缩放）。
+            final baseScale = MediaQuery.textScalerOf(context).scale(1.0);
+            final textScaler = TextScaler.linear(baseScale * _theme.fontScale);
+            Widget result = MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+              child: _AppBackground(
+                themeController: _theme,
+                child: _SystemUiOverlay(
+                  child: child ?? const SizedBox.shrink(),
+                ),
+              ),
             );
             // Windows 桌面 AXTree 竞态导致原生崩溃（accessibility_bridge.cc），
             // 整 app 排除语义树彻底规避。Android/iOS 不受影响。
@@ -252,7 +262,11 @@ class _AppBackgroundState extends State<_AppBackground> {
     final path = widget.themeController.backgroundImagePath;
     if (path != null && path != _cachedPath) {
       _cachedPath = path;
-      _imageProvider = ResizeImage(FileImage(File(path)), width: 800, height: 800);
+      _imageProvider = ResizeImage(
+        FileImage(File(path)),
+        width: 800,
+        height: 800,
+      );
     }
   }
 

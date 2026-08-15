@@ -132,8 +132,10 @@ class UserProfile {
     );
   }
 
-  Map<String, dynamic> toCache() =>
-      {'nickname': nickname, 'avatarUrl': avatarUrl};
+  Map<String, dynamic> toCache() => {
+    'nickname': nickname,
+    'avatarUrl': avatarUrl,
+  };
 
   factory UserProfile.fromCache(Map<String, dynamic> json) {
     return UserProfile(
@@ -294,10 +296,9 @@ class UserVipInfo {
     return UserVipInfo(
       isVip: asInt(json['is_vip']),
       vipType: asInt(json['vip_type']),
-      busiVip: asList(json['busi_vip'])
-          .whereType<Map>()
-          .map((e) => BusiVipInfo.fromJson(asMap(e)))
-          .toList(),
+      busiVip: asList(
+        json['busi_vip'],
+      ).whereType<Map>().map((e) => BusiVipInfo.fromJson(asMap(e))).toList(),
       isSuperVip: json['isSuperVip'] as bool?,
       isConceptVip: json['isConceptVip'] as bool?,
     );
@@ -352,8 +353,7 @@ class PlaylistSummary {
   bool get isLikedPlaylist => isDefault == 2 || title.trim() == '我喜欢';
 
   /// 酷狗系统「默认收藏」歌单（is_def=1），不可删除，一般不展示。
-  bool get isSystemDefaultCollect =>
-      isDefault == 1 || title.trim() == '默认收藏';
+  bool get isSystemDefaultCollect => isDefault == 1 || title.trim() == '默认收藏';
 
   /// 收藏专辑：用户歌单列表里没有 `list_create_gid` 的专辑条目。
   /// 注意：自建歌单也可能没有 `list_create_gid`，不能单靠 sourceGlobalId 为空判断。
@@ -415,7 +415,9 @@ class PlaylistSummary {
 
   /// 可删除/取消收藏（系统默认收藏与「我喜欢」不可删）
   bool get canDeleteOrUncollect =>
-      !isLikedPlaylist && !isSystemDefaultCollect && (isCreatedPlaylist || type == 1 || isCollectedAlbum);
+      !isLikedPlaylist &&
+      !isSystemDefaultCollect &&
+      (isCreatedPlaylist || type == 1 || isCollectedAlbum);
 
   bool get hasCollectionSource {
     return (sourceGlobalId != null && sourceGlobalId!.isNotEmpty) ||
@@ -494,6 +496,19 @@ class PlaylistSummary {
       // 标记来源 ID，避免被 isCollectedAlbum 误判为收藏专辑，
       // 否则 PlaylistDetailPage 会走专辑加载分支导致歌曲列表为空。
       sourceGlobalId: globalCollectionId ?? id,
+    );
+  }
+
+  factory PlaylistSummary.fromSimilar(Map<String, dynamic> json) {
+    return PlaylistSummary(
+      id: asString(json['global_collection_id']) ?? '',
+      title: asString(json['collection_name']) ?? '未知歌单',
+      coverUrl: normalizeImageUrl(
+        asString(json['flexible_cover']) ?? asString(json['cover']),
+      ),
+      songCount: asInt(json['song_count']) ?? asInt(json['count']),
+      playCount: asInt(json['heat']),
+      creatorName: asString(json['user_name']),
     );
   }
 
@@ -600,8 +615,10 @@ class PlaylistSummary {
 enum SongSource {
   /// 酷狗音乐（默认）
   kugou,
+
   /// 网易云音乐
   netease,
+
   /// 本地音乐
   local,
 }
@@ -696,6 +713,29 @@ class Song {
     );
   }
 
+  factory Song.fromTopSong(Map<String, dynamic> json) {
+    final hash =
+        asString(json['hash']) ??
+        asString(json['hash_320']) ??
+        asString(json['hash_flac']) ??
+        '';
+    final audioId =
+        asString(json['audio_id']) ?? asString(json['album_audio_id']);
+    final author = asString(json['author_name']) ?? '未知艺人';
+    return Song(
+      id: audioId ?? hash,
+      title: asString(json['songname']) ?? asString(json['filename']) ?? '未知歌曲',
+      artist: author,
+      hash: hash,
+      albumId: asString(json['album_id']),
+      albumAudioId: asString(json['album_audio_id']),
+      albumName: asString(json['album_name']),
+      coverUrl: normalizeImageUrl(asString(json['album_sizable_cover'])),
+      duration: durationFromMilliseconds(json['timelength']),
+      artists: parseArtists(json, fallbackName: author),
+    );
+  }
+
   factory Song.fromDaily(Map<String, dynamic> json) {
     final songId = asString(json['songid']) ?? asString(json['audio_id']);
     final artists = parseArtists(
@@ -729,27 +769,28 @@ class Song {
     final artist = artists.map((artist) => artist.name).join(' / ');
     final albumInfo = json['albuminfo'];
     final albumMap = albumInfo is Map<String, dynamic> ? albumInfo : null;
-    final hash = asString(json['hash']) ??
+    final hash =
+        asString(json['hash']) ??
         asString(json['hash_320']) ??
         asString(json['hash_flac']) ??
         asString(json['FileHash']) ??
         '';
 
     return Song(
-      id: asString(json['fileid']) ??
-          asString(json['mixsongid']) ??
-          hash,
+      id: asString(json['fileid']) ?? asString(json['mixsongid']) ?? hash,
       title: asString(json['name']) ?? asString(json['audio_name']) ?? '未知歌曲',
       artist: artist.isNotEmpty ? artist : '未知艺人',
       hash: hash,
-      albumId: asString(json['album_id']) ??
+      albumId:
+          asString(json['album_id']) ??
           asString(albumMap?['album_id']) ??
           asString(albumMap?['id']),
       albumAudioId:
           asString(json['mixsongid']) ??
           asString(json['album_audio_id']) ??
           asString(json['audio_id']),
-      albumName: asString(albumMap?['name']) ??
+      albumName:
+          asString(albumMap?['name']) ??
           asString(albumMap?['album_name']) ??
           asString(json['album_name']),
       coverUrl: normalizeImageUrl(
@@ -944,17 +985,14 @@ class Song {
                 asString(base['author_name']) ??
                 '未知艺人',
       hash: hash,
-      albumId:
-          asString(json['album_id']) ??
-          asString(base['album_id']),
+      albumId: asString(json['album_id']) ?? asString(base['album_id']),
       albumAudioId:
           asString(json['album_audio_id']) ??
           asString(audioInfo['hash_128']) ??
           asString(audioInfo['hash']) ??
           asString(json['hash']),
       albumName:
-          asString(json['album_name']) ??
-          asString(albumInfo['album_name']),
+          asString(json['album_name']) ?? asString(albumInfo['album_name']),
       coverUrl: normalizeImageUrl(
         asString(json['sizable_cover']) ??
             asString(json['img']) ??
@@ -976,25 +1014,21 @@ class Song {
   }
 
   Map<String, dynamic> toCache() => {
-        'id': id,
-        'title': title,
-        'artist': artist,
-        'hash': hash,
-        'albumId': albumId,
-        'albumAudioId': albumAudioId,
-        'albumName': albumName,
-        'coverUrl': coverUrl,
-        'durationMs': duration?.inMilliseconds,
-        'artists': artists
-            .map((a) => {
-                  'id': a.id,
-                  'name': a.name,
-                  'avatarUrl': a.avatarUrl,
-                })
-            .toList(),
-        if (isCloudDrive) 'isCloudDrive': true,
-        if (source != SongSource.kugou) 'source': source.name,
-      };
+    'id': id,
+    'title': title,
+    'artist': artist,
+    'hash': hash,
+    'albumId': albumId,
+    'albumAudioId': albumAudioId,
+    'albumName': albumName,
+    'coverUrl': coverUrl,
+    'durationMs': duration?.inMilliseconds,
+    'artists': artists
+        .map((a) => {'id': a.id, 'name': a.name, 'avatarUrl': a.avatarUrl})
+        .toList(),
+    if (isCloudDrive) 'isCloudDrive': true,
+    if (source != SongSource.kugou) 'source': source.name,
+  };
 
   factory Song.fromCache(Map<String, dynamic> json) {
     return Song(
@@ -1009,11 +1043,13 @@ class Song {
       duration: durationFromMilliseconds(json['durationMs']),
       artists: asList(json['artists'])
           .whereType<Map<String, dynamic>>()
-          .map((a) => ArtistRef(
-                id: asString(a['id']) ?? '',
-                name: asString(a['name']) ?? '',
-                avatarUrl: asString(a['avatarUrl']),
-              ))
+          .map(
+            (a) => ArtistRef(
+              id: asString(a['id']) ?? '',
+              name: asString(a['name']) ?? '',
+              avatarUrl: asString(a['avatarUrl']),
+            ),
+          )
           .where((artist) => artist.name.isNotEmpty)
           .toList(),
       isCloudDrive: json['isCloudDrive'] == true,
@@ -1305,7 +1341,13 @@ List<ArtistRef> parseArtists(
     );
   }
 
-  for (final key in const ['singerinfo', 'authors', 'author', 'singers', 'Singers']) {
+  for (final key in const [
+    'singerinfo',
+    'authors',
+    'author',
+    'singers',
+    'Singers',
+  ]) {
     final value = json[key];
     if (value is List) {
       for (final item in value.whereType<Map<String, dynamic>>()) {
@@ -1357,11 +1399,11 @@ class DailyRecommend {
   }
 
   Map<String, dynamic> toCache() => {
-        'title': title,
-        'subtitle': subtitle,
-        'coverUrl': coverUrl,
-        'songs': songs.map((s) => s.toCache()).toList(),
-      };
+    'title': title,
+    'subtitle': subtitle,
+    'coverUrl': coverUrl,
+    'songs': songs.map((s) => s.toCache()).toList(),
+  };
 
   factory DailyRecommend.fromCache(Map<String, dynamic> json) {
     return DailyRecommend(
@@ -1419,14 +1461,14 @@ class AlbumShopItem {
   }
 
   Map<String, dynamic> toCache() => {
-        'albumName': albumName,
-        'singerName': singerName,
-        'mediaId': mediaId,
-        'topicId': topicId,
-        'pic': pic,
-        'price': price,
-        'buyNum': buyNum,
-      };
+    'albumName': albumName,
+    'singerName': singerName,
+    'mediaId': mediaId,
+    'topicId': topicId,
+    'pic': pic,
+    'price': price,
+    'buyNum': buyNum,
+  };
 
   factory AlbumShopItem.fromCache(Map<String, dynamic> json) {
     return AlbumShopItem(
@@ -1518,13 +1560,13 @@ class LyricLine {
   }
 
   Map<String, dynamic> toCache() => {
-        'timeMs': time.inMilliseconds,
-        'text': text,
-        'durationMs': duration?.inMilliseconds,
-        'translation': translation,
-        'romanization': romanization,
-        'words': words.map((w) => w.toCache()).toList(),
-      };
+    'timeMs': time.inMilliseconds,
+    'text': text,
+    'durationMs': duration?.inMilliseconds,
+    'translation': translation,
+    'romanization': romanization,
+    'words': words.map((w) => w.toCache()).toList(),
+  };
 
   factory LyricLine.fromCache(Map<String, dynamic> json) {
     return LyricLine(
@@ -1553,10 +1595,10 @@ class LyricWord {
   final String text;
 
   Map<String, dynamic> toCache() => {
-        'timeMs': time.inMilliseconds,
-        'durationMs': duration.inMilliseconds,
-        'text': text,
-      };
+    'timeMs': time.inMilliseconds,
+    'durationMs': duration.inMilliseconds,
+    'text': text,
+  };
 
   factory LyricWord.fromCache(Map<String, dynamic> json) {
     return LyricWord(
@@ -2020,10 +2062,9 @@ class RankCategory {
   final List<Song> songs;
 
   factory RankCategory.fromJson(Map<String, dynamic> json) {
-    final children = asList(json['children'])
-        .whereType<Map<String, dynamic>>()
-        .map(RankCategory.fromJson)
-        .toList();
+    final children = asList(
+      json['children'],
+    ).whereType<Map<String, dynamic>>().map(RankCategory.fromJson).toList();
     final songs = asList(json['songlist'])
         .whereType<Map<String, dynamic>>()
         .map(Song.fromRank)
@@ -2216,7 +2257,9 @@ class CloudDriveSongMeta {
 
   factory CloudDriveSongMeta.fromJson(Map<String, dynamic> json) {
     final albumInfo = asMap(json['album_info']);
-    final authorsRaw = asList(json['authors']).whereType<Map<String, dynamic>>();
+    final authorsRaw = asList(
+      json['authors'],
+    ).whereType<Map<String, dynamic>>();
     final artists = authorsRaw
         .map(
           (item) => ArtistRef(
@@ -2240,11 +2283,13 @@ class CloudDriveSongMeta {
 
     // 云盘歌曲的 name 字段通常是上传时的文件名（如 "xxx.mp3"），这里移除后缀。
     final ext = asString(json['ext']);
-    final rawName = asString(json['name']) ?? asString(json['audio_name']) ?? '';
+    final rawName =
+        asString(json['name']) ?? asString(json['audio_name']) ?? '';
     final cleanName = _stripCloudFileExtension(rawName, ext);
 
     final song = Song(
-      id: asString(json['audio_id']) ??
+      id:
+          asString(json['audio_id']) ??
           asString(json['album_audio_id']) ??
           asString(json['hash']) ??
           '',
@@ -2290,8 +2335,10 @@ String _stripCloudFileExtension(String name, String? ext) {
   }
 
   // 兜底：移除常见音频文件后缀
-  final match = RegExp(r'\.(mp3|flac|ape|wav|aac|m4a|ogg|wma|opus)$', caseSensitive: false)
-      .firstMatch(result);
+  final match = RegExp(
+    r'\.(mp3|flac|ape|wav|aac|m4a|ogg|wma|opus)$',
+    caseSensitive: false,
+  ).firstMatch(result);
   if (match != null) {
     result = result.substring(0, match.start);
   }
@@ -2377,6 +2424,115 @@ class NetEaseAlbum {
       id: asInt(json['id']) ?? 0,
       name: asString(json['name']) ?? '未知专辑',
       picUrl: asString(json['picUrl']),
+    );
+  }
+}
+
+/// 网易云 / QQ 音乐歌单分享链接解析结果（/playlist/external/parse）。
+class ExternalPlaylistParseResult {
+  const ExternalPlaylistParseResult({
+    required this.sourcePlatform,
+    required this.playlistName,
+    required this.songNames,
+  });
+
+  final String sourcePlatform;
+  final String playlistName;
+  final List<String> songNames;
+
+  factory ExternalPlaylistParseResult.fromJson(Map<String, dynamic> json) {
+    return ExternalPlaylistParseResult(
+      sourcePlatform: asString(json['sourcePlatform']) ?? '',
+      playlistName: asString(json['playlistName']) ?? '未命名歌单',
+      songNames: asList(json['songNames'])
+          .map((item) => item?.toString() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList(),
+    );
+  }
+}
+
+/// 歌手专辑（/artist/albums）。
+class ArtistAlbum {
+  const ArtistAlbum({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.authorName,
+    this.publishDate,
+    this.intro,
+  });
+
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final String? authorName;
+  final String? publishDate;
+  final String? intro;
+
+  factory ArtistAlbum.fromJson(Map<String, dynamic> json) {
+    return ArtistAlbum(
+      id: asString(json['album_id']) ?? asString(json['id']) ?? '',
+      name: asString(json['album_name']) ?? asString(json['name']) ?? '未知专辑',
+      coverUrl: normalizeImageUrl(
+        asString(json['cover']) ?? asString(json['sizable_cover']),
+      ),
+      authorName: asString(json['author_name']),
+      publishDate: asString(json['publish_date']),
+      intro: asString(json['intro']),
+    );
+  }
+}
+
+/// 歌曲高潮片段信息（/song/climax）。
+class SongClimax {
+  const SongClimax({
+    required this.startTime,
+    required this.endTime,
+    required this.hash,
+  });
+
+  final Duration startTime;
+  final Duration endTime;
+  final String hash;
+
+  bool get isValid => endTime > startTime && endTime > Duration.zero;
+
+  factory SongClimax.fromJson(Map<String, dynamic> json) {
+    return SongClimax(
+      startTime: Duration(milliseconds: asInt(json['start_time']) ?? 0),
+      endTime: Duration(milliseconds: asInt(json['end_time']) ?? 0),
+      hash: asString(json['hash']) ?? '',
+    );
+  }
+}
+
+/// 新碟上架（/top/album）。
+class TopAlbumItem {
+  const TopAlbumItem({
+    required this.id,
+    required this.name,
+    this.singerName,
+    this.coverUrl,
+    this.publishTime,
+    this.songCount,
+  });
+
+  final String id;
+  final String name;
+  final String? singerName;
+  final String? coverUrl;
+  final String? publishTime;
+  final int? songCount;
+
+  factory TopAlbumItem.fromJson(Map<String, dynamic> json) {
+    return TopAlbumItem(
+      id: asString(json['albumid']) ?? '',
+      name: asString(json['albumname']) ?? '未知专辑',
+      singerName: asString(json['singername']),
+      coverUrl: normalizeImageUrl(asString(json['imgurl'])),
+      publishTime: asString(json['publishtime']),
+      songCount: asInt(json['songcount']),
     );
   }
 }

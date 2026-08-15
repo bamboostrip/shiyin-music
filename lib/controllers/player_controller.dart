@@ -103,14 +103,15 @@ class PlayerController extends ChangeNotifier {
     unawaited(_restorePlaybackState());
     // 车机切网（WiFi ↔ 蜂窝 ↔ 离线）后恢复网络时，若上一首因断网停在
     // 错误态，自动重播一次；isRetry 防止失败后再次触发形成循环。
-    _networkRestoredSub =
-        NetworkMonitor.instance.onConnectivityRestored.listen((_) {
-      if (isPreparing || errorMessage == null) return;
-      final song = currentSong;
-      if (song == null) return;
-      debugPrint('[KA Music][player] 网络已恢复，自动重播: ${song.title}');
-      unawaited(playSong(song, isRetry: true));
-    });
+    _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
+      (_) {
+        if (isPreparing || errorMessage == null) return;
+        final song = currentSong;
+        if (song == null) return;
+        debugPrint('[KA Music][player] 网络已恢复，自动重播: ${song.title}');
+        unawaited(playSong(song, isRetry: true));
+      },
+    );
     _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
     _desktopLyrics.setVisibilityChangedHandler(_handleDesktopLyricsVisibility);
     _positionSub = audioPlayer.positionStream.listen((value) {
@@ -118,6 +119,7 @@ class PlayerController extends ChangeNotifier {
         _setPositionBase(value, playing: isPlaying);
       }
       _maybeCompleteFromPosition(value);
+      _maybeStopClimaxPreview(value);
       _maybeSyncDesktopLyricFromPosition();
       // 进度只通知 positionListenable，避免整页 AnimatedBuilder(player) 每 tick 重建。
       _emitPosition();
@@ -210,7 +212,16 @@ class PlayerController extends ChangeNotifier {
   StreamSubscription<Set<AudioDevice>>? _devicesSub;
   Set<AudioDevice>? _previousDevices;
   final Stopwatch _positionClock = Stopwatch();
+  // 平滑位置的上一次取值：用于过滤位置流的小幅倒退（音频缓冲/时钟抖动），
+  // 避免歌词高亮和卡拉OK进度出现回跳。seek/换歌的大跨度回退会重建基线。
+  Duration _lastSmoothPosition = Duration.zero;
   final _random = math.Random();
+
+  /// 高潮试听结束时间（播放到该时间自动暂停）。
+  Duration? _climaxEndTime;
+
+  /// 当前歌曲的高潮片段时间（用于进度条标记），可能为 null。
+  SongClimax? climax;
   Timer? _completionFallbackTimer;
   Timer? _listenTimeTimer;
   DateTime? _listenTimeStartedAt;
@@ -232,8 +243,9 @@ class PlayerController extends ChangeNotifier {
   Duration duration = Duration.zero;
 
   /// 播放进度专用通知（高频）。UI 进度条应监听此对象，勿依赖 [notifyListeners]。
-  final ValueNotifier<Duration> positionListenable =
-      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> positionListenable = ValueNotifier<Duration>(
+    Duration.zero,
+  );
 
   bool isPlaying = false;
   bool isBuffering = false;
@@ -296,17 +308,29 @@ class PlayerController extends ChangeNotifier {
   }
 
   Duration get smoothPosition {
+    final raw = _isScrubbing
+        ? position
+        : (!isPlaying ? position : position + _positionClock.elapsed);
+    var value = raw;
+    if (value < Duration.zero) {
+      value = Duration.zero;
+    } else if (duration > Duration.zero && value > duration) {
+      value = duration;
+    }
     if (_isScrubbing) {
-      return position;
+      // 拖动进度条时位置必须严格跟随手指。
+      _lastSmoothPosition = value;
+      return value;
     }
-    if (!isPlaying) {
-      return position;
+    if (value < _lastSmoothPosition) {
+      if (_lastSmoothPosition - value > const Duration(milliseconds: 250)) {
+        // 明显回退：视为 seek 或切歌，直接重建基线。
+        _lastSmoothPosition = value;
+      }
+    } else {
+      _lastSmoothPosition = value;
     }
-    final value = position + _positionClock.elapsed;
-    if (duration > Duration.zero && value > duration) {
-      return duration;
-    }
-    return value;
+    return _lastSmoothPosition;
   }
 
   int get currentIndex {
@@ -366,9 +390,16 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> playSong(Song song, {List<Song>? queue, bool isRetry = false}) async {
+  Future<void> playSong(
+    Song song, {
+    List<Song>? queue,
+    bool isRetry = false,
+  }) async {
+    _climaxEndTime = null;
+    climax = null;
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
+    _lastSmoothPosition = Duration.zero;
     isPreparing = true;
     _isChangingSource = true;
     errorMessage = null;
@@ -387,6 +418,8 @@ class PlayerController extends ChangeNotifier {
     // 切歌:取消上一首可能在途的响度分析,避免旧分析空跑占 CPU。
     // 序号守卫也会丢弃旧结果,但取消能立即停掉原生解码线程。
     unawaited(_loudness.cancelAnalysis());
+    // 异步预取高潮片段时间，用于进度条标记（失败静默）。
+    unawaited(_loadClimax(song));
 
     try {
       String url;
@@ -473,7 +506,11 @@ class PlayerController extends ChangeNotifier {
     final coverUrl = song.coverUrl;
     if (coverUrl == null || coverUrl.isEmpty) return;
     if (coverUrl.startsWith('content://')) return;
-    final provider = ResizeImage(NetworkImage(coverUrl), width: 150, height: 150);
+    final provider = ResizeImage(
+      NetworkImage(coverUrl),
+      width: 150,
+      height: 150,
+    );
     final stream = provider.resolve(ImageConfiguration.empty);
     stream.addListener(ImageStreamListener((_, __) {}, onError: (_, __) {}));
   }
@@ -914,6 +951,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> seek(Duration position) async {
     final serial = ++_seekSerial;
     final target = _clampPosition(position);
+    _lastSmoothPosition = Duration.zero;
     seekRevision++;
     _isScrubbing = false;
     _isSeeking = true;
@@ -1017,6 +1055,51 @@ class PlayerController extends ChangeNotifier {
           unawaited(_handleCompleted());
         }
       });
+    }
+  }
+
+  /// 试听当前歌曲的高潮片段：定位到高潮开始并播放，到高潮结束自动暂停。
+  /// 返回是否成功（无高潮片段或失败时返回 false）。
+  Future<bool> playClimaxPreview() async {
+    final song = currentSong;
+    if (song == null) return false;
+    try {
+      final climax = await _api.songClimax(song.hash);
+      if (climax == null) return false;
+      this.climax = climax;
+      await seek(climax.startTime);
+      // seek 完成后再设置结束时间，避免 seek 期间旧位置触发提前暂停。
+      _climaxEndTime = climax.endTime;
+      if (!audioPlayer.playing) {
+        await togglePlay();
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 高潮试听播放到结束时间时自动暂停。
+  void _maybeStopClimaxPreview(Duration value) {
+    final end = _climaxEndTime;
+    if (end == null || value < end) return;
+    _climaxEndTime = null;
+    if (audioPlayer.playing) {
+      unawaited(togglePlay());
+    }
+  }
+
+  /// 异步获取当前歌曲高潮时间，用于进度条标记（失败静默）。
+  Future<void> _loadClimax(Song song) async {
+    try {
+      final result = await _api.songClimax(song.hash);
+      if (currentSong?.hash != song.hash) return;
+      climax = result;
+      notifyListeners();
+    } catch (_) {
+      if (currentSong?.hash == song.hash) {
+        climax = null;
+      }
     }
   }
 
@@ -1142,19 +1225,21 @@ class PlayerController extends ChangeNotifier {
           final addedDevices = devices.difference(_previousDevices!);
           if (addedDevices.isNotEmpty) {
             // ignore: experimental_member_use
-            final hasNewAudioDevice = addedDevices.any((d) =>
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.bluetoothA2dp ||
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.bluetoothLe ||
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.bluetoothSco ||
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.wiredHeadset ||
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.wiredHeadphones ||
-                // ignore: experimental_member_use
-                d.type == AudioDeviceType.carAudio);
+            final hasNewAudioDevice = addedDevices.any(
+              (d) =>
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.bluetoothA2dp ||
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.bluetoothLe ||
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.bluetoothSco ||
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.wiredHeadset ||
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.wiredHeadphones ||
+                  // ignore: experimental_member_use
+                  d.type == AudioDeviceType.carAudio,
+            );
 
             if (hasNewAudioDevice &&
                 autoPlayOnDeviceConnected &&
@@ -1586,8 +1671,10 @@ class PlayerController extends ChangeNotifier {
       if (queueList.isEmpty) return;
 
       queue = queueList;
-      final index = (state['currentIndex'] as int? ?? 0)
-          .clamp(0, queueList.length - 1);
+      final index = (state['currentIndex'] as int? ?? 0).clamp(
+        0,
+        queueList.length - 1,
+      );
       currentSong = queueList[index];
 
       final modeName = state['playbackMode'] as String?;
@@ -1729,14 +1816,18 @@ class PlayerController extends ChangeNotifier {
     // 重置 EMA 滤波状态:每首新歌从零开始滤波,记录墙钟起点。
     _emaGainDb = null;
     _emaStartWallTime = DateTime.now();
-    LoudnessService.log('controller analyze 开始 serial=$serial hash=${song.hash.length > 8 ? song.hash.substring(0, 8) : song.hash}');
+    LoudnessService.log(
+      'controller analyze 开始 serial=$serial hash=${song.hash.length > 8 ? song.hash.substring(0, 8) : song.hash}',
+    );
     final gain = await _loudness.analyzeAndComputeGain(
       songHash: song.hash,
       url: url,
       onProgress: (gainDb, lufs, analyzedMs, isFinal) {
         // 切歌守卫:序号不匹配说明期间已切到其它歌曲,丢弃本次中途进度。
         if (serial != _loudnessSerial) {
-          LoudnessService.log('controller PROGRESS 丢弃 serial=$serial≠$_loudnessSerial (已切歌)');
+          LoudnessService.log(
+            'controller PROGRESS 丢弃 serial=$serial≠$_loudnessSerial (已切歌)',
+          );
           return;
         }
         // 渡口效应缓解:分析开始后前 3s(墙钟时间)的中途增益做 EMA 低通滤波。
@@ -1755,10 +1846,13 @@ class PlayerController extends ChangeNotifier {
           } else {
             // EMA: α=0.3 → 新值权重 30%,历史 70%。对 +6→+1.69 跳变
             // 平滑到 +3.90(首次)→ +3.0(二次),用户可感但不再突兀。
-            _emaGainDb = LoudnessService.emaAlpha * gainDb +
+            _emaGainDb =
+                LoudnessService.emaAlpha * gainDb +
                 (1 - LoudnessService.emaAlpha) * prev;
             appliedGain = _emaGainDb!;
-            LoudnessService.log('controller PROGRESS(mid,EMA) raw=${gainDb.toStringAsFixed(2)}dB smoothed=${appliedGain.toStringAsFixed(2)}dB wall=${wallElapsedMs}ms<${LoudnessService.earlyProgressWallMs}ms');
+            LoudnessService.log(
+              'controller PROGRESS(mid,EMA) raw=${gainDb.toStringAsFixed(2)}dB smoothed=${appliedGain.toStringAsFixed(2)}dB wall=${wallElapsedMs}ms<${LoudnessService.earlyProgressWallMs}ms',
+            );
           }
         }
         // 中途进度(isFinal=false):若新增益与当前应用增益差异超过阈值,
@@ -1769,11 +1863,17 @@ class PlayerController extends ChangeNotifier {
             ? double.infinity
             : (appliedGain - currentGain).abs();
         if (isFinal) {
-          LoudnessService.log('controller PROGRESS(final) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff == double.infinity ? "∞" : diff.toStringAsFixed(2)}dB → 应用(ramp)');
+          LoudnessService.log(
+            'controller PROGRESS(final) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff == double.infinity ? "∞" : diff.toStringAsFixed(2)}dB → 应用(ramp)',
+          );
         } else if (diff >= LoudnessService.progressGainThreshold) {
-          LoudnessService.log('controller PROGRESS(mid) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff.toStringAsFixed(2)}dB≥${LoudnessService.progressGainThreshold} → 应用(ramp)');
+          LoudnessService.log(
+            'controller PROGRESS(mid) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff.toStringAsFixed(2)}dB≥${LoudnessService.progressGainThreshold} → 应用(ramp)',
+          );
         } else {
-          LoudnessService.log('controller PROGRESS(mid) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff.toStringAsFixed(2)}dB<${LoudnessService.progressGainThreshold} → 跳过(差异太小)');
+          LoudnessService.log(
+            'controller PROGRESS(mid) gain=${appliedGain.toStringAsFixed(2)}dB diff=${diff.toStringAsFixed(2)}dB<${LoudnessService.progressGainThreshold} → 跳过(差异太小)',
+          );
           return;
         }
         _pendingGainDb = appliedGain;
@@ -1785,7 +1885,9 @@ class PlayerController extends ChangeNotifier {
     );
     // 切歌守卫:序号不匹配说明期间已切到其它歌曲,丢弃本次最终结果
     if (serial != _loudnessSerial) {
-      LoudnessService.log('controller analyze 最终结果丢弃 serial=$serial≠$_loudnessSerial (已切歌)');
+      LoudnessService.log(
+        'controller analyze 最终结果丢弃 serial=$serial≠$_loudnessSerial (已切歌)',
+      );
       return;
     }
     // 最终值已在 onProgress(isFinal=true) 里应用过,这里只处理:
@@ -1803,12 +1905,16 @@ class PlayerController extends ChangeNotifier {
     // 缓存命中场景:onProgress 不会被调用(查缓存直接返回),
     // _pendingGainDb 可能仍为 null(首次)或旧值。这里补一次 instant 应用。
     if (gain != _pendingGainDb) {
-      LoudnessService.log('controller analyze 缓存命中补应用 gain=${gain.toStringAsFixed(2)}dB (instant)');
+      LoudnessService.log(
+        'controller analyze 缓存命中补应用 gain=${gain.toStringAsFixed(2)}dB (instant)',
+      );
       _pendingGainDb = gain;
       await _applyLoudnessGain(instant: true);
       notifyListeners();
     } else {
-      LoudnessService.log('controller analyze 完成 gain=${gain.toStringAsFixed(2)}dB 已应用,无需补应用');
+      LoudnessService.log(
+        'controller analyze 完成 gain=${gain.toStringAsFixed(2)}dB 已应用,无需补应用',
+      );
     }
   }
 
@@ -1817,7 +1923,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> _applyLoudnessGain({bool instant = false}) async {
     await _loudness.applyGain(
       audioPlayer: audioPlayer,
-      audioSessionId: _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+      audioSessionId:
+          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
       gainDb: _pendingGainDb,
       instant: instant,
     );
@@ -1828,7 +1935,8 @@ class PlayerController extends ChangeNotifier {
     await _loudness.setEnabled(
       enabled: enabled,
       audioPlayer: audioPlayer,
-      audioSessionId: _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+      audioSessionId:
+          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
     );
     if (enabled) {
       // 开启后,对当前歌曲立即分析并应用(用已解析的真实 URL,避免重新请求)
@@ -1858,7 +1966,8 @@ class PlayerController extends ChangeNotifier {
     if (_loudness.isEnabled) {
       await _loudness.resetGain(
         audioPlayer: audioPlayer,
-        audioSessionId: _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
       );
     }
     notifyListeners();

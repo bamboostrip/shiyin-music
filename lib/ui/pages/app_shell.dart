@@ -44,7 +44,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   var _index = 1; // Default to '推荐' tab (index 1) in landscape
-  var _lastHomeTab = 1; // Tracks the last active Home sub-tab (1=推荐, 2=排行榜, 3=电台)
+  var _lastHomeTab =
+      1; // Tracks the last active Home sub-tab (1=推荐, 2=排行榜, 3=电台)
   final _navigatorKey = GlobalKey<NavigatorState>();
 
   int _getPortraitIndex() {
@@ -59,6 +60,10 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    return AppShortcutScope(player: widget.player, child: _buildShell(context));
+  }
+
+  Widget _buildShell(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final colorScheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
@@ -203,10 +208,7 @@ class _AppShellState extends State<AppShell> {
     Widget mainContent = Stack(
       children: [
         Positioned.fill(
-          child: _LazyIndexedStack(
-            index: portraitIndex,
-            children: pages,
-          ),
+          child: _LazyIndexedStack(index: portraitIndex, children: pages),
         ),
         Positioned(
           left: 0,
@@ -336,12 +338,16 @@ class _AppShellState extends State<AppShell> {
             ),
             child: Container(
               height: 46, // Increased from 38
-              padding: const EdgeInsets.symmetric(horizontal: 20), // Increased from 16
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+              ), // Increased from 16
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest.withValues(
                   alpha: .54,
                 ),
-                borderRadius: BorderRadius.circular(23), // Increased from 19 (height/2)
+                borderRadius: BorderRadius.circular(
+                  23,
+                ), // Increased from 19 (height/2)
               ),
               child: Row(
                 children: [
@@ -372,7 +378,9 @@ class _AppShellState extends State<AppShell> {
                 children: [
                   for (final entry in tabs.indexed)
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10), // Increased from 6
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                      ), // Increased from 6
                       child: ChoiceChip(
                         showCheckmark: false,
                         label: Text(
@@ -405,9 +413,14 @@ class _AppShellState extends State<AppShell> {
                         ),
                         backgroundColor: Colors.transparent,
                         side: BorderSide.none,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Added explicit padding
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ), // Added explicit padding
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12), // Added explicit shape for larger tap area
+                          borderRadius: BorderRadius.circular(
+                            12,
+                          ), // Added explicit shape for larger tap area
                         ),
                       ),
                     ),
@@ -513,4 +526,87 @@ class _RelativeTextScaler extends TextScaler {
 
   @override
   String toString() => '$base × $multiplier';
+}
+
+/// 全局快捷键作用域（桌面端）：空格播放/暂停，左右键切歌。
+class AppShortcutScope extends StatelessWidget {
+  const AppShortcutScope({
+    super.key,
+    required this.player,
+    required this.child,
+  });
+
+  final PlayerController player;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Shortcuts(
+      shortcuts: {
+        const SingleActivator(LogicalKeyboardKey.space):
+            const _PlayPauseIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight):
+            const _NextIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft):
+            const _PreviousIntent(),
+      },
+      child: Actions(
+        actions: {
+          _PlayPauseIntent: CallbackAction<_PlayPauseIntent>(
+            onInvoke: (_) {
+              if (!_isFocusInsideInteractiveControl()) player.togglePlay();
+              return null;
+            },
+          ),
+          _NextIntent: CallbackAction<_NextIntent>(
+            onInvoke: (_) {
+              if (!_isFocusInsideInteractiveControl()) player.next();
+              return null;
+            },
+          ),
+          _PreviousIntent: CallbackAction<_PreviousIntent>(
+            onInvoke: (_) {
+              if (!_isFocusInsideInteractiveControl()) player.previous();
+              return null;
+            },
+          ),
+        },
+        child: Focus(autofocus: true, child: child),
+      ),
+    );
+  }
+
+  /// 焦点位于输入框或按钮等可交互控件内时返回 true。
+  ///
+  /// 此时应忽略全局快捷键，让按键落到默认行为（编辑文本/激活按钮）上。
+  bool _isFocusInsideInteractiveControl() {
+    final focused = FocusManager.instance.primaryFocus;
+    if (focused == null || focused.context == null) return false;
+    var interactive = false;
+    focused.context!.visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is EditableText ||
+          widget is SelectableText ||
+          widget is ButtonStyleButton ||
+          widget is IconButton ||
+          widget is RawMaterialButton) {
+        interactive = true;
+        return false;
+      }
+      return true;
+    });
+    return interactive;
+  }
+}
+
+class _PlayPauseIntent extends Intent {
+  const _PlayPauseIntent();
+}
+
+class _NextIntent extends Intent {
+  const _NextIntent();
+}
+
+class _PreviousIntent extends Intent {
+  const _PreviousIntent();
 }

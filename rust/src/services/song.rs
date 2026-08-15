@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::AppResult;
 use crate::kugou::{
@@ -57,6 +57,28 @@ pub async fn get_play_url(
         .signature_type(SignatureType::V5)
         .specific_dfid(dfid);
 
+    transport::send(client, session, &req).await
+}
+
+/// 试听高潮（对应 .NET RawSongApi.GetSongClimaxAsync）。
+///
+/// 上游接口：GET https://expendablekmrcdn.kugou.com/v1/audio_climax/audio
+/// 参数 `data` 为 JSON 字符串数组，如 `[{"hash":"<hash1>"},{"hash":"<hash2>"}]`；
+/// `hash` 支持逗号分隔传多个。返回上游原始 JSON 透传。
+pub async fn get_song_climax(
+    client: &reqwest::Client,
+    session: &KgSession,
+    hash: &str,
+) -> AppResult<Value> {
+    let data: Vec<Value> = hash
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|h| json!({ "hash": h.trim() }))
+        .collect();
+    let req = KgRequest::get("/v1/audio_climax/audio")
+        .base_url("https://expendablekmrcdn.kugou.com")
+        .param("data", serde_json::to_string(&data).unwrap_or_default())
+        .signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
 }
 

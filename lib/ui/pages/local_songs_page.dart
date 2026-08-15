@@ -53,6 +53,153 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
     }
   }
 
+  /// 打开「扫描目录设置」：勾选/取消勾选文件夹以排除录音等目录。
+  void _showFolderFilterSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        return AnimatedBuilder(
+          animation: widget.localMusic,
+          builder: (context, _) {
+            final folders = widget.localMusic.availableFolders;
+            final excludedCount = widget.localMusic.excludedFolders.length;
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '扫描目录设置',
+                              style: Theme.of(sheetContext).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          if (excludedCount > 0)
+                            TextButton(
+                              onPressed: () =>
+                                  widget.localMusic.clearExcludedFolders(),
+                              child: const Text('恢复全部'),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                      child: Text(
+                        '取消勾选的文件夹将从本地音乐中排除（例如录音文件夹），'
+                        '其子目录中的音频也不会显示。',
+                        style: Theme.of(sheetContext).textTheme.bodySmall
+                            ?.copyWith(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                    Flexible(
+                      child: folders.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Center(
+                                child: Text(
+                                  '未扫描到任何音频文件夹',
+                                  style: Theme.of(sheetContext)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: folders.length,
+                              separatorBuilder: (_, _) => Divider(
+                                height: 1,
+                                indent: 56,
+                                color: colorScheme.outlineVariant.withValues(
+                                  alpha: .3,
+                                ),
+                              ),
+                              itemBuilder: (context, index) {
+                                final entry = folders[index];
+                                final folder = entry.folder;
+                                final excluded = widget.localMusic
+                                    .isFolderExcluded(folder);
+                                return CheckboxListTile(
+                                  value: !excluded,
+                                  onChanged: (checked) =>
+                                      widget.localMusic.setFolderExcluded(
+                                        folder,
+                                        checked != true,
+                                      ),
+                                  controlAffinity:
+                                      ListTileControlAffinity.leading,
+                                  secondary: Icon(
+                                    excluded
+                                        ? Icons.folder_off_rounded
+                                        : Icons.folder_rounded,
+                                    color: excluded
+                                        ? colorScheme.outline
+                                        : colorScheme.primary.withValues(
+                                            alpha: .8,
+                                          ),
+                                  ),
+                                  title: Text(
+                                    _folderDisplayName(folder),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: excluded
+                                          ? colorScheme.onSurfaceVariant
+                                          : colorScheme.onSurface,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '$folder · ${entry.count} 首',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(sheetContext)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                    if (excludedCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
+                        child: Text(
+                          '已排除 $excludedCount 个文件夹',
+                          style: Theme.of(sheetContext).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.primary),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -77,13 +224,22 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
               if (!Platform.isAndroid || !widget.localMusic.hasPermission) {
                 return const SizedBox.shrink();
               }
-              return IconButton(
-                tooltip: '重新扫描',
-                onPressed: () async {
-                  await widget.localMusic.scanLocalMusic();
-                  Toast.success('扫描完成');
-                },
-                icon: const Icon(Icons.refresh_rounded),
+              return Row(
+                children: [
+                  IconButton(
+                    tooltip: '扫描目录设置',
+                    onPressed: _showFolderFilterSheet,
+                    icon: const Icon(Icons.rule_folder_rounded),
+                  ),
+                  IconButton(
+                    tooltip: '重新扫描',
+                    onPressed: () async {
+                      await widget.localMusic.scanLocalMusic();
+                      Toast.success('扫描完成');
+                    },
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
               );
             },
           ),
@@ -122,8 +278,12 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
 
             final allSongs = widget.localMusic.songs;
             final filteredSongs = allSongs.where((song) {
-              final titleMatch = song.title.toLowerCase().contains(_searchQuery);
-              final artistMatch = song.artist.toLowerCase().contains(_searchQuery);
+              final titleMatch = song.title.toLowerCase().contains(
+                _searchQuery,
+              );
+              final artistMatch = song.artist.toLowerCase().contains(
+                _searchQuery,
+              );
               return titleMatch || artistMatch;
             }).toList();
 
@@ -132,16 +292,26 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                 // 歌曲数显示
                 if (allSongs.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         color: colorScheme.surfaceContainer,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.music_note_rounded, color: colorScheme.primary, size: 20),
+                          Icon(
+                            Icons.music_note_rounded,
+                            color: colorScheme.primary,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -168,7 +338,10 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                 // 搜索栏
                 if (allSongs.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
                     child: TextField(
                       controller: _searchController,
                       decoration: InputDecoration(
@@ -183,80 +356,100 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                       ),
                     ),
                   ),
                 // 歌曲列表
                 Expanded(
                   child: widget.localMusic.isScanning
-                      ? const Center(
-                          child: CircularProgressIndicator(),
-                        )
+                      ? const Center(child: CircularProgressIndicator())
                       : filteredSongs.isEmpty
-                          ? _buildEmptyState(
-                              context,
-                              colorScheme,
-                              icon: Icons.library_music_rounded,
-                              title: allSongs.isEmpty ? '未找到本地音乐' : '没有检索到匹配的歌曲',
-                              subtitle: allSongs.isEmpty ? '设备上没有可播放的音频文件' : '尝试其他关键词搜索',
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.only(bottom: 120),
-                              itemCount: filteredSongs.length,
-                              itemBuilder: (context, index) {
-                                final song = filteredSongs[index];
-                                final isCurrent = widget.player.currentSong?.hash == song.hash;
-                                final isPlaying = isCurrent && widget.player.isPlaying;
+                      ? _buildEmptyState(
+                          context,
+                          colorScheme,
+                          icon: Icons.library_music_rounded,
+                          title: allSongs.isEmpty ? '未找到本地音乐' : '没有检索到匹配的歌曲',
+                          subtitle: allSongs.isEmpty
+                              ? '设备上没有可播放的音频文件'
+                              : '尝试其他关键词搜索',
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 120),
+                          itemCount: filteredSongs.length,
+                          itemBuilder: (context, index) {
+                            final song = filteredSongs[index];
+                            final isCurrent =
+                                widget.player.currentSong?.hash == song.hash;
+                            final isPlaying =
+                                isCurrent && widget.player.isPlaying;
 
-                                return ListTile(
-                                  leading: SizedBox(
-                                    width: 44,
-                                    height: 44,
-                                    child: Stack(
-                                      children: [
-                                        Artwork(url: song.coverUrl, size: 44),
-                                        if (isCurrent)
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              color: Colors.black.withValues(alpha: 0.4),
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Center(
-                                              child: NowPlayingBadge(
-                                                active: true,
-                                                playing: isPlaying,
-                                                color: Colors.white,
-                                                size: 16,
-                                              ),
-                                            ),
+                            return ListTile(
+                              leading: SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: Stack(
+                                  children: [
+                                    Artwork(url: song.coverUrl, size: 44),
+                                    if (isCurrent)
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.4,
                                           ),
-                                      ],
-                                    ),
-                                  ),
-                                  title: Text(
-                                    song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                                      color: isCurrent ? colorScheme.primary : colorScheme.onSurface,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    song.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: isCurrent ? colorScheme.primary.withValues(alpha: .7) : colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  onTap: () {
-                                    widget.player.playSong(song, queue: filteredSongs);
-                                  },
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: NowPlayingBadge(
+                                            active: true,
+                                            playing: isPlaying,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              title: Text(
+                                song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: isCurrent
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  color: isCurrent
+                                      ? colorScheme.primary
+                                      : colorScheme.onSurface,
+                                ),
+                              ),
+                              subtitle: Text(
+                                song.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isCurrent
+                                      ? colorScheme.primary.withValues(
+                                          alpha: .7,
+                                        )
+                                      : colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              onTap: () {
+                                widget.player.playSong(
+                                  song,
+                                  queue: filteredSongs,
                                 );
                               },
-                            ),
+                            );
+                          },
+                        ),
                 ),
               ],
             );
@@ -288,25 +481,32 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
             const SizedBox(height: 16),
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
               subtitle,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 24),
-              action,
-            ],
+            if (action != null) ...[const SizedBox(height: 24), action],
           ],
         ),
       ),
     );
   }
+}
+
+/// 取文件夹显示名：优先末级目录名，顶层存储目录（末级为 `0`）显示完整路径。
+String _folderDisplayName(String folder) {
+  final separator = folder.contains('\\') ? '\\' : '/';
+  final segments = folder.split(separator).where((s) => s.isNotEmpty).toList();
+  if (segments.isEmpty) return folder;
+  final last = segments.last;
+  if (last == '0' || last == 'storage') return folder;
+  return last;
 }

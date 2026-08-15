@@ -2,7 +2,7 @@ pub mod album;
 pub mod artist;
 pub mod comment;
 pub mod discover;
-// pub mod external_playlist; // unused, requires regex
+pub mod external_playlist;
 pub mod fm;
 pub mod login;
 pub mod lyric;

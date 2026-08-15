@@ -6,8 +6,8 @@ use crate::error::{AppError, AppResult};
 use crate::kugou::session::KgSession;
 use crate::kugou::session_store::FileSessionStore;
 use crate::services::{
-    album, artist, comment, discover, fm, login, lyric, playlist, rank, report, search, song,
-    user, youth,
+    album, artist, comment, discover, external_playlist, fm, login, lyric, playlist, rank, report,
+    search, song, user, youth,
 };
 
 pub struct KugouEngine {
@@ -210,6 +210,11 @@ impl KugouEngine {
                     .await
             }
 
+            ("GET", "/song/climax") => {
+                // 上游 Dart songClimax(hash) 传单个 hash；兼容逗号分隔多 hash
+                let hash = params.get("hash").map(|s| s.as_str()).unwrap_or("");
+                song::get_song_climax(client, session, hash).await
+            }
             ("GET", "/search/lyric") => {
                 let hash = params.get("hash").map(|s| s.as_str());
                 let album_audio_id = params.get("album_audio_id").map(|s| s.as_str());
@@ -271,10 +276,14 @@ impl KugouEngine {
                 discover::recommend_playlists(client, session, category_id, page).await
             }
             ("GET", "/top/song") => {
+                // 上游 Dart topSongs() 传 `type`（默认 21608，对应酷狗新歌速递 rank_id，
+                // .NET DiscoveryController.GetNewSong 直接把 type 透传为 body["rank_id"]）；
+                // fork 旧 Dart 传 `rank_id`。两者都兼容，默认 21608 与上游一致。
                 let rank_id = params
-                    .get("rank_id")
+                    .get("type")
+                    .or_else(|| params.get("rank_id"))
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(0i64);
+                    .unwrap_or(21608i64);
                 let page = params
                     .get("page")
                     .and_then(|s| s.parse().ok())
@@ -412,8 +421,12 @@ impl KugouEngine {
                 fm::fm_image(client, session, fm_ids).await
             }
 
-            ("GET", "/playlist/detail") => {
-                // Dart: ids；兼容 id
+            ("GET", "/playlist/similar") => {
+                // ids 为 global_collection_id，逗号分隔多个
+                let ids = params.get("ids").map(|s| s.as_str()).unwrap_or("");
+                playlist::playlist_similar(client, session, ids).await
+            }
+            ("GET", "/playlist/detail") => {                // Dart: ids；兼容 id
                 let id = params
                     .get("ids")
                     .or_else(|| params.get("id"))
@@ -440,6 +453,20 @@ impl KugouEngine {
                     })
                     .unwrap_or(0i64);
                 playlist::playlist_tracks(client, session, id, begin_idx, pagesize).await
+            }
+            ("POST", "/playlist/external/parse") => {
+                // Dart body: { sourceText };兼容 body 里的 SourceText / query 传参
+                let body_val: Value =
+                    serde_json::from_str(body.unwrap_or("{}")).unwrap_or_default();
+                let source_text = first_str(
+                    &[&body_val],
+                    params,
+                    &["sourceText", "SourceText", "source_text"],
+                )
+                .unwrap_or_default();
+                let result = external_playlist::parse(client, &source_text).await?;
+                serde_json::to_value(result)
+                    .map_err(|e| AppError::Internal(format!("序列化解析结果失败: {e}")))
             }
             ("POST", "/playlist/create") => {
                 // Dart 走 query: name / type；兼容 body: name / is_pri
@@ -510,6 +537,20 @@ impl KugouEngine {
                     .unwrap_or(30i64);
                 let sort = params.get("sort").map(|s| s.as_str()).unwrap_or("hot");
                 artist::artist_audios(client, session, id, page, pagesize, sort).await
+            }
+            ("GET", "/artist/albums") => {
+                // 上游 Dart artistAlbums(id, page, pageSize, sort: 'new')
+                let id = params.get("id").map(|s| s.as_str()).unwrap_or("");
+                let page = params
+                    .get("page")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1i64);
+                let pagesize = params
+                    .get("pagesize")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(30i64);
+                let sort = params.get("sort").map(|s| s.as_str()).unwrap_or("new");
+                artist::artist_albums(client, session, id, page, pagesize, sort).await
             }
 
             ("GET", "/comment/music") => {

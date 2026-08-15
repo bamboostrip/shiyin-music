@@ -107,7 +107,6 @@ pub async fn artist_audios(
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
 pub async fn artist_albums(
     client: &reqwest::Client,
     session: &KgSession,

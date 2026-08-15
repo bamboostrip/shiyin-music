@@ -29,6 +29,8 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 tracing = "0.1"
+regex = "1"
+url = "2"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(frb_expand)"] }

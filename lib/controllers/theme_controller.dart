@@ -30,6 +30,10 @@ class ThemeController extends ChangeNotifier {
   static const _bgOpacityKey = 'theme.bg_opacity';
   static const _landscapeEnabledKey = 'theme.landscape_enabled';
   static const _carModeEnabledKey = 'theme.car_mode_enabled';
+  static const _fontScaleKey = 'theme.font_scale';
+
+  /// 全局字体大小档位（1.0 = 标准，1.1 = 大，1.2 = 特大）。
+  static const fontScaleOptions = [1.0, 1.1, 1.2];
 
   /// 车机模式下文字放大倍数（远距离观看更清晰）。
   static const double carModeFontScaleFactor = 1.12;
@@ -52,6 +56,7 @@ class ThemeController extends ChangeNotifier {
   double _backgroundOpacity = 0.15;
   bool _landscapeEnabled = false;
   bool _carModeEnabled = false;
+  double _fontScale = 1.0;
   // 车机检测结果缓存（设备不变，启动时检测一次）。
   bool _isAutomotiveDevice = false;
 
@@ -65,6 +70,7 @@ class ThemeController extends ChangeNotifier {
   double get backgroundOpacity => _backgroundOpacity;
   bool get landscapeEnabled => _landscapeEnabled;
   bool get carModeEnabled => _carModeEnabled;
+  double get fontScale => _fontScale;
   bool get isAutomotiveDevice => _isAutomotiveDevice;
 
   /// 是否使用了非默认种子色。
@@ -94,6 +100,9 @@ class ThemeController extends ChangeNotifier {
     } else {
       _carModeEnabled = _isAutomotiveDevice;
     }
+    final storedFontScale = prefs.getDouble(_fontScaleKey) ?? 1.0;
+    _fontScale =
+        fontScaleOptions.contains(storedFontScale) ? storedFontScale : 1.0;
     final opacity = prefs.getDouble(_bgOpacityKey);
     if (opacity != null) {
       _backgroundOpacity = opacity.clamp(0.0, 0.8);
@@ -133,6 +142,16 @@ class ThemeController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_landscapeEnabledKey, enabled);
     applyOrientations(isTablet);
+    notifyListeners();
+  }
+
+  /// 设置全局字体大小档位（仅接受 [fontScaleOptions] 中的值）。
+  Future<void> setFontScale(double scale) async {
+    final clamped = fontScaleOptions.contains(scale) ? scale : 1.0;
+    if (_fontScale == clamped) return;
+    _fontScale = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_fontScaleKey, clamped);
     notifyListeners();
   }
 
@@ -209,8 +228,8 @@ class ThemeController extends ChangeNotifier {
 
     // 复制到应用文档目录，避免临时文件被系统清理
     final docsDir = await getApplicationDocumentsDirectory();
-    final ext = xFile.path.contains('.') 
-        ? xFile.path.substring(xFile.path.lastIndexOf('.')) 
+    final ext = xFile.path.contains('.')
+        ? xFile.path.substring(xFile.path.lastIndexOf('.'))
         : '.jpg';
     final permanentPath = '${docsDir.path}/bg_custom$ext';
     await sourceFile.copy(permanentPath);

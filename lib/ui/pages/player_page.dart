@@ -16,6 +16,7 @@ import '../../services/lyric_converter.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/artwork.dart';
+import '../widgets/blurred_lyric_view.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -25,11 +26,7 @@ import 'comment_page.dart';
 import 'desktop_lyrics_settings_page.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({
-    super.key,
-    required this.player,
-    required this.auth,
-  });
+  const PlayerPage({super.key, required this.player, required this.auth});
 
   final PlayerController player;
   final AuthController auth;
@@ -358,7 +355,11 @@ class _PlayerBodyState extends State<_PlayerBody> {
                   leading: CircleAvatar(
                     backgroundImage: artist.avatarUrl == null
                         ? null
-                        : ResizeImage(NetworkImage(artist.avatarUrl!), width: 80, height: 80),
+                        : ResizeImage(
+                            NetworkImage(artist.avatarUrl!),
+                            width: 80,
+                            height: 80,
+                          ),
                     child: artist.avatarUrl == null
                         ? const Icon(Icons.person_rounded)
                         : null,
@@ -650,11 +651,10 @@ class _LandscapeHeader extends StatelessWidget {
                         song.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall
-                            ?.copyWith(
-                              color: Colors.white.withValues(alpha: .7),
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: .7),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                   ],
                 ),
@@ -703,6 +703,15 @@ class _LandscapeHeader extends StatelessWidget {
           onTap: () => _showAudioQualityPicker(context, player),
         ),
         SongSheetAction(
+          icon: Icons.auto_awesome_rounded,
+          title: '试听高潮',
+          subtitle: '播放歌曲高潮片段',
+          onTap: () async {
+            final ok = await player.playClimaxPreview();
+            if (!ok) Toast.error('暂无高潮片段');
+          },
+        ),
+        SongSheetAction(
           icon: Icons.graphic_eq_rounded,
           title: '音效',
           subtitle: player.audioEffectsLabel,
@@ -712,8 +721,11 @@ class _LandscapeHeader extends StatelessWidget {
           SongSheetAction(
             icon: Icons.playlist_add_rounded,
             title: '添加到歌单',
-            onTap: () =>
-                showAddToPlaylistSheet(context: context, auth: auth, song: song),
+            onTap: () => showAddToPlaylistSheet(
+              context: context,
+              auth: auth,
+              song: song,
+            ),
           ),
         SongSheetAction(
           icon: Icons.bedtime_rounded,
@@ -721,8 +733,8 @@ class _LandscapeHeader extends StatelessWidget {
           subtitle: player.isSleepTimerActive
               ? '剩余 ${_formatSleepRemaining(player.sleepTimerRemaining)}'
               : player.isSleepFinishCurrentSong
-                  ? '播完歌曲后停止'
-                  : null,
+              ? '播完歌曲后停止'
+              : null,
           onTap: () => showSleepTimerSheet(context: context, player: player),
         ),
         if (player.isDesktopLyricsSupported) ...[
@@ -734,7 +746,9 @@ class _LandscapeHeader extends StatelessWidget {
             subtitle: player.desktopLyricsEnabled ? '已开启' : '已关闭',
             onTap: () async {
               Navigator.of(context).pop();
-              await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
+              await player.setDesktopLyricsEnabled(
+                !player.desktopLyricsEnabled,
+              );
             },
           ),
           if (player.desktopLyricsEnabled)
@@ -861,7 +875,10 @@ class _LandscapeArtworkShowcaseState extends State<_LandscapeArtworkShowcase>
       },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final available = math.min(constraints.maxWidth, constraints.maxHeight);
+          final available = math.min(
+            constraints.maxWidth,
+            constraints.maxHeight,
+          );
           final discSize = (available * (widget.compact ? .84 : .9))
               .clamp(150.0, 330.0)
               .toDouble();
@@ -979,10 +996,10 @@ class _LandscapeRightPanel extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.white.withValues(alpha: .92),
-                            fontSize: compact ? 18 : 22,
-                            fontWeight: FontWeight.w900,
-                          ),
+                        color: Colors.white.withValues(alpha: .92),
+                        fontSize: compact ? 18 : 22,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -990,9 +1007,9 @@ class _LandscapeRightPanel extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withValues(alpha: .6),
-                            fontWeight: FontWeight.w600,
-                          ),
+                        color: Colors.white.withValues(alpha: .6),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -1267,6 +1284,15 @@ class _TopBar extends StatelessWidget {
           onTap: () => showAudioEffectsSheet(context: context, player: player),
         ),
         SongSheetAction(
+          icon: Icons.auto_awesome_rounded,
+          title: '高潮',
+          isGrid: true,
+          onTap: () async {
+            final ok = await player.playClimaxPreview();
+            if (!ok) Toast.error('暂无高潮片段');
+          },
+        ),
+        SongSheetAction(
           icon: Icons.bedtime_rounded,
           title: '定时',
           isGrid: true,
@@ -1282,7 +1308,9 @@ class _TopBar extends StatelessWidget {
             isGrid: true,
             onTap: () async {
               Navigator.of(context).pop();
-              await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
+              await player.setDesktopLyricsEnabled(
+                !player.desktopLyricsEnabled,
+              );
             },
           ),
           if (player.desktopLyricsEnabled)
@@ -1312,8 +1340,11 @@ class _TopBar extends StatelessWidget {
           SongSheetAction(
             icon: Icons.playlist_add_rounded,
             title: '添加到歌单',
-            onTap: () =>
-                showAddToPlaylistSheet(context: context, auth: auth, song: song),
+            onTap: () => showAddToPlaylistSheet(
+              context: context,
+              auth: auth,
+              song: song,
+            ),
           ),
       ],
     );
@@ -1365,10 +1396,13 @@ class _PosterPlayerPageState extends State<_PosterPlayerPage>
                 constraints: BoxConstraints(maxWidth: artworkMaxWidth),
                 child: AspectRatio(
                   aspectRatio: 1,
-                  child: Artwork(
-                    url: widget.song.coverUrl,
-                    size: double.infinity,
-                    borderRadius: 8,
+                  child: Hero(
+                    tag: 'player_cover',
+                    child: Artwork(
+                      url: widget.song.coverUrl,
+                      size: double.infinity,
+                      borderRadius: 8,
+                    ),
                   ),
                 ),
               ),
@@ -1524,11 +1558,14 @@ class _PosterLyricPreviewState extends State<_PosterLyricPreview> {
               SizedBox(
                 height: 25,
                 child: _MarqueeSingleLine(
-                  textKey: current.translation != null && current.translation!.isNotEmpty
+                  textKey:
+                      current.translation != null &&
+                          current.translation!.isNotEmpty
                       ? current.time.inMilliseconds
                       : (next?.time.inMilliseconds ?? -1),
                   child: Text(
-                    current.translation != null && current.translation!.isNotEmpty
+                    current.translation != null &&
+                            current.translation!.isNotEmpty
                         ? current.translation!
                         : (next?.text ?? ''),
                     textAlign: TextAlign.center,
@@ -1880,8 +1917,10 @@ class _LyricViewportState extends State<_LyricViewport>
   void _syncLyrics() {
     final lyrics = widget.lyrics;
     if (lyrics.isNotEmpty) {
-      final showTranslation = widget.displayMode == _LyricDisplayMode.lyricsWithTranslation;
-      final showRomanization = widget.displayMode == _LyricDisplayMode.lyricsWithRomanization;
+      final showTranslation =
+          widget.displayMode == _LyricDisplayMode.lyricsWithTranslation;
+      final showRomanization =
+          widget.displayMode == _LyricDisplayMode.lyricsWithRomanization;
       final model = convertToFlutterLyricModel(
         lyrics,
         showTranslation: showTranslation,
@@ -1955,38 +1994,42 @@ class _LyricViewportState extends State<_LyricViewport>
     final activeSize = 34.0 * widget.lyricScale;
     final translationSize = 16.0 * widget.lyricScale;
 
+    final lyricStyle = LyricStyles.default1.copyWith(
+      textStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
+        color: Colors.white.withValues(alpha: .34),
+        fontSize: normalSize,
+        height: 1.24,
+        fontWeight: FontWeight.w800,
+      ),
+      activeStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
+        color: Colors.white.withValues(alpha: .34),
+        fontSize: activeSize,
+        height: 1.24,
+        fontWeight: FontWeight.w900,
+      ),
+      translationStyle: Theme.of(context).textTheme.titleMedium!.copyWith(
+        color: Colors.white.withValues(alpha: .54),
+        fontSize: translationSize,
+        height: 1.28,
+        fontWeight: FontWeight.w700,
+      ),
+      lineGap: 28,
+      translationLineGap: 8,
+      contentPadding: const EdgeInsets.fromLTRB(20, 180, 20, 220),
+      fadeRange: FadeRange(top: 80, bottom: 80),
+      textAlign: TextAlign.start,
+      contentAlignment: CrossAxisAlignment.start,
+      activeAnchorPosition: 0.34,
+      activeHighlightColor: Colors.white,
+    );
+
     return ExcludeSemantics(
       // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
-      child: LyricView(
+      child: BlurredLyricView(
         controller: _lyricController,
-        style: LyricStyles.default1.copyWith(
-          textStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
-            color: Colors.white.withValues(alpha: .34),
-            fontSize: normalSize,
-            height: 1.24,
-            fontWeight: FontWeight.w800,
-          ),
-          activeStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
-            color: Colors.white.withValues(alpha: .34),
-            fontSize: activeSize,
-            height: 1.24,
-            fontWeight: FontWeight.w900,
-          ),
-          translationStyle: Theme.of(context).textTheme.titleMedium!.copyWith(
-            color: Colors.white.withValues(alpha: .54),
-            fontSize: translationSize,
-            height: 1.28,
-            fontWeight: FontWeight.w700,
-          ),
-          lineGap: 28,
-          translationLineGap: 8,
-          contentPadding: const EdgeInsets.fromLTRB(20, 180, 20, 220),
-          fadeRange: FadeRange(top: 80, bottom: 80),
-          textAlign: TextAlign.start,
-          contentAlignment: CrossAxisAlignment.start,
-          activeAnchorPosition: 0.34,
-          activeHighlightColor: Colors.white,
-        ),
+        style: lyricStyle,
+        maxBlurSigma: 3.0,
+        blurStep: 0.7,
       ),
     );
   }
@@ -2155,7 +2198,9 @@ class _KaraokeLinePainter extends CustomPainter {
       if (clipWidth <= 0) continue;
 
       canvas.save();
-      canvas.clipRect(Rect.fromLTWH(rect.left, rect.top, clipWidth, rect.height));
+      canvas.clipRect(
+        Rect.fromLTWH(rect.left, rect.top, clipWidth, rect.height),
+      );
       highlightPainter.paint(canvas, Offset.zero);
       canvas.restore();
     }
@@ -2194,36 +2239,85 @@ class _Progress extends StatelessWidget {
             ? 1.0
             : player.duration.inMilliseconds.toDouble();
         final pos = player.smoothPosition;
-        final value =
-            pos.inMilliseconds.clamp(0, max.toInt()).toDouble();
+        final value = pos.inMilliseconds.clamp(0, max.toInt()).toDouble();
+        // 高潮片段时间点（进度条小圆点），无高潮或无效时为空。
+        final climax = player.climax;
+        final climaxFraction =
+            climax != null &&
+                climax.isValid &&
+                max > 0 &&
+                climax.startTime.inMilliseconds <= max.toInt()
+            ? climax.startTime.inMilliseconds / max
+            : null;
 
         return Column(
           children: [
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: compact ? 3 : 5,
-                thumbShape: RoundSliderThumbShape(
-                  enabledThumbRadius: compact ? 4 : 5,
-                ),
-                overlayShape: RoundSliderOverlayShape(
-                  overlayRadius: compact ? 10 : 14,
-                ),
-                activeTrackColor: bright
-                    ? Colors.white.withValues(alpha: .86)
-                    : Theme.of(context).colorScheme.primary,
-                inactiveTrackColor: bright
-                    ? Colors.white.withValues(alpha: .25)
-                    : Theme.of(context).colorScheme.surfaceContainerHighest,
-                thumbColor: Colors.white,
-              ),
-              child: Slider(
-                value: value,
-                max: max,
-                onChanged: (value) =>
-                    player.previewSeek(Duration(milliseconds: value.round())),
-                onChangeEnd: (value) =>
-                    player.seek(Duration(milliseconds: value.round())),
-              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final thumbRadius = compact ? 4.0 : 5.0;
+                final dotSize = compact ? 7.0 : 8.0;
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: compact ? 3 : 5,
+                        thumbShape: RoundSliderThumbShape(
+                          enabledThumbRadius: compact ? 4 : 5,
+                        ),
+                        overlayShape: RoundSliderOverlayShape(
+                          overlayRadius: compact ? 10 : 14,
+                        ),
+                        activeTrackColor: bright
+                            ? Colors.white.withValues(alpha: .86)
+                            : Theme.of(context).colorScheme.primary,
+                        inactiveTrackColor: bright
+                            ? Colors.white.withValues(alpha: .25)
+                            : Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        value: value,
+                        max: max,
+                        onChanged: (value) => player.previewSeek(
+                          Duration(milliseconds: value.round()),
+                        ),
+                        onChangeEnd: (value) =>
+                            player.seek(Duration(milliseconds: value.round())),
+                      ),
+                    ),
+                    if (climaxFraction != null)
+                      Positioned(
+                        left:
+                            thumbRadius +
+                            climaxFraction * (width - 2 * thumbRadius) -
+                            dotSize / 2,
+                        top: 24 - dotSize / 2,
+                        child: IgnorePointer(
+                          child: Container(
+                            width: dotSize,
+                            height: dotSize,
+                            decoration: BoxDecoration(
+                              color: bright
+                                  ? Colors.white
+                                  : Theme.of(context).colorScheme.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: bright
+                                    ? Colors.black.withValues(alpha: .4)
+                                    : Colors.white,
+                                width: 1.2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 4),
@@ -2283,12 +2377,24 @@ class _Controls extends StatelessWidget {
         final dense = denseOverride;
         // 超大按钮仅在车机模式开启时使用，普通横屏用标准尺寸。
         final isCar = isLandscape && ThemeController.instance.carModeEnabled;
-        final edgeButtonSize = dense ? 34.0 : (isCar ? 56.0 : (compact ? 40.0 : 44.0));
-        final edgeIconSize = dense ? 21.0 : (isCar ? 34.0 : (compact ? 24.0 : 27.0));
-        final skipButtonSize = dense ? 42.0 : (isCar ? 72.0 : (compact ? 50.0 : 56.0));
-        final skipIconSize = dense ? 33.0 : (isCar ? 54.0 : (compact ? 40.0 : 46.0));
-        final playButtonSize = dense ? 58.0 : (isCar ? 96.0 : (compact ? 72.0 : 82.0));
-        final playIconSize = dense ? 46.0 : (isCar ? 72.0 : (compact ? 56.0 : 64.0));
+        final edgeButtonSize = dense
+            ? 34.0
+            : (isCar ? 56.0 : (compact ? 40.0 : 44.0));
+        final edgeIconSize = dense
+            ? 21.0
+            : (isCar ? 34.0 : (compact ? 24.0 : 27.0));
+        final skipButtonSize = dense
+            ? 42.0
+            : (isCar ? 72.0 : (compact ? 50.0 : 56.0));
+        final skipIconSize = dense
+            ? 33.0
+            : (isCar ? 54.0 : (compact ? 40.0 : 46.0));
+        final playButtonSize = dense
+            ? 58.0
+            : (isCar ? 96.0 : (compact ? 72.0 : 82.0));
+        final playIconSize = dense
+            ? 46.0
+            : (isCar ? 72.0 : (compact ? 56.0 : 64.0));
         final gap = dense ? 3.0 : (isCar ? 24.0 : (compact ? 5.0 : 9.0));
 
         return Row(

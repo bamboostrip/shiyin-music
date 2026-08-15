@@ -284,7 +284,6 @@ pub async fn playlist_tracks_new(client: &reqwest::Client, session: &KgSession, 
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
 pub async fn playlist_similar(client: &reqwest::Client, session: &KgSession, ids: &str) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
     let data: Vec<Value> = ids.split(',').filter(|s| !s.trim().is_empty())

@@ -98,10 +98,15 @@ class _DownloadedList extends StatelessWidget {
       animation: downloads,
       builder: (context, _) {
         final entries = downloads.downloadEntries;
-        final completed =
-            entries.where((e) => e.status == DownloadStatus.downloaded).toList();
-        final downloading =
-            entries.where((e) => e.status == DownloadStatus.downloading).toList();
+        final completed = entries
+            .where((e) => e.status == DownloadStatus.downloaded)
+            .toList();
+        final downloading = entries
+            .where((e) => e.status == DownloadStatus.downloading)
+            .toList();
+        final failed = entries
+            .where((e) => e.status == DownloadStatus.failed)
+            .toList();
 
         if (entries.isEmpty) {
           return _emptyState(context, '还没有已下载歌曲', '下载歌曲后可离线播放');
@@ -117,8 +122,8 @@ class _DownloadedList extends StatelessWidget {
                     Text(
                       '已下载 ${completed.length} 首',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const Spacer(),
                     TextButton(
@@ -128,13 +133,15 @@ class _DownloadedList extends StatelessWidget {
                   ],
                 ),
               ),
-              ...completed.map((entry) => _DownloadedSongRow(
-                    entry: entry,
-                    api: api,
-                    auth: auth,
-                    player: player,
-                    downloads: downloads,
-                  )),
+              ...completed.map(
+                (entry) => _DownloadedSongRow(
+                  entry: entry,
+                  api: api,
+                  auth: auth,
+                  player: player,
+                  downloads: downloads,
+                ),
+              ),
             ],
             if (downloading.isNotEmpty) ...[
               Padding(
@@ -142,11 +149,25 @@ class _DownloadedList extends StatelessWidget {
                 child: Text(
                   '下载中 ${downloading.length} 首',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               ...downloading.map((entry) => _DownloadingRow(entry: entry)),
+            ],
+            if (failed.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
+                child: Text(
+                  '下载失败 ${failed.length} 首',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+              ...failed.map(
+                (entry) => _FailedRow(entry: entry, downloads: downloads),
+              ),
             ],
           ],
         );
@@ -202,11 +223,7 @@ class _DownloadedSongRow extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return ListTile(
-      leading: Artwork(
-        url: song.coverUrl,
-        size: 48,
-        borderRadius: 8,
-      ),
+      leading: Artwork(url: song.coverUrl, size: 48, borderRadius: 8),
       title: Text(
         song.title,
         maxLines: 1,
@@ -308,7 +325,9 @@ class _DownloadedSongRow extends StatelessWidget {
       final uri = Uri.parse('file://$dir');
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         // 回退：尝试 content URI 方式
-        final contentUri = Uri.parse('content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}');
+        final contentUri = Uri.parse(
+          'content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}',
+        );
         await launchUrl(contentUri, mode: LaunchMode.externalApplication);
       }
     }
@@ -326,11 +345,7 @@ class _DownloadingRow extends StatelessWidget {
     final song = entry.song;
     return ListTile(
       leading: Artwork(url: song.coverUrl, size: 48, borderRadius: 8),
-      title: Text(
-        song.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
+      title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         song.artist,
         maxLines: 1,
@@ -354,6 +369,46 @@ class _DownloadingRow extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 下载失败行（可重试或移除）。
+class _FailedRow extends StatelessWidget {
+  const _FailedRow({required this.entry, required this.downloads});
+
+  final DownloadEntry entry;
+  final DownloadController downloads;
+
+  @override
+  Widget build(BuildContext context) {
+    final song = entry.song;
+    final colorScheme = Theme.of(context).colorScheme;
+    return ListTile(
+      leading: Artwork(url: song.coverUrl, size: 48, borderRadius: 8),
+      title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        entry.error ?? '下载失败',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: colorScheme.error.withValues(alpha: .85)),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '重新下载',
+            icon: const Icon(Icons.refresh_rounded),
+            color: colorScheme.primary,
+            onPressed: () => downloads.download(song, entry.quality),
+          ),
+          IconButton(
+            tooltip: '移除',
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => downloads.removeFailed(song),
+          ),
+        ],
       ),
     );
   }
@@ -386,8 +441,8 @@ class _PlayCacheList extends StatelessWidget {
                   Text(
                     '缓存 ${entries.length} 首 · ${_formatBytes(totalBytes)}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const Spacer(),
                   TextButton(
@@ -397,25 +452,31 @@ class _PlayCacheList extends StatelessWidget {
                 ],
               ),
             ),
-            ...entries.map((entry) => ListTile(
-                  leading: Artwork(url: entry.song.coverUrl, size: 48, borderRadius: 8),
-                  title: Text(
-                    entry.song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    '${entry.song.artist} · ${_formatBytes(entry.size)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded),
-                    onPressed: () =>
-                        downloads.deletePlayCache(entry.song, entry.quality),
-                  ),
-                )),
+            ...entries.map(
+              (entry) => ListTile(
+                leading: Artwork(
+                  url: entry.song.coverUrl,
+                  size: 48,
+                  borderRadius: 8,
+                ),
+                title: Text(
+                  entry.song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${entry.song.artist} · ${_formatBytes(entry.size)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  onPressed: () =>
+                      downloads.deletePlayCache(entry.song, entry.quality),
+                ),
+              ),
+            ),
           ],
         );
       },
@@ -461,16 +522,13 @@ Widget _emptyState(BuildContext context, String title, String subtitle) {
             color: colorScheme.outline,
           ),
           const SizedBox(height: 16),
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Text(
             subtitle,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

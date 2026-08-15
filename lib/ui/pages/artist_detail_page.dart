@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../widgets/app_section.dart';
+import '../design_tokens.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -9,6 +11,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../adaptive_layout.dart';
+import 'playlist_detail_page.dart';
 
 class ArtistDetailPage extends StatefulWidget {
   const ArtistDetailPage({
@@ -33,6 +36,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
   final _scrollController = ScrollController();
   final _songs = <Song>[];
+  final _albums = <ArtistAlbum>[];
 
   ArtistDetail? _detail;
   String? _resolvedArtistId;
@@ -64,6 +68,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     setState(() {
       _detail = null;
       _songs.clear();
+      _albums.clear();
       _nextPage = 1;
       _hasMore = true;
       _isInitialLoading = true;
@@ -86,15 +91,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         );
         for (final song in searchResults) {
           for (final a in song.artists) {
-            if (a.id.isNotEmpty &&
-                a.name.toLowerCase().contains(targetName)) {
+            if (a.id.isNotEmpty && a.name.toLowerCase().contains(targetName)) {
               artistId = a.id;
               break;
             }
           }
           if (artistId.isNotEmpty) break;
         }
-
       }
 
       if (artistId.isEmpty) {
@@ -116,14 +119,17 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           pageSize: _pageSize,
           sort: 'hot',
         ),
+        widget.api.artistAlbums(artistId, pageSize: 20),
       ]);
       if (!mounted) return;
 
       final detail = results[0] as ArtistDetail;
       final songs = results[1] as List<Song>;
+      final albums = results[2] as List<ArtistAlbum>;
       setState(() {
         _detail = detail;
         _songs.addAll(songs);
+        _albums.addAll(albums);
         _nextPage = 2;
         _hasMore = songs.length == _pageSize;
         _isInitialLoading = false;
@@ -180,6 +186,24 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     }
   }
 
+  void _openAlbum(ArtistAlbum album) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlaylistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          player: widget.player,
+          playlist: PlaylistSummary(
+            id: album.id,
+            title: album.name,
+            subtitle: album.authorName ?? widget.artist.name,
+            coverUrl: album.coverUrl,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
@@ -203,7 +227,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                 controller: _scrollController,
                 slivers: [
                   SliverToBoxAdapter(
-                    child: _ArtistHeader(detail: _detail, fallback: widget.artist),
+                    child: _ArtistHeader(
+                      detail: _detail,
+                      fallback: widget.artist,
+                    ),
                   ),
                   if (_isInitialLoading)
                     const _ArtistDetailSkeleton()
@@ -216,6 +243,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       ),
                     )
                   else ...[
+                    if (_albums.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: _ArtistAlbumSection(
+                          albums: _albums,
+                          onTap: _openAlbum,
+                        ),
+                      ),
                     SliverToBoxAdapter(
                       child: _SongSectionHeader(
                         count: _songs.length,
@@ -267,7 +301,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           animation: widget.player,
                           builder: (context, _) {
                             final hasSong = widget.player.currentSong != null;
-                            return SizedBox(height: hasSong ? miniPlayerSpace : 0);
+                            return SizedBox(
+                              height: hasSong ? miniPlayerSpace : 0,
+                            );
                           },
                         ),
                       ),
@@ -280,10 +316,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
               left: 0,
               right: 0,
               bottom: bottomInset + 16,
-              child: MiniPlayer(
-                player: widget.player,
-                auth: widget.auth,
-              ),
+              child: MiniPlayer(player: widget.player, auth: widget.auth),
             ),
           ],
         ),
@@ -411,6 +444,73 @@ class _ArtistPosterFallback extends StatelessWidget {
         Icons.person_rounded,
         size: 88,
         color: Colors.white.withValues(alpha: .86),
+      ),
+    );
+  }
+}
+
+/// 歌手专辑横向区块。
+class _ArtistAlbumSection extends StatelessWidget {
+  const _ArtistAlbumSection({required this.albums, required this.onTap});
+
+  final List<ArtistAlbum> albums;
+  final ValueChanged<ArtistAlbum> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppHorizontalRail<ArtistAlbum>(
+      title: '专辑 ${albums.length}',
+      items: albums,
+      height: 168,
+      itemWidth: 120,
+      topPadding: 4,
+      headerPadding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+      itemBuilder: (context, album) =>
+          _ArtistAlbumCard(album: album, onTap: () => onTap(album)),
+    );
+  }
+}
+
+class _ArtistAlbumCard extends StatelessWidget {
+  const _ArtistAlbumCard({required this.album, required this.onTap});
+
+  final ArtistAlbum album;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              child: Artwork(url: album.coverUrl, size: 120),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              album.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+            if (album.publishDate case final date?)
+              Text(
+                date,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
