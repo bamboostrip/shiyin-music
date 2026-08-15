@@ -16,7 +16,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:layout_marginBottom="14dp">
 
         <LinearLayout
             android:id="@+id/lyrics_container"
@@ -68,16 +69,18 @@
 
     </LinearLayout>
 
-    <!-- 右下角宽度拖拽手柄：拖动时横向调整悬浮窗宽度，宽度记忆保存 -->
+    <!-- 右下角宽度拖拽手柄：缩小图标并独立占位，不与锁定/关闭按钮重叠；
+         拖动时横向调整悬浮窗宽度，宽度记忆保存 -->
     <ImageView
         android:id="@+id/btn_resize"
-        android:layout_width="28dp"
-        android:layout_height="28dp"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
         android:layout_gravity="bottom|end"
+        android:layout_marginEnd="4dp"
         android:src="@drawable/overlay_resize_grip"
         android:scaleType="centerInside"
-        android:tint="#66FFFFFF"
+        android:tint="#80FFFFFF"
         android:contentDescription="调整宽度"
-        android:padding="6dp" />
+        android:padding="5dp" />
 
 </FrameLayout>

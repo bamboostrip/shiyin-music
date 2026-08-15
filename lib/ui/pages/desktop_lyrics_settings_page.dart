@@ -116,25 +116,18 @@ class _DesktopLyricsSettingsPageState
                 icon: Icons.lock_rounded,
                 iconColor: colorScheme.primary,
                 title: '锁定位置',
-                subtitle: '锁定后无法拖动移动歌词悬浮窗',
+                subtitle: '锁定后无法拖动移动歌词悬浮窗，点击悬浮窗锁图标可解锁',
                 value: _settings.locked,
-                onChanged: (v) => _update((s) => s.copyWith(
-                  locked: v,
-                  passthrough: v ? true : s.passthrough, // Lock auto-enables passthrough
-                )),
+                onChanged: (v) => _update((s) => s.copyWith(locked: v)),
               ),
               _SettingsDivider(),
               _SwitchTile(
                 icon: Icons.touch_app_rounded,
                 iconColor: colorScheme.primary,
                 title: '触摸穿透',
-                subtitle: _settings.locked
-                    ? '锁定位置时自动开启'
-                    : '启用后点击事件会穿透到下层应用',
-                value: _settings.locked ? true : _settings.passthrough,
-                onChanged: _settings.locked
-                    ? null // Disabled when locked (auto-enabled)
-                    : (v) => _update((s) => s.copyWith(passthrough: v)),
+                subtitle: '启用后点击事件会穿透到下层应用',
+                value: _settings.passthrough,
+                onChanged: (v) => _update((s) => s.copyWith(passthrough: v)),
               ),
             ],
           ),

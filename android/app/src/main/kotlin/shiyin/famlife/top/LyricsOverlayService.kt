@@ -155,8 +155,9 @@ class LyricsOverlayService : Service() {
             ACTION_UPDATE_SETTINGS -> {
                 bgOpacity = intent.getFloatExtra(EXTRA_OPACITY, bgOpacity)
                 isLocked = intent.getBooleanExtra(EXTRA_LOCKED, isLocked)
-                // Lock auto-enables passthrough
-                isPassthrough = if (isLocked) true else intent.getBooleanExtra(EXTRA_PASSTHROUGH, isPassthrough)
+                // 锁定与触摸穿透相互独立：锁定只禁止拖动，穿透由用户单独开启，
+                // 否则穿透（NOT_TOUCHABLE）会让悬浮窗收不到任何点击，无法再解锁
+                isPassthrough = intent.getBooleanExtra(EXTRA_PASSTHROUGH, isPassthrough)
                 val colorInt = intent.getIntExtra(EXTRA_TEXT_COLOR, textColor)
                 val bgColorInt = intent.getIntExtra(EXTRA_BACKGROUND_COLOR, backgroundColor)
                 val sizeSp = intent.getFloatExtra(EXTRA_FONT_SIZE, fontSizeSp)
@@ -228,9 +229,8 @@ class LyricsOverlayService : Service() {
         }
 
         btnLock?.setOnClickListener {
-            // Toggle lock from overlay
+            // Toggle lock from overlay；锁定只禁止拖动，保持窗口可点击以便再次解锁
             isLocked = !isLocked
-            isPassthrough = isLocked // Lock auto-enables passthrough
             saveSettings()
             applySettings()
             // Notify Flutter side
@@ -521,7 +521,7 @@ class LyricsOverlayService : Service() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         bgOpacity = prefs.getFloat(KEY_OPACITY, 0.8f)
         isLocked = prefs.getBoolean(KEY_LOCKED, false)
-        isPassthrough = if (isLocked) true else prefs.getBoolean(KEY_PASSTHROUGH, false)
+        isPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, false)
         textColor = prefs.getInt(KEY_TEXT_COLOR, Color.WHITE)
         backgroundColor = prefs.getInt(KEY_BACKGROUND_COLOR, Color.parseColor("#1A1A2E"))
         fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, 16f)
