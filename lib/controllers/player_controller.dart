@@ -934,6 +934,16 @@ class PlayerController extends ChangeNotifier {
     if (audioPlayer.playing) {
       await _audioHandler.pause();
     } else {
+      // 冷启动恢复播放状态后，音频引擎只恢复了队列/当前歌曲状态，
+      // 尚未加载任何音频源（idle）。此时直接 play() 只是空转
+      // （UI 显示播放中但不出声），必须走完整播放流程加载当前歌曲。
+      if (audioPlayer.processingState == ProcessingState.idle) {
+        final song = currentSong;
+        if (song != null) {
+          await playSong(song, queue: queue);
+          return;
+        }
+      }
       if (audioPlayer.processingState == ProcessingState.completed) {
         await _audioHandler.seek(Duration.zero);
       }
