@@ -18,7 +18,6 @@ import 'desktop_lyrics_settings_page.dart';
 import 'personalization_settings_page.dart';
 import 'playback_history_page.dart';
 import 'playback_stats_page.dart';
-import 'vip_info_page.dart';
 import '../adaptive_layout.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -104,14 +103,6 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  void _openVipInfo(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => VipInfoPage(api: api, auth: auth),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -155,14 +146,6 @@ class SettingsPage extends StatelessWidget {
                         onTap: auth.isLoading
                             ? null
                             : () => auth.refreshProfile(),
-                      ),
-                      _SettingsDivider(),
-                      _SettingsTile(
-                        icon: Icons.workspace_premium_rounded,
-                        iconColor: const Color(0xFFE8A33D),
-                        title: '我的 VIP',
-                        subtitle: 'VIP 状态与每日福利',
-                        onTap: () => _openVipInfo(context),
                       ),
                       _SettingsDivider(),
                       _SettingsSwitchTile(
