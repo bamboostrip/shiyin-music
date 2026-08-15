@@ -952,6 +952,8 @@ class PlayerController extends ChangeNotifier {
     final serial = ++_seekSerial;
     final target = _clampPosition(position);
     _lastSmoothPosition = Duration.zero;
+    // 用户手动 seek 后取消高潮武装，避免拖动进度条到高潮结束点后意外自动暂停。
+    _climaxEndTime = null;
     seekRevision++;
     _isScrubbing = false;
     _isSeeking = true;
@@ -1066,8 +1068,11 @@ class PlayerController extends ChangeNotifier {
     try {
       final climax = await _api.songClimax(song.hash);
       if (climax == null) return false;
+      // 等待网络期间可能已切歌，避免把旧歌的高潮定位到新歌上。
+      if (currentSong?.hash != song.hash) return false;
       this.climax = climax;
       await seek(climax.startTime);
+      if (currentSong?.hash != song.hash) return false;
       // seek 完成后再设置结束时间，避免 seek 期间旧位置触发提前暂停。
       _climaxEndTime = climax.endTime;
       if (!audioPlayer.playing) {

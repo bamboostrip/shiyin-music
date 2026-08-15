@@ -224,14 +224,22 @@ class _HomePageState extends State<HomePage> {
     );
     if (!mounted || _future != null) return;
     if (cached != null) {
-      final data = _homeDataFromCache(cached.data);
-      _cachedData = data;
-      _checkAndAutoPlay(data);
-      setState(() {
-        _future = Future.value(data);
-      });
-      // 缓存数据已显示，后台静默刷新
-      _silentRefresh();
+      try {
+        final data = _homeDataFromCache(cached.data);
+        _cachedData = data;
+        _checkAndAutoPlay(data);
+        setState(() {
+          _future = Future.value(data);
+        });
+        // 缓存数据已显示，后台静默刷新
+        _silentRefresh();
+      } catch (_) {
+        // 缓存损坏时回退到网络加载，避免首页停留在骨架屏。
+        if (!mounted) return;
+        setState(() {
+          _future = _load();
+        });
+      }
     } else {
       // 无缓存数据，直接从网络加载
       setState(() {

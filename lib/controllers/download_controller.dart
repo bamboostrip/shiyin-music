@@ -315,6 +315,9 @@ class DownloadController extends ChangeNotifier {
     List<Song> songs,
     AudioQuality quality,
   ) async {
+    // 批次内按 hash 去重，避免同一首歌被重复下载。
+    final seen = <String>{};
+    songs = songs.where((song) => seen.add(song.hash)).toList();
     const urlConcurrency = 4;
     var enqueued = 0;
     var skipped = 0;

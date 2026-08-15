@@ -119,7 +119,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           pageSize: _pageSize,
           sort: 'hot',
         ),
-        widget.api.artistAlbums(artistId, pageSize: 20),
+        _loadAlbumsSafe(artistId),
       ]);
       if (!mounted) return;
 
@@ -186,6 +186,15 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     }
   }
 
+  /// 专辑列表失败时降级为空，不阻塞歌手详情与歌曲加载。
+  Future<List<ArtistAlbum>> _loadAlbumsSafe(String artistId) async {
+    try {
+      return await widget.api.artistAlbums(artistId, pageSize: 20);
+    } catch (_) {
+      return const [];
+    }
+  }
+
   void _openAlbum(ArtistAlbum album) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -198,6 +207,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
             title: album.name,
             subtitle: album.authorName ?? widget.artist.name,
             coverUrl: album.coverUrl,
+            // 标记专辑侧 ID，使 isCollectedAlbum/albumId 走专辑分支（/album/songs）。
+            sourceListId: album.id,
           ),
         ),
       ),
