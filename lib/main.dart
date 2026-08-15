@@ -27,9 +27,15 @@ import 'ui/widgets/toast.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 图片缓存策略（车机 2-4GB RAM，内存有限但不宜过小）：
+  // - maximumSizeBytes = 64MB：封面经 Artwork 解码后最大 600×600×4B ≈ 1.4MB/张，
+  //   64MB 约可容纳 44 张满尺寸封面或数百张列表小图，来回切页基本全部命中缓存，
+  //   不再反复下载；对 2-4GB 设备约占内存 2~3%，低于 Flutter 手机默认 100MB。
+  // - maximumSize = 200：张数兜底，防止大量极小缩略图塞满条目数。
+  // 超限后由 ImageCache 按 LRU 自动淘汰，避免手动全清导致切页重下。
   final cache = PaintingBinding.instance.imageCache;
-  cache.maximumSize = 30;
-  cache.maximumSizeBytes = 6 << 20;
+  cache.maximumSize = 200;
+  cache.maximumSizeBytes = 64 << 20;
   final client = await RustApiClient.getInstance();
   final api = MusicApi(client);
   final audioHandler = await AudioService.init(
@@ -132,8 +138,14 @@ class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
         if (_player.desktopLyricsEnabled) _player.setAppForeground(false);
       case AppLifecycleState.paused:
         if (_player.desktopLyricsEnabled) _player.setAppForeground(false);
-        PaintingBinding.instance.imageCache.clear();
-        PaintingBinding.instance.imageCache.clearLiveImages();
+        // 图片缓存内存保护（后台驻留时不长期占用大量解码位图）：
+        // - 缓存量较小时保留，切后台再回前台不重新下载，避免反复加载；
+        // - 缓存量较大（>24MB）才整体释放，兼顾车机有限内存与加载体感。
+        // 不再调用 clearLiveImages()：它会把当前正在显示的图流也强制释放，
+        // 回到前台时整屏重新解码/下载，是"切页后图片反复重下"的根源之一。
+        if (PaintingBinding.instance.imageCache.currentSizeBytes > 24 << 20) {
+          PaintingBinding.instance.imageCache.clear();
+        }
       case AppLifecycleState.detached:
         if (_player.desktopLyricsEnabled) _player.setAppForeground(false);
     }

@@ -20,7 +20,11 @@ class LocalMusicController extends ChangeNotifier {
   final Set<String> _excludedFolders = {};
   bool _isScanning = false;
 
-  static const _maxAlbumArtCacheSize = 50;
+  // 本地专辑封面字节缓存上限（LRU，按插入顺序淘汰最早项）。
+  // 50 → 100：封面为压缩字节（常见 500×500 JPEG ≈ 50-200KB），
+  // 100 张 ≈ 5-20MB，换取滚动本地歌曲列表时更少触发原生
+  // content provider 查询（该查询较慢，是列表滚动的卡顿来源之一）。
+  static const _maxAlbumArtCacheSize = 100;
   final _albumArtCache = LinkedHashMap<String, Uint8List>();
 
   /// 规范化文件夹路径 -> 原始大小写路径（仅用于界面展示）。
