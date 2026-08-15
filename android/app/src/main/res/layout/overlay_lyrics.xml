@@ -10,13 +10,13 @@
     android:paddingBottom="10dp"
     android:elevation="8dp">
 
+    <!-- 窗口宽度已由 LyricsOverlayService 固定（min(屏幕宽*0.9, 320dp)），
+         这里填满窗口即可，不再约束文本宽度 -->
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:minWidth="200dp"
-        android:maxWidth="320dp">
+        android:gravity="center_vertical">
 
         <LinearLayout
             android:id="@+id/lyrics_container"

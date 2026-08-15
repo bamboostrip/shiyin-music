@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
@@ -17,6 +18,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.Gravity
+import android.util.TypedValue
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.TextView
@@ -63,6 +65,12 @@ class LyricsOverlayService : Service() {
         private const val KEY_BACKGROUND_COLOR = "background_color"
         private const val KEY_FONT_SIZE = "font_size"
 
+        // 悬浮窗固定宽度：取屏幕宽度的一定比例并设上限，宽度不随歌词文本长短变化。
+        // 上限 320dp 沿用原布局 maxWidth 的意图（车机横屏、手机竖屏都保持紧凑），
+        // 比例只在屏幕较窄时兜底防止超屏。
+        private const val MAX_WINDOW_WIDTH_DP = 320f
+        private const val WINDOW_WIDTH_RATIO = 0.9f
+
         fun isRunning(context: Context): Boolean {
             val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
             @Suppress("DEPRECATION")
@@ -82,6 +90,7 @@ class LyricsOverlayService : Service() {
     private var btnClose: ImageView? = null
     private var btnLock: ImageView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
+    private var fixedWidthPx = 0
     private var isShowing = false
     private var isAppForeground = false
     private val choreographer by lazy { Choreographer.getInstance() }
@@ -158,6 +167,15 @@ class LyricsOverlayService : Service() {
         return START_STICKY
     }
 
+    /** 计算悬浮窗固定宽度（px）：min(屏幕宽 * 0.9, 320dp)，不随歌词文本长度变化。 */
+    private fun computeFixedWidthPx(): Int {
+        val displayMetrics = resources.displayMetrics
+        val capPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, MAX_WINDOW_WIDTH_DP, displayMetrics
+        ).toInt()
+        return (displayMetrics.widthPixels * WINDOW_WIDTH_RATIO).toInt().coerceAtMost(capPx)
+    }
+
     private fun showOverlay(title: String, artist: String) {
         if (isShowing) return
 
@@ -192,8 +210,11 @@ class LyricsOverlayService : Service() {
 
         applySettings()
 
+        // 固定窗口宽度：按当前屏幕尺寸计算一次，横竖屏切换时在
+        // onConfigurationChanged 里重算，保证不随歌词文本长短变化
+        fixedWidthPx = computeFixedWidthPx()
         layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            fixedWidthPx,
             WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -497,6 +518,23 @@ class LyricsOverlayService : Service() {
         builder.setContentIntent(pendingIntent)
         builder.setOngoing(true)
         return builder.build()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 横竖屏切换后屏幕宽度变化，重算固定宽度并应用到悬浮窗
+        if (isShowing) {
+            val newWidth = computeFixedWidthPx()
+            if (newWidth != fixedWidthPx) {
+                fixedWidthPx = newWidth
+                layoutParams?.let { lp ->
+                    lp.width = newWidth
+                    try {
+                        windowManager?.updateViewLayout(overlayView, lp)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
