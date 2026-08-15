@@ -16,7 +16,6 @@ import '../../services/lyric_converter.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/artwork.dart';
-import '../widgets/blurred_lyric_view.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -2025,11 +2024,9 @@ class _LyricViewportState extends State<_LyricViewport>
 
     return ExcludeSemantics(
       // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
-      child: BlurredLyricView(
+      child: LyricView(
         controller: _lyricController,
         style: lyricStyle,
-        maxBlurSigma: 3.0,
-        blurStep: 0.7,
       ),
     );
   }
