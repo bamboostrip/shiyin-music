@@ -60,15 +60,16 @@ else()
 endif()
 set(RUST_TARGET_DIR "${RUST_LIB_DIR}/target/${RUST_BUILD_TYPE}")
 
-add_custom_command(
-  OUTPUT "${RUST_TARGET_DIR}/kugou_engine.dll"
+# 每次构建都调用 cargo，由 cargo 自身的增量编译判断是否需要重编
+# （无源码改动时秒级返回）。旧写法 add_custom_command(OUTPUT dll) 没有
+# 源码依赖，DLL 文件一旦存在 CMake 就视为最新，导致 8 月的 Rust 改动
+# 一直没进调试包（表现为歌手页专辑消失等"功能凭空不见"）。
+add_custom_target(rust_engine_build ALL
   COMMAND cargo build ${RUST_BUILD_FLAG}
   WORKING_DIRECTORY "${RUST_LIB_DIR}"
+  BYPRODUCTS "${RUST_TARGET_DIR}/kugou_engine.dll"
   COMMENT "Building Rust kugou_engine library"
   VERBATIM
-)
-add_custom_target(rust_engine_build ALL
-  DEPENDS "${RUST_TARGET_DIR}/kugou_engine.dll"
 )
 
 # Application build; see runner/CMakeLists.txt.

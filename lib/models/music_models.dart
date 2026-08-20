@@ -2475,7 +2475,9 @@ class ArtistAlbum {
       id: asString(json['album_id']) ?? asString(json['id']) ?? '',
       name: asString(json['album_name']) ?? asString(json['name']) ?? '未知专辑',
       coverUrl: normalizeImageUrl(
-        asString(json['cover']) ?? asString(json['sizable_cover']),
+        // 上游 cover 字段只返回文件名（如 20260319xxx.jpg），不是可加载的
+        // URL；sizable_cover 才是完整地址，必须优先。
+        asString(json['sizable_cover']) ?? asString(json['cover']),
       ),
       authorName: asString(json['author_name']),
       publishDate: asString(json['publish_date']),
