@@ -34,6 +34,9 @@ class ArtistDetailPage extends StatefulWidget {
 class _ArtistDetailPageState extends State<ArtistDetailPage> {
   static const _pageSize = 30;
 
+  /// 头部展开高度（不含状态栏，SliverAppBar 会自动叠加）。
+  static const _headerExpandedHeight = 286.0;
+
   final _scrollController = ScrollController();
   final _songs = <Song>[];
   final _albums = <ArtistAlbum>[];
@@ -44,20 +47,21 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   var _hasMore = true;
   var _isInitialLoading = true;
   var _isLoadingMore = false;
+  var _isHeaderCollapsed = false;
   String? _errorMessage;
   String? _loadMoreError;
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_maybeLoadMore);
+    _scrollController.addListener(_onScroll);
     _loadInitial();
   }
 
   @override
   void dispose() {
     _scrollController
-      ..removeListener(_maybeLoadMore)
+      ..removeListener(_onScroll)
       ..dispose();
     _songs.clear();
     _detail = null;
@@ -73,6 +77,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       _hasMore = true;
       _isInitialLoading = true;
       _isLoadingMore = false;
+      _isHeaderCollapsed = false;
       _errorMessage = null;
       _loadMoreError = null;
     });
@@ -140,6 +145,20 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         _errorMessage = error.toString();
         _isInitialLoading = false;
       });
+    }
+  }
+
+  void _onScroll() {
+    _maybeLoadMore();
+
+    // 头部完全收起（滚动距离 >= 展开高度 - 工具栏高度）后，把顶栏从
+    // 透明切为不透明底色 + 主题色图标：透明工具栏会让列表内容从返回键
+    // 下方穿透，收起瞬间头部照片刚好完全离开视口，切换不会突兀。
+    final collapsed =
+        _scrollController.hasClients &&
+        _scrollController.offset >= _headerExpandedHeight - kToolbarHeight;
+    if (collapsed != _isHeaderCollapsed) {
+      setState(() => _isHeaderCollapsed = collapsed);
     }
   }
 
@@ -220,15 +239,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     // MiniPlayer 高度约 64，距底部 16，合计预留空间防止遮挡最后一首歌
     final miniPlayerSpace = bottomInset + 64 + 16;
+    final theme = Theme.of(context);
+    final artistName = _detail?.name ?? widget.artist.name;
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const SizedBox.shrink(),
-      ),
       body: AdaptiveContentPadding(
         child: Stack(
           fit: StackFit.expand,
@@ -237,10 +250,39 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
               child: CustomScrollView(
                 controller: _scrollController,
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: _ArtistHeader(
-                      detail: _detail,
-                      fallback: widget.artist,
+                  SliverAppBar(
+                    pinned: true,
+                    expandedHeight: _headerExpandedHeight,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    // 展开态透明叠在头部照片上（白色返回键）；收起后换不透明
+                    // 底色 + 主题色，避免歌曲列表从工具栏下方穿透。
+                    backgroundColor: _isHeaderCollapsed
+                        ? theme.scaffoldBackgroundColor
+                        : Colors.transparent,
+                    foregroundColor: _isHeaderCollapsed
+                        ? theme.colorScheme.onSurface
+                        : Colors.white,
+                    title: AnimatedOpacity(
+                      opacity: _isHeaderCollapsed ? 1 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: Text(
+                        artistName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    flexibleSpace: FlexibleSpaceBar(
+                      stretchModes: const [StretchMode.zoomBackground],
+                      background: _ArtistHeader(
+                        detail: _detail,
+                        fallback: widget.artist,
+                      ),
                     ),
                   ),
                   if (_isInitialLoading)
@@ -345,89 +387,87 @@ class _ArtistHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final avatar = detail?.avatarUrl ?? fallback.avatarUrl;
-    final topPadding = MediaQuery.paddingOf(context).top;
 
+    // 作为 SliverAppBar 的 flexibleSpace 背景，尺寸由展开高度决定，
+    // 这里只需填满并保留底部圆角。
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
-      child: SizedBox(
-        height: topPadding + 286,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (avatar == null)
-              const _ArtistPosterFallback()
-            else
-              Image.network(
-                avatar,
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                cacheWidth: 800,
-                cacheHeight: 800,
-                errorBuilder: (context, error, stackTrace) =>
-                    const _ArtistPosterFallback(),
-              ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: .20),
-                    Colors.black.withValues(alpha: .06),
-                    Colors.black.withValues(alpha: .58),
-                  ],
-                  stops: const [0, .48, 1],
-                ),
-              ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (avatar == null)
+            const _ArtistPosterFallback()
+          else
+            Image.network(
+              avatar,
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              cacheWidth: 800,
+              cacheHeight: 800,
+              errorBuilder: (context, error, stackTrace) =>
+                  const _ArtistPosterFallback(),
             ),
-            Positioned(
-              left: 22,
-              right: 22,
-              bottom: 26,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    detail?.name ?? fallback.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      height: 1.08,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .18),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: .22),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        detail?.birthday?.isNotEmpty == true
-                            ? '生日 ${detail!.birthday}'
-                            : '歌手 ID ${detail?.id ?? fallback.id}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withValues(alpha: .88),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: .20),
+                  Colors.black.withValues(alpha: .06),
+                  Colors.black.withValues(alpha: .58),
                 ],
+                stops: const [0, .48, 1],
               ),
             ),
-          ],
-        ),
+          ),
+          Positioned(
+            left: 22,
+            right: 22,
+            bottom: 26,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  detail?.name ?? fallback.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    height: 1.08,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .18),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: .22),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      detail?.birthday?.isNotEmpty == true
+                          ? '生日 ${detail!.birthday}'
+                          : '歌手 ID ${detail?.id ?? fallback.id}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: .88),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
