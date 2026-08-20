@@ -2024,10 +2024,7 @@ class _LyricViewportState extends State<_LyricViewport>
 
     return ExcludeSemantics(
       // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
-      child: LyricView(
-        controller: _lyricController,
-        style: lyricStyle,
-      ),
+      child: LyricView(controller: _lyricController, style: lyricStyle),
     );
   }
 }
@@ -2237,84 +2234,55 @@ class _Progress extends StatelessWidget {
             : player.duration.inMilliseconds.toDouble();
         final pos = player.smoothPosition;
         final value = pos.inMilliseconds.clamp(0, max.toInt()).toDouble();
-        // 高潮片段时间点（进度条小圆点），无高潮或无效时为空。
+        // 高潮起始位置映射为 0..1，在轨道内部画一个小标记。
         final climax = player.climax;
-        final climaxFraction =
-            climax != null &&
-                climax.isValid &&
-                max > 0 &&
-                climax.startTime.inMilliseconds <= max.toInt()
-            ? climax.startTime.inMilliseconds / max
-            : null;
+        final durationMs = player.duration.inMilliseconds;
+        double? climaxStart;
+        if (climax != null && climax.isValid && durationMs > 0) {
+          final start = (climax.startTime.inMilliseconds / durationMs).clamp(
+            0.0,
+            1.0,
+          );
+          if (start > 0 && start < 1.0) {
+            climaxStart = start;
+          }
+        }
 
         return Column(
           children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                final thumbRadius = compact ? 4.0 : 5.0;
-                final dotSize = compact ? 7.0 : 8.0;
-                return Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: compact ? 3 : 5,
-                        thumbShape: RoundSliderThumbShape(
-                          enabledThumbRadius: compact ? 4 : 5,
-                        ),
-                        overlayShape: RoundSliderOverlayShape(
-                          overlayRadius: compact ? 10 : 14,
-                        ),
-                        activeTrackColor: bright
-                            ? Colors.white.withValues(alpha: .86)
-                            : Theme.of(context).colorScheme.primary,
-                        inactiveTrackColor: bright
-                            ? Colors.white.withValues(alpha: .25)
-                            : Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest,
-                        thumbColor: Colors.white,
-                      ),
-                      child: Slider(
-                        value: value,
-                        max: max,
-                        onChanged: (value) => player.previewSeek(
-                          Duration(milliseconds: value.round()),
-                        ),
-                        onChangeEnd: (value) =>
-                            player.seek(Duration(milliseconds: value.round())),
-                      ),
-                    ),
-                    if (climaxFraction != null)
-                      Positioned(
-                        left:
-                            thumbRadius +
-                            climaxFraction * (width - 2 * thumbRadius) -
-                            dotSize / 2,
-                        top: 24 - dotSize / 2,
-                        child: IgnorePointer(
-                          child: Container(
-                            width: dotSize,
-                            height: dotSize,
-                            decoration: BoxDecoration(
-                              color: bright
-                                  ? Colors.white
-                                  : Theme.of(context).colorScheme.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: bright
-                                    ? Colors.black.withValues(alpha: .4)
-                                    : Colors.white,
-                                width: 1.2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                );
-              },
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: compact ? 3 : 5,
+                thumbShape: RoundSliderThumbShape(
+                  enabledThumbRadius: compact ? 4 : 5,
+                ),
+                overlayShape: RoundSliderOverlayShape(
+                  overlayRadius: compact ? 10 : 14,
+                ),
+                activeTrackColor: bright
+                    ? Colors.white.withValues(alpha: .86)
+                    : Theme.of(context).colorScheme.primary,
+                inactiveTrackColor: bright
+                    ? Colors.white.withValues(alpha: .25)
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                thumbColor: Colors.white,
+                trackShape: _ClimaxSliderTrackShape(
+                  climaxStart: climaxStart,
+                  markerColor: bright
+                      ? Colors.white.withValues(alpha: .55)
+                      : Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: .45),
+                ),
+              ),
+              child: Slider(
+                value: value,
+                max: max,
+                onChanged: (value) =>
+                    player.previewSeek(Duration(milliseconds: value.round())),
+                onChangeEnd: (value) =>
+                    player.seek(Duration(milliseconds: value.round())),
+              ),
             ),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 4),
@@ -2342,6 +2310,103 @@ class _Progress extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// 进度条轨道：在轨道内部标记高潮起始位置（替代原先轨道下方的圆点）。
+///
+/// 绘制顺序：整条未播放底轨 -> 高潮起点小标记 -> 已播放进度（系统默认
+/// 加高 2px，播放头经过后盖住标记）。thumb 位置由 Slider 框架按全宽线性
+/// 映射传入，标记同样按全宽线性映射定位。
+class _ClimaxSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _ClimaxSliderTrackShape({
+    required this.climaxStart,
+    required this.markerColor,
+  });
+
+  final double? climaxStart;
+  final Color markerColor;
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    if (sliderTheme.trackHeight == null || sliderTheme.trackHeight! <= 0) {
+      return;
+    }
+
+    final canvas = context.canvas;
+    final trackRect = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+    final trackRadius = Radius.circular(trackRect.height / 2);
+    final activePaint = Paint()
+      ..color = ColorTween(
+        begin: sliderTheme.disabledActiveTrackColor,
+        end: sliderTheme.activeTrackColor,
+      ).evaluate(enableAnimation)!;
+    final inactivePaint = Paint()
+      ..color = ColorTween(
+        begin: sliderTheme.disabledInactiveTrackColor,
+        end: sliderTheme.inactiveTrackColor,
+      ).evaluate(enableAnimation)!;
+
+    // 1. 整条未播放底轨。
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(trackRect, trackRadius),
+      inactivePaint,
+    );
+
+    // 2. 高潮起点标记：沿用高潮段的高亮色，只取起点处一小段，
+    //    高度与轨道完全齐平（不超出进度条），水平方向夹在轨道范围内。
+    final start = climaxStart;
+    if (start != null) {
+      final markerWidth = (trackRect.height * 1.6).clamp(6.0, 9.0);
+      final centerDx = (trackRect.left + start * trackRect.width).clamp(
+        trackRect.left + markerWidth / 2,
+        trackRect.right - markerWidth / 2,
+      );
+      final markerRect = Rect.fromCenter(
+        center: Offset(centerDx, trackRect.center.dy),
+        width: markerWidth,
+        height: trackRect.height,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(markerRect, trackRadius),
+        Paint()..color = markerColor,
+      );
+    }
+
+    // 3. 已播放进度（与系统默认一致，加高 2px；播放头经过后覆盖标记）。
+    if (thumbCenter.dx > trackRect.left) {
+      final activeRect = Rect.fromLTRB(
+        trackRect.left,
+        trackRect.top - additionalActiveTrackHeight / 2,
+        thumbCenter.dx,
+        trackRect.bottom + additionalActiveTrackHeight / 2,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          activeRect,
+          Radius.circular((trackRect.height + additionalActiveTrackHeight) / 2),
+        ),
+        activePaint,
+      );
+    }
   }
 }
 
