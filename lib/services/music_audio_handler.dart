@@ -9,6 +9,19 @@ import '../models/music_models.dart';
 
 const _kgUserAgent = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
 
+/// 车机与手机通知渠道解析（车机使用专属静默渠道防弹窗，手机使用标准媒体渠道支持灵动岛与锁屏控制）
+({String channelId, String channelName}) resolvePlaybackNotificationChannel({
+  required bool isCarMode,
+  required bool isAutomotiveDevice,
+}) {
+  final isCar = isCarMode || isAutomotiveDevice;
+  return (
+    channelId:
+        isCar ? 'kgka_music_hl.playback_car' : 'kgka_music_hl.playback_phone',
+    channelName: isCar ? '时音 车机播放控制' : '时音 播放控制',
+  );
+}
+
 class MusicAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
   MusicAudioHandler() {

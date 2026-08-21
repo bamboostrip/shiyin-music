@@ -38,18 +38,24 @@ Future<void> main() async {
   cache.maximumSizeBytes = 64 << 20;
   final client = await RustApiClient.getInstance();
   final api = MusicApi(client);
-  final audioHandler = await AudioService.init(
-    builder: MusicAudioHandler.new,
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'kgka_music_hl.playback',
-      androidNotificationChannelName: 'KA Music 播放控制',
-      androidStopForegroundOnPause: false,
-    ),
-  );
 
   final themeController = ThemeController();
   await themeController.detectAutomotive(const DeviceInfoService());
   await themeController.load();
+
+  final channelConfig = resolvePlaybackNotificationChannel(
+    isCarMode: themeController.carModeEnabled,
+    isAutomotiveDevice: themeController.isAutomotiveDevice,
+  );
+
+  final audioHandler = await AudioService.init(
+    builder: MusicAudioHandler.new,
+    config: AudioServiceConfig(
+      androidNotificationChannelId: channelConfig.channelId,
+      androidNotificationChannelName: channelConfig.channelName,
+      androidStopForegroundOnPause: false,
+    ),
+  );
 
   runApp(
     KaMusicApp(
