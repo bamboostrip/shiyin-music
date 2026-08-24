@@ -2,9 +2,6 @@ package shiyin.famlife.top
 
 import android.Manifest
 import android.app.DownloadManager
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.ContentUris
 import android.content.Context
@@ -89,7 +86,6 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        setupNotificationChannels()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kgka_music_hl/screen")
             .setMethodCallHandler { call, result ->
@@ -827,46 +823,6 @@ class MainActivity : AudioServiceActivity() {
             lyrics
         } catch (e: Exception) {
             null
-        }
-    }
-
-    private fun setupNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-            // 清理旧版本未分流渠道（避免老车机缓存了旧配置）
-            try {
-                notificationManager.deleteNotificationChannel("kgka_music_hl.playback")
-            } catch (_: Exception) {}
-
-            // 1. 手机端标准媒体渠道（IMPORTANCE_LOW，无提示音无震动，但完美支持下拉通知中心、锁屏大卡片、状态栏胶囊/灵动岛/流体云）
-            val phoneChannel = NotificationChannel(
-                "kgka_music_hl.playback_phone",
-                "时音 播放控制",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "后台音乐播放服务与通知中心控制"
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-                enableLights(false)
-            }
-            notificationManager.createNotificationChannel(phoneChannel)
-
-            // 2. 车机端专属静默渠道（IMPORTANCE_MIN，彻底杜绝 Heads-Up 顶部弹窗横幅，同时保证前台服务正常保活）
-            val carChannel = NotificationChannel(
-                "kgka_music_hl.playback_car",
-                "时音 车机播放控制",
-                NotificationManager.IMPORTANCE_MIN
-            ).apply {
-                description = "车机静默后台音乐播放服务（防顶部弹窗）"
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-                enableLights(false)
-                lockscreenVisibility = Notification.VISIBILITY_SECRET
-            }
-            notificationManager.createNotificationChannel(carChannel)
         }
     }
 

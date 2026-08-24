@@ -9,7 +9,11 @@ import '../models/music_models.dart';
 
 const _kgUserAgent = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
 
-/// 车机与手机通知渠道解析（车机使用专属静默渠道防弹窗，手机使用标准媒体渠道支持灵动岛与锁屏控制）
+/// 车机与手机通知渠道解析（车机使用专属静默渠道防弹窗，手机使用标准媒体渠道支持灵动岛与锁屏控制）。
+///
+/// 渠道 ID 与原生 MusicApplication.setupNotificationChannels 创建的渠道一一对应，
+/// 改动需双端同步。渠道在启动时随 AudioServiceConfig 定向，运行时切换车机模式
+/// 不会生效，需重启进程。
 ({String channelId, String channelName}) resolvePlaybackNotificationChannel({
   required bool isCarMode,
   required bool isAutomotiveDevice,

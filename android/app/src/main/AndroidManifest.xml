@@ -11,11 +11,14 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
-    <application
-        android:label="时音"
-        android:name="${applicationName}"
-        android:usesCleartextTraffic="true"
-        android:icon="@mipmap/ic_launcher">
+        <!-- 自定义 Application：任何组件（Activity/Service/Receiver）启动前先创建
+             通知渠道，防止 audio_service 在车机上以 IMPORTANCE_LOW 预建渠道导致
+             MIN 静默配置失效（渠道重要性创建后无法程序化下调）。 -->
+        <application
+            android:label="时音"
+            android:name=".MusicApplication"
+            android:usesCleartextTraffic="true"
+            android:icon="@mipmap/ic_launcher">
         <!-- A/B 测试：恢复 Flutter 默认 Impeller（Vulkan）渲染引擎，
              验证 Adreno 702 车机（QCM2290）无冻屏/渲染缺陷后保留；
              如发现问题，git revert 本提交即回退 Skia。 -->

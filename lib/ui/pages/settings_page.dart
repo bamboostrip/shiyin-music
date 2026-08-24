@@ -384,7 +384,17 @@ class SettingsPage extends StatelessWidget {
                         title: '车机模式',
                         subtitle: '横屏时使用左侧播放面板布局并放大文字',
                         value: theme.carModeEnabled,
-                        onChanged: (value) => theme.setCarModeEnabled(value),
+                        onChanged: (value) async {
+                          await theme.setCarModeEnabled(value);
+                          // 通知渠道在启动时按车机模式定向，切换后需完全重启
+                          // 进程才生效；原生车机设备始终走静默渠道，无需提示
+                          if (!theme.isAutomotiveDevice) {
+                            Toast.show(
+                              '车机模式已切换，建议重启应用以同步通知栏显示方式',
+                              duration: const Duration(seconds: 4),
+                            );
+                          }
+                        },
                       ),
                     ],
                   ),
