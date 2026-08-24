@@ -303,6 +303,31 @@ class MusicApi {
     return RankSongPage(songs: songs, total: total);
   }
 
+  /// 拉取榜单全部分页歌曲（排行榜详情页"播放全部"与后台补全播放队列用）。
+  ///
+  /// 与 [playlistSongs] 的 fetchAll 同构：循环翻页直到某页不足 [pageSize]
+  /// （过滤后条数，与 RankDetailPage 的 _hasMore 判定一致）或达到 [maxPages]
+  /// 防御上限（防止上游异常数据导致死循环）。
+  Future<List<Song>> rankAudioAll({
+    required int rankId,
+    int rankCid = 0,
+    int pageSize = 50,
+    int maxPages = 30,
+  }) async {
+    final allSongs = <Song>[];
+    for (var page = 1; page <= maxPages; page++) {
+      final result = await rankAudio(
+        rankId: rankId,
+        rankCid: rankCid,
+        page: page,
+        pageSize: pageSize,
+      );
+      allSongs.addAll(result.songs);
+      if (result.songs.length < pageSize) break;
+    }
+    return allSongs;
+  }
+
   Future<List<Song>> newSongs({int rankId = 0, int page = 1}) async {
     final json = asMap(
       await _client.get('/top/song', {'rank_id': rankId, 'page': page}),

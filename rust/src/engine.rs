@@ -405,9 +405,15 @@ impl KugouEngine {
 
             ("GET", "/fm/recommend") => fm::fm_recommend(client, session).await,
             ("GET", "/fm/songs") => {
-                let fm_ids = params.get("fm_ids").map(|s| s.as_str()).unwrap_or("");
+                // Dart 侧契约参数为 fmid/type（旧服务器同款）；兼容 fm_ids/fmtype
+                let fm_ids = params
+                    .get("fmid")
+                    .or_else(|| params.get("fm_ids"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 let fmtype = params
-                    .get("fmtype")
+                    .get("type")
+                    .or_else(|| params.get("fmtype"))
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(2i64);
                 let offset = params
@@ -422,7 +428,12 @@ impl KugouEngine {
             }
             ("GET", "/fm/class") => fm::fm_class(client, session).await,
             ("GET", "/fm/image") => {
-                let fm_ids = params.get("fm_ids").map(|s| s.as_str()).unwrap_or("");
+                // Dart 侧契约参数为 fmid；兼容 fm_ids
+                let fm_ids = params
+                    .get("fmid")
+                    .or_else(|| params.get("fm_ids"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 fm::fm_image(client, session, fm_ids).await
             }
 
@@ -806,5 +817,157 @@ mod tests {
         assert!(!KugouEngine::is_session_invalid_response(&json!({
             "status": 0, "msg": "服务内部错误"
         })));
+    }
+
+    /// 联网探针：实测 /fm/recommend 与 /fm/songs 的真实返回结构。
+    /// 仅手动运行：`cargo test --lib fm_live_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn fm_live_probe() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let dir = std::env::temp_dir().join("fm_probe_session");
+            std::fs::create_dir_all(&dir).unwrap();
+            // 可选：通过 KG_SESSION_FILE 指定登录会话文件（复制到临时目录，不回写、不打印内容）
+            if let Ok(path) = std::env::var("KG_SESSION_FILE") {
+                let src = std::path::PathBuf::from(path);
+                if src.exists() {
+                    std::fs::copy(src, dir.join("kg_session.json")).unwrap();
+                }
+            }
+            let mut engine = KugouEngine::new(dir.to_string_lossy().to_string()).await;
+
+            let rec = engine
+                .request("GET", "/fm/recommend", "{}", None)
+                .await
+                .expect("fm/recommend failed");
+            let rec_v: serde_json::Value = serde_json::from_str(&rec).unwrap();
+            println!("== /fm/recommend 顶层键: {:?}", rec_v.as_object().map(|m| m.keys().collect::<Vec<_>>()));
+
+            // 递归收集带 fmid 的对象作为电台候选
+            fn collect_stations(v: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+                match v {
+                    serde_json::Value::Object(map) => {
+                        if map.contains_key("fmid") {
+                            out.push(v.clone());
+                        }
+                        for child in map.values() {
+                            collect_stations(child, out);
+                        }
+                    }
+                    serde_json::Value::Array(list) => {
+                        for child in list {
+                            collect_stations(child, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let mut stations = Vec::new();
+            collect_stations(&rec_v, &mut stations);
+            println!("== 推荐电台数量: {}", stations.len());
+            for s in stations.iter().take(3) {
+                println!(
+                    "== 电台: fmid={:?} fmname={:?} fmtype={:?} rcmdlist长度={:?}",
+                    s.get("fmid"),
+                    s.get("fmname"),
+                    s.get("fmtype").or_else(|| s.get("type")),
+                    s.get("rcmdlist").and_then(|l| l.as_array()).map(|a| a.len())
+                );
+            }
+            assert!(!stations.is_empty(), "推荐电台为空，结构可能变化");
+
+            fn count_songs(v: &serde_json::Value) -> (usize, Option<Vec<String>>) {
+                match v {
+                    serde_json::Value::Object(map) => {
+                        if map.contains_key("hash") {
+                            return (
+                                1,
+                                Some(map.keys().cloned().collect::<Vec<_>>()),
+                            );
+                        }
+                        let mut total = 0;
+                        let mut keys = None;
+                        for child in map.values() {
+                            let (n, k) = count_songs(child);
+                            total += n;
+                            keys = keys.or(k);
+                        }
+                        (total, keys)
+                    }
+                    serde_json::Value::Array(list) => {
+                        let mut total = 0;
+                        let mut keys = None;
+                        for child in list {
+                            let (n, k) = count_songs(child);
+                            total += n;
+                            keys = keys.or(k);
+                        }
+                        (total, keys)
+                    }
+                    _ => (0, None),
+                }
+            }
+
+            // 对照实验：引擎路径不同 size 多次调用（FM 为随机歌单，需排除偶发性）
+            let station = &stations[0];
+            let fmid = station["fmid"].as_str().unwrap_or_default().to_string();
+            let fmtype = station
+                .get("fmtype")
+                .or_else(|| station.get("type"))
+                .and_then(|t| t.as_i64())
+                .unwrap_or(2);
+            fn count_songs_only(v: &serde_json::Value) -> usize {
+                match v {
+                    serde_json::Value::Object(map) => {
+                        if map.contains_key("hash") {
+                            return 1;
+                        }
+                        map.values().map(count_songs_only).sum()
+                    }
+                    serde_json::Value::Array(list) => list.iter().map(count_songs_only).sum(),
+                    _ => 0,
+                }
+            }
+            let mut max_count = 0usize;
+            // 引擎完整链路（Dart 契约参数；值须为字符串，与 rust_api_client 的编码一致）
+            for _ in 0..2 {
+                let query = format!(
+                    r#"{{"fmid":"{}","type":"{}","offset":"-1","size":"20"}}"#,
+                    fmid, fmtype
+                );
+                let songs = engine
+                    .request("GET", "/fm/songs", &query, None)
+                    .await
+                    .expect("fm/songs failed");
+                let songs_v: serde_json::Value = serde_json::from_str(&songs).unwrap();
+                let n = count_songs_only(&songs_v);
+                println!("== /fm/songs size=20 => 歌曲数 {}", n);
+                max_count = max_count.max(n);
+            }
+            assert!(max_count > 1, "电台歌曲应多于 1 首，实际最多 {} 首", max_count);
+
+            // /fm/class：分类电台分组
+            let class = engine
+                .request("GET", "/fm/class", "{}", None)
+                .await
+                .expect("fm/class failed");
+            let class_v: serde_json::Value = serde_json::from_str(&class).unwrap();
+            let mut class_stations = Vec::new();
+            collect_stations(&class_v, &mut class_stations);
+            println!("== /fm/class 分类电台数量: {}", class_stations.len());
+
+            // /fm/image（Dart 契约参数 fmid）
+            let img_query = format!(r#"{{"fmid":"{}"}}"#, fmid);
+            let img = engine
+                .request("GET", "/fm/image", &img_query, None)
+                .await
+                .expect("fm/image failed");
+            let img_v: serde_json::Value = serde_json::from_str(&img).unwrap();
+            println!(
+                "== /fm/image 返回: {}",
+                &img_v.to_string()[..img_v.to_string().len().min(300)]
+            );
+        });
     }
 }

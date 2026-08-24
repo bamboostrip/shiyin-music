@@ -3,12 +3,14 @@ use serde_json::{json, Value};
 use crate::error::AppResult;
 use crate::kugou::{config, crypto, request::{KgRequest, SignatureType}, session::KgSession, signer, transport};
 
+/// fm.service.kugou.com 系列接口统一用**标准客户端身份**（appid=1005 + OfficialSalt）
+/// 签名：歌曲列表等接口只对标准身份返回数据，Lite 身份会得到 status=1 但空 data。
 fn fm_signed_body(session: &KgSession, now_ms: i64, mut body: Value) -> Value {
     if let Value::Object(ref mut map) = body {
-        map.insert("appid".into(), json!(config::APP_ID));
+        map.insert("appid".into(), json!(config::OFFICIAL_APP_ID));
         map.insert("clienttime".into(), json!(now_ms));
-        map.insert("clientver".into(), json!(config::CLIENT_VER));
-        map.insert("key".into(), json!(signer::calc_login_key(now_ms)));
+        map.insert("clientver".into(), json!(config::OFFICIAL_CLIENT_VER));
+        map.insert("key".into(), json!(signer::calc_official_key(now_ms)));
         map.insert("mid".into(), json!(crypto::calc_new_mid(&session.dfid)));
     }
     body
@@ -27,7 +29,7 @@ pub async fn fm_recommend(client: &reqwest::Client, session: &KgSession) -> AppR
         .method(reqwest::Method::POST)
         .router("fm.service.kugou.com")
         .json_body(body)
-        .signature_type(SignatureType::Default);
+        .signature_type(SignatureType::OfficialAndroid);
     transport::send(client, session, &req).await
 }
 
@@ -64,7 +66,7 @@ pub async fn fm_songs(
         .method(reqwest::Method::POST)
         .router("fm.service.kugou.com")
         .json_body(body)
-        .signature_type(SignatureType::Default);
+        .signature_type(SignatureType::OfficialAndroid);
     transport::send(client, session, &req).await
 }
 
@@ -81,7 +83,7 @@ pub async fn fm_class(client: &reqwest::Client, session: &KgSession) -> AppResul
         .method(reqwest::Method::POST)
         .router("fm.service.kugou.com")
         .json_body(body)
-        .signature_type(SignatureType::Default);
+        .signature_type(SignatureType::OfficialAndroid);
     transport::send(client, session, &req).await
 }
 
@@ -107,6 +109,6 @@ pub async fn fm_image(client: &reqwest::Client, session: &KgSession, fm_ids: &st
         .method(reqwest::Method::POST)
         .router("fm.service.kugou.com")
         .json_body(body)
-        .signature_type(SignatureType::Default);
+        .signature_type(SignatureType::OfficialAndroid);
     transport::send(client, session, &req).await
 }

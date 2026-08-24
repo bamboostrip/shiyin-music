@@ -1213,9 +1213,12 @@ class FmImage {
 
   factory FmImage.fromJson(Map<String, dynamic> json) {
     return FmImage(
-      fmid: asString(json['fmid']) ?? '',
+      fmid: asString(json['fmid']) ?? asString(json['fmId']) ?? '',
       fmtype: asInt(json['fmtype']),
-      imageUrl: normalizeImageUrl(asString(json['imgurl'])),
+      // 实测 /fm/image 返回 imgUrl100（完整 URL）；imgurl 为另一来源的旧字段名
+      imageUrl: normalizeImageUrl(
+        asString(json['imgUrl100']) ?? asString(json['imgurl']),
+      ),
       bannerUrl: normalizeImageUrl(asString(json['banner'])),
     );
   }

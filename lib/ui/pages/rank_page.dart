@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
@@ -428,6 +430,8 @@ class _RankDetailPageState extends State<RankDetailPage> {
   var _hasMore = true;
   var _isLoadingMore = false;
   var _isLoading = true;
+  var _isLoadingAllSongs = false;
+  var _allSongsLoaded = false;
   String? _error;
 
   @override
@@ -506,13 +510,70 @@ class _RankDetailPageState extends State<RankDetailPage> {
 
   void _playSong(Song song) {
     widget.player.playSong(song, queue: List.of(_songs));
+    _expandQueueInBackgroundIfNeeded(startedWith: song);
   }
 
   void _playAll() {
     if (_songs.isNotEmpty) {
-      widget.player.playSong(_songs.first, queue: List.of(_songs));
+      final first = _songs.first;
+      widget.player.playSong(first, queue: List.of(_songs));
+      _expandQueueInBackgroundIfNeeded(startedWith: first);
     }
   }
+
+  /// 后台拉取榜单全部分页，并在仍播放本榜单时扩展播放队列（与歌单详情页同款机制）。
+  /// 播放立即以已加载列表开始，不阻塞等待；补全完成后静默替换队列，
+  /// 避免"播放全部只含首屏 50 首、播完回到第一首"。
+  void _expandQueueInBackgroundIfNeeded({required Song startedWith}) {
+    if (_allSongsLoaded || !_hasMore) return;
+    final startedKey = startedWith.hash.isNotEmpty ? startedWith.hash : startedWith.id;
+    if (startedKey.isEmpty) return;
+    unawaited(() async {
+      await _loadAllSongs();
+      if (!mounted) return;
+      final current = widget.player.currentSong;
+      if (current == null) return;
+      final currentKey = current.hash.isNotEmpty ? current.hash : current.id;
+      final queueStillOurs = widget.player.queue.any((s) {
+        final k = s.hash.isNotEmpty ? s.hash : s.id;
+        return k == startedKey;
+      });
+      // 用户已切到其它来源则不改队列
+      if (currentKey != startedKey && !queueStillOurs) return;
+      final expanded = List<Song>.of(_songs);
+      if (expanded.length <= widget.player.queue.length) return;
+      await widget.player.replaceQueue(expanded);
+    }());
+  }
+
+  Future<void> _loadAllSongs() async {
+    if (_isLoadingAllSongs || _allSongsLoaded) return;
+    setState(() => _isLoadingAllSongs = true);
+    try {
+      final allSongs = await widget.api.rankAudioAll(
+        rankId: widget.rank.rankId,
+      );
+      if (!mounted) return;
+      setState(() {
+        // 增量追加：保留已加载歌曲，仅追加尚未加载的，避免列表滚动位置被重置
+        final existingKeys = _songs.map(_songKey).toSet();
+        for (final song in allSongs) {
+          final key = _songKey(song);
+          if (existingKeys.contains(key)) continue;
+          _songs.add(song);
+          existingKeys.add(key);
+        }
+        _hasMore = false;
+        _allSongsLoaded = true;
+        _isLoadingAllSongs = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingAllSongs = false);
+    }
+  }
+
+  String _songKey(Song song) =>
+      song.hash.isNotEmpty ? song.hash : song.id;
 
   @override
   Widget build(BuildContext context) {

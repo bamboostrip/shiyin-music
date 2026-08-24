@@ -106,6 +106,23 @@ pub fn calc_login_key(clienttime: i64) -> String {
     crypto::md5_str(&raw)
 }
 
+/// fm.service.kugou.com 专用 key（标准客户端身份）。
+///
+/// 对应 KuGouMusicApi 的 `signParamsKey`（非 lite 平台）：
+/// `md5(officialAppid + OfficialSalt + officialClientver + clienttime)`。
+/// fm.service 的歌曲列表接口只对标准客户端身份（appid=1005）返回数据，
+/// Lite 身份（appid=3116）会得到 status=1 但 data 为空的响应。
+pub fn calc_official_key(clienttime: i64) -> String {
+    let raw = format!(
+        "{}{}{}{}",
+        config::OFFICIAL_APP_ID,
+        config::OFFICIAL_SALT,
+        config::OFFICIAL_CLIENT_VER,
+        clienttime
+    );
+    crypto::md5_str(&raw)
+}
+
 /// KgSigner.CalcCloudKey —— 云盘 key。
 ///
 /// `md5("musicclound" + hash + pid + salt)`，salt 为硬编码常量。
@@ -213,5 +230,18 @@ mod tests {
             config::APP_ID, config::LITE_SALT, config::CLIENT_VER, ms
         ));
         assert_eq!(k, expected);
+    }
+
+    #[test]
+    fn official_key_uses_official_identity() {
+        let ms: i64 = 1_700_000_000_000;
+        let k = calc_official_key(ms);
+        let expected = crypto::md5_str(&format!(
+            "{}{}{}{}",
+            config::OFFICIAL_APP_ID, config::OFFICIAL_SALT, config::OFFICIAL_CLIENT_VER, ms
+        ));
+        assert_eq!(k, expected);
+        // 与 Lite 身份的 key 不同（salt/appid/clientver 均不同）
+        assert_ne!(k, calc_login_key(ms));
     }
 }
