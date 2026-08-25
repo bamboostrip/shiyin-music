@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../../models/music_models.dart';
 import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
+import '../../services/network_monitor.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
@@ -67,6 +69,8 @@ class _HomePageState extends State<HomePage> {
   var _sectionIndex = 0;
   var _updateBannerDismissed = false;
   var _autoUpdateDialogShown = false;
+  StreamSubscription<void>? _networkRestoredSub;
+  bool _silentRefreshing = false;
 
   @override
   void initState() {
@@ -85,6 +89,11 @@ class _HomePageState extends State<HomePage> {
       _tryRestoreFromCache();
     }
     widget.auth.addListener(_handleAuthChanged);
+    // 断网进入首页时会停留在缓存歌曲上（静默刷新失败被吞掉），且缓存
+    // 内容可能与线上不同；恢复网络后重新拉取，让首页与线上同步。
+    _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
+      (_) => _silentRefresh(),
+    );
     if (AppUpdateService.isSupportedPlatform) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
     }
@@ -100,6 +109,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _networkRestoredSub?.cancel();
     widget.auth.removeListener(_handleAuthChanged);
     super.dispose();
   }
@@ -161,6 +171,9 @@ class _HomePageState extends State<HomePage> {
   /// 先从缓存显示（已在 initState/_tryRestoreFromCache 中完成），
   /// 然后后台请求最新数据，成功后更新 UI，失败则保持缓存数据。
   Future<void> _silentRefresh() async {
+    // 网络恢复事件可能与启动时的静默刷新重叠，避免并发请求。
+    if (_silentRefreshing) return;
+    _silentRefreshing = true;
     try {
       final results = await Future.wait([
         widget.api.dailyRecommend(),
@@ -189,6 +202,8 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (_) {
       // 静默刷新失败，保持缓存数据不变
+    } finally {
+      _silentRefreshing = false;
     }
   }
 
@@ -893,8 +908,8 @@ class _FeatureCard extends StatelessWidget {
             children: [
               if (imageUrl != null)
                 Positioned.fill(
-                  child: Image.network(
-                    imageUrl!,
+                  child: RetryableNetworkImage(
+                    url: imageUrl!,
                     fit: BoxFit.cover,
                     cacheWidth: 600,
                     cacheHeight: 600,
@@ -1575,11 +1590,33 @@ class _RadioSectionState extends State<_RadioSection> {
 
   late Future<_RadioData> _future;
   String? _loadingStationId;
+  StreamSubscription<void>? _networkRestoredSub;
 
   @override
   void initState() {
     super.initState();
-    _future = _cachedFuture ??= _load();
+    final future = _cachedFuture ??= _load();
+    _future = future;
+    // 静态缓存只保留成功结果：断网时产生的 error future 若滞留缓存，
+    // 之后每次进入电台 tab 都会复用同一个错误，只能手动刷新恢复。
+    unawaited(
+      future.then(
+        (_) {},
+        onError: (_) {
+          if (identical(_cachedFuture, future)) _cachedFuture = null;
+        },
+      ),
+    );
+    // 断网进入电台 tab 会停留在错误/空数据上，恢复网络后自动重载。
+    _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
+      (_) => _refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _networkRestoredSub?.cancel();
+    super.dispose();
   }
 
   Future<_RadioData> _load() async {
@@ -1860,8 +1897,8 @@ class _RadioHeroCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (station.bannerUrl ?? station.artworkUrl case final url?)
-                  Image.network(
-                    url,
+                  RetryableNetworkImage(
+                    url: url,
                     fit: BoxFit.cover,
                     cacheWidth: 600,
                     cacheHeight: 300,

@@ -7,6 +7,7 @@ import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
+import '../../services/network_monitor.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
@@ -33,6 +34,7 @@ class _RankPageState extends State<RankPage>
     with AutomaticKeepAliveClientMixin {
   Future<List<RankCategory>>? _future;
   Future<List<Song>>? _newSongsFuture;
+  StreamSubscription<void>? _networkRestoredSub;
 
   @override
   bool get wantKeepAlive => true;
@@ -42,6 +44,16 @@ class _RankPageState extends State<RankPage>
     super.initState();
     _future = widget.api.rankList(withSong: 3);
     _newSongsFuture = widget.api.newSongs();
+    // 断网进入排行榜会停留在错误页上，恢复网络后自动刷新。
+    _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
+      (_) => _refresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _networkRestoredSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {

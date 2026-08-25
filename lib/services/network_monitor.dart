@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 
 /// 网络状态监听。
 ///
@@ -52,6 +53,12 @@ class NetworkMonitor {
     if (hasNetwork && wasOffline && !_restored.isClosed) {
       _restored.add(null);
     }
+  }
+
+  /// 仅供测试：模拟"网络从断开恢复到可用"事件，驱动 UI 层的自动刷新。
+  @visibleForTesting
+  void debugSimulateRestored() {
+    if (!_restored.isClosed) _restored.add(null);
   }
 
   void dispose() {
