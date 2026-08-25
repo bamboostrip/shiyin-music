@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,24 @@ import '../core/api_client.dart';
 import '../models/music_models.dart';
 import '../services/cache_service.dart';
 import '../services/music_api.dart';
+import '../services/network_monitor.dart';
 import '../services/vip_background_task.dart';
 
 class AuthController extends ChangeNotifier {
   AuthController(this._api, this._cacheService) {
     _vipBackgroundTask.onClaimSuccess = () => refreshProfile(silent: true);
+    // 断网启动时 refreshProfile（含 VIP 状态查询）与每日 VIP 领取都会失败，
+    // 且没有其他时机补跑；恢复网络后静默刷新用户数据并补跑领取任务
+    // （schedule 自带当日去重，当天已领过则直接跳过）。
+    _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
+      (_) {
+        if (!isLoggedIn) return;
+        unawaited(() async {
+          await refreshProfile(silent: true);
+          _vipBackgroundTask.schedule(session);
+        }());
+      },
+    );
   }
 
   static const _tokenKey = 'ka_music_token';
@@ -39,6 +53,7 @@ class AuthController extends ChangeNotifier {
 
   final Set<String> _likedHashes = {};
   final Map<String, int> _hashToFileId = {};
+  StreamSubscription<void>? _networkRestoredSub;
 
   bool get isLoggedIn => session?.isValid == true;
 
@@ -703,5 +718,11 @@ class AuthController extends ChangeNotifier {
       return error.message;
     }
     return error.toString();
+  }
+
+  @override
+  void dispose() {
+    _networkRestoredSub?.cancel();
+    super.dispose();
   }
 }
