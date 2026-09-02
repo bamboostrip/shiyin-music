@@ -148,7 +148,7 @@ class _AppShellState extends State<AppShell> {
                           return Scaffold(
                             body: Column(
                               children: [
-                                _buildCarTopNavBar(navContext, colorScheme),
+                                _buildCarTopNavBar(navContext),
                                 const Divider(height: 1),
                                 Expanded(
                                   child: _LazyIndexedStack(
@@ -273,7 +273,8 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _buildCarTopNavBar(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildCarTopNavBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final tabs = ['我的', '推荐', '排行榜', '电台'];
     final topInset = MediaQuery.paddingOf(context).top;
     final isDark = Theme.of(context).brightness == Brightness.dark;
