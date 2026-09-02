@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/music_models.dart';
 import '../services/audio_effects_service.dart';
 import '../services/cache_service.dart';
+import '../services/bluetooth_lyrics_service.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/music_api.dart';
@@ -20,6 +21,7 @@ import '../services/music_audio_handler.dart';
 import '../services/network_monitor.dart';
 import '../services/playback_history_service.dart';
 import '../services/playback_stats_service.dart';
+import '../services/super_lyric_service.dart';
 import '../services/vip_background_task.dart';
 import 'download_controller.dart';
 import 'local_music_controller.dart';
@@ -53,6 +55,8 @@ class PlayerController extends ChangeNotifier {
   static const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
   static const _autoPlayOnDeviceConnectedSettingKey =
       'settings.auto_play_on_device_connected';
+  static const _bluetoothLyricsEnabledSettingKey =
+      'settings.bluetooth_lyrics_enabled';
   static const _playbackStateKey = 'playback_state';
   static const _playbackStateMaxQueueSize = 200;
   static const _listenTimeReportInterval = Duration(minutes: 30);
@@ -121,6 +125,8 @@ class PlayerController extends ChangeNotifier {
       _maybeCompleteFromPosition(value);
       _maybeStopClimaxPreview(value);
       _maybeSyncDesktopLyricFromPosition();
+      _syncSuperLyricFromPosition();
+      _syncBluetoothLyricsFromPosition();
       // 进度只通知 positionListenable，避免整页 AnimatedBuilder(player) 每 tick 重建。
       _emitPosition();
     });
@@ -148,6 +154,8 @@ class PlayerController extends ChangeNotifier {
       }
       _syncListeningTimeTracker();
       _syncDesktopPlayState();
+      _syncSuperLyricFromPosition();
+      _syncBluetoothLyricsFromPosition();
       _emitPosition();
       notifyListeners();
     });
@@ -171,6 +179,7 @@ class PlayerController extends ChangeNotifier {
     });
     unawaited(_setupAudioSessionListeners());
     unawaited(_loudness.init());
+    unawaited(_superLyric.registerPublisher());
   }
 
   final MusicApi _api;
@@ -180,6 +189,8 @@ class PlayerController extends ChangeNotifier {
   final PlaybackHistoryService _historyService = PlaybackHistoryService();
   final PlaybackStatsService _statsService = PlaybackStatsService();
   final LoudnessService _loudness = LoudnessService();
+  final SuperLyricService _superLyric = SuperLyricService();
+  final BluetoothLyricsService _bluetoothLyrics = BluetoothLyricsService();
   double? _pendingGainDb; // 当前歌曲分析得到的待应用增益(dB)
   // 切歌竞态守卫:每次发起分析递增,回调比对序号,不一致则丢弃旧结果。
   int _loudnessSerial = 0;
@@ -270,8 +281,17 @@ class PlayerController extends ChangeNotifier {
   bool audioInterruptionEnabled = true;
   bool autoResumeAfterInterruption = false;
   bool autoPlayOnDeviceConnected = false;
+  bool bluetoothLyricsEnabled = false;
   bool desktopLyricsEnabled = false;
   DesktopLyricsSettings desktopLyricsSettings = const DesktopLyricsSettings();
+  bool get isBluetoothLyricsSupported =>
+      BluetoothLyricsService.isSupportedPlatform;
+
+  // SuperLyric/蓝牙歌词同步状态
+  int _lastSuperLyricIndex = -1;
+  bool _lastSuperLyricPlaying = false;
+  int _lastBluetoothLyricIndex = -1;
+  bool _lastBluetoothPlaying = false;
   Timer? _autoResumeTimer;
   Duration? sleepTimerRemaining;
   Timer? _sleepTimer;
@@ -709,6 +729,32 @@ class PlayerController extends ChangeNotifier {
     autoPlayOnDeviceConnected = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_autoPlayOnDeviceConnectedSettingKey, enabled);
+    notifyListeners();
+  }
+
+  /// 开关车载蓝牙歌词广播（默认关闭，避免无车机时多余广播）。
+  Future<void> setBluetoothLyricsEnabled(bool enabled) async {
+    if (bluetoothLyricsEnabled == enabled) return;
+    bluetoothLyricsEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_bluetoothLyricsEnabledSettingKey, enabled);
+    if (!enabled && currentSong != null) {
+      unawaited(
+        _bluetoothLyrics.broadcastMetaChanged(
+          title: currentSong!.title,
+          artist: currentSong!.artist,
+          album: currentSong!.albumName,
+          lyric: '',
+          position: position,
+          duration: currentSong!.duration ?? Duration.zero,
+          playing: isPlaying,
+          trackIndex: currentIndex,
+          listSize: queue.length,
+        ),
+      );
+    } else if (enabled) {
+      _pushBluetoothLyricForCurrentLine(force: true);
+    }
     notifyListeners();
   }
 
@@ -1406,6 +1452,107 @@ class PlayerController extends ChangeNotifier {
     _syncDesktopKaraokeProgress();
   }
 
+  void _syncSuperLyricFromPosition() {
+    if (currentSong == null) return;
+    if (lyrics.isEmpty) {
+      if (!isPlaying && _lastSuperLyricPlaying) {
+        _lastSuperLyricPlaying = false;
+        _lastSuperLyricIndex = -1;
+        unawaited(_superLyric.sendStop());
+      } else if (isPlaying && !_lastSuperLyricPlaying) {
+        _lastSuperLyricPlaying = true;
+      }
+      return;
+    }
+    final index = activeLyricIndex;
+    final lineChanged = isPlaying && (index != _lastSuperLyricIndex);
+    final resumed = isPlaying && !_lastSuperLyricPlaying;
+    if (lineChanged || resumed) {
+      _lastSuperLyricIndex = index;
+      _lastSuperLyricPlaying = true;
+      final clampedIndex = index.clamp(0, lyrics.length - 1);
+      final line = lyrics[clampedIndex];
+      final lineEndTime = line.time +
+          (line.duration ?? _estimatedLineDuration(clampedIndex) ?? Duration.zero);
+      unawaited(
+        _superLyric.sendLyric(
+          song: currentSong!,
+          line: line,
+          lineEndTime: lineEndTime,
+        ),
+      );
+    } else if (!isPlaying && _lastSuperLyricPlaying) {
+      _lastSuperLyricPlaying = false;
+      unawaited(_superLyric.sendStop());
+    }
+  }
+
+  void _syncBluetoothLyricsFromPosition() {
+    if (!bluetoothLyricsEnabled) return;
+    if (currentSong == null) return;
+    final index = lyrics.isEmpty ? -1 : activeLyricIndex;
+    final lineChanged = index != _lastBluetoothLyricIndex;
+    final playingChanged = isPlaying != _lastBluetoothPlaying;
+    if (lineChanged || playingChanged) {
+      _pushBluetoothLyricForCurrentLine(
+        index: index,
+        forcePlayState: playingChanged,
+      );
+    }
+  }
+
+  void _pushBluetoothLyricForCurrentLine({
+    bool force = false,
+    int? index,
+    bool forcePlayState = false,
+  }) {
+    if (!bluetoothLyricsEnabled || currentSong == null) return;
+    final song = currentSong!;
+    final resolvedIndex = index ?? (lyrics.isEmpty ? -1 : activeLyricIndex);
+    final prevIndex = _lastBluetoothLyricIndex;
+
+    final String lyricText;
+    if (lyrics.isEmpty || resolvedIndex < 0) {
+      lyricText = '';
+      _lastBluetoothLyricIndex = -1;
+    } else {
+      final clampedIndex = resolvedIndex.clamp(0, lyrics.length - 1);
+      lyricText = lyrics[clampedIndex].text;
+      _lastBluetoothLyricIndex = clampedIndex;
+    }
+
+    _lastBluetoothPlaying = isPlaying;
+
+    final lineChanged = force || prevIndex != _lastBluetoothLyricIndex;
+    if (lineChanged) {
+      unawaited(
+        _bluetoothLyrics.broadcastMetaChanged(
+          title: song.title,
+          artist: song.artist,
+          album: song.albumName,
+          lyric: lyricText,
+          position: position,
+          duration: song.duration ?? Duration.zero,
+          playing: isPlaying,
+          trackIndex: currentIndex,
+          listSize: queue.length,
+        ),
+      );
+    }
+    if (forcePlayState) {
+      unawaited(
+        _bluetoothLyrics.broadcastPlayStateChanged(
+          title: song.title,
+          artist: song.artist,
+          album: song.albumName,
+          position: position,
+          duration: song.duration ?? Duration.zero,
+          playing: isPlaying,
+        ),
+      );
+    }
+  }
+
   void _syncDesktopKaraokeProgress() {
     if (!_shouldShowDesktopLyrics || lyrics.isEmpty) return;
     final index = activeLyricIndex;
@@ -1649,6 +1796,9 @@ class PlayerController extends ChangeNotifier {
     autoPlayOnDeviceConnected =
         prefs.getBool(_autoPlayOnDeviceConnectedSettingKey) ??
         autoPlayOnDeviceConnected;
+    bluetoothLyricsEnabled =
+        prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
+        bluetoothLyricsEnabled;
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
     desktopLyricsEnabled =
         prefs.getBool(_desktopLyricsEnabledSettingKey) ?? desktopLyricsEnabled;
@@ -2118,6 +2268,7 @@ class PlayerController extends ChangeNotifier {
     );
     unawaited(_loudness.cancelAnalysis());
     unawaited(_loudness.releaseNative());
+    unawaited(_superLyric.unregisterPublisher());
     _audioHandler.detachTransportControls();
     _desktopLyrics.setVisibilityChangedHandler(null);
     unawaited(_audioHandler.close());

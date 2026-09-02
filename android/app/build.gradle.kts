@@ -30,7 +30,8 @@ android {
         applicationId = "shiyin.famlife.top"
         // You may update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // 车载歌词依赖 SuperLyricApi 3.4 声明 minSdk 26，原 flutter.minSdkVersion(24) 会在 Manifest 合并失败
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -78,6 +79,20 @@ kotlin {
     }
 }
 
+
+// JitPack 懒构建不缓存失败结果，避免首次 404 被永久缓存
+configurations.all {
+    resolutionStrategy {
+        cacheChangingModulesFor(0, "seconds")
+    }
+}
+
+dependencies {
+    // SuperLyricApi 3.4 via JitPack，车载歌词广播（Xposed）
+    implementation("com.github.HChenX:SuperLyricApi:3.4") {
+        isChanging = true
+    }
+}
 
 flutter {
     source = "../.."

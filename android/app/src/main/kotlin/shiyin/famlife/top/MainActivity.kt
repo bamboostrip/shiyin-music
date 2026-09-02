@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
@@ -27,6 +28,10 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.hchen.superlyricapi.SuperLyricHelper
+import com.hchen.superlyricapi.SuperLyricData
+import com.hchen.superlyricapi.SuperLyricLine
+import com.hchen.superlyricapi.SuperLyricWord
 import java.io.File
 import kotlin.concurrent.thread
 
@@ -35,6 +40,8 @@ class MainActivity : AudioServiceActivity() {
     private var downloadReceiverRegistered = false
     private var lyricsStateReceiverRegistered = false
     private var desktopLyricsChannel: MethodChannel? = null
+    private var superLyricChannel: MethodChannel? = null
+    private var superLyricRegistered = false
     // audio_effects channel 引用,供响度分析中途反向 invokeMethod 推进度给 Dart。
     private var audioEffectsChannel: MethodChannel? = null
     private var bassBoost: BassBoost? = null
@@ -51,6 +58,8 @@ class MainActivity : AudioServiceActivity() {
 
     companion object {
         private const val REQUEST_READ_AUDIO = 1001
+        private const val TAG_SUPER_LYRIC = "SuperLyricPublisher"
+        private const val TAG_BLUETOOTH_LYRICS = "BluetoothLyrics"
     }
 
     private val downloadReceiver = object : BroadcastReceiver() {
@@ -436,6 +445,248 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // SuperLyric 系统歌词发布（Xposed）
+        superLyricChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "kgka_music_hl/super_lyric"
+        )
+        superLyricChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isAvailable" -> {
+                    runCatching {
+                        SuperLyricHelper.isAvailable()
+                    }.onSuccess { available ->
+                        result.success(available)
+                    }.onFailure { error ->
+                        Log.w(TAG_SUPER_LYRIC, "isAvailable failed: ${error.message}")
+                        result.success(false)
+                    }
+                }
+                "registerPublisher" -> {
+                    runCatching {
+                        if (!superLyricRegistered) {
+                            SuperLyricHelper.registerPublisher()
+                            superLyricRegistered = true
+                        }
+                        val registered = runCatching {
+                            SuperLyricHelper.isPublisherRegistered()
+                        }.getOrNull() ?: superLyricRegistered
+                        Log.d(TAG_SUPER_LYRIC, "registerPublisher: registered=$registered")
+                        result.success(registered)
+                    }.onFailure { error ->
+                        Log.w(TAG_SUPER_LYRIC, "registerPublisher failed: ${error.message}")
+                        result.success(false)
+                    }
+                }
+                "unregisterPublisher" -> {
+                    runCatching {
+                        if (superLyricRegistered) {
+                            SuperLyricHelper.unregisterPublisher()
+                            superLyricRegistered = false
+                        }
+                        result.success(null)
+                    }.onFailure {
+                        result.success(null)
+                    }
+                }
+                "sendLyric" -> {
+                    runCatching {
+                        if (!superLyricRegistered) {
+                            SuperLyricHelper.registerPublisher()
+                            superLyricRegistered = true
+                        }
+                        val title = call.argument<String>("title") ?: ""
+                        val artist = call.argument<String>("artist") ?: ""
+                        val album = call.argument<String>("album") ?: ""
+                        val lyricText = call.argument<String>("lyricText") ?: ""
+                        val lyricStartTime =
+                            (call.argument<Number>("lyricStartTime"))?.toLong() ?: 0L
+                        val lyricEndTime =
+                            (call.argument<Number>("lyricEndTime"))?.toLong() ?: 0L
+                        val secondaryText = call.argument<String>("secondaryText")
+                        val translationText = call.argument<String>("translationText")
+                        val words = call.argument<List<Map<String, Any>>>("words")
+
+                        val lyricData = SuperLyricData()
+                            .setTitle(title)
+                            .setArtist(artist)
+                            .setAlbum(album)
+
+                        val lyricWords: Array<SuperLyricWord>? = words?.mapNotNull { w ->
+                            val wordText = w["word"] as? String
+                            val wordStart = (w["startTime"] as? Number)?.toLong()
+                            val wordEnd = (w["endTime"] as? Number)?.toLong()
+                            if (wordText != null && wordStart != null && wordEnd != null) {
+                                SuperLyricWord(wordText, wordStart, wordEnd)
+                            } else null
+                        }?.takeIf { it.isNotEmpty() }?.toTypedArray()
+
+                        val mainLyric = if (lyricWords != null) {
+                            SuperLyricLine(lyricText, lyricWords, lyricStartTime, lyricEndTime)
+                        } else {
+                            SuperLyricLine(lyricText, lyricStartTime, lyricEndTime)
+                        }
+                        lyricData.setLyric(mainLyric)
+
+                        if (!secondaryText.isNullOrBlank()) {
+                            lyricData.setSecondary(
+                                SuperLyricLine(secondaryText, lyricStartTime, lyricEndTime)
+                            )
+                        }
+                        if (!translationText.isNullOrBlank()) {
+                            lyricData.setTranslation(
+                                SuperLyricLine(translationText, lyricStartTime, lyricEndTime)
+                            )
+                        }
+                        SuperLyricHelper.sendLyric(lyricData)
+                        Log.d(
+                            TAG_SUPER_LYRIC,
+                            "sendLyric ok: \"$lyricText\" ($lyricStartTime-$lyricEndTime ms), words=${lyricWords?.size ?: 0}"
+                        )
+                        result.success(true)
+                    }.onFailure { error ->
+                        Log.w(TAG_SUPER_LYRIC, "sendLyric failed: ${error.message}")
+                        result.error("send_lyric_failed", error.message, null)
+                    }
+                }
+                "sendStop" -> {
+                    runCatching {
+                        if (!superLyricRegistered) {
+                            SuperLyricHelper.registerPublisher()
+                            superLyricRegistered = true
+                        }
+                        SuperLyricHelper.sendStop(SuperLyricData())
+                        Log.d(TAG_SUPER_LYRIC, "sendStop ok")
+                        result.success(true)
+                    }.onFailure { error ->
+                        Log.w(TAG_SUPER_LYRIC, "sendStop failed: ${error.message}")
+                        result.error("send_stop_failed", error.message, null)
+                    }
+                }
+                "debugState" -> {
+                    result.success(
+                        mapOf(
+                            "serviceAvailable" to
+                                (runCatching { SuperLyricHelper.isAvailable() }.getOrNull() ?: false),
+                            "localRegisteredFlag" to superLyricRegistered,
+                            "publisherRegistered" to
+                                (runCatching { SuperLyricHelper.isPublisherRegistered() }
+                                    .getOrNull() ?: false),
+                        )
+                    )
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 车载蓝牙歌词广播（标准 + 厂商兼容）
+        val btLyricChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "kgka_music_hl/bluetooth_lyrics"
+        )
+        btLyricChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "broadcastMetaChanged" -> {
+                    runCatching {
+                        val title = call.argument<String>("title") ?: ""
+                        val artist = call.argument<String>("artist") ?: ""
+                        val album = call.argument<String>("album") ?: ""
+                        val lyric = call.argument<String>("lyric") ?: ""
+                        val positionMs = (call.argument<Number>("positionMs") ?: 0).toLong()
+                        val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
+                        val playing = call.argument<Boolean>("playing") ?: false
+                        val track = (call.argument<Number>("track") ?: 0).toInt()
+                        val listSize = (call.argument<Number>("listSize") ?: 0).toInt()
+
+                        val extras = Bundle().apply {
+                            putString("track", title)
+                            putString("artist", artist)
+                            putString("album", album)
+                            putString("id", "")
+                            putLong("position", positionMs)
+                            putLong("duration", durationMs)
+                            putBoolean("playing", playing)
+                            putInt("ListSize", listSize)
+                            putInt("trackPos", track)
+                            putString("lyric", lyric)
+                            putString("currentLyric", lyric)
+                            putString("DISPLAY_NAME", title)
+                        }
+
+                        sendOrderedBroadcast(Intent("com.android.music.metachanged").apply {
+                            putExtras(extras)
+                            setPackage(null)
+                        }, null)
+                        sendBroadcast(Intent("com.netease.cloudmusic.metachanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+                        sendBroadcast(Intent("com.tencent.qqmusic.metachanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+                        sendBroadcast(Intent("com.kugou.android.metachanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+                        sendBroadcast(Intent("cn.kuwo.player.metachanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+
+                        Log.d(
+                            TAG_BLUETOOTH_LYRICS,
+                            "metaChanged ok: \"$title\"/\"$artist\", lyric=\"${lyric.take(24)}\", pos=${positionMs}ms"
+                        )
+                        result.success(true)
+                    }.onFailure { error ->
+                        Log.w(TAG_BLUETOOTH_LYRICS, "broadcastMetaChanged failed: ${error.message}")
+                        result.success(false)
+                    }
+                }
+                "broadcastPlayStateChanged" -> {
+                    runCatching {
+                        val title = call.argument<String>("title") ?: ""
+                        val artist = call.argument<String>("artist") ?: ""
+                        val album = call.argument<String>("album") ?: ""
+                        val positionMs = (call.argument<Number>("positionMs") ?: 0).toLong()
+                        val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
+                        val playing = call.argument<Boolean>("playing") ?: false
+
+                        val extras = Bundle().apply {
+                            putString("track", title)
+                            putString("artist", artist)
+                            putString("album", album)
+                            putLong("position", positionMs)
+                            putLong("duration", durationMs)
+                            putBoolean("playing", playing)
+                        }
+                        sendBroadcast(Intent("com.android.music.playstatechanged").apply {
+                            putExtras(extras)
+                            setPackage(null)
+                        })
+                        sendBroadcast(Intent("com.netease.cloudmusic.playstatechanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+                        sendBroadcast(Intent("com.tencent.qqmusic.playstatechanged").apply {
+                            putExtras(Bundle(extras))
+                            setPackage(null)
+                        })
+                        Log.d(
+                            TAG_BLUETOOTH_LYRICS,
+                            "playStateChanged ok: \"$title\", playing=$playing, pos=${positionMs}ms"
+                        )
+                        result.success(true)
+                    }.onFailure { error ->
+                        Log.w(TAG_BLUETOOTH_LYRICS, "broadcastPlayStateChanged failed: ${error.message}")
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun readAudioPermission(): String {
@@ -830,6 +1081,10 @@ class MainActivity : AudioServiceActivity() {
         releaseEqualizer()
         releaseBassBoost()
         releaseLoudnessGain()
+        if (superLyricRegistered) {
+            runCatching { SuperLyricHelper.unregisterPublisher() }
+            superLyricRegistered = false
+        }
         if (downloadReceiverRegistered) {
             unregisterReceiver(downloadReceiver)
             downloadReceiverRegistered = false
