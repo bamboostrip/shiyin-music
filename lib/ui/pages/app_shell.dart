@@ -319,13 +319,14 @@ class _AppShellState extends State<AppShell> {
   Widget _buildCarTopNavBar(BuildContext context, ColorScheme colorScheme) {
     final tabs = ['我的', '推荐', '排行榜', '电台'];
     final topInset = MediaQuery.paddingOf(context).top;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       // 顶部加上状态栏高度，避免导航栏内容被状态栏遮挡
       padding: EdgeInsets.fromLTRB(16, topInset, 16, 0),
       height: 72 + topInset, // Increased from 64
       child: Row(
         children: [
-          // Search Pill Button
+          // Search Pill Button — 已适配深色模式：深色下使用实色 + 边框提升对比度
           GestureDetector(
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
@@ -342,25 +343,37 @@ class _AppShellState extends State<AppShell> {
                 horizontal: 20,
               ), // Increased from 16
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest.withValues(
-                  alpha: .54,
-                ),
+                color: isDark
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surfaceContainerHighest.withValues(
+                        alpha: .54,
+                      ),
                 borderRadius: BorderRadius.circular(
                   23,
                 ), // Increased from 19 (height/2)
+                border: Border.all(
+                  color: isDark
+                      ? colorScheme.outlineVariant.withValues(alpha: .85)
+                      : colorScheme.outlineVariant.withValues(alpha: .45),
+                  width: 1,
+                ),
               ),
               child: Row(
                 children: [
                   Icon(
                     Icons.search_rounded,
-                    color: colorScheme.onSurfaceVariant,
+                    color: isDark
+                        ? colorScheme.onSurface.withValues(alpha: .92)
+                        : colorScheme.onSurfaceVariant,
                     size: 22, // Increased from 20
                   ),
                   const SizedBox(width: 8),
                   Text(
                     '搜索',
                     style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
+                      color: isDark
+                          ? colorScheme.onSurface.withValues(alpha: .92)
+                          : colorScheme.onSurfaceVariant,
                       fontSize: 16, // Increased from default
                       fontWeight: FontWeight.w600,
                     ),

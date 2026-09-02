@@ -233,6 +233,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildCarSearchHeader(BuildContext context, ColorScheme colorScheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       children: [
         IconButton(
@@ -244,23 +245,42 @@ class _SearchPageState extends State<SearchPage> {
           child: Container(
             height: 46,
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withValues(alpha: .54),
+              color: isDark
+                  ? colorScheme.surfaceContainerHighest
+                  : colorScheme.surfaceContainerHighest.withValues(alpha: .54),
               borderRadius: BorderRadius.circular(23),
+              border: Border.all(
+                color: isDark
+                    ? colorScheme.outlineVariant.withValues(alpha: .85)
+                    : colorScheme.outlineVariant.withValues(alpha: .45),
+                width: 1,
+              ),
             ),
             child: TextField(
               controller: _controller,
               focusNode: _focusNode,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _onSubmit(),
-              style: Theme.of(context).textTheme.bodyLarge,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: isDark
+                        ? colorScheme.onSurface.withValues(alpha: .92)
+                        : null,
+                  ),
               decoration: InputDecoration(
                 prefixIcon: Icon(
                   Icons.search_rounded,
-                  color: colorScheme.onSurfaceVariant,
+                  color: isDark
+                      ? colorScheme.onSurface.withValues(alpha: .92)
+                      : colorScheme.onSurfaceVariant,
                 ),
                 suffixIcon: _controller.text.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close_rounded),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: isDark
+                              ? colorScheme.onSurface.withValues(alpha: .86)
+                              : null,
+                        ),
                         onPressed: () {
                           _controller.clear();
                           _focusNode.requestFocus();
@@ -268,7 +288,11 @@ class _SearchPageState extends State<SearchPage> {
                       )
                     : null,
                 hintText: '搜索歌曲，歌手',
-                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                hintStyle: TextStyle(
+                  color: isDark
+                      ? colorScheme.onSurface.withValues(alpha: .62)
+                      : colorScheme.onSurfaceVariant,
+                ),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(vertical: 11),
               ),
@@ -300,6 +324,7 @@ class _SearchPageState extends State<SearchPage> {
     final size = MediaQuery.sizeOf(context);
     final isLandscape = size.width > size.height;
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     // 车机式搜索栏仅在车机模式开启时使用，普通横屏用标准布局。
     final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
 
@@ -332,23 +357,42 @@ class _SearchPageState extends State<SearchPage> {
         title: Container(
           height: 42,
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest.withValues(alpha: .54),
+            color: isDark
+                ? colorScheme.surfaceContainerHighest
+                : colorScheme.surfaceContainerHighest.withValues(alpha: .54),
             borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isDark
+                  ? colorScheme.outlineVariant.withValues(alpha: .85)
+                  : colorScheme.outlineVariant.withValues(alpha: .45),
+              width: 1,
+            ),
           ),
           child: TextField(
             controller: _controller,
             focusNode: _focusNode,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _onSubmit(),
-            style: Theme.of(context).textTheme.bodyLarge,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: isDark
+                      ? colorScheme.onSurface.withValues(alpha: .92)
+                      : null,
+                ),
             decoration: InputDecoration(
               prefixIcon: Icon(
                 Icons.search_rounded,
-                color: colorScheme.onSurfaceVariant,
+                color: isDark
+                    ? colorScheme.onSurface.withValues(alpha: .92)
+                    : colorScheme.onSurfaceVariant,
               ),
               suffixIcon: _controller.text.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.close_rounded),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: isDark
+                            ? colorScheme.onSurface.withValues(alpha: .86)
+                            : null,
+                      ),
                       onPressed: () {
                         _controller.clear();
                         _focusNode.requestFocus();
@@ -356,7 +400,11 @@ class _SearchPageState extends State<SearchPage> {
                     )
                   : null,
               hintText: '搜索歌曲，歌手',
-              hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+              hintStyle: TextStyle(
+                color: isDark
+                    ? colorScheme.onSurface.withValues(alpha: .62)
+                    : colorScheme.onSurfaceVariant,
+              ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
