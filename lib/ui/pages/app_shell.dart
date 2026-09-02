@@ -10,11 +10,13 @@ import '../../controllers/theme_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
+import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import 'home_page.dart';
 import 'library_page.dart';
+import 'player_page.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
 
@@ -210,13 +212,13 @@ class _AppShellState extends State<AppShell> {
         Positioned.fill(
           child: _LazyIndexedStack(index: portraitIndex, children: pages),
         ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom:
-              bottomInset + (useNavRail ? 16 : kBottomNavigationBarHeight + 10),
-          child: MiniPlayer(player: widget.player, auth: widget.auth),
-        ),
+        if (useNavRail)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: bottomInset + 16,
+            child: MiniPlayer(player: widget.player, auth: widget.auth),
+          ),
       ],
     );
 
@@ -264,54 +266,11 @@ class _AppShellState extends State<AppShell> {
       body: AdaptiveContentPadding(child: mainContent),
       bottomNavigationBar: useNavRail
           ? null
-          : ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? colorScheme.surfaceContainerHighest.withValues(
-                            alpha: .72,
-                          )
-                        : colorScheme.surfaceContainerHighest.withValues(
-                            alpha: .64,
-                          ),
-                    border: Border(
-                      top: BorderSide(
-                        color: colorScheme.outlineVariant.withValues(
-                          alpha: .38,
-                        ),
-                      ),
-                    ),
-                  ),
-                  child: BottomNavigationBar(
-                    currentIndex: portraitIndex,
-                    onTap: _setPortraitIndex,
-                    backgroundColor: Colors.transparent,
-                    elevation: 0,
-                    selectedItemColor: colorScheme.primary,
-                    unselectedItemColor: colorScheme.onSurface,
-                    selectedLabelStyle: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                    ),
-                    unselectedLabelStyle: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                    ),
-                    items: const [
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.home_outlined),
-                        activeIcon: Icon(Icons.home_rounded),
-                        label: '首页',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.person_outline_rounded),
-                        activeIcon: Icon(Icons.person_rounded),
-                        label: '我的',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          : _FloatingBottomBar(
+              currentIndex: portraitIndex,
+              onTap: _setPortraitIndex,
+              player: widget.player,
+              auth: widget.auth,
             ),
     );
   }
@@ -463,6 +422,219 @@ class _AppShellState extends State<AppShell> {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 悬浮胶囊底栏（实色，无 BackdropFilter）— 参考上游 ` _LiquidGlassBottomBar` 的居中唱片交互，
+/// 但以实色 + 轻阴影实现，避免 `ImageFilter.blur` 在车机/低端机上的离屏缓冲与掉帧。
+class _FloatingBottomBar extends StatelessWidget {
+  const _FloatingBottomBar({
+    required this.currentIndex,
+    required this.onTap,
+    required this.player,
+    required this.auth,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final PlayerController player;
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(24, 0, 24, bottomInset > 0 ? bottomInset : 12),
+        child: Container(
+          height: 62,
+          constraints: const BoxConstraints(maxWidth: 380),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E2433) : Colors.white,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: .12)
+                  : colorScheme.outlineVariant.withValues(alpha: .5),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? .28 : .12),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              _BottomNavItem(
+                icon: Icons.home_outlined,
+                activeIcon: Icons.home_rounded,
+                label: '首页',
+                selected: currentIndex == 0,
+                onTap: () => onTap(0),
+              ),
+              _CenterDisc(player: player, auth: auth),
+              _BottomNavItem(
+                icon: Icons.person_outline_rounded,
+                activeIcon: Icons.person_rounded,
+                label: '我的',
+                selected: currentIndex == 1,
+                onTap: () => onTap(1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNavItem extends StatelessWidget {
+  const _BottomNavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selected ? activeIcon : icon,
+              size: 24,
+              color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CenterDisc extends StatelessWidget {
+  const _CenterDisc({required this.player, required this.auth});
+
+  final PlayerController player;
+  final AuthController auth;
+
+  void _openPlayer(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PlayerPage(player: player, auth: auth)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => _openPlayer(context),
+      onLongPress: () {
+        if (player.currentSong != null) {
+          HapticFeedback.lightImpact();
+          player.togglePlay();
+        }
+      },
+      child: AnimatedBuilder(
+        animation: player,
+        builder: (context, _) {
+          final song = player.currentSong;
+          final hasSong = song != null;
+          final durationMs = player.duration.inMilliseconds;
+          final positionMs = player.position.inMilliseconds;
+          final progress = (durationMs > 0 ? positionMs / durationMs : 0.0).clamp(0.0, 1.0);
+          return SizedBox(
+            width: 52,
+            height: 52,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // 进度环
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: CircularProgressIndicator(
+                    value: hasSong ? progress : 0,
+                    strokeWidth: 2.5,
+                    backgroundColor: colorScheme.outlineVariant.withValues(alpha: .35),
+                    valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
+                  ),
+                ),
+                // 封面
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white.withValues(alpha: .9), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .15),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: hasSong
+                        ? Artwork(url: song.coverUrl, size: 42, borderRadius: 21)
+                        : Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.music_note_rounded,
+                                size: 22, color: colorScheme.onSurfaceVariant),
+                          ),
+                  ),
+                ),
+                // 播放/暂停小图标叠加（无歌时隐藏）
+                if (hasSong)
+                  Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: .45),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      size: 12,
+                      color: Colors.white,
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
