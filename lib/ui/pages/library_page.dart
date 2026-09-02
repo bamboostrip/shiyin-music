@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import '../widgets/liquid_glass_ui.dart';
+import '../design_tokens.dart';
 
-import '../../config/app_config.dart';
-import '../../core/pinyin_utils.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -17,6 +17,10 @@ import 'playlist_detail_page.dart';
 import 'settings_page.dart';
 import 'local_songs_page.dart';
 import '../../controllers/local_music_controller.dart';
+import '../../core/pinyin_utils.dart';
+
+/// 歌单排序模式。
+enum _PlaylistSortMode { defaultOrder, byName, bySongCount, byCreatedTime }
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({
@@ -40,21 +44,20 @@ class LibraryPage extends StatefulWidget {
   State<LibraryPage> createState() => _LibraryPageState();
 }
 
-class _LibraryPageState extends State<LibraryPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+class _LibraryPageState extends State<LibraryPage> {
+  // 折叠状态管理（改 tab 为折叠）
+  bool _expandedCreated = true;
+  bool _expandedCollected = true;
+  bool _expandedAlbums = false;
+  bool _expandedCloud = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
+  // 歌单排序模式
+  _PlaylistSortMode _sortMode = _PlaylistSortMode.defaultOrder;
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+  // 多选管理状态
+  bool _multiSelectMode = false;
+  final Set<int> _selectedIndices = {};
+  String _selectedSection = 'created'; // 'created' | 'collected' | 'albums'
 
   void _openPlaylist(PlaylistSummary playlist) {
     Navigator.of(context).push(
@@ -109,570 +112,6 @@ class _LibraryPageState extends State<LibraryPage>
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Stack(
-      children: [
-        // 顶部渐变背景（仅顶部区域，淡淡过渡到透明）
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 280,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: isDark
-                    ? const [
-                        Color(0xFF10233A),
-                        Color(0xFF0B1828),
-                        Color(0x0006070A),
-                      ]
-                    : const [
-                        Color(0xFFEAF3FF),
-                        Color(0xFFF2F7FD),
-                        Color(0x00FFFFFF),
-                      ],
-                stops: const [0, .6, 1],
-              ),
-            ),
-          ),
-        ),
-        // 内容层
-        SafeArea(
-          bottom: false,
-          child: AnimatedBuilder(
-            animation: widget.auth,
-            builder: (context, _) {
-              final created = widget.auth.createdPlaylists;
-              final collected = widget.auth.collectedPlaylists;
-              final albums = widget.auth.collectedAlbums;
-
-              return CustomScrollView(
-                slivers: [
-                  // Header
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 14, 12, 0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '我的',
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 22,
-                                  ),
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: '创建歌单',
-                            onPressed: _showCreatePlaylistDialog,
-                            icon: const Icon(Icons.add_rounded),
-                          ),
-                          // 车机模式顶栏已有设置按钮，隐藏此处重复按钮
-                          if (!(_isLandscape(context) && widget.theme.carModeEnabled))
-                            IconButton(
-                              tooltip: '设置',
-                              onPressed: _openSettings,
-                              icon: const Icon(Icons.settings_rounded),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Account info
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
-                      child: _AccountRow(auth: widget.auth),
-                    ),
-                  ),
-                  // Quick action cards (horizontal scrollable)
-                  SliverToBoxAdapter(
-                    child: _QuickActionRow(
-                      auth: widget.auth,
-                      downloads: widget.downloads,
-                      player: widget.player,
-                      localMusic: widget.localMusic,
-                      api: widget.api,
-                      onOpenLiked: widget.auth.likedPlaylist == null
-                          ? null
-                          : () => _openPlaylist(widget.auth.likedPlaylist!),
-                      onOpenDownloads: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => DownloadedSongsPage(
-                            api: widget.api,
-                            auth: widget.auth,
-                            player: widget.player,
-                            downloads: widget.downloads,
-                          ),
-                        ),
-                      ),
-                      onOpenCloudDrive: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CloudDrivePage(
-                            api: widget.api,
-                            auth: widget.auth,
-                            player: widget.player,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Tab 标签栏：创建 / 收藏 / 专辑
-                  SliverToBoxAdapter(
-                    child: _PlaylistTabBar(
-                      controller: _tabController,
-                      createdCount: created.length,
-                      collectedCount: collected.length,
-                      albumCount: albums.length,
-                    ),
-                  ),
-                  // 当前 Tab 对应的歌单列表
-                  SliverToBoxAdapter(
-                    child: _PlaylistTabView(
-                      controller: _tabController,
-                      created: created,
-                      collected: collected,
-                      albums: albums,
-                      auth: widget.auth,
-                      onOpen: _openPlaylist,
-                    ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 160)),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// --- Account row (no card background) ---
-
-class _AccountRow extends StatelessWidget {
-  const _AccountRow({required this.auth});
-
-  final AuthController auth;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final profile = auth.profile;
-    final vipInfo = auth.vipInfo;
-    final vipText = vipInfo?.expiryDisplay;
-    final isVip = vipInfo?.hasVip ?? false;
-
-    return Row(
-      children: [
-        Container(
-          width: 46,
-          height: 46,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            shape: BoxShape.circle,
-          ),
-          child: profile?.avatarUrl == null
-              ? Icon(Icons.person_rounded, color: colorScheme.primary)
-              : Image.network(profile!.avatarUrl!, fit: BoxFit.cover, cacheWidth: 100, cacheHeight: 100),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      profile?.nickname ?? '${AppConfig.appName}用户',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  if (isVip) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFFD54F), Color(0xFFFFB300)],
-                        ),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'VIP',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF5D4037),
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              Text(
-                vipText ?? '已登录',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// --- Quick action row (horizontal scrollable cards) ---
-
-class _QuickActionRow extends StatelessWidget {
-  const _QuickActionRow({
-    required this.auth,
-    required this.downloads,
-    required this.player,
-    required this.localMusic,
-    required this.api,
-    required this.onOpenLiked,
-    required this.onOpenDownloads,
-    required this.onOpenCloudDrive,
-  });
-
-  final AuthController auth;
-  final DownloadController downloads;
-  final PlayerController player;
-  final LocalMusicController localMusic;
-  final MusicApi api;
-  final VoidCallback? onOpenLiked;
-  final VoidCallback onOpenDownloads;
-  final VoidCallback onOpenCloudDrive;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 16, 0, 0),
-      child: SizedBox(
-        height: 120,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.only(right: 18),
-          children: [
-            _QuickActionCard(
-              icon: Icons.favorite_rounded,
-              iconColor: const Color.fromARGB(176, 255, 99, 151),
-              subtitle: '${auth.likedCount} 首歌曲',
-              title: '我喜欢',
-              onTap: onOpenLiked,
-            ),
-            const SizedBox(width: 10),
-            _QuickActionCard(
-              icon: Icons.cloud_rounded,
-              iconColor: const Color.fromARGB(200, 88, 156, 245),
-              subtitle: '云盘音乐',
-              title: '云盘',
-              onTap: onOpenCloudDrive,
-            ),
-            const SizedBox(width: 10),
-            AnimatedBuilder(
-              animation: downloads,
-              builder: (context, _) {
-                return _QuickActionCard(
-                  icon: Icons.download_rounded,
-                  iconColor: Theme.of(context).colorScheme.primary,
-                  subtitle: '${downloads.downloadedSongs.length} 首歌曲',
-                  title: '已下载',
-                  onTap: onOpenDownloads,
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            AnimatedBuilder(
-              animation: localMusic,
-              builder: (context, _) {
-                return _QuickActionCard(
-                  icon: Icons.computer_rounded,
-                  iconColor: const Color.fromARGB(200, 76, 175, 80),
-                  subtitle: '${localMusic.songs.length} 首歌曲',
-                  title: '本地',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LocalSongsPage(
-                        player: player,
-                        localMusic: localMusic,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 10),
-            _QuickActionCard(
-              icon: Icons.history_rounded,
-              iconColor: const Color.fromARGB(200, 255, 167, 38),
-              subtitle: '最近播放',
-              title: '历史',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => PlaybackHistoryPage(
-                    api: api,
-                    auth: auth,
-                    player: player,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickActionCard extends StatelessWidget {
-  const _QuickActionCard({
-    required this.icon,
-    required this.iconColor,
-    required this.subtitle,
-    required this.title,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String subtitle;
-  final String title;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Container(
-      width: 93,
-      margin: const EdgeInsets.only(right: 0),
-      child: Material(
-        color: colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: iconColor,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Icon(icon, color: Colors.white, size: 20),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// --- Tab 标签栏 ---
-
-class _PlaylistTabBar extends StatelessWidget {
-  const _PlaylistTabBar({
-    required this.controller,
-    required this.createdCount,
-    required this.collectedCount,
-    required this.albumCount,
-  });
-
-  final TabController controller;
-  final int createdCount;
-  final int collectedCount;
-  final int albumCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: AnimatedBuilder(
-          animation: controller,
-          builder: (context, _) {
-            return Row(
-              children: [
-                Expanded(
-                  child: _TabItem(
-                    label: '创建',
-                    count: createdCount,
-                    selected: controller.index == 0,
-                    onTap: () => controller.animateTo(0),
-                  ),
-                ),
-                Expanded(
-                  child: _TabItem(
-                    label: '收藏',
-                    count: collectedCount,
-                    selected: controller.index == 1,
-                    onTap: () => controller.animateTo(1),
-                  ),
-                ),
-                Expanded(
-                  child: _TabItem(
-                    label: '专辑',
-                    count: albumCount,
-                    selected: controller.index == 2,
-                    onTap: () => controller.animateTo(2),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _TabItem extends StatelessWidget {
-  const _TabItem({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? colorScheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: label),
-              if (count > 0) ...[
-                const TextSpan(text: ' '),
-                TextSpan(
-                  text: '$count',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? colorScheme.onPrimary.withValues(alpha: .78)
-                        : colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: selected ? colorScheme.onPrimary : colorScheme.onSurface,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// --- Tab 内容视图 ---
-
-/// 歌单排序模式。
-enum _PlaylistSortMode { defaultOrder, byName, bySongCount, byCreatedTime }
-
-class _PlaylistTabView extends StatefulWidget {
-  const _PlaylistTabView({
-    required this.controller,
-    required this.created,
-    required this.collected,
-    required this.albums,
-    required this.auth,
-    required this.onOpen,
-  });
-
-  final TabController controller;
-  final List<PlaylistSummary> created;
-  final List<PlaylistSummary> collected;
-  final List<PlaylistSummary> albums;
-  final AuthController auth;
-  final void Function(PlaylistSummary) onOpen;
-
-  @override
-  State<_PlaylistTabView> createState() => _PlaylistTabViewState();
-}
-
-class _PlaylistTabViewState extends State<_PlaylistTabView> {
-  _PlaylistSortMode _sortMode = _PlaylistSortMode.defaultOrder;
-
-  /// 多选模式状态：选中的歌单。
-  final Set<int> _selectedIndices = {};
-  bool _multiSelectMode = false;
-
-  List<PlaylistSummary> get _currentList {
-    final lists = [widget.created, widget.collected, widget.albums];
-    return lists[widget.controller.index.clamp(0, 2)];
-  }
-
-  /// 按当前排序模式返回新列表（不修改原列表）。
   List<PlaylistSummary> _sortedPlaylists(List<PlaylistSummary> playlists) {
     switch (_sortMode) {
       case _PlaylistSortMode.byName:
@@ -727,7 +166,7 @@ class _PlaylistTabViewState extends State<_PlaylistTabView> {
                 const SizedBox(height: 12),
                 Material(
                   color: colorScheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
@@ -760,8 +199,9 @@ class _PlaylistTabViewState extends State<_PlaylistTabView> {
     }
   }
 
-  void _enterMultiSelect(int index) {
+  void _enterMultiSelect(String section, int index) {
     setState(() {
+      _selectedSection = section;
       _multiSelectMode = true;
       _selectedIndices
         ..clear()
@@ -789,11 +229,10 @@ class _PlaylistTabViewState extends State<_PlaylistTabView> {
     });
   }
 
-  Future<void> _deleteSelected() async {
-    final playlists = _currentList;
+  Future<void> _deleteSelected(List<PlaylistSummary> currentList) async {
     final targets = _selectedIndices
-        .where((i) => i >= 0 && i < playlists.length)
-        .map((i) => playlists[i])
+        .where((i) => i >= 0 && i < currentList.length)
+        .map((i) => currentList[i])
         .toList();
     if (targets.isEmpty) return;
 
@@ -816,133 +255,726 @@ class _PlaylistTabViewState extends State<_PlaylistTabView> {
     );
     if (confirmed != true) return;
 
-    var ok = 0;
-    String? lastError;
     for (final playlist in targets) {
-      if (playlist.isSystemDefaultCollect || playlist.isLikedPlaylist) {
-        lastError = playlist.isSystemDefaultCollect
-            ? '「默认收藏」为系统歌单，无法删除'
-            : '「我喜欢」无法删除';
-        continue;
-      }
       try {
         await widget.auth.deleteOrUncollectPlaylist(playlist);
-        ok++;
-      } catch (e) {
-        lastError = e.toString();
-      }
+      } catch (_) {}
     }
     if (!mounted) return;
-    if (ok == 0) {
-      Toast.error(lastError ?? widget.auth.errorMessage ?? '删除失败');
-    } else if (ok < targets.length) {
-      Toast.info('已删除 $ok 个，部分失败：${lastError ?? widget.auth.errorMessage ?? ''}');
+    if (widget.auth.errorMessage != null) {
+      Toast.error('删除失败：${widget.auth.errorMessage}');
     } else {
-      Toast.success('已删除 $ok 个歌单');
+      Toast.success('已删除 ${targets.length} 个歌单');
     }
     _exitMultiSelect();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
-      child: AnimatedBuilder(
-        animation: widget.controller,
-        builder: (context, _) {
-          final current = _currentList;
-          final sorted = _sortedPlaylists(current);
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 多选模式下的操作栏
-              if (_multiSelectMode)
-                _MultiSelectBar(
-                  selectedCount: _selectedIndices.length,
-                  onCancel: _exitMultiSelect,
-                  onDelete: _deleteSelected,
-                ),
-              // 排序行（仅在有歌单且非多选模式时显示）
-              if (current.isNotEmpty && !_multiSelectMode)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8, top: 2),
-                  child: Row(
-                    children: [
-                      Text(
-                        '共 ${current.length} 个',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const Spacer(),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _showSortSheet(context),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.sort_rounded,
-                              size: 16,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _sortModeLabel,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+    return Stack(
+      children: [
+        SafeArea(
+          bottom: false,
+          child: AnimatedBuilder(
+            animation: Listenable.merge([
+              widget.auth,
+              widget.downloads,
+              widget.localMusic,
+            ]),
+            builder: (context, _) {
+              final created = widget.auth.createdPlaylists;
+              final collected = widget.auth.collectedPlaylists;
+              final albums = widget.auth.collectedAlbums;
+              final sortedCreated = _sortedPlaylists(created);
+              final sortedCollected = _sortedPlaylists(collected);
+              final sortedAlbums = _sortedPlaylists(albums);
+
+              return CustomScrollView(
+                slivers: [
+                  // 1. 顶部 Header
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 14, 12, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '我的',
+                              style: Theme.of(context).textTheme.headlineSmall
                                   ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 22,
                                   ),
                             ),
-                            const SizedBox(width: 2),
-                            Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              size: 16,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                          ),
+                          IconButton(
+                            tooltip: '创建歌单',
+                            onPressed: _showCreatePlaylistDialog,
+                            icon: const Icon(Icons.add_rounded),
+                          ),
+                          if (!(_isLandscape(context) && widget.theme.carModeEnabled))
+                            IconButton(
+                              tooltip: '设置',
+                              onPressed: _openSettings,
+                              icon: const Icon(Icons.settings_rounded),
                             ),
-                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 2. 用户资料头部（同款用户区域）
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+                      child: _UserProfileHeader(auth: widget.auth),
+                    ),
+                  ),
+
+                  // 3. 同款 2x2 核心功能卡片网格（我喜欢、最近播放、本地音乐、已下载）
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+                      child: _LibraryQuickGrid(
+                        auth: widget.auth,
+                        downloads: widget.downloads,
+                        localMusic: widget.localMusic,
+                        onOpenLiked: widget.auth.likedPlaylist == null
+                            ? null
+                            : () => _openPlaylist(widget.auth.likedPlaylist!),
+                        onOpenRecent: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PlaybackHistoryPage(
+                              api: widget.api,
+                              auth: widget.auth,
+                              player: widget.player,
+                            ),
+                          ),
+                        ),
+                        onOpenLocal: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => LocalSongsPage(
+                              player: widget.player,
+                              localMusic: widget.localMusic,
+                            ),
+                          ),
+                        ),
+                        onOpenDownloads: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => DownloadedSongsPage(
+                              api: widget.api,
+                              auth: widget.auth,
+                              player: widget.player,
+                              downloads: widget.downloads,
+                            ),
+                          ),
                         ),
                       ),
-                    ],
+                    ),
+                  ),
+
+                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+                  // 4. 折叠分组 1：我创建的歌单
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: _CollapsibleSection(
+                        title: '我创建的歌单',
+                        count: created.length,
+                        isExpanded: _expandedCreated,
+                        onToggle: () =>
+                            setState(() => _expandedCreated = !_expandedCreated),
+                        trailingActions: [
+                          IconButton(
+                            icon: const Icon(Icons.add_rounded, size: 20),
+                            visualDensity: VisualDensity.compact,
+                            tooltip: '新建歌单',
+                            onPressed: _showCreatePlaylistDialog,
+                          ),
+                          if (created.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.sort_rounded, size: 19),
+                              visualDensity: VisualDensity.compact,
+                              tooltip: _sortModeLabel,
+                              onPressed: () => _showSortSheet(context),
+                            ),
+                        ],
+                        child: _multiSelectMode && _selectedSection == 'created'
+                            ? Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _MultiSelectBar(
+                                    selectedCount: _selectedIndices.length,
+                                    onCancel: _exitMultiSelect,
+                                    onDelete: () => _deleteSelected(sortedCreated),
+                                  ),
+                                  _PlaylistGroup(
+                                    playlists: sortedCreated,
+                                    multiSelectMode: true,
+                                    selectedIndices: _selectedIndices,
+                                    onOpen: _openPlaylist,
+                                    onTapInMultiSelect: _toggleSelected,
+                                  ),
+                                ],
+                              )
+                            : (sortedCreated.isEmpty
+                                ? const _EmptyGroup()
+                                : _PlaylistGroup(
+                                    playlists: sortedCreated,
+                                    onOpen: _openPlaylist,
+                                    onLongPress: (i) =>
+                                        _enterMultiSelect('created', i),
+                                  )),
+                      ),
+                    ),
+                  ),
+
+                  const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+                  // 5. 折叠分组 2：我收藏的歌单
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: _CollapsibleSection(
+                        title: '我收藏的歌单',
+                        count: collected.length,
+                        isExpanded: _expandedCollected,
+                        onToggle: () => setState(
+                            () => _expandedCollected = !_expandedCollected),
+                        child: sortedCollected.isEmpty
+                            ? const _EmptyGroup()
+                            : _PlaylistGroup(
+                                playlists: sortedCollected,
+                                onOpen: _openPlaylist,
+                              ),
+                      ),
+                    ),
+                  ),
+
+                  // 6. 折叠分组 3：收藏的专辑（若有或需要展示）
+                  if (albums.isNotEmpty) ...[
+                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: _CollapsibleSection(
+                          title: '收藏的专辑',
+                          count: albums.length,
+                          isExpanded: _expandedAlbums,
+                          onToggle: () => setState(
+                              () => _expandedAlbums = !_expandedAlbums),
+                          child: sortedAlbums.isEmpty
+                              ? const _EmptyGroup()
+                              : _PlaylistGroup(
+                                  playlists: sortedAlbums,
+                                  onOpen: _openPlaylist,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+                  // 7. 折叠分组 4：我的云盘（独立放到最下面）
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: _CollapsibleSection(
+                        title: '我的云盘',
+                        isExpanded: _expandedCloud,
+                        onToggle: () =>
+                            setState(() => _expandedCloud = !_expandedCloud),
+                        child: _CloudDriveSectionItem(
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CloudDrivePage(
+                                api: widget.api,
+                                auth: widget.auth,
+                                player: widget.player,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // 底部安全留白，避免内容被悬浮黑胶底栏遮挡
+                  const SliverToBoxAdapter(child: SizedBox(height: 120)),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+// --- 1. 用户资料头部 (User Profile Header) ---
+
+class _UserProfileHeader extends StatelessWidget {
+  const _UserProfileHeader({required this.auth});
+
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final profile = auth.profile;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: .24)
+                    : Colors.white.withValues(alpha: .95),
+                width: 2.0,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? .35 : .08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: profile?.avatarUrl == null
+                ? Icon(Icons.person_rounded, color: colorScheme.primary, size: 30)
+                : Image.network(profile!.avatarUrl!, fit: BoxFit.cover),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  profile?.nickname ?? 'KA Music 用户',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 20,
+                    letterSpacing: -0.3,
                   ),
                 ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                child: sorted.isEmpty
-                    ? _EmptyGroup(key: ValueKey('empty_${widget.controller.index}'))
-                    : _PlaylistGroup(
-                        key: ValueKey('group_${widget.controller.index}'),
-                        playlists: sorted,
-                        multiSelectMode: _multiSelectMode,
-                        selectedIndices: _selectedIndices,
-                        onOpen: widget.onOpen,
-                        onLongPress: _enterMultiSelect,
-                        onTapInMultiSelect: _toggleSelected,
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Container(
+                      width: 7.5,
+                      height: 7.5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: auth.isLoggedIn
+                            ? const Color(0xFF4CAF50)
+                            : colorScheme.onSurfaceVariant.withValues(alpha: .45),
                       ),
-              ),
-            ],
-          );
-        },
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      auth.isLoggedIn ? '已登录' : '未登录',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// 排序选项条目。
+// --- 2. 同款 2x2 核心功能卡片网格 (2x2 Quick Grid) ---
+
+class _LibraryQuickGrid extends StatelessWidget {
+  const _LibraryQuickGrid({
+    required this.auth,
+    required this.downloads,
+    required this.localMusic,
+    required this.onOpenLiked,
+    required this.onOpenRecent,
+    required this.onOpenLocal,
+    required this.onOpenDownloads,
+  });
+
+  final AuthController auth;
+  final DownloadController downloads;
+  final LocalMusicController localMusic;
+  final VoidCallback? onOpenLiked;
+  final VoidCallback onOpenRecent;
+  final VoidCallback onOpenLocal;
+  final VoidCallback onOpenDownloads;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _QuickHubTile(
+                icon: Icons.favorite_rounded,
+                title: '收藏',
+                subtitle: '${auth.likedCount} 首',
+                gradientColors: const [Color(0xFFFF85A1), Color(0xFFFF3366)],
+                onTap: onOpenLiked,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _QuickHubTile(
+                icon: Icons.access_time_filled_rounded,
+                title: '最近',
+                subtitle: '播放历史',
+                gradientColors: const [Color(0xFF70B9FE), Color(0xFF2C7BF6)],
+                onTap: onOpenRecent,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: AnimatedBuilder(
+                animation: localMusic,
+                builder: (context, _) => _QuickHubTile(
+                  icon: Icons.computer_rounded,
+                  title: '本地',
+                  subtitle: '${localMusic.songs.length} 首',
+                  gradientColors: const [Color(0xFF67E3C8), Color(0xFF00BFA5)],
+                  onTap: onOpenLocal,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: AnimatedBuilder(
+                animation: downloads,
+                builder: (context, _) => _QuickHubTile(
+                  icon: Icons.download_done_rounded,
+                  title: '已下载',
+                  subtitle: '${downloads.downloadedSongs.length} 首',
+                  gradientColors: const [Color(0xFF81D4FA), Color(0xFF0288D1)],
+                  onTap: onOpenDownloads,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickHubTile extends StatefulWidget {
+  const _QuickHubTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.gradientColors,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final List<Color> gradientColors;
+  final VoidCallback? onTap;
+
+  @override
+  State<_QuickHubTile> createState() => _QuickHubTileState();
+}
+
+class _QuickHubTileState extends State<_QuickHubTile> {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    final primaryColor = widget.gradientColors.last;
+    final cardBgColor = isDark
+        ? Colors.white.withValues(alpha: .06)
+        : Colors.white.withValues(alpha: .85);
+    final cardBorderColor = isDark
+        ? Colors.white.withValues(alpha: .12)
+        : Colors.white.withValues(alpha: .92);
+
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _isPressed ? 0.95 : 1.0,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        child: Container(
+          height: 68,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: cardBgColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cardBorderColor, width: 1.1),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: .20)
+                    : const Color(0x0C000000),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: widget.gradientColors,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: primaryColor.withValues(alpha: isDark ? .40 : .30),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Icon(widget.icon, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                        letterSpacing: -0.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- 3. 折叠分组组件 (Collapsible Section) ---
+
+class _CollapsibleSection extends StatelessWidget {
+  const _CollapsibleSection({
+    required this.title,
+    this.count,
+    required this.isExpanded,
+    required this.onToggle,
+    required this.child,
+    this.trailingActions,
+  });
+
+  final String title;
+  final int? count;
+  final bool isExpanded;
+  final VoidCallback onToggle;
+  final Widget child;
+  final List<Widget>? trailingActions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+            child: Row(
+              children: [
+                AnimatedRotation(
+                  turns: isExpanded ? 0.0 : -0.25,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 22,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+                if (count != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '$count',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                ...?trailingActions,
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        AnimatedCrossFade(
+          firstChild: child,
+          secondChild: const SizedBox.shrink(),
+          crossFadeState: isExpanded
+              ? CrossFadeState.showFirst
+              : CrossFadeState.showSecond,
+          duration: const Duration(milliseconds: 220),
+          sizeCurve: Curves.easeOutCubic,
+        ),
+      ],
+    );
+  }
+}
+
+// --- 4. 云盘独立列表项组件 (Cloud Drive Section Item) ---
+
+class _CloudDriveSectionItem extends StatelessWidget {
+  const _CloudDriveSectionItem({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return LiquidGlassCard(
+      borderRadius: AppRadius.lg,
+      padding: EdgeInsets.zero,
+      enableTouchFlex: false,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF68B0FB), Color(0xFF3378FF)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF3378FF).withValues(alpha: isDark ? .40 : .30),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.cloud_rounded, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '云盘音乐',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '随时随地，同步云端音乐资产',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: colorScheme.outline,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- 5. 排序选项条目 (Sort Option Tile) ---
+
 class _SortOptionTile extends StatelessWidget {
   const _SortOptionTile({
     required this.label,
@@ -985,7 +1017,8 @@ class _SortOptionTile extends StatelessWidget {
   }
 }
 
-/// 多选模式操作栏。
+// --- 6. 多选模式操作栏 (Multi-Select Bar) ---
+
 class _MultiSelectBar extends StatelessWidget {
   const _MultiSelectBar({
     required this.selectedCount,
@@ -1031,24 +1064,26 @@ class _MultiSelectBar extends StatelessWidget {
   }
 }
 
+// --- 7. 空态提示组件 (Empty Group) ---
+
 class _EmptyGroup extends StatelessWidget {
-  const _EmptyGroup({super.key});
+  const _EmptyGroup();
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48),
+      padding: const EdgeInsets.symmetric(vertical: 32),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.library_music_outlined,
-              size: 48,
+              size: 42,
               color: colorScheme.outline,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(
               '这里还没有内容',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -1062,11 +1097,10 @@ class _EmptyGroup extends StatelessWidget {
   }
 }
 
-// --- Playlist group with dividers (no card background) ---
+// --- 8. 歌单卡片分组 (Playlist Group) ---
 
 class _PlaylistGroup extends StatelessWidget {
   const _PlaylistGroup({
-    super.key,
     required this.playlists,
     required this.onOpen,
     this.multiSelectMode = false,
@@ -1101,62 +1135,53 @@ class _PlaylistGroup extends StatelessWidget {
         ),
         itemCount: playlists.length,
         itemBuilder: (context, i) {
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainer,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: _PlaylistRow(
-                playlist: playlists[i],
-                selected: multiSelectMode && selectedIndices.contains(i),
-                multiSelectMode: multiSelectMode,
-                onTap: multiSelectMode
-                    ? () => onTapInMultiSelect?.call(i)
-                    : () => onOpen(playlists[i]),
-                onLongPress: () => onLongPress?.call(i),
-              ),
+          return LiquidGlassCard(
+            borderRadius: AppRadius.lg,
+            padding: EdgeInsets.zero,
+            child: _PlaylistRow(
+              playlist: playlists[i],
+              selected: multiSelectMode && selectedIndices.contains(i),
+              multiSelectMode: multiSelectMode,
+              onTap: multiSelectMode
+                  ? () => onTapInMultiSelect?.call(i)
+                  : () => onOpen(playlists[i]),
+              onLongPress: () => onLongPress?.call(i),
             ),
           );
         },
       );
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(
-          children: [
-            for (var i = 0; i < playlists.length; i++) ...[
-              _PlaylistRow(
-                playlist: playlists[i],
-                selected: multiSelectMode && selectedIndices.contains(i),
-                multiSelectMode: multiSelectMode,
-                onTap: multiSelectMode
-                    ? () => onTapInMultiSelect?.call(i)
-                    : () => onOpen(playlists[i]),
-                onLongPress: () => onLongPress?.call(i),
+    return LiquidGlassCard(
+      borderRadius: AppRadius.lg,
+      padding: EdgeInsets.zero,
+      enableTouchFlex: false,
+      child: Column(
+        children: [
+          for (var i = 0; i < playlists.length; i++) ...[
+            _PlaylistRow(
+              playlist: playlists[i],
+              selected: multiSelectMode && selectedIndices.contains(i),
+              multiSelectMode: multiSelectMode,
+              onTap: multiSelectMode
+                  ? () => onTapInMultiSelect?.call(i)
+                  : () => onOpen(playlists[i]),
+              onLongPress: () => onLongPress?.call(i),
+            ),
+            if (i < playlists.length - 1)
+              Divider(
+                height: 1,
+                indent: 62,
+                color: colorScheme.outlineVariant.withValues(alpha: .3),
               ),
-              if (i < playlists.length - 1)
-                Divider(
-                  height: 1,
-                  indent: 62,
-                  color: colorScheme.outlineVariant.withValues(alpha: .3),
-                ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }
 }
 
-// --- Playlist row ---
+// --- 9. 歌单列表单项 (Playlist Row) ---
 
 class _PlaylistRow extends StatelessWidget {
   const _PlaylistRow({
@@ -1183,7 +1208,6 @@ class _PlaylistRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            // 多选模式下显示勾选标记，否则显示封面
             if (multiSelectMode)
               Padding(
                 padding: const EdgeInsets.only(right: 12),
@@ -1216,8 +1240,8 @@ class _PlaylistRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -1227,8 +1251,8 @@ class _PlaylistRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                   ),
                 ],
               ),
@@ -1246,11 +1270,8 @@ class _PlaylistRow extends StatelessWidget {
   }
 }
 
-/// 创建歌单 BottomSheet。
-///
-/// 作为独立 StatefulWidget，让 [TextField]、[FocusNode]、
-/// [TextEditingController] 的生命周期与 BottomSheet 内容一致，
-/// 由 Flutter 框架在卸载时统一清理依赖关系。
+// --- 10. 创建歌单 BottomSheet ---
+
 class _CreatePlaylistSheet extends StatefulWidget {
   @override
   State<_CreatePlaylistSheet> createState() => _CreatePlaylistSheetState();
@@ -1263,7 +1284,6 @@ class _CreatePlaylistSheetState extends State<_CreatePlaylistSheet> {
   @override
   void initState() {
     super.initState();
-    // 进入动画结束后再请求焦点，避免动画期间建立 TextInputConnection
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
