@@ -63,6 +63,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   bool _isMutating = false;
   bool _isSearching = false;
   bool _isLoadingAllSongs = false;
+  // 后台静默补全进行中（点歌后扩展队列用，不驱动全屏 loading UI，
+  // 避免列表被替换导致滚动位置丢失）。
+  bool _isExpandingQueue = false;
   bool _allSongsLoaded = false;
   bool _isSelecting = false;
   bool _selectAllMode = false;
@@ -236,9 +239,16 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  Future<void> _loadAllSongs() async {
-    if (_isLoadingAllSongs || _allSongsLoaded) return;
-    setState(() => _isLoadingAllSongs = true);
+  /// [silent] 为 true 时为点歌后的后台静默补全：不置位
+  /// [_isLoadingAllSongs]，不把列表替换成全屏 loading，
+  /// 从而保留滚动位置；仅在结束时增量追加。
+  Future<void> _loadAllSongs({bool silent = false}) async {
+    if (_isLoadingAllSongs || _isExpandingQueue || _allSongsLoaded) return;
+    if (silent) {
+      _isExpandingQueue = true;
+    } else {
+      setState(() => _isLoadingAllSongs = true);
+    }
     try {
       final id = _isAlbum
           ? (widget.playlist.albumId ?? widget.playlist.id)
@@ -275,7 +285,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         });
       }
 
-      if (!mounted) return;
+      if (!mounted) {
+        _isExpandingQueue = false;
+        return;
+      }
       setState(() {
         // 增量追加：保留已有歌曲，仅追加尚未加载的歌曲，
         // 避免先清空再重建列表导致滚动位置被强制重置。
@@ -292,8 +305,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         _allSongsLoaded = true;
         _hasMore = false;
         _isLoadingAllSongs = false;
+        _isExpandingQueue = false;
       });
     } catch (_) {
+      _isExpandingQueue = false;
       if (mounted) setState(() => _isLoadingAllSongs = false);
     }
   }
@@ -313,7 +328,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         ? startedWith.hash
         : startedWith.id;
     unawaited(() async {
-      await _loadAllSongs();
+      // 静默补全：不弹全屏 loading、不重置滚动位置。
+      await _loadAllSongs(silent: true);
       if (!mounted || startedKey.isEmpty) return;
       final current = widget.player.currentSong;
       if (current == null) return;
@@ -1367,7 +1383,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 : null,
                           ),
                         ),
-                      if (_isLoadingAllSongs)
+                      // 只有空列表时才用全屏 loading 占位；已有歌曲时保留列表、
+                      // 仅在列表上方叠加一条小提示，避免 CustomScrollView 内容
+                      // 高度塌陷导致滚动位置被钳制回顶部。
+                      if (_isLoadingAllSongs && _songs.isEmpty)
                         const SliverToBoxAdapter(
                           child: Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
@@ -1383,9 +1402,31 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                           ),
                         )
                       else if (_searchQuery.isNotEmpty &&
-                          _filteredSongs.isEmpty)
+                          _filteredSongs.isEmpty &&
+                          !_isLoadingAllSongs)
                         const SliverToBoxAdapter(child: _SearchEmpty())
                       else ...[
+                        if (_isLoadingAllSongs)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox.square(
+                                      dimension: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('正在加载全部歌曲…'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         SliverPadding(
                           padding: EdgeInsets.fromLTRB(
                             16,
