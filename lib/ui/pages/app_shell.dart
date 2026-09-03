@@ -10,6 +10,7 @@ import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/lazy_indexed_stack.dart';
 import '../widgets/toast.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
@@ -152,7 +153,7 @@ class _AppShellState extends State<AppShell> {
                                 _buildCarTopNavBar(navContext),
                                 const Divider(height: 1),
                                 Expanded(
-                                  child: _LazyIndexedStack(
+                                  child: LazyIndexedStack(
                                     index: activePageIndex,
                                     children: pages,
                                   ),
@@ -209,7 +210,7 @@ class _AppShellState extends State<AppShell> {
     Widget mainContent = Stack(
       children: [
         Positioned.fill(
-          child: _LazyIndexedStack(index: portraitIndex, children: pages),
+          child: LazyIndexedStack(index: portraitIndex, children: pages),
         ),
         if (useNavRail)
           Positioned(
@@ -647,47 +648,6 @@ class _CenterDisc extends StatelessWidget {
   }
 }
 
-/// 只在首次被选中时才构建对应 child 的 [IndexedStack]。
-///
-/// 普通 IndexedStack 会一次性构建全部 children，导致所有页面
-/// 都在 initState 中发起网络请求。这里通过懒构建
-/// 保证只有被访问过的 tab 才会真正初始化，避免重复请求与重复监听。
-class _LazyIndexedStack extends StatefulWidget {
-  const _LazyIndexedStack({required this.index, required this.children});
-
-  final int index;
-  final List<Widget> children;
-
-  @override
-  State<_LazyIndexedStack> createState() => _LazyIndexedStackState();
-}
-
-class _LazyIndexedStackState extends State<_LazyIndexedStack> {
-  final _built = <int>{};
-
-  @override
-  void initState() {
-    super.initState();
-    _built.add(widget.index);
-  }
-
-  @override
-  void didUpdateWidget(covariant _LazyIndexedStack oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _built.add(widget.index);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IndexedStack(
-      index: widget.index,
-      children: [
-        for (var i = 0; i < widget.children.length; i++)
-          _built.contains(i) ? widget.children[i] : const SizedBox.shrink(),
-      ],
-    );
-  }
-}
 
 /// 在已有 [TextScaler] 基础上再乘固定倍数（Flutter 内置 TextScaler 无 `*` 运算符）。
 class _RelativeTextScaler extends TextScaler {
