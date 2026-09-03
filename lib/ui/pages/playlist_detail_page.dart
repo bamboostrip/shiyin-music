@@ -48,6 +48,11 @@ class PlaylistDetailPage extends StatefulWidget {
 class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   static const _pageSize = 50;
 
+  /// 参考主流音乐 App 的歌单头：进入时居中大封面（图2），上滑时列表
+  /// 圆角面板上移覆盖（图3），置顶后仅留标题+粘性歌曲操作条（图4）。
+  static const _heroExpandedHeight = 412.0;
+  static const _stickyHeaderHeight = 68.0;
+
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
   final _songs = <Song>[];
@@ -678,9 +683,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
 
     final topInset = MediaQuery.paddingOf(context).top;
-    // 折叠后 SliverAppBar 工具栏高度 + _Actions 操作行（含 padding）+
+    // 折叠后 SliverAppBar 工具栏高度 + 粘性歌曲条（含 padding）+
     // 列表顶部 padding；歌曲行高 68 + 分隔 2。
-    const actionsHeight = 70.0;
+    const actionsHeight = 68.0;
     const listTopPadding = 4.0;
     const rowExtent = 70.0;
     final targetOffset =
@@ -1035,9 +1040,69 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     Toast.success('歌单信息已复制到剪贴板');
   }
 
-  /// 显示歌单操作 BottomSheet（收藏/删除/取消收藏）。
+  /// 播放全部/播放结果：与粘性歌曲条共用，避免两处逻辑分叉。
+  void _playAll() {
+    final queue = _playbackQueueNow();
+    if (queue.isEmpty) return;
+    final first = queue.first;
+    widget.player.playSong(first, queue: List<Song>.of(queue));
+    _expandQueueInBackgroundIfNeeded(startedWith: first);
+  }
+
+  /// Hero 区「下载」：补全全量后整单入队，复用批量下载的并发 guard。
+  Future<void> _downloadAll() async {
+    final downloads = widget.player.downloadController;
+    if (downloads == null) {
+      Toast.error('下载功能不可用');
+      return;
+    }
+    if (_isBatchDownloading) return;
+    setState(() => _isBatchDownloading = true);
+    try {
+      if (!_allSongsLoaded && _hasMore) {
+        Toast.info('正在加载完整列表…');
+        await _loadAllSongs();
+      }
+      if (!mounted) return;
+      final songs = _playbackQueueNow();
+      if (songs.isEmpty) {
+        Toast.error('暂无可下载歌曲');
+        return;
+      }
+      final result = await downloads.enqueueBatch(
+        songs,
+        widget.player.audioQuality,
+      );
+      final parts = <String>['已加入下载队列 ${result.enqueued} 首'];
+      if (result.skipped > 0) {
+        parts.add('已跳过 ${result.skipped} 首（已下载/下载中）');
+      }
+      if (result.failed > 0) {
+        parts.add('失败 ${result.failed} 首');
+      }
+      Toast.success(parts.join('，'));
+    } catch (_) {
+      Toast.error('加入下载队列失败');
+    } finally {
+      if (mounted) setState(() => _isBatchDownloading = false);
+    }
+  }
+
+  /// 显示歌单操作 BottomSheet（收藏/删除/取消收藏/导入）。
+  /// 顶栏瘦身后仅保留这一个溢出入口，原顶栏的导入/收藏统一收敛到这里。
   void _showPlaylistActionSheet() {
     final options = <_ActionOption>[];
+    options.add(
+      _ActionOption(
+        icon: Icons.playlist_add_rounded,
+        title: '通过 ID 导入歌单',
+        onTap: () => showImportPlaylistSheet(
+          context: context,
+          api: widget.api,
+          auth: widget.auth,
+        ),
+      ),
+    );
     if (!_isAlbum && !_isInLibrary) {
       options.add(
         _ActionOption(
@@ -1190,6 +1255,24 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
+    // 粘性歌曲条的两行文案：标题放总数、副标题放加载/排序状态，
+    // 窄屏下各自省略，不再像之前单行那样把「已加载 xx」挤没。
+    final totalCount = (!_hasMore || _allSongsLoaded)
+        ? _songs.length
+        : (_info?.songCount ?? _songs.length);
+    final stickyTitle = _searchQuery.isNotEmpty
+        ? '搜索结果 · ${_filteredSongs.length} 首'
+        : _allSongsLoaded || !_hasMore
+            ? '${_songs.length} 首歌曲'
+            : '共 $totalCount 首 · 已加载 ${_songs.length} 首';
+    final stickySubtitle = _isLoadingAllSongs
+        ? '正在加载全部歌曲…'
+        : _searchQuery.isNotEmpty
+            ? _sortModeLabel
+            : _allSongsLoaded || !_hasMore
+                ? _sortModeLabel
+                : '$_sortModeLabel · 继续下滑加载更多';
+
     return PopScope(
       canPop: !_isSelecting,
       onPopInvokedWithResult: (didPop, _) {
@@ -1214,7 +1297,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     SliverAppBar(
                       pinned: true,
                       stretch: !_isSearching,
-                      expandedHeight: _isSearching ? 0 : 232,
+                      centerTitle: true,
+                      expandedHeight: _isSearching ? 0 : _heroExpandedHeight,
                       surfaceTintColor: Colors.transparent,
                       elevation: 0,
                       scrolledUnderElevation: 1,
@@ -1260,15 +1344,36 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 fontWeight: FontWeight.w600,
                               ),
                             )
-                          : Text(
-                              (_info ?? widget.playlist).title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
+                          // 参考图4：标题仅在收起后淡入，展开时由 Hero 居中展示，
+                          // 顶栏不再与一排按钮抢宽度，窄屏也能完整显示。
+                          : AnimatedBuilder(
+                              animation: _scrollController,
+                              builder: (context, _) {
+                                var collapsed = false;
+                                if (_scrollController.hasClients) {
+                                  final delta =
+                                      _heroExpandedHeight - kToolbarHeight;
+                                  collapsed = delta <= 0 ||
+                                      _scrollController.offset > delta - 48;
+                                }
+                                return AnimatedOpacity(
+                                  opacity: collapsed ? 1 : 0,
+                                  duration:
+                                      const Duration(milliseconds: 180),
+                                  child: Text(
+                                    (_info ?? widget.playlist).title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
+                      // 顶栏瘦身：选择/搜索/分享/导入下沉到 Hero 与粘性条，
+                      // 这里最多只剩一个溢出入口，标题不再被挤成几个字。
                       actions: [
                         if (_isSelecting) ...[
                           TextButton(
@@ -1278,32 +1383,6 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                             child: Text(_isAllSelected ? '取消全选' : '全选'),
                           ),
                         ] else if (!_isSearching) ...[
-                          IconButton(
-                            tooltip: '选择',
-                            onPressed: _songs.isEmpty && !_hasMore
-                                ? null
-                                : _enterSelectMode,
-                            icon: const Icon(Icons.checklist_rounded),
-                          ),
-                          IconButton(
-                            tooltip: '搜索',
-                            onPressed: _toggleSearch,
-                            icon: const Icon(Icons.search_rounded),
-                          ),
-                          IconButton(
-                            tooltip: '分享',
-                            onPressed: _sharePlaylist,
-                            icon: const Icon(Icons.share_rounded),
-                          ),
-                          IconButton(
-                            tooltip: '导入歌单',
-                            onPressed: () => showImportPlaylistSheet(
-                              context: context,
-                              api: widget.api,
-                              auth: widget.auth,
-                            ),
-                            icon: const Icon(Icons.playlist_add_rounded),
-                          ),
                           if (_isMutating)
                             const Padding(
                               padding: EdgeInsets.only(right: 16),
@@ -1316,10 +1395,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 ),
                               ),
                             )
-                          else if (!_isDailyRecommend &&
-                              ((!_isAlbum && !_isInLibrary) ||
-                                  (_isInLibrary &&
-                                      !_libraryPlaylist.isLikedPlaylist)))
+                          else
                             IconButton(
                               tooltip: '更多',
                               onPressed: _showPlaylistActionSheet,
@@ -1338,6 +1414,21 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               stretchModes: const [StretchMode.zoomBackground],
                               background: _HeroHeader(
                                 info: _info ?? widget.playlist,
+                                isInLibrary: _isInLibrary,
+                                showCollect:
+                                    !_isAlbum && !_isDailyRecommend,
+                                mutating: _isMutating,
+                                downloading: _isBatchDownloading,
+                                downloadAvailable: widget
+                                        .player.downloadController !=
+                                    null,
+                                selectEnabled:
+                                    _songs.isNotEmpty || _hasMore,
+                                onShare: _sharePlaylist,
+                                onCollect: _collectPlaylist,
+                                onMore: _showPlaylistActionSheet,
+                                onDownloadAll: _downloadAll,
+                                onSelect: _enterSelectMode,
                               ),
                             ),
                     ),
@@ -1353,36 +1444,30 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                         ),
                       )
                     else ...[
-                      if (!_isSelecting)
-                        SliverToBoxAdapter(
-                          child: _Actions(
-                            // 以可播放列表为准；元数据 count 可能含无版权曲
-                            count: (!_hasMore || _allSongsLoaded)
-                                ? _songs.length
-                                : (_info?.songCount ?? _songs.length),
-                            loadedCount: _songs.length,
-                            sortLabel: _sortModeLabel,
-                            onSortTap: () => _showSortSheet(context),
-                            onPlay: _playbackQueueNow().isEmpty
+                      // 参考图4：圆角列表面板的粘性头，置顶后依然可播/可搜/可排。
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _StickyHeaderDelegate(
+                          height: _stickyHeaderHeight,
+                          child: _ListStickyBar(
+                            selecting: _isSelecting,
+                            selectedCount: _selectedCount,
+                            allSelected: _isAllSelected,
+                            onToggleSelectAll: _selectPool.isEmpty
                                 ? null
-                                : () {
-                                    final queue = _playbackQueueNow();
-                                    if (queue.isEmpty) return;
-                                    final first = queue.first;
-                                    widget.player.playSong(
-                                      first,
-                                      queue: List<Song>.of(queue),
-                                    );
-                                    _expandQueueInBackgroundIfNeeded(
-                                      startedWith: first,
-                                    );
-                                  },
-                            searchQuery: _searchQuery,
-                            searchResultCount: _searchQuery.isNotEmpty
-                                ? _filteredSongs.length
-                                : null,
+                                : _toggleSelectAll,
+                            title: stickyTitle,
+                            subtitle: stickySubtitle,
+                            canPlay: _playbackQueueNow().isNotEmpty,
+                            onPlay: _playAll,
+                            onSearch: _toggleSearch,
+                            onSort: () => _showSortSheet(context),
+                            selectEnabled:
+                                _songs.isNotEmpty || _hasMore,
+                            onSelect: _enterSelectMode,
                           ),
                         ),
+                      ),
                       // 只有空列表时才用全屏 loading 占位；已有歌曲时保留列表、
                       // 仅在列表上方叠加一条小提示，避免 CustomScrollView 内容
                       // 高度塌陷导致滚动位置被钳制回顶部。
@@ -1795,10 +1880,36 @@ class _ActionOptionTile extends StatelessWidget {
   }
 }
 
+/// 参考图2的居中大封面头：封面 + 居中标题/副标题/meta + 圆形操作行。
+/// 原来的左右白卡在窄屏下挤压标题，这里标题独占整行居中，最多两行。
 class _HeroHeader extends StatelessWidget {
-  const _HeroHeader({required this.info});
+  const _HeroHeader({
+    required this.info,
+    required this.isInLibrary,
+    required this.showCollect,
+    required this.mutating,
+    required this.downloading,
+    required this.downloadAvailable,
+    required this.selectEnabled,
+    required this.onShare,
+    required this.onCollect,
+    required this.onMore,
+    required this.onDownloadAll,
+    required this.onSelect,
+  });
 
   final PlaylistSummary info;
+  final bool isInLibrary;
+  final bool showCollect;
+  final bool mutating;
+  final bool downloading;
+  final bool downloadAvailable;
+  final bool selectEnabled;
+  final VoidCallback onShare;
+  final VoidCallback onCollect;
+  final VoidCallback onMore;
+  final VoidCallback onDownloadAll;
+  final VoidCallback onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -1811,118 +1922,186 @@ class _HeroHeader extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: isDark
-              ? const [Color(0xFF162840), Color(0xFF0D121E), Color(0xFF06070A)]
-              : const [Color(0xFFDCEEFF), Color(0xFFF2F7FF), Color(0xFFFFFFFF)],
+              ? const [Color(0xFF1B2E49), Color(0xFF0D121E), Color(0xFF06070A)]
+              : const [Color(0xFFD3E8FF), Color(0xFFEDF4FF), Color(0xFFFFFFFF)],
           stops: isDark ? const [0, 0.55, 1] : const [0, 0.62, 1],
         ),
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          // 顶部避开 pinned AppBar 的 toolbar，避免白卡与导航重叠（状态栏已由 SafeArea 处理）
-          padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 10, 16, 14),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: .06)
-                  : Colors.white.withValues(alpha: .88),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: .10)
-                    : Colors.white.withValues(alpha: .92),
-                width: 1.1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? .22 : .08),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 360;
-                final artworkSize = compact ? 88.0 : 96.0;
-
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: .12),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Artwork(
-                        url: info.coverUrl,
-                        size: artworkSize,
-                        borderRadius: 16,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            info.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1.15,
-                                  letterSpacing: -0.3,
-                                ),
-                          ),
-                          const SizedBox(height: 6),
-                          if (info.subtitle?.trim().isNotEmpty == true)
-                            Text(
-                              info.subtitle!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12.5,
-                                  ),
-                            ),
-                          const SizedBox(height: 4),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _detailMeta(info),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: colorScheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 11.5,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
+          // 顶部避开 pinned AppBar 的 toolbar（状态栏已由 SafeArea 处理）；
+          // 内容总高需收敛在 expandedHeight 内，避免小屏溢出裁剪操作行。
+          padding: const EdgeInsets.fromLTRB(24, kToolbarHeight + 2, 24, 14),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(26),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? .35 : .18),
+                      blurRadius: 22,
+                      offset: const Offset(0, 8),
                     ),
                   ],
-                );
-              },
-            ),
+                ),
+                child: Artwork(
+                  url: info.coverUrl,
+                  size: 132,
+                  borderRadius: 26,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                info.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      height: 1.2,
+                      letterSpacing: -0.3,
+                    ),
+              ),
+              const SizedBox(height: 4),
+              if (info.subtitle?.trim().isNotEmpty == true)
+                Text(
+                  info.subtitle!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12.5,
+                      ),
+                ),
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(
+                    alpha: isDark ? .20 : .10,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _detailMeta(info),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11.5,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _HeroCircleAction(
+                    icon: Icons.share_rounded,
+                    label: '分享',
+                    onTap: onShare,
+                  ),
+                  const SizedBox(width: 16),
+                  if (showCollect)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: _HeroCircleAction(
+                        icon: isInLibrary
+                            ? Icons.bookmark_added_rounded
+                            : Icons.bookmark_add_outlined,
+                        label: mutating
+                            ? '请稍候'
+                            : (isInLibrary ? '已收藏' : '收藏'),
+                        onTap: isInLibrary ? onMore : onCollect,
+                      ),
+                    ),
+                  _HeroCircleAction(
+                    icon: downloading
+                        ? Icons.downloading_rounded
+                        : Icons.download_rounded,
+                    label: downloading ? '下载中' : '下载',
+                    onTap: downloadAvailable && !downloading
+                        ? onDownloadAll
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  _HeroCircleAction(
+                    icon: Icons.checklist_rounded,
+                    label: '多选',
+                    onTap: selectEnabled ? onSelect : null,
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Hero 区圆形幽灵按钮：图标圆底 + 下方文字，与参考图的分享/下载一致，
+/// 不再用顶栏小图标挤占标题空间。
+class _HeroCircleAction extends StatelessWidget {
+  const _HeroCircleAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final enabled = onTap != null;
+    final fg = enabled
+        ? colorScheme.onSurface
+        : colorScheme.onSurface.withValues(alpha: .38);
+
+    return Opacity(
+      opacity: enabled ? 1 : .55,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .78),
+            shape: const CircleBorder(),
+            elevation: 0,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(11),
+                child: Icon(icon, size: 22, color: fg),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: enabled
+                      ? colorScheme.onSurfaceVariant
+                      : colorScheme.onSurfaceVariant.withValues(alpha: .5),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -2007,153 +2186,170 @@ class _SkeletonBox extends StatelessWidget {
   }
 }
 
-class _Actions extends StatelessWidget {
-  const _Actions({
-    required this.count,
-    required this.loadedCount,
+/// 粘性头的 sliver 代理：固定高度，置顶后依然可播/可搜/可排（参考图4）。
+class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _StickyHeaderDelegate({required this.height, required this.child});
+
+  final double height;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return SizedBox.expand(child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
+    return oldDelegate.height != height || oldDelegate.child != child;
+  }
+}
+
+/// 参考图4的粘性歌曲条：顶部大圆角面板头，左侧蓝色播放 pill，
+/// 中间两行计数（标题+副标题各自省略，窄屏不再挤没「已加载」），
+/// 右侧搜索/排序/多选三个幽灵图标。多选模式下切换为已选计数+全选。
+class _ListStickyBar extends StatelessWidget {
+  const _ListStickyBar({
+    required this.selecting,
+    required this.selectedCount,
+    required this.allSelected,
+    required this.onToggleSelectAll,
+    required this.title,
+    required this.subtitle,
+    required this.canPlay,
     required this.onPlay,
-    required this.sortLabel,
-    required this.onSortTap,
-    this.searchQuery,
-    this.searchResultCount,
+    required this.onSearch,
+    required this.onSort,
+    required this.selectEnabled,
+    required this.onSelect,
   });
 
-  final int count;
-  final int loadedCount;
-  final VoidCallback? onPlay;
-  final String? searchQuery;
-  final int? searchResultCount;
-  final String sortLabel;
-  final VoidCallback onSortTap;
+  final bool selecting;
+  final int selectedCount;
+  final bool allSelected;
+  final VoidCallback? onToggleSelectAll;
+  final String title;
+  final String subtitle;
+  final bool canPlay;
+  final VoidCallback onPlay;
+  final VoidCallback onSearch;
+  final VoidCallback onSort;
+  final bool selectEnabled;
+  final VoidCallback onSelect;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isSearching = searchQuery != null && searchQuery!.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: .06)
-              : Colors.white.withValues(alpha: .88),
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: .10)
-                : Colors.white.withValues(alpha: .92),
-            width: 1.1,
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .25 : .07),
+            blurRadius: 12,
+            offset: const Offset(0, -4),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Icon(
-                      Icons.music_note_rounded,
-                      size: 16,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      isSearching
-                          ? '搜索结果 · $searchResultCount 首'
-                          : loadedCount >= count
-                              ? '$count 首歌曲'
-                              : '已加载 $loadedCount / $count',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurface,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13.5,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (!isSearching) ...[
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: onSortTap,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: .08)
-                              : colorScheme.surfaceContainerHighest.withValues(alpha: .9),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: colorScheme.outlineVariant.withValues(alpha: .5),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.sort_rounded, size: 14, color: colorScheme.primary),
-                            const SizedBox(width: 4),
-                            Text(
-                              sortLabel,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: colorScheme.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            if (!isSearching)
-              FilledButton.icon(
-                onPressed: onPlay,
-                icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                label: const Text('播放全部'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                  elevation: 0,
-                ),
-              )
-            else if (searchResultCount != null && searchResultCount! > 0)
-              FilledButton.icon(
-                onPressed: onPlay,
-                icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                label: const Text('播放结果'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                  elevation: 0,
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+      child: selecting
+          ? Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '已选 $selectedCount 首',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onToggleSelectAll,
+                  child: Text(allSelected ? '取消全选' : '全选'),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                FilledButton(
+                  onPressed: canPlay ? onPlay : null,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(52, 38),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                  height: 1.15,
+                                ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11.5,
+                              height: 1.15,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '搜索',
+                  onPressed: onSearch,
+                  icon: const Icon(Icons.search_rounded, size: 22),
+                ),
+                IconButton(
+                  tooltip: '排序',
+                  onPressed: onSort,
+                  icon: const Icon(Icons.sort_rounded, size: 22),
+                ),
+                IconButton(
+                  tooltip: '多选',
+                  onPressed: selectEnabled ? onSelect : null,
+                  icon: const Icon(Icons.checklist_rounded, size: 22),
+                ),
+              ],
+            ),
     );
   }
 }
