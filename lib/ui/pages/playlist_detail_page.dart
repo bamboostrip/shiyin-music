@@ -1305,24 +1305,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       shadowColor: Colors.black.withValues(alpha: .08),
                       // 修复穿透：收起时用不透明 surface 遮挡滚动内容，展开时被 _HeroHeader 覆盖
                       backgroundColor: Theme.of(context).colorScheme.surface,
-                      leading: _isSelecting
-                          ? IconButton(
-                              tooltip: '取消',
-                              onPressed: _exitSelectMode,
-                              icon: const Icon(Icons.close_rounded),
-                            )
-                          : null,
-                      title: _isSelecting
-                          ? Text(
-                              '已选 $_selectedCount 首',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            )
-                          : _isSearching
+                      // 选择模式也保留默认返回箭头（参考主流 App）：
+                      // PopScope 会把返回拦截为退出选择，不需要 X。
+                      title: _isSearching
                           ? TextField(
                               controller: _searchController,
                               autofocus: true,
@@ -1373,16 +1358,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               },
                             ),
                       // 顶栏瘦身：选择/搜索/分享/导入下沉到 Hero 与粘性条，
+                      // 选择模式下顶栏只剩返回+标题（参考图2），全选/完成在粘性条。
                       // 这里最多只剩一个溢出入口，标题不再被挤成几个字。
                       actions: [
-                        if (_isSelecting) ...[
-                          TextButton(
-                            onPressed: _selectPool.isEmpty
-                                ? null
-                                : _toggleSelectAll,
-                            child: Text(_isAllSelected ? '取消全选' : '全选'),
-                          ),
-                        ] else if (!_isSearching) ...[
+                        if (_isSelecting)
+                          const SizedBox.shrink()
+                        else if (!_isSearching) ...[
                           if (_isMutating)
                             const Padding(
                               padding: EdgeInsets.only(right: 16),
@@ -1422,13 +1403,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 downloadAvailable: widget
                                         .player.downloadController !=
                                     null,
-                                selectEnabled:
-                                    _songs.isNotEmpty || _hasMore,
                                 onShare: _sharePlaylist,
                                 onCollect: _collectPlaylist,
                                 onMore: _showPlaylistActionSheet,
                                 onDownloadAll: _downloadAll,
-                                onSelect: _enterSelectMode,
                               ),
                             ),
                     ),
@@ -1456,6 +1434,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                             onToggleSelectAll: _selectPool.isEmpty
                                 ? null
                                 : _toggleSelectAll,
+                            onDone: _exitSelectMode,
                             title: stickyTitle,
                             subtitle: stickySubtitle,
                             canPlay: _playbackQueueNow().isNotEmpty,
@@ -1517,7 +1496,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                             16,
                             4,
                             16,
-                            _isSelecting ? 100 : 16,
+                            _isSelecting ? 110 : 16,
                           ),
                           sliver: SliverList.separated(
                             itemCount: _filteredSongs.length,
@@ -1581,9 +1560,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               ),
               if (_isSelecting)
                 Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
+                  left: 16,
+                  right: 16,
+                  bottom: bottomInset > 0 ? bottomInset + 10 : 16,
                   child: _SelectionBottomBar(
                     canDelete: _canEdit,
                     downloading: _isBatchDownloading,
@@ -1703,6 +1682,60 @@ class _SimilarPlaylistCard extends StatelessWidget {
   }
 }
 
+/// 自定义精致圆形勾选框，用于粘性条「全选」和单曲列表勾选。
+class _MusicCircleCheckbox extends StatelessWidget {
+  const _MusicCircleCheckbox({
+    required this.value,
+    this.onChanged,
+  });
+
+  final bool value;
+  final ValueChanged<bool?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final unselectedBorderColor = isDark
+        ? Colors.white.withValues(alpha: .32)
+        : colorScheme.outlineVariant.withValues(alpha: .95);
+
+    return InkResponse(
+      onTap: onChanged == null ? null : () => onChanged!(!value),
+      radius: 18,
+      containedInkWell: false,
+      highlightShape: BoxShape.circle,
+      child: SizedBox.square(
+        dimension: 32,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: value ? colorScheme.primary : Colors.transparent,
+              border: Border.all(
+                color: value ? colorScheme.primary : unselectedBorderColor,
+                width: 1.5,
+              ),
+            ),
+            child: value
+                ? const Icon(
+                    Icons.check_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SelectionBottomBar extends StatelessWidget {
   const _SelectionBottomBar({
     required this.canDelete,
@@ -1723,14 +1756,31 @@ class _SelectionBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    return Material(
-      elevation: 8,
-      color: colorScheme.surface,
-      child: SafeArea(
-        top: false,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .12)
+              : colorScheme.outlineVariant.withValues(alpha: .5),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .28 : .12),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        color: isDark ? const Color(0xFF1E2433) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(12, 10, 12, bottom > 0 ? 8 : 12),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
               Expanded(
@@ -1789,39 +1839,54 @@ class _SelectionActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = onTap == null
-        ? colorScheme.onSurface.withValues(alpha: .38)
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final isEnabled = onTap != null && !busy;
+
+    final color = !isEnabled
+        ? colorScheme.onSurface.withValues(alpha: isDark ? .28 : .32)
         : danger
-        ? colorScheme.error
-        : colorScheme.onSurface;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (busy)
-              SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: color,
-                ),
-              )
-            else
-              Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w700,
+            ? colorScheme.error
+            : colorScheme.onSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        splashColor: (danger ? colorScheme.error : colorScheme.primary)
+            .withValues(alpha: .12),
+        highlightColor: (danger ? colorScheme.error : colorScheme.primary)
+            .withValues(alpha: .06),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: color,
+                  ),
+                )
+              else
+                Icon(icon, color: color, size: 22),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                      color: color,
+                      fontWeight: isEnabled ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 12,
+                    ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1890,12 +1955,10 @@ class _HeroHeader extends StatelessWidget {
     required this.mutating,
     required this.downloading,
     required this.downloadAvailable,
-    required this.selectEnabled,
     required this.onShare,
     required this.onCollect,
     required this.onMore,
     required this.onDownloadAll,
-    required this.onSelect,
   });
 
   final PlaylistSummary info;
@@ -1904,12 +1967,10 @@ class _HeroHeader extends StatelessWidget {
   final bool mutating;
   final bool downloading;
   final bool downloadAvailable;
-  final bool selectEnabled;
   final VoidCallback onShare;
   final VoidCallback onCollect;
   final VoidCallback onMore;
   final VoidCallback onDownloadAll;
-  final VoidCallback onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -2009,20 +2070,19 @@ class _HeroHeader extends StatelessWidget {
                     label: '分享',
                     onTap: onShare,
                   ),
-                  const SizedBox(width: 16),
-                  if (showCollect)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: _HeroCircleAction(
-                        icon: isInLibrary
-                            ? Icons.bookmark_added_rounded
-                            : Icons.bookmark_add_outlined,
-                        label: mutating
-                            ? '请稍候'
-                            : (isInLibrary ? '已收藏' : '收藏'),
-                        onTap: isInLibrary ? onMore : onCollect,
-                      ),
+                  if (showCollect) ...[
+                    const SizedBox(width: 24),
+                    _HeroCircleAction(
+                      icon: isInLibrary
+                          ? Icons.bookmark_added_rounded
+                          : Icons.bookmark_add_outlined,
+                      label: mutating
+                          ? '请稍候'
+                          : (isInLibrary ? '已收藏' : '收藏'),
+                      onTap: isInLibrary ? onMore : onCollect,
                     ),
+                  ],
+                  const SizedBox(width: 24),
                   _HeroCircleAction(
                     icon: downloading
                         ? Icons.downloading_rounded
@@ -2031,12 +2091,6 @@ class _HeroHeader extends StatelessWidget {
                     onTap: downloadAvailable && !downloading
                         ? onDownloadAll
                         : null,
-                  ),
-                  const SizedBox(width: 16),
-                  _HeroCircleAction(
-                    icon: Icons.checklist_rounded,
-                    label: '多选',
-                    onTap: selectEnabled ? onSelect : null,
                   ),
                 ],
               ),
@@ -2223,6 +2277,7 @@ class _ListStickyBar extends StatelessWidget {
     required this.selectedCount,
     required this.allSelected,
     required this.onToggleSelectAll,
+    required this.onDone,
     required this.title,
     required this.subtitle,
     required this.canPlay,
@@ -2237,6 +2292,7 @@ class _ListStickyBar extends StatelessWidget {
   final int selectedCount;
   final bool allSelected;
   final VoidCallback? onToggleSelectAll;
+  final VoidCallback onDone;
   final String title;
   final String subtitle;
   final bool canPlay;
@@ -2263,42 +2319,85 @@ class _ListStickyBar extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      // 选择模式（参考图2）：复选框+全选+已选计数+右侧蓝色完成，
+      // 顶栏不再重复放全选，返回箭头即退出选择。
       child: selecting
           ? Row(
               children: [
+                _MusicCircleCheckbox(
+                  value: allSelected,
+                  onChanged: onToggleSelectAll == null
+                      ? null
+                      : (_) => onToggleSelectAll!(),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '全选',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     '已选 $selectedCount 首',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
                         ),
                   ),
                 ),
-                TextButton(
-                  onPressed: onToggleSelectAll,
-                  child: Text(allSelected ? '取消全选' : '全选'),
+                Material(
+                  color: colorScheme.primary.withValues(
+                    alpha: isDark ? .22 : .12,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: onDone,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      height: 32,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '完成',
+                        style: TextStyle(
+                          color: colorScheme.primary,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             )
           : Row(
               children: [
-                FilledButton(
-                  onPressed: canPlay ? onPlay : null,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(52, 38),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                Material(
+                  color: canPlay
+                      ? colorScheme.primary
+                      : colorScheme.primary.withValues(alpha: .38),
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: canPlay ? onPlay : null,
+                    customBorder: const CircleBorder(),
+                    child: const SizedBox.square(
+                      dimension: 40,
+                      child: Center(
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          size: 24,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
-                    elevation: 0,
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    size: 22,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -2333,23 +2432,73 @@ class _ListStickyBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                _StickyHeaderIconButton(
+                  icon: Icons.search_rounded,
                   tooltip: '搜索',
-                  onPressed: onSearch,
-                  icon: const Icon(Icons.search_rounded, size: 22),
+                  onTap: onSearch,
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                _StickyHeaderIconButton(
+                  icon: Icons.sort_rounded,
                   tooltip: '排序',
-                  onPressed: onSort,
-                  icon: const Icon(Icons.sort_rounded, size: 22),
+                  onTap: onSort,
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                _StickyHeaderIconButton(
+                  icon: Icons.checklist_rounded,
                   tooltip: '多选',
-                  onPressed: selectEnabled ? onSelect : null,
-                  icon: const Icon(Icons.checklist_rounded, size: 22),
+                  onTap: selectEnabled ? onSelect : null,
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _StickyHeaderIconButton extends StatelessWidget {
+  const _StickyHeaderIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark
+        ? Colors.white.withValues(alpha: .08)
+        : Colors.black.withValues(alpha: .04);
+    final iconColor = onTap == null
+        ? colorScheme.onSurface.withValues(alpha: .38)
+        : colorScheme.onSurface;
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: bgColor,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: SizedBox.square(
+            dimension: 36,
+            child: Center(
+              child: Icon(
+                icon,
+                size: 20,
+                color: iconColor,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2519,13 +2668,11 @@ class _SongRow extends StatelessWidget {
               child: Row(
                 children: [
                   if (selecting) ...[
-                    Checkbox(
+                    _MusicCircleCheckbox(
                       value: selected,
                       onChanged: (_) => onTap(),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 8),
                   ],
                   SizedBox.square(
                     dimension: 50,
