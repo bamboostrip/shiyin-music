@@ -304,6 +304,14 @@ class PlayerController extends ChangeNotifier {
   int seekRevision = 0;
   int? _androidAudioSessionId;
   bool get isScrubbing => _isScrubbing;
+
+  /// 当前音量（0.0–1.0）。桌面播放栏音量滑杆使用。
+  double get volume => _audioHandler.audioPlayer.volume;
+
+  /// 设置音量（0.0–1.0），越界值自动夹取。
+  Future<void> setVolume(double value) =>
+      _audioHandler.audioPlayer.setVolume(value.clamp(0.0, 1.0));
+
   bool get isAudioEffectsSupported => _audioEffects.isAudioEffectsSupported;
   bool get isBassBoostSupported => _audioEffects.isBassBoostSupported;
   bool get loudnessEnabled => _loudness.isEnabled;
