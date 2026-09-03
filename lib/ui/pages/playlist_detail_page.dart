@@ -32,12 +32,14 @@ class PlaylistDetailPage extends StatefulWidget {
     required this.auth,
     required this.player,
     required this.playlist,
+    this.initialSongs,
   });
 
   final MusicApi api;
   final AuthController auth;
   final PlayerController player;
   final PlaylistSummary playlist;
+  final List<Song>? initialSongs;
 
   @override
   State<PlaylistDetailPage> createState() => _PlaylistDetailPageState();
@@ -154,6 +156,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   bool get _isAlbum => widget.playlist.isCollectedAlbum;
+  bool get _isDailyRecommend => widget.playlist.id == 'daily_recommend';
 
   @override
   void initState() {
@@ -338,6 +341,58 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _info = null;
       _songs.clear();
     });
+
+    if (_isDailyRecommend) {
+      if (widget.initialSongs != null && widget.initialSongs!.isNotEmpty && _songs.isEmpty) {
+        final songs = List<Song>.of(widget.initialSongs!);
+        setState(() {
+          _info = widget.playlist;
+          _songs
+            ..clear()
+            ..addAll(songs);
+          _isInitialLoading = false;
+          _allSongsLoaded = true;
+          _hasMore = false;
+        });
+        return;
+      }
+      try {
+        final daily = await widget.api.dailyRecommend();
+        if (!mounted) return;
+        setState(() {
+          _info = widget.playlist.copyWith(
+            songCount: daily.songs.length,
+            coverUrl: daily.coverUrl ??
+                (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
+          );
+          _songs
+            ..clear()
+            ..addAll(daily.songs);
+          _isInitialLoading = false;
+          _allSongsLoaded = true;
+          _hasMore = false;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        if (widget.initialSongs != null && widget.initialSongs!.isNotEmpty) {
+          setState(() {
+            _info = widget.playlist;
+            _songs
+              ..clear()
+              ..addAll(widget.initialSongs!);
+            _isInitialLoading = false;
+            _allSongsLoaded = true;
+            _hasMore = false;
+          });
+        } else {
+          setState(() {
+            _errorMessage = '加载失败: $e';
+            _isInitialLoading = false;
+          });
+        }
+      }
+      return;
+    }
 
     final cacheKey = _isAlbum
         ? 'cache_album_${widget.playlist.albumId ?? widget.playlist.id}'
@@ -1245,9 +1300,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 ),
                               ),
                             )
-                          else if ((!_isAlbum && !_isInLibrary) ||
-                              (_isInLibrary &&
-                                  !_libraryPlaylist.isLikedPlaylist))
+                          else if (!_isDailyRecommend &&
+                              ((!_isAlbum && !_isInLibrary) ||
+                                  (_isInLibrary &&
+                                      !_libraryPlaylist.isLikedPlaylist)))
                             IconButton(
                               tooltip: '更多',
                               onPressed: _showPlaylistActionSheet,

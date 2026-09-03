@@ -333,6 +333,28 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openDailyRecommend(DailyRecommend daily) {
+    final playlist = PlaylistSummary(
+      id: 'daily_recommend',
+      title: '猜你喜欢',
+      subtitle: daily.subtitle ?? '根据你的听歌偏好，每日精心推荐',
+      coverUrl: daily.coverUrl ??
+          (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
+      songCount: daily.songs.length,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlaylistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          player: widget.player,
+          playlist: playlist,
+          initialSongs: daily.songs,
+        ),
+      ),
+    );
+  }
+
   void _playSong(Song song, List<Song> queue) {
     widget.player.playSong(song, queue: queue);
   }
@@ -415,6 +437,7 @@ class _HomePageState extends State<HomePage> {
                         widget.player.playSong(songs.first, queue: songs);
                       }
                     },
+                    onDailyTap: () => _openDailyRecommend(data.daily),
                     api: widget.api,
                     player: widget.player,
                     updateVersion: _updateBannerDismissed
@@ -493,6 +516,7 @@ class _RecommendHeader extends StatelessWidget {
     required this.sectionIndex,
     required this.onSectionChanged,
     required this.onDailyPlay,
+    required this.onDailyTap,
     required this.api,
     required this.player,
     required this.updateVersion,
@@ -505,6 +529,7 @@ class _RecommendHeader extends StatelessWidget {
   final int sectionIndex;
   final ValueChanged<int> onSectionChanged;
   final VoidCallback onDailyPlay;
+  final VoidCallback onDailyTap;
   final MusicApi api;
   final PlayerController player;
   final AppVersionInfo? updateVersion;
@@ -562,6 +587,7 @@ class _RecommendHeader extends StatelessWidget {
                         child: _FeatureShelf(
                           daily: daily,
                           onDailyPlay: onDailyPlay,
+                          onDailyTap: onDailyTap,
                         ),
                       ),
                       // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
@@ -583,6 +609,7 @@ class _RecommendHeader extends StatelessWidget {
                   _FeatureShelf(
                     daily: daily,
                     onDailyPlay: onDailyPlay,
+                    onDailyTap: onDailyTap,
                   ),
                   if (isCarMode)
                     _CarQuickStatsPills(
@@ -819,10 +846,12 @@ class _FeatureShelf extends StatelessWidget {
   const _FeatureShelf({
     required this.daily,
     required this.onDailyPlay,
+    required this.onDailyTap,
   });
 
   final DailyRecommend daily;
   final VoidCallback onDailyPlay;
+  final VoidCallback onDailyTap;
 
   @override
   Widget build(BuildContext context) {
@@ -835,7 +864,8 @@ class _FeatureShelf extends StatelessWidget {
           ? daily.coverUrl
           : daily.songs.first.coverUrl,
       gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
-      onTap: onDailyPlay,
+      onTap: onDailyTap,
+      onPlay: onDailyPlay,
     );
   }
 }
@@ -847,6 +877,7 @@ class _FeatureCard extends StatelessWidget {
     required this.imageUrl,
     required this.gradient,
     required this.onTap,
+    required this.onPlay,
   });
 
   final String title;
@@ -854,139 +885,164 @@ class _FeatureCard extends StatelessWidget {
   final String? imageUrl;
   final List<Color> gradient;
   final VoidCallback onTap;
+  final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    const imageSize = 64.0;
-    const playSize = 36.0;
-    const playIconSize = 20.0;
-    const gap = 10.0;
-    const titleGap = 6.0;
-    const hintGap = 3.0;
-    const tagVPadding = 3.0;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: .10)
-                : Colors.white.withValues(alpha: .92),
-            width: 1.1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
+    final size = MediaQuery.sizeOf(context);
+    final isLandscape = size.width > size.height;
+    final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
+
+    final imageSize = isCarMode ? 82.0 : 64.0;
+    final playSize = isCarMode ? 46.0 : 36.0;
+    final playIconSize = isCarMode ? 26.0 : 20.0;
+    final gap = isCarMode ? 14.0 : 10.0;
+    final titleGap = isCarMode ? 7.0 : 6.0;
+    final hintGap = isCarMode ? 4.0 : 3.0;
+    final tagHPadding = isCarMode ? 9.0 : 7.0;
+    final tagVPadding = isCarMode ? 4.5 : 3.0;
+    final tagFontSize = isCarMode ? 13.5 : 11.0;
+    final titleFontSize = isCarMode ? 17.5 : 13.0;
+    final hintFontSize = isCarMode ? 13.0 : 11.0;
+    final cardPadding = isCarMode ? const EdgeInsets.all(13) : const EdgeInsets.all(10);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .10)
+              : Colors.white.withValues(alpha: .92),
+          width: 1.1,
         ),
-        child: Row(
-          children: [
-            Container(
-              width: imageSize,
-              height: imageSize,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: .08),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: cardPadding,
+            child: Row(
+              children: [
+                Container(
+                  width: imageSize,
+                  height: imageSize,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .08),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: imageUrl == null
-                    ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: gradient),
-                        ),
-                        child: const Icon(Icons.album_rounded, color: Colors.white, size: 28),
-                      )
-                    : RetryableNetworkImage(
-                        url: imageUrl!,
-                        fit: BoxFit.cover,
-                        cacheWidth: 300,
-                        cacheHeight: 300,
-                        errorBuilder: (_, _, _) => DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: gradient),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: imageUrl == null
+                        ? DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(colors: gradient),
+                            ),
+                            child: Icon(
+                              Icons.album_rounded,
+                              color: Colors.white,
+                              size: isCarMode ? 36 : 28,
+                            ),
+                          )
+                        : RetryableNetworkImage(
+                            url: imageUrl!,
+                            fit: BoxFit.cover,
+                            cacheWidth: 300,
+                            cacheHeight: 300,
+                            errorBuilder: (_, _, _) => DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(colors: gradient),
+                              ),
+                              child: Icon(
+                                Icons.music_note_rounded,
+                                color: Colors.white,
+                                size: isCarMode ? 32 : 26,
+                              ),
+                            ),
                           ),
-                          child: const Icon(Icons.music_note_rounded, color: Colors.white, size: 26),
+                  ),
+                ),
+                SizedBox(width: gap),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: tagHPadding,
+                          vertical: tagVPadding,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(
+                            alpha: isDark ? .18 : .10,
+                          ),
+                          borderRadius: BorderRadius.circular(isCarMode ? 8 : 7),
+                        ),
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          style: TextStyle(
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: tagFontSize,
+                            letterSpacing: 0.2,
+                          ),
                         ),
                       ),
-              ),
-            ),
-            SizedBox(width: gap),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: tagVPadding,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(
-                        alpha: isDark ? .18 : .10,
+                      SizedBox(height: titleGap),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              fontSize: titleFontSize,
+                              height: 1.2,
+                            ),
                       ),
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      softWrap: false,
-                      style: TextStyle(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 11,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: titleGap),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                          height: 1.2,
+                      SizedBox(height: hintGap),
+                      Text(
+                        isCarMode ? '点击查看歌单 · 右侧播放' : '点击查看歌单',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: .70),
+                          fontWeight: FontWeight.w600,
+                          fontSize: hintFontSize,
                         ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: hintGap),
-                  Text(
-                    '轻触播放',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant.withValues(alpha: .62),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                SizedBox(width: gap),
+                _CirclePlayButton(size: playSize, iconSize: playIconSize, onTap: onPlay),
+              ],
             ),
-            SizedBox(width: gap),
-            _CirclePlayButton(size: playSize, iconSize: playIconSize, onTap: onTap),
-          ],
+          ),
         ),
       ),
     );
@@ -2038,6 +2094,21 @@ class _RadioHeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final size = MediaQuery.sizeOf(context);
+    final isLandscape = size.width > size.height;
+    final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
+
+    final artworkSize = isCarMode ? 84.0 : 72.0;
+    final cardPadding = isCarMode ? const EdgeInsets.all(14) : const EdgeInsets.all(12);
+    final gap = isCarMode ? 14.0 : 12.0;
+    final titleGap = isCarMode ? 7.0 : 6.0;
+    final subtitleGap = isCarMode ? 4.0 : 3.0;
+    final tagHPadding = isCarMode ? 9.0 : 7.0;
+    final tagVPadding = isCarMode ? 4.5 : 3.0;
+    final tagFontSize = isCarMode ? 13.5 : 11.0;
+    final titleFontSize = isCarMode ? 18.0 : 15.0;
+    final subtitleFontSize = isCarMode ? 14.0 : 12.0;
+
     // 与首页白卡统一：白底 16 圆角 + 描边 + 轻阴影，左侧封面 + 右侧信息 + 主色圆播钮。
     return Container(
       decoration: BoxDecoration(
@@ -2062,87 +2133,90 @@ class _RadioHeroCard extends StatelessWidget {
           onTap: loading ? null : onTap,
           borderRadius: BorderRadius.circular(16),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: cardPadding,
             child: Row(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: .08),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .08),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Artwork(
+                      url: station.artworkUrl ?? station.bannerUrl,
+                      size: artworkSize,
+                      borderRadius: 12,
+                      icon: Icons.radio_rounded,
                     ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Artwork(
-                    url: station.artworkUrl ?? station.bannerUrl,
-                    size: 72,
-                    borderRadius: 12,
-                    icon: Icons.radio_rounded,
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      child: Text(
-                        '推荐电台',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.primary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 11,
-                          letterSpacing: 0.2,
+                SizedBox(width: gap),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: tagHPadding,
+                          vertical: tagVPadding,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                          borderRadius: BorderRadius.circular(isCarMode ? 8 : 7),
+                        ),
+                        child: Text(
+                          '推荐电台',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: tagFontSize,
+                            letterSpacing: 0.2,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      station.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            height: 1.2,
-                          ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      station.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 12,
-                          ),
-                    ),
-                  ],
+                      SizedBox(height: titleGap),
+                      Text(
+                        station.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              fontSize: titleFontSize,
+                              height: 1.2,
+                            ),
+                      ),
+                      SizedBox(height: subtitleGap),
+                      Text(
+                        station.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w500,
+                              fontSize: subtitleFontSize,
+                            ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              _RadioPlayBadge(loading: loading),
-            ],
+                SizedBox(width: gap),
+                _RadioPlayBadge(loading: loading),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
 }
 }
 
@@ -2369,9 +2443,13 @@ class _RadioPlayBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screenSize = MediaQuery.sizeOf(context);
+    final isLandscape = screenSize.width > screenSize.height;
+    final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
+
     // 与全局/推荐页圆形播钮统一：清爽淡蓝底 + 主色图标。大卡小卡统一实底淡蓝，杜绝泛灰。
-    final size = compact ? 30.0 : 38.0;
-    final iconSize = compact ? 18.0 : 22.0;
+    final size = compact ? 30.0 : (isCarMode ? 46.0 : 38.0);
+    final iconSize = compact ? 18.0 : (isCarMode ? 26.0 : 22.0);
     return Container(
       width: size,
       height: size,
