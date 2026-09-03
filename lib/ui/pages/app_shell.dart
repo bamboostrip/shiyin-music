@@ -14,6 +14,8 @@ import '../widgets/lazy_indexed_stack.dart';
 import '../widgets/toast.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
+import '../desktop/desktop_shell.dart';
+import '../form_factor.dart';
 import 'home_page.dart';
 import 'library_page.dart';
 import 'player_page.dart';
@@ -66,6 +68,21 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildShell(BuildContext context) {
+    // 桌面形态（Windows 等）：独立的桌面骨架（侧栏 + 底部播放栏）。
+    // 判定只看平台（form_factor.dart），Android 车机/平板/手机不受影响；
+    // 车机模式在桌面形态下不生效（本分支先行返回）。
+    if (isDesktopFormFactor) {
+      return DesktopShell(
+        api: widget.api,
+        auth: widget.auth,
+        player: widget.player,
+        cache: widget.cache,
+        downloads: widget.downloads,
+        theme: widget.theme,
+        localMusic: widget.localMusic,
+      );
+    }
+
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final colorScheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
