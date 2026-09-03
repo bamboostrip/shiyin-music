@@ -115,12 +115,9 @@ class _RankPageState extends State<RankPage>
               player: widget.player,
               auth: widget.auth,
             ),
-            // 榜单标题 + 刷新按钮（与首页白卡语言统一：32 图标底 + 17 粗标题 + 圆角刷新）
-            // 节奏与首页分区头对齐：标题行高锁 32（刷新钮同步压到 32，
-            // 否则 IconButton 默认 48 高度会把整行撑高、标题离卡片显远），
-            // 下间距 10→6。
+            // 榜单标题 + 刷新按钮：与电台 _RadioSectionTitle 视觉与间距完全对齐
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
               child: Row(
                 children: [
                   Container(
@@ -134,39 +131,40 @@ class _RankPageState extends State<RankPage>
                     child: Icon(Icons.leaderboard_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
                   ),
                   const SizedBox(width: 10),
-                  Text(
-                    '排行榜',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
-                        ),
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: IconButton(
-                      tooltip: '刷新',
-                      onPressed: _refresh,
-                      padding: EdgeInsets.zero,
-                      icon: const Icon(Icons.refresh_rounded),
-                      iconSize: 20,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      visualDensity: VisualDensity.compact,
+                  Expanded(
+                    child: Text(
+                      '排行榜',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
                     ),
+                  ),
+                  IconButton(
+                    tooltip: '刷新',
+                    onPressed: _refresh,
+                    icon: const Icon(Icons.refresh_rounded),
+                    iconSize: 20,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    visualDensity: VisualDensity.compact,
                   ),
                 ],
               ),
             ),
+            // 与电台标题下 SizedBox(height: 12) 完全对齐。
+            const SizedBox(height: 12),
             // 榜单列表 / 网格
             if (isCarLandscape)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final crossAxisCount = constraints.maxWidth > 600 ? 2 : 1;
                     return GridView.builder(
+                      padding: EdgeInsets.zero,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -190,7 +188,7 @@ class _RankPageState extends State<RankPage>
             else
               // 手机版双列小卡：一屏展示更多榜单，封面 + 榜名 + 前两首。
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final count = constraints.maxWidth > 600 ? 3 : 2;
@@ -199,6 +197,7 @@ class _RankPageState extends State<RankPage>
                     final cellWidth =
                         (constraints.maxWidth - spacing * (count - 1)) / count;
                     return GridView.builder(
+                      padding: EdgeInsets.zero,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(

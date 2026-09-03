@@ -226,25 +226,6 @@ class MusicApi {
         .toList();
   }
 
-  /// 新碟上架。
-  Future<List<TopAlbumItem>> topAlbums({
-    int page = 1,
-    int pageSize = 10,
-  }) async {
-    final raw = await _client.get('/top/album', {
-      'page': page,
-      'pagesize': pageSize,
-    });
-    final json = asMap(raw);
-    final data = asMap(json['data']);
-    final items = asList(data['chn'] ?? json['chn']);
-    return items
-        .whereType<Map<String, dynamic>>()
-        .map(TopAlbumItem.fromJson)
-        .where((album) => album.id.isNotEmpty)
-        .toList();
-  }
-
   // -------------------------------------------------------------------------
   // 排行榜 (Rank)
   // -------------------------------------------------------------------------
@@ -338,20 +319,6 @@ class MusicApi {
         .whereType<Map<String, dynamic>>()
         .map(Song.fromRank)
         .where((s) => s.hash.isNotEmpty)
-        .toList();
-  }
-
-  Future<List<AlbumShopItem>> albumShop({
-    int page = 1,
-    int pageSize = 30,
-  }) async {
-    final json = asMap(
-      await _client.get('/album/shop', {'page': page, 'pagesize': pageSize}),
-    );
-    return asList(json['album_list'])
-        .whereType<Map<String, dynamic>>()
-        .map(AlbumShopItem.fromJson)
-        .where((item) => item.mediaId > 0)
         .toList();
   }
 

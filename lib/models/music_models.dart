@@ -1422,70 +1422,6 @@ class DailyRecommend {
   }
 }
 
-class AlbumShopItem {
-  const AlbumShopItem({
-    required this.albumName,
-    required this.singerName,
-    required this.mediaId,
-    required this.topicId,
-    this.pic,
-    this.price,
-    this.buyNum,
-  });
-
-  final String albumName;
-  final String singerName;
-  final int mediaId;
-  final int topicId;
-  final String? pic;
-  final int? price; // 分为单位
-  final int? buyNum;
-
-  String? get coverUrl => normalizeImageUrl(pic);
-
-  String get priceText {
-    if (price == null) return '';
-    final yuan = price! / 100;
-    return yuan == yuan.roundToDouble()
-        ? '¥${yuan.round()}'
-        : '¥${yuan.toStringAsFixed(2)}';
-  }
-
-  factory AlbumShopItem.fromJson(Map<String, dynamic> json) {
-    return AlbumShopItem(
-      albumName: asString(json['album_name']) ?? '未知专辑',
-      singerName: asString(json['singer_name']) ?? '未知歌手',
-      mediaId: asInt(json['media_id']) ?? 0,
-      topicId: asInt(json['topic_id']) ?? 0,
-      pic: asString(json['pic']),
-      price: asInt(json['price']),
-      buyNum: asInt(json['buy_num']),
-    );
-  }
-
-  Map<String, dynamic> toCache() => {
-    'albumName': albumName,
-    'singerName': singerName,
-    'mediaId': mediaId,
-    'topicId': topicId,
-    'pic': pic,
-    'price': price,
-    'buyNum': buyNum,
-  };
-
-  factory AlbumShopItem.fromCache(Map<String, dynamic> json) {
-    return AlbumShopItem(
-      albumName: asString(json['albumName']) ?? '未知专辑',
-      singerName: asString(json['singerName']) ?? '未知歌手',
-      mediaId: asInt(json['mediaId']) ?? 0,
-      topicId: asInt(json['topicId']) ?? 0,
-      pic: asString(json['pic']),
-      price: asInt(json['price']),
-      buyNum: asInt(json['buyNum']),
-    );
-  }
-}
-
 class PlayUrl {
   const PlayUrl({required this.url, required this.hash, this.privStatus = 0});
 
@@ -2508,36 +2444,6 @@ class SongClimax {
       startTime: Duration(milliseconds: asInt(json['start_time']) ?? 0),
       endTime: Duration(milliseconds: asInt(json['end_time']) ?? 0),
       hash: asString(json['hash']) ?? '',
-    );
-  }
-}
-
-/// 新碟上架（/top/album）。
-class TopAlbumItem {
-  const TopAlbumItem({
-    required this.id,
-    required this.name,
-    this.singerName,
-    this.coverUrl,
-    this.publishTime,
-    this.songCount,
-  });
-
-  final String id;
-  final String name;
-  final String? singerName;
-  final String? coverUrl;
-  final String? publishTime;
-  final int? songCount;
-
-  factory TopAlbumItem.fromJson(Map<String, dynamic> json) {
-    return TopAlbumItem(
-      id: asString(json['albumid']) ?? '',
-      name: asString(json['albumname']) ?? '未知专辑',
-      singerName: asString(json['singername']),
-      coverUrl: normalizeImageUrl(asString(json['imgurl'])),
-      publishTime: asString(json['publishtime']),
-      songCount: asInt(json['songcount']),
     );
   }
 }

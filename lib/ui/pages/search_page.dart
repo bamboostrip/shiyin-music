@@ -932,18 +932,26 @@ class _HotSearchPanel extends StatefulWidget {
 }
 
 class _HotSearchPanelState extends State<_HotSearchPanel> {
+  late final PageController _pageController = PageController();
   var _page = 0;
-  // 切榜滑入方向：往后 +1（新页从右进）、往前 -1（新页从左进），
-  // 点 tab 与横滑都会先定方向再 setState，保证动画与手势一致。
-  var _slideDir = 1;
 
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  // tab 点击 / 左右箭头：翻到指定榜（300ms easeOutCubic）。
+  // 横滑由 PageView 自己跟手 + 松手吸附，松手后 onPageChanged 回写 _page，
+  // 切页动画由手势驱动，用户一定感知得到，不会再"一闪而过"。
   void _goToPage(int index, int total) {
     final next = index.clamp(0, total - 1);
     if (next == _page) return;
-    setState(() {
-      _slideDir = next > _page ? 1 : -1;
-      _page = next;
-    });
+    _pageController.animateToPage(
+      next,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
@@ -951,6 +959,8 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
     final categories = widget.categories;
     if (categories.isEmpty) return const SizedBox.shrink();
     final page = _page.clamp(0, categories.length - 1);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -962,10 +972,10 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
               width: 28,
               height: 28,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? .18 : .10),
+                color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(Icons.local_fire_department_rounded, size: 16, color: Theme.of(context).colorScheme.primary),
+              child: Icon(Icons.local_fire_department_rounded, size: 16, color: colorScheme.primary),
             ),
             const SizedBox(width: 10),
             Text(
@@ -975,76 +985,123 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
                     fontSize: 16,
                   ),
             ),
+            const Spacer(),
+            // 当前榜单计数 + 左右切换箭头：切换方式一目了然，
+            // 与 tab 点击、横滑手势三路同走 _goToPage。
+            Text(
+              '${page + 1} / ${categories.length}',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+            ),
+            const SizedBox(width: 6),
+            _HotPageArrow(
+              icon: Icons.chevron_left_rounded,
+              enabled: page > 0,
+              onTap: () => _goToPage(page - 1, categories.length),
+            ),
+            const SizedBox(width: 4),
+            _HotPageArrow(
+              icon: Icons.chevron_right_rounded,
+              enabled: page < categories.length - 1,
+              onTap: () => _goToPage(page + 1, categories.length),
+            ),
           ],
         ),
         const SizedBox(height: 12),
+        // 分段胶囊 tab 条：与首页顶部 tab 同一语言，选中态为立体白卡。
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withValues(alpha: .06)
+                : colorScheme.surfaceContainerHighest.withValues(alpha: .55),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: SizedBox(
+            height: 34,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.zero,
+              itemCount: categories.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 4),
+              itemBuilder: (context, index) {
+                final active = index == page;
+                return _CategoryTab(
+                  label: categories[index].name,
+                  active: active,
+                  onTap: () => _goToPage(index, categories.length),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // 榜单区锁高 360（约八行半：露出半行暗示榜内可滚），tab 条常驻可见，
+        // 切榜时用户始终看得到自己在哪个榜。
+        // 之前随内容撑高：榜单一长 tab 就被顶出屏幕，横滑切榜只剩内容一闪，
+        // 用户感知不到切换。现在用真 PageView：横滑跟手 + 松手吸附。
         SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.zero,
+          height: 360,
+          child: PageView.builder(
+            controller: _pageController,
+            onPageChanged: (i) => setState(() => _page = i),
             itemCount: categories.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (context, index) {
-              final active = index == page;
-              return _CategoryTab(
-                label: categories[index].name,
-                active: active,
-                onTap: () => _goToPage(index, categories.length),
+              return _CategoryKeywordList(
+                keywords: categories[index].keywords,
+                onTap: widget.onTap,
               );
             },
           ),
         ),
-        const SizedBox(height: 12),
-        // 各榜单列表按内容自然撑高、随外层 ListView 一起滚：
-        // 之前是固定 560 高 + PageView + 内层 NeverScrollable，
-        // 行数一多就被卡死在框里，外层怎么滑都看不到。
-        // 切榜动画用定向滑入 + 淡入（260ms，与之前 PageView 体感一致），
-        // 高度变化由 AnimatedSize 兜底；左右横滑手势保留。
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragEnd: (details) {
-            final v = details.primaryVelocity ?? 0;
-            if (v > 300) {
-              _goToPage(page - 1, categories.length);
-            } else if (v < -300) {
-              _goToPage(page + 1, categories.length);
-            }
-          },
-          child: AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.topCenter,
-            // 只挂当前页：高度即当前榜单内容高。
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                final offset =
-                    Tween<Offset>(
-                      begin: Offset(0.28 * _slideDir, 0),
-                      end: Offset.zero,
-                    ).animate(
-                      CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutCubic,
-                      ),
-                    );
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(position: offset, child: child),
-                );
-              },
-              child: _CategoryKeywordList(
-                key: ValueKey('hot-$page-${categories[page].name}'),
-                keywords: categories[page].keywords,
-                onTap: widget.onTap,
-              ),
-            ),
+      ],
+    );
+  }
+}
+
+/// 热搜头部左右切榜小箭头：28 见方圆角，与标题行图标底同一语言。
+class _HotPageArrow extends StatelessWidget {
+  const _HotPageArrow({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(9),
+        onTap: enabled ? onTap : null,
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: enabled
+                ? colorScheme.primary.withValues(alpha: isDark ? .18 : .10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: enabled
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant.withValues(alpha: .35),
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -1070,7 +1127,7 @@ class _CategoryTab extends StatelessWidget {
         color: active
             ? (isDark ? colorScheme.primary.withValues(alpha: .20) : Colors.white)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: active && !isDark
             ? Border.all(color: colorScheme.primary.withValues(alpha: .18), width: 1)
             : null,
@@ -1079,7 +1136,7 @@ class _CategoryTab extends StatelessWidget {
             : null,
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -1098,7 +1155,7 @@ class _CategoryTab extends StatelessWidget {
 }
 
 class _CategoryKeywordList extends StatelessWidget {
-  const _CategoryKeywordList({super.key, required this.keywords, required this.onTap});
+  const _CategoryKeywordList({required this.keywords, required this.onTap});
 
   final List<SearchHotKeyword> keywords;
   final ValueChanged<String> onTap;
@@ -1106,9 +1163,8 @@ class _CategoryKeywordList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 榜内可滚：父级锁高 360，超出的行在这里滚，tab 条不受影响。
     return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: keywords.length,
       itemBuilder: (context, index) {
@@ -1116,57 +1172,57 @@ class _CategoryKeywordList extends StatelessWidget {
         final rank = index + 1;
         return InkWell(
           onTap: () => onTap(item.keyword),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    '$rank',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: _rankWeight(rank),
-                      color: _rankColor(rank, colorScheme),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    item.keyword,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (rank <= 3 && item.reason != null && item.reason!.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _rankColor(
-                        rank,
-                        colorScheme,
-                      ).withValues(alpha: .14),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '热',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: _rankColor(rank, colorScheme),
-                        fontWeight: FontWeight.w800,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 28,
+                      child: Text(
+                        '$rank',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: _rankWeight(rank),
+                          color: _rankColor(rank, colorScheme),
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-        );
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        item.keyword,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (rank <= 3 && item.reason != null && item.reason!.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _rankColor(
+                            rank,
+                            colorScheme,
+                          ).withValues(alpha: .14),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '热',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: _rankColor(rank, colorScheme),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
       },
     );
   }

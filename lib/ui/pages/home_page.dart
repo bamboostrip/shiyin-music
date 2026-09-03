@@ -19,7 +19,6 @@ import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
-import 'album_shop_page.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
 import 'search_page.dart';
@@ -177,21 +176,18 @@ class _HomePageState extends State<HomePage> {
       final results = await Future.wait([
         widget.api.dailyRecommend(),
         widget.api.recommendedPlaylists(),
-        widget.api.albumShop(),
         _loadTopSongsSafe(),
       ]);
       if (!mounted) return;
       final data = _HomeData(
         daily: results[0] as DailyRecommend,
         playlists: results[1] as List<PlaylistSummary>,
-        albums: results[2] as List<AlbumShopItem>,
-        topSongs: results[3] as List<Song>,
+        topSongs: results[2] as List<Song>,
       );
       _cachedData = data;
       await widget.cache.write('cache_home', {
         'daily': data.daily.toCache(),
         'playlists': data.playlists.map((p) => p.toCache()).toList(),
-        'albums': data.albums.map((a) => a.toCache()).toList(),
         'topSongs': data.topSongs.map((song) => song.toCache()).toList(),
       });
       if (!mounted) return;
@@ -210,20 +206,17 @@ class _HomePageState extends State<HomePage> {
     final results = await Future.wait([
       widget.api.dailyRecommend(),
       widget.api.recommendedPlaylists(),
-      widget.api.albumShop(),
       _loadTopSongsSafe(),
     ]);
     final data = _HomeData(
       daily: results[0] as DailyRecommend,
       playlists: results[1] as List<PlaylistSummary>,
-      albums: results[2] as List<AlbumShopItem>,
-      topSongs: results[3] as List<Song>,
+      topSongs: results[2] as List<Song>,
     );
     _cachedData = data;
     await widget.cache.write('cache_home', {
       'daily': data.daily.toCache(),
       'playlists': data.playlists.map((p) => p.toCache()).toList(),
-      'albums': data.albums.map((a) => a.toCache()).toList(),
       'topSongs': data.topSongs.map((song) => song.toCache()).toList(),
     });
     _checkAndAutoPlay(data);
@@ -268,10 +261,6 @@ class _HomePageState extends State<HomePage> {
       playlists: (json['playlists'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(PlaylistSummary.fromCache)
-          .toList(),
-      albums: (json['albums'] as List? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(AlbumShopItem.fromCache)
           .toList(),
       topSongs: (json['topSongs'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()
@@ -366,19 +355,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openAlbumShop() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AlbumShopPage(
-          api: widget.api,
-          auth: widget.auth,
-          player: widget.player,
-          initialAlbums: _cachedData?.albums ?? [],
-        ),
-      ),
-    );
-  }
-
   // ignore: unused_element
   void _openSettings() {
     Navigator.of(context).push(
@@ -424,7 +400,6 @@ class _HomePageState extends State<HomePage> {
                   child: _RecommendHeader(
                     auth: widget.auth,
                     daily: data!.daily,
-                    albums: data.albums,
                     sectionIndex: _sectionIndex,
                     onSectionChanged: (value) {
                       if (value == -1) {
@@ -440,7 +415,6 @@ class _HomePageState extends State<HomePage> {
                         widget.player.playSong(songs.first, queue: songs);
                       }
                     },
-                    onAlbumTap: _openAlbumShop,
                     api: widget.api,
                     player: widget.player,
                     updateVersion: _updateBannerDismissed
@@ -516,11 +490,9 @@ class _RecommendHeader extends StatelessWidget {
   const _RecommendHeader({
     required this.auth,
     required this.daily,
-    required this.albums,
     required this.sectionIndex,
     required this.onSectionChanged,
     required this.onDailyPlay,
-    required this.onAlbumTap,
     required this.api,
     required this.player,
     required this.updateVersion,
@@ -530,11 +502,9 @@ class _RecommendHeader extends StatelessWidget {
 
   final AuthController auth;
   final DailyRecommend daily;
-  final List<AlbumShopItem> albums;
   final int sectionIndex;
   final ValueChanged<int> onSectionChanged;
   final VoidCallback onDailyPlay;
-  final VoidCallback onAlbumTap;
   final MusicApi api;
   final PlayerController player;
   final AppVersionInfo? updateVersion;
@@ -591,9 +561,7 @@ class _RecommendHeader extends StatelessWidget {
                         flex: 6,
                         child: _FeatureShelf(
                           daily: daily,
-                          albums: albums,
                           onDailyPlay: onDailyPlay,
-                          onAlbumTap: onAlbumTap,
                         ),
                       ),
                       // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
@@ -614,9 +582,7 @@ class _RecommendHeader extends StatelessWidget {
                 else ...[
                   _FeatureShelf(
                     daily: daily,
-                    albums: albums,
                     onDailyPlay: onDailyPlay,
-                    onAlbumTap: onAlbumTap,
                   ),
                   if (isCarMode)
                     _CarQuickStatsPills(
@@ -709,24 +675,25 @@ class _TopTabs extends StatelessWidget {
                         ? (isDark
                             ? colorScheme.primary.withValues(alpha: .20)
                             : Colors.white)
-                        : Colors.transparent,
+                        : (isDark
+                            ? colorScheme.primary.withValues(alpha: 0)
+                            : Colors.white.withValues(alpha: 0)),
                     borderRadius: BorderRadius.circular(12),
-                    border: i == index && !isDark
-                        ? Border.all(
-                            color:
-                                colorScheme.primary.withValues(alpha: .18),
-                            width: 1,
-                          )
-                        : null,
-                    boxShadow: i == index && !isDark
-                        ? [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: .06),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : null,
+                    border: Border.all(
+                      color: i == index && !isDark
+                          ? colorScheme.primary.withValues(alpha: .18)
+                          : colorScheme.primary.withValues(alpha: 0),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: i == index && !isDark
+                            ? Colors.black.withValues(alpha: .06)
+                            : Colors.black.withValues(alpha: 0),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -846,98 +813,29 @@ class _SmartSearch extends StatelessWidget {
   }
 }
 
+/// 推荐区特性卡：新碟上架下线后只剩「猜你喜欢」一张，全宽独占一行。
+/// 手机/车机/宽窄屏统一为单卡，不再需要双卡并排与窄屏竖排逻辑。
 class _FeatureShelf extends StatelessWidget {
   const _FeatureShelf({
     required this.daily,
-    required this.albums,
     required this.onDailyPlay,
-    required this.onAlbumTap,
   });
 
   final DailyRecommend daily;
-  final List<AlbumShopItem> albums;
   final VoidCallback onDailyPlay;
-  final VoidCallback onAlbumTap;
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final isCar = size.width > size.height && ThemeController.instance.carModeEnabled;
-    // 车机下文字放大 1.12 倍，需预留更多高度避免 BOTTOM OVERFLOWED
-    final cardHeight = isCar ? 100.0 : 92.0;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 18.5:9 主流手机宽度约 360~393dp，减去两侧 18dp 边距后
-        // 每张并排卡只剩 ~150dp，扣除封面 64 + 播放键 36 + 间距边距后，
-        // 中间文字列只剩 ~17dp：顶部标签被挤成空白、副标题截断、
-        // “轻触播放”被迫换行（即真机截图的样子）。窄屏改上下叠放，
-        // 每张独占整行宽度，文字区回到 ~190dp+，不再被截断。
-        final shelfWidth = constraints.hasBoundedWidth
-            ? constraints.maxWidth
-            : size.width - 36;
-        final isNarrow = !isCar && shelfWidth < 520;
-
-        Widget guessCard({required bool compact}) => _FeatureCard(
-              title: '猜你喜欢',
-              subtitle: daily.songs.isEmpty
-                  ? '献给此刻迈步的你'
-                  : daily.songs.first.title,
-              imageUrl: daily.songs.isEmpty
-                  ? daily.coverUrl
-                  : daily.songs.first.coverUrl,
-              gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
-              onTap: onDailyPlay,
-              compact: compact,
-            );
-        Widget albumCard({required bool compact}) => albums.isNotEmpty
-            ? _FeatureCard(
-                title: '新碟上架',
-                subtitle:
-                    '${albums.first.singerName} · ${albums.first.albumName}',
-                imageUrl: albums.first.coverUrl,
-                gradient: const [
-                  Color(0xFF454A92),
-                  Color(0xFF78CAFF),
-                ],
-                onTap: onAlbumTap,
-                compact: compact,
-              )
-            : _FeatureCard(
-                title: '新碟上架',
-                subtitle: '暂无新专辑',
-                imageUrl: null,
-                gradient: const [
-                  Color(0xFF454A92),
-                  Color(0xFF78CAFF),
-                ],
-                onTap: () {},
-                compact: compact,
-              );
-
-        if (isNarrow) {
-          // 窄屏竖排不用固定高度，让卡片按内容自然撑高：
-          // 固定 76 时内高仅 ~54px，三行文字要 ~57px，必报
-          // BOTTOM OVERFLOWED 3.2px；自适应后约 78-80px，
-          // 大字号/长标题也不会再溢出。
-          return Column(
-            children: [
-              guessCard(compact: true),
-              const SizedBox(height: 10),
-              albumCard(compact: true),
-            ],
-          );
-        }
-        return SizedBox(
-          height: cardHeight,
-          child: Row(
-              children: [
-                Expanded(child: guessCard(compact: false)),
-                const SizedBox(width: 10),
-                Expanded(child: albumCard(compact: false)),
-              ],
-            ),
-          );
-        },
+    return _FeatureCard(
+      title: '猜你喜欢',
+      subtitle: daily.songs.isEmpty
+          ? '献给此刻迈步的你'
+          : daily.songs.first.title,
+      imageUrl: daily.songs.isEmpty
+          ? daily.coverUrl
+          : daily.songs.first.coverUrl,
+      gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
+      onTap: onDailyPlay,
     );
   }
 }
@@ -949,7 +847,6 @@ class _FeatureCard extends StatelessWidget {
     required this.imageUrl,
     required this.gradient,
     required this.onTap,
-    this.compact = false,
   });
 
   final String title;
@@ -957,24 +854,18 @@ class _FeatureCard extends StatelessWidget {
   final String? imageUrl;
   final List<Color> gradient;
   final VoidCallback onTap;
-  /// 窄屏竖排模式：封面与播放键同步缩小，保证 76 高度内不溢出。
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 紧凑模式服务于 18.5:9 窄屏竖排卡：高度 76 - 内边距 20 = 56，
-    // 封面取 52 留 4px 呼吸；播放键同步缩小到 34。
-    final imageSize = compact ? 52.0 : 64.0;
-    final playSize = compact ? 34.0 : 36.0;
-    final playIconSize = compact ? 18.0 : 20.0;
-    final gap = compact ? 8.0 : 10.0;
-    // 紧凑模式纵向预算：76 - 内边距 20 = 56，需把两处间距压到 4/2、
-    // 标签上下垫压到 2，否则三行文字 (~57px) 会 BOTTOM OVERFLOW 1px。
-    final titleGap = compact ? 4.0 : 6.0;
-    final hintGap = compact ? 2.0 : 3.0;
-    final tagVPadding = compact ? 2.0 : 3.0;
+    const imageSize = 64.0;
+    const playSize = 36.0;
+    const playIconSize = 20.0;
+    const gap = 10.0;
+    const titleGap = 6.0;
+    const hintGap = 3.0;
+    const tagVPadding = 3.0;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -2148,32 +2039,31 @@ class _RadioHeroCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 与首页白卡统一：白底 16 圆角 + 描边 + 轻阴影，左侧封面 + 右侧信息 + 主色圆播钮。
-    return Material(
-      color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
+        border: Border.all(
           color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
           width: 1.1,
         ),
-      ),
-      child: InkWell(
-        onTap: loading ? null : onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
-          child: Row(
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: loading ? null : onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
             children: [
               Container(
                 decoration: BoxDecoration(
@@ -2251,8 +2141,9 @@ class _RadioHeroCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _RadioStationRail extends StatelessWidget {
@@ -2272,9 +2163,9 @@ class _RadioStationRail extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    // 卡片内容约 176 高，轨道只多留一点透气，避免底部出现空白带。
+    // 卡片内容高度充足（封面116 + 标题 + 副标题），轨道188彻底杜绝底部溢出且呼吸感匀称。
     return SizedBox(
-      height: 182,
+      height: 188,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: stations.length,
@@ -2308,8 +2199,7 @@ class _RadioStationGrid extends StatelessWidget {
     if (stations.isEmpty) {
       return const SizedBox.shrink();
     }
-    // 卡片高度 = 封面(格宽-16) + 60，纵横比按实测反推，
-    // 格子与卡片等高，不再出现底部大片留白。
+    // 格子纵横比给足文字与留白空间，避免在大屏网格下溢出。
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
@@ -2325,7 +2215,7 @@ class _RadioStationGrid extends StatelessWidget {
             crossAxisCount: count,
             mainAxisSpacing: spacing,
             crossAxisSpacing: spacing,
-            childAspectRatio: cellWidth / (cellWidth + 44),
+            childAspectRatio: cellWidth / (cellWidth + 56),
           ),
           itemBuilder: (context, index) {
             final station = stations[index];
@@ -2360,7 +2250,7 @@ class _RadioStationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 与排行榜新歌卡统一的白卡：圆角 16 + 描边 + 轻阴影，封面圆角 + 右下主色播钮。
+    // 与排行榜新歌卡统一的白卡：圆角 16 + 描边 + 轻阴影，封面圆角 + 右下淡蓝播钮。
     final card = Container(
         decoration: BoxDecoration(
           color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
@@ -2391,10 +2281,9 @@ class _RadioStationCard extends StatelessWidget {
                 children: [
                   LayoutBuilder(
                     builder: (context, constraints) {
-                      final side = (constraints.maxWidth.isFinite
-                              ? constraints.maxWidth
-                              : 116.0) -
-                          16.0;
+                      final side = constraints.maxWidth.isFinite
+                          ? constraints.maxWidth
+                          : 116.0;
                       return Stack(
                         children: [
                           Container(
@@ -2432,7 +2321,7 @@ class _RadioStationCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: Text(
                       station.name,
                       maxLines: 1,
@@ -2446,7 +2335,7 @@ class _RadioStationCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: Text(
                       station.subtitle,
                       maxLines: 1,
@@ -2454,6 +2343,7 @@ class _RadioStationCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                             fontSize: 11.5,
+                            height: 1.2,
                           ),
                     ),
                   ),
@@ -2478,35 +2368,38 @@ class _RadioPlayBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    // 与全局圆形播钮统一：主色实心圆 + 白色图标 + 主色阴影。
-    final size = compact ? 32.0 : 44.0;
-    final iconSize = compact ? 18.0 : 24.0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 与全局/推荐页圆形播钮统一：清爽淡蓝底 + 主色图标。大卡小卡统一实底淡蓝，杜绝泛灰。
+    final size = compact ? 30.0 : 38.0;
+    final iconSize = compact ? 18.0 : 22.0;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: colorScheme.primary,
+        color: isDark
+            ? colorScheme.primary.withValues(alpha: .28)
+            : const Color(0xFFE8F2FF),
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: colorScheme.primary.withValues(alpha: .35),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: colorScheme.primary.withValues(alpha: isDark ? .20 : .12),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Center(
         child: loading
             ? SizedBox.square(
-                dimension: compact ? 15 : 19,
+                dimension: compact ? 14 : 18,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: colorScheme.onPrimary,
+                  strokeWidth: 2.0,
+                  color: colorScheme.primary,
                 ),
               )
             : Icon(
                 Icons.play_arrow_rounded,
-                color: colorScheme.onPrimary,
+                color: colorScheme.primary,
                 size: iconSize,
               ),
       ),
@@ -2762,13 +2655,11 @@ class _HomeData {
   const _HomeData({
     required this.daily,
     required this.playlists,
-    required this.albums,
     this.topSongs = const [],
   });
 
   final DailyRecommend daily;
   final List<PlaylistSummary> playlists;
-  final List<AlbumShopItem> albums;
   final List<Song> topSongs;
 }
 
