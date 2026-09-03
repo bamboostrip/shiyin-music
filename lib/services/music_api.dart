@@ -1706,7 +1706,7 @@ void _debugLyricLog(String message) {
   if (!AppConfig.debugLyrics || !kDebugMode) {
     return;
   }
-  debugPrint('[KA Music][lyrics] $message');
+  debugPrint('[时音][lyrics] $message');
 }
 
 void _debugLyricLogObject(String label, Object? value) {
@@ -1721,13 +1721,13 @@ void _debugLyricContent(String label, String content) {
   if (!AppConfig.debugLyrics || !kDebugMode) {
     return;
   }
-  debugPrint('[KA Music][lyrics] ==== $label ====');
+  debugPrint('[时音][lyrics] ==== $label ====');
   const chunkSize = 1800;
   for (var start = 0; start < content.length; start += chunkSize) {
     final end = (start + chunkSize).clamp(0, content.length);
     debugPrint(content.substring(start, end));
   }
-  debugPrint('[KA Music][lyrics] ==== end $label ====');
+  debugPrint('[时音][lyrics] ==== end $label ====');
 }
 
 void _debugPlaylistLogObject(String label, Object? value) {
@@ -1735,13 +1735,13 @@ void _debugPlaylistLogObject(String label, Object? value) {
     return;
   }
   final text = const JsonEncoder.withIndent('  ').convert(value);
-  debugPrint('[KA Music][playlists] ==== $label ====');
+  debugPrint('[时音][playlists] ==== $label ====');
   const chunkSize = 1800;
   for (var start = 0; start < text.length; start += chunkSize) {
     final end = (start + chunkSize).clamp(0, text.length);
     debugPrint(text.substring(start, end));
   }
-  debugPrint('[KA Music][playlists] ==== end $label ====');
+  debugPrint('[时音][playlists] ==== end $label ====');
 }
 
 void _debugArtistLogObject(String label, Object? value) {
@@ -1749,11 +1749,11 @@ void _debugArtistLogObject(String label, Object? value) {
     return;
   }
   final text = const JsonEncoder.withIndent('  ').convert(value);
-  debugPrint('[KA Music][artist] ==== $label ====');
+  debugPrint('[时音][artist] ==== $label ====');
   const chunkSize = 1800;
   for (var start = 0; start < text.length; start += chunkSize) {
     final end = (start + chunkSize).clamp(0, text.length);
     debugPrint(text.substring(start, end));
   }
-  debugPrint('[KA Music][artist] ==== end $label ====');
+  debugPrint('[时音][artist] ==== end $label ====');
 }

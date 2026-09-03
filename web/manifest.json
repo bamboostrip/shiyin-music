@@ -1,11 +1,11 @@
 {
-    "name": "KA Music",
-    "short_name": "KA Music",
+    "name": "时音",
+    "short_name": "时音",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "KA Music Flutter music player.",
+    "description": "时音 (Shiyin) Flutter music player.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

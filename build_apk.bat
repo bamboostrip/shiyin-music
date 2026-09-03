@@ -1,7 +1,7 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 echo ============================================
-echo   kgka_Music_hl - APK 构建工具
+echo   时音 (Shiyin) - APK 构建工具
 echo ============================================
 echo.
 
@@ -11,7 +11,7 @@ set ANDROID_HOME=E:\AIwork\android-sdk
 set JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8
 set PATH=%JAVA_HOME%\bin;%ANDROID_HOME%\platform-tools;%PATH%
 
-cd /d E:\AIwork\kgka_Music_hl
+cd /d "%~dp0"
 
 rem 用法: build_apk.bat [impeller^|skia] [release^|debug]
 rem   第一个参数是渲染引擎，默认 impeller（老机器闪退/冻屏再打 skia 版）

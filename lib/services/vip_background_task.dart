@@ -207,7 +207,7 @@ class VipBackgroundTask extends ChangeNotifier {
       }
     } catch (error, stackTrace) {
       result = VipClaimResult(VipClaimStatus.failed, '领取异常：$error');
-      debugPrint('[KA Music][vip-task] claim failed: $error');
+      debugPrint('[时音][vip-task] claim failed: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
 
@@ -245,7 +245,7 @@ class VipBackgroundTask extends ChangeNotifier {
         await prefs.setString(_lastRunKeyKey, _lastRunKey!);
       }
     } catch (error) {
-      debugPrint('[KA Music][vip-task] persist state failed: $error');
+      debugPrint('[时音][vip-task] persist state failed: $error');
     }
   }
 

@@ -17,8 +17,11 @@ class AppConfig {
   static String get rendererLabel => renderer == 'skia' ? 'Skia' : 'Impeller';
 
   static const debugLyrics = bool.fromEnvironment(
-    'KA_MUSIC_DEBUG_LYRICS',
-    defaultValue: true,
+    'SHIYIN_DEBUG_LYRICS',
+    defaultValue: bool.fromEnvironment(
+      'KA_MUSIC_DEBUG_LYRICS',
+      defaultValue: true,
+    ),
   );
 
   // ===== 缓存与下载配置 =====

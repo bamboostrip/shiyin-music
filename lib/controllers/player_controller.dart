@@ -113,7 +113,7 @@ class PlayerController extends ChangeNotifier {
         if (isPreparing || errorMessage == null) return;
         final song = currentSong;
         if (song == null) return;
-        debugPrint('[KA Music][player] 网络已恢复，自动重播: ${song.title}');
+        debugPrint('[时音][player] 网络已恢复，自动重播: ${song.title}');
         unawaited(playSong(song, isRetry: true));
       },
     );
@@ -520,7 +520,7 @@ class PlayerController extends ChangeNotifier {
         errorMessage = '播放失败，正在重试...';
         notifyListeners();
         await Future<void>.delayed(const Duration(seconds: 2));
-        debugPrint('[KA Music][player] 播放失败，自动重试: ${song.title} ($error)');
+        debugPrint('[时音][player] 播放失败，自动重试: ${song.title} ($error)');
         await playSong(song, queue: queue, isRetry: true);
         return;
       }
@@ -590,7 +590,7 @@ class PlayerController extends ChangeNotifier {
         final retryUrl = await _api.songUrl(song, quality: fallback);
         if (retryUrl.url.isNotEmpty) {
           debugPrint(
-            '[KA Music][smart-quality] ${audioQuality.badge} 失败，'
+            '[时音][smart-quality] ${audioQuality.badge} 失败，'
             '已降级为 ${fallback.badge}',
           );
           return retryUrl;
@@ -608,7 +608,7 @@ class PlayerController extends ChangeNotifier {
       final result = await vipClaim!.claimNow(null);
       if (result.status == VipClaimStatus.success ||
           result.status == VipClaimStatus.alreadyClaimed) {
-        debugPrint('[KA Music][player] VIP 已领取，重试播放: ${song.title}');
+        debugPrint('[时音][player] VIP 已领取，重试播放: ${song.title}');
         final playUrl = await _api.songUrl(song, quality: audioQuality);
         if (playUrl.url.isNotEmpty) {
           errorMessage = null;
@@ -618,7 +618,7 @@ class PlayerController extends ChangeNotifier {
         }
       }
     } catch (e) {
-      debugPrint('[KA Music][player] VIP 领取/重试失败: $e');
+      debugPrint('[时音][player] VIP 领取/重试失败: $e');
     }
     return false;
   }
@@ -2245,7 +2245,7 @@ class PlayerController extends ChangeNotifier {
         _listenTimeTimer = null;
       }
     } catch (error) {
-      debugPrint('[KA Music][listen-time] report failed: $error');
+      debugPrint('[时音][listen-time] report failed: $error');
     } finally {
       _isReportingListenTime = false;
     }

@@ -126,7 +126,7 @@ class MainActivity : AudioServiceActivity() {
                 when (call.method) {
                     "downloadAndInstallApk" -> {
                         val url = call.argument<String>("url")
-                        val fileName = call.argument<String>("fileName") ?: "ka_music_update.apk"
+                        val fileName = call.argument<String>("fileName") ?: "shiyin_update.apk"
                         if (url.isNullOrBlank()) {
                             result.error("invalid_url", "APK download url is empty", null)
                             return@setMethodCallHandler
@@ -972,7 +972,7 @@ class MainActivity : AudioServiceActivity() {
 
     private fun enqueueApkDownload(url: String, fileName: String) {
         val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle("KA Music 更新包")
+            .setTitle("时音 更新包")
             .setDescription("正在下载新版本")
             .setMimeType("application/vnd.android.package-archive")
             .setAllowedOverMetered(true)

@@ -58,7 +58,7 @@ Future<void> main() async {
   );
 
   runApp(
-    KaMusicApp(
+    ShiyinApp(
       client: client,
       api: api,
       audioHandler: audioHandler,
@@ -67,8 +67,8 @@ Future<void> main() async {
   );
 }
 
-class KaMusicApp extends StatefulWidget {
-  const KaMusicApp({
+class ShiyinApp extends StatefulWidget {
+  const ShiyinApp({
     super.key,
     required this.client,
     required this.api,
@@ -82,10 +82,10 @@ class KaMusicApp extends StatefulWidget {
   final ThemeController themeController;
 
   @override
-  State<KaMusicApp> createState() => _KaMusicAppState();
+  State<ShiyinApp> createState() => _ShiyinAppState();
 }
 
-class _KaMusicAppState extends State<KaMusicApp> with WidgetsBindingObserver {
+class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   late final ApiClientInterface _client;
   late final MusicApi _api;
   late final CacheService _cacheService;

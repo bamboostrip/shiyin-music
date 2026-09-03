@@ -593,7 +593,7 @@ class LyricsOverlayService : Service() {
             Notification.Builder(this)
         }
 
-        builder.setContentTitle("KA Music 桌面歌词")
+        builder.setContentTitle("时音 桌面歌词")
         builder.setContentText("桌面歌词显示中")
         builder.setSmallIcon(android.R.drawable.ic_dialog_info)
         builder.setContentIntent(pendingIntent)
