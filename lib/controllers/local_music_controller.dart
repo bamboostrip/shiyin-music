@@ -1,4 +1,3 @@
-import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -25,7 +24,7 @@ class LocalMusicController extends ChangeNotifier {
   // 100 张 ≈ 5-20MB，换取滚动本地歌曲列表时更少触发原生
   // content provider 查询（该查询较慢，是列表滚动的卡顿来源之一）。
   static const _maxAlbumArtCacheSize = 100;
-  final _albumArtCache = LinkedHashMap<String, Uint8List>();
+  final _albumArtCache = <String, Uint8List>{};
 
   /// 规范化文件夹路径 -> 原始大小写路径（仅用于界面展示）。
   final Map<String, String> _folderDisplayNames = {};

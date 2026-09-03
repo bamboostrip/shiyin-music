@@ -814,18 +814,20 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
         return AlertDialog(
           title: const Text('设置播放缓存上限'),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: options.map((opt) {
-                return RadioListTile<int>(
-                  title: Text(opt.label),
-                  value: opt.value,
-                  groupValue: currentLimit,
-                  onChanged: (val) {
-                    Navigator.of(dialogContext).pop(val);
-                  },
-                );
-              }).toList(),
+            child: RadioGroup<int>(
+              groupValue: currentLimit,
+              onChanged: (val) {
+                Navigator.of(dialogContext).pop(val);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: options.map((opt) {
+                  return RadioListTile<int>(
+                    title: Text(opt.label),
+                    value: opt.value,
+                  );
+                }).toList(),
+              ),
             ),
           ),
           actions: [

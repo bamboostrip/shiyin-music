@@ -14,8 +14,11 @@ class RustApiClient implements ApiClientInterface {
   static RustApiClient? _instance;
   final Engine _engine;
 
+  @override
   String? token;
+  @override
   String? t1;
+  @override
   String? sessionId;
 
   static Future<RustApiClient> getInstance() async {
@@ -27,10 +30,12 @@ class RustApiClient implements ApiClientInterface {
     return _instance!;
   }
 
+  @override
   Future<dynamic> get(String path, [Map<String, Object?> query = const {}]) {
     return _request('GET', path, query, null);
   }
 
+  @override
   Future<dynamic> getRaw(Uri uri) async {
     final client = http.Client();
     try {
@@ -47,6 +52,7 @@ class RustApiClient implements ApiClientInterface {
     }
   }
 
+  @override
   Future<dynamic> post(
     String path, {
     Map<String, Object?> query = const {},
@@ -93,5 +99,6 @@ class RustApiClient implements ApiClientInterface {
     );
   }
 
+  @override
   void close() {}
 }

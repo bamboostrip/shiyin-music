@@ -532,7 +532,7 @@ class PlayerController extends ChangeNotifier {
       height: 150,
     );
     final stream = provider.resolve(ImageConfiguration.empty);
-    stream.addListener(ImageStreamListener((_, __) {}, onError: (_, __) {}));
+    stream.addListener(ImageStreamListener((_, _) {}, onError: (_, _) {}));
   }
 
   /// 解析播放地址。
