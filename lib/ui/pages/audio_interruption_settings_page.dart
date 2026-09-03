@@ -61,11 +61,10 @@ class AudioInterruptionSettingsPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 // Settings card
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                Material(
+                  color: colorScheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(14),
+                  clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
                       SwitchListTile(

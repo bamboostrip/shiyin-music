@@ -41,34 +41,28 @@ Future<AudioQuality?> showAudioQualitySheet({
                 color: colorScheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(16),
                 clipBehavior: Clip.antiAlias,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    children: [
-                      for (final quality in AudioQuality.values) ...[
-                        ListTile(
-                          onTap: () => Navigator.of(sheetContext).pop(quality),
-                          leading: Icon(_iconForQuality(quality)),
-                          title: Text(quality.label),
-                          subtitle: Text(quality.badge),
-                          trailing: selected == quality
-                              ? Icon(
-                                  Icons.check_rounded,
-                                  color: colorScheme.primary,
-                                )
-                              : null,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                          ),
+                child: Column(
+                  children: [
+                    for (final quality in AudioQuality.values) ...[
+                      ListTile(
+                        onTap: () => Navigator.of(sheetContext).pop(quality),
+                        leading: Icon(_iconForQuality(quality)),
+                        title: Text(quality.label),
+                        subtitle: Text(quality.badge),
+                        trailing: selected == quality
+                            ? Icon(
+                                Icons.check_rounded,
+                                color: colorScheme.primary,
+                              )
+                            : null,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
                         ),
-                        if (quality != AudioQuality.values.last)
-                          const Divider(height: 1, indent: 58),
-                      ],
+                      ),
+                      if (quality != AudioQuality.values.last)
+                        const Divider(height: 1, indent: 58),
                     ],
-                  ),
+                  ],
                 ),
               ),
             ],

@@ -10,6 +10,7 @@ import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/toast.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import 'home_page.dart';
@@ -549,6 +550,11 @@ class _CenterDisc extends StatelessWidget {
   final AuthController auth;
 
   void _openPlayer(BuildContext context) {
+    // 无歌曲时不进播放页：首次安装尚未播放，直接给轻提示，避免白屏。
+    if (player.currentSong == null) {
+      Toast.info('先去挑选一首喜欢的歌曲吧');
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PlayerPage(player: player, auth: auth)),
     );

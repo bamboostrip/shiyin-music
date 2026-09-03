@@ -115,39 +115,38 @@ class _RankPageState extends State<RankPage>
               player: widget.player,
               auth: widget.auth,
             ),
-            // 榜单标题 + 刷新按钮
+            // 榜单标题 + 刷新按钮（与首页白卡语言统一：32 图标底 + 17 粗标题 + 圆角刷新）
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
               child: Row(
                 children: [
                   Container(
-                    width: 28,
-                    height: 28,
+                    width: 32,
+                    height: 32,
                     decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.primary.withValues(
-                          alpha: Theme.of(context).brightness == Brightness.dark ? .18 : .10),
-                      borderRadius: BorderRadius.circular(8),
+                          alpha: Theme.of(context).brightness == Brightness.dark ? .18 : .12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(Icons.leaderboard_rounded, size: 16, color: Theme.of(context).colorScheme.primary),
+                    child: Icon(Icons.leaderboard_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
                   ),
                   const SizedBox(width: 10),
                   Text(
                     '排行榜',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 16,
+                          fontSize: 17,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.3,
                         ),
                   ),
                   const Spacer(),
-                  IconButton.filledTonal(
+                  IconButton(
                     tooltip: '刷新',
                     onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    style: IconButton.styleFrom(
-                      fixedSize: const Size.square(36),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
+                    icon: const Icon(Icons.refresh_rounded),
+                    iconSize: 20,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    visualDensity: VisualDensity.compact,
                   ),
                 ],
               ),
@@ -181,19 +180,36 @@ class _RankPageState extends State<RankPage>
                 ),
               )
             else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
+              // 手机版双列小卡：一屏展示更多榜单，封面 + 榜名 + 前两首。
+              Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: ranks.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final rank = ranks[index];
-                  return _RankCard(
-                    rank: rank,
-                    onTap: () => _openRankDetail(rank),
-                  );
-                },
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final count = constraints.maxWidth > 600 ? 3 : 2;
+                    const spacing = 12.0;
+                    const cardHeight = 148.0;
+                    final cellWidth =
+                        (constraints.maxWidth - spacing * (count - 1)) / count;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: count,
+                        mainAxisSpacing: spacing,
+                        crossAxisSpacing: spacing,
+                        childAspectRatio: cellWidth / cardHeight,
+                      ),
+                      itemCount: ranks.length,
+                      itemBuilder: (context, index) {
+                        final rank = ranks[index];
+                        return _RankGridCard(
+                          rank: rank,
+                          onTap: () => _openRankDetail(rank),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             const SizedBox(height: 166),
           ],
@@ -242,19 +258,19 @@ class _NewSongsSection extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    width: 28,
-                    height: 28,
+                    width: 32,
+                    height: 32,
                     decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
-                      borderRadius: BorderRadius.circular(8),
+                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(Icons.fiber_new_rounded, size: 16, color: colorScheme.primary),
+                    child: Icon(Icons.fiber_new_rounded, size: 18, color: colorScheme.primary),
                   ),
                   const SizedBox(width: 10),
                   Text(
                     '新歌推荐',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 16,
+                          fontSize: 17,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.3,
                         ),
@@ -273,9 +289,9 @@ class _NewSongsSection extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               SizedBox(
-                height: 130,
+                height: 142,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: songs.length > 10 ? 10 : songs.length,
@@ -316,32 +332,66 @@ class _NewSongCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 100,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 108,
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
+          color: isPlaying
+              ? colorScheme.primary.withValues(alpha: isDark ? .14 : .07)
+              : (isDark ? Colors.white.withValues(alpha: .06) : Colors.white),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: .08) : Colors.white.withValues(alpha: .92),
-            width: 1,
+            color: isPlaying
+                ? colorScheme.primary.withValues(alpha: .30)
+                : (isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92)),
+            width: 1.1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-              child: Artwork(url: song.coverUrl, size: 100, borderRadius: 0),
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  child: Artwork(url: song.coverUrl, size: 108, borderRadius: 0),
+                ),
+                if (isPlaying)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: colorScheme.primary.withValues(alpha: .40),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.equalizer_rounded,
+                        size: 14,
+                        color: colorScheme.onPrimary,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(7, 6, 7, 7),
+              padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -350,25 +400,147 @@ class _NewSongCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
                       color: isPlaying ? colorScheme.primary : colorScheme.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     song.artist,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
-                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: isPlaying
+                          ? colorScheme.primary.withValues(alpha: .75)
+                          : colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 手机版双列榜单小卡：封面 + 榜名 + 首行歌曲 + 圆形进入钮。
+class _RankGridCard extends StatelessWidget {
+  const _RankGridCard({
+    required this.rank,
+    required this.onTap,
+  });
+
+  final RankCategory rank;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final first = rank.songs.isNotEmpty ? rank.songs.first : null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                child: SizedBox(
+                  height: 88,
+                  width: double.infinity,
+                  child: Artwork(
+                    url: rank.imageUrl,
+                    size: double.infinity,
+                    borderRadius: 0,
+                    icon: Icons.leaderboard_rounded,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 8, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            rank.rankName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            first == null
+                                ? '查看完整榜单歌曲'
+                                : (first.artist.isEmpty
+                                    ? first.title
+                                    : '${first.title} - ${first.artist}'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              height: 1.25,
+                              fontWeight: FontWeight.w500,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -389,88 +561,188 @@ class _RankCard extends StatelessWidget {
     final isCarMode =
         size.width > size.height && ThemeController.instance.carModeEnabled;
 
-    final cardPadding = isCarMode ? 14.0 : 10.0;
-    final artworkSize = isCarMode ? 88.0 : 72.0;
-    final nameFontSize = isCarMode ? 17.0 : 15.0;
-    final songFontSize = isCarMode ? 14.0 : 12.0;
-    final spacing = isCarMode ? 16.0 : 14.0;
+    // 手机版做成更精致的白卡：加大封面、歌曲带序号+歌手、尾部主色小圆钮。
+    final cardPadding = isCarMode ? 14.0 : 12.0;
+    final artworkSize = isCarMode ? 88.0 : 76.0;
+    final nameFontSize = isCarMode ? 17.0 : 16.0;
+    final songFontSize = isCarMode ? 14.0 : 12.5;
+    final spacing = isCarMode ? 16.0 : 12.0;
     final maxSongs = isCarMode ? 2 : 3;
 
-    return Material(
-      color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-      elevation: 0,
-      shadowColor: Colors.black.withValues(alpha: .08),
-      shape: RoundedRectangleBorder(
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
+        border: Border.all(
           color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
           width: 1.1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
-      child: InkWell(
-        onTap: onTap,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: EdgeInsets.all(cardPadding),
-          child: Row(
-            children: [
-              // 封面
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox.square(
-                  dimension: artworkSize,
-                  child: Artwork(
-                    url: rank.imageUrl,
-                    size: artworkSize,
-                    borderRadius: 10,
-                    icon: Icons.leaderboard_rounded,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: EdgeInsets.all(cardPadding),
+            child: Row(
+              children: [
+                // 封面（带轻阴影，与首页白卡一致）
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? .20 : .08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-              SizedBox(width: spacing),
-              // 榜单信息
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      rank.rankName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: nameFontSize,
-                        fontWeight: FontWeight.w800,
-                        color: colorScheme.onSurface,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox.square(
+                      dimension: artworkSize,
+                      child: Artwork(
+                        url: rank.imageUrl,
+                        size: artworkSize,
+                        borderRadius: 12,
+                        icon: Icons.leaderboard_rounded,
                       ),
                     ),
-                    if (rank.songs.isNotEmpty) ...[
-                      const SizedBox(height: 5),
-                      ...rank.songs.take(maxSongs).map(
-                            (s) => Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                s.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: songFontSize,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
+                  ),
+                ),
+                SizedBox(width: spacing),
+                // 榜单信息
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              rank.rankName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: nameFontSize,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                                color: colorScheme.onSurface,
                               ),
                             ),
                           ),
+                        ],
+                      ),
+                      if (rank.songs.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        ...rank.songs.take(maxSongs).toList().asMap().entries.map(
+                              (entry) {
+                                final i = entry.key;
+                                final s = entry.value;
+                                final subtitle = s.artist.isEmpty ? s.title : '${s.title} - ${s.artist}';
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 14,
+                                        child: Text(
+                                          '${i + 1}',
+                                          style: TextStyle(
+                                            fontSize: songFontSize,
+                                            fontWeight: FontWeight.w900,
+                                            fontStyle: FontStyle.italic,
+                                            height: 1.2,
+                                            color: i == 0
+                                                ? colorScheme.primary
+                                                : colorScheme.onSurfaceVariant.withValues(alpha: .75),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          subtitle,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: songFontSize,
+                                            height: 1.25,
+                                            fontWeight: FontWeight.w500,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                      ] else ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '查看完整榜单歌曲',
+                          style: TextStyle(
+                            fontSize: songFontSize,
+                            color: colorScheme.onSurfaceVariant.withValues(alpha: .75),
+                          ),
+                        ),
+                      ],
                     ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 角标与箭头放在同一尾部行里垂直居中，天生对齐。
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        '榜单',
+                        style: TextStyle(
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10.5,
+                          letterSpacing: 0.2,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: isCarMode ? 40 : 34,
+                      height: isCarMode ? 40 : 34,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: isCarMode ? 24 : 20,
+                        color: colorScheme.primary,
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: isCarMode ? 26 : 22,
-                color: colorScheme.onSurfaceVariant.withValues(alpha: .5),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -947,14 +1219,14 @@ class _RankSongRow extends StatelessWidget {
               border: Border.all(
                 color: isActive
                     ? colorScheme.primary.withValues(alpha: .18)
-                    : (isDark ? Colors.white.withValues(alpha: .08) : Colors.white.withValues(alpha: .92)),
-                width: 1,
+                    : (isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92)),
+                width: 1.1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? .14 : .05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
@@ -1122,6 +1394,44 @@ class _RankSkeleton extends StatelessWidget {
           ),
         );
 
+    Widget buildGridItem() => Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 88,
+                decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  decoration: placeholder,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(width: 90, height: 13, decoration: placeholder),
+                    const SizedBox(height: 7),
+                    Container(
+                        width: double.infinity,
+                        height: 10,
+                        decoration: placeholder),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+
     if (isCarLandscape) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1145,14 +1455,29 @@ class _RankSkeleton extends StatelessWidget {
       );
     }
 
+    // 手机版骨架与双列小卡同构。
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 8,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) => buildItem(),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final count = constraints.maxWidth > 600 ? 3 : 2;
+          const spacing = 12.0;
+          const cardHeight = 148.0;
+          final cellWidth =
+              (constraints.maxWidth - spacing * (count - 1)) / count;
+          return GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: count,
+              mainAxisSpacing: spacing,
+              crossAxisSpacing: spacing,
+              childAspectRatio: cellWidth / cardHeight,
+            ),
+            itemCount: 6,
+            itemBuilder: (context, index) => buildGridItem(),
+          );
+        },
       ),
     );
   }

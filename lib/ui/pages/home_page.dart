@@ -596,6 +596,9 @@ class _RecommendHeader extends StatelessWidget {
                           onAlbumTap: onAlbumTap,
                         ),
                       ),
+                      // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
+                      // 避免五张卡挤成一排的局促感。
+                      const SizedBox(width: 16),
                       Expanded(
                         flex: 4,
                         child: _CarQuickStatsPills(
@@ -1884,60 +1887,58 @@ class _RadioSectionState extends State<_RadioSection> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-                  child: _SectionHeader(
+                  child: _RadioSectionTitle(
                     title: '推荐电台',
-                    action: IconButton.filledTonal(
+                    icon: Icons.radio_rounded,
+                    action: IconButton(
                       tooltip: '刷新',
                       onPressed: _refresh,
                       icon: const Icon(Icons.refresh_rounded),
-                      style: IconButton.styleFrom(
-                        fixedSize: const Size.square(42),
-                        shape: const CircleBorder(),
-                      ),
+                      iconSize: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      visualDensity: VisualDensity.compact,
                     ),
                   ),
                 ),
                 if (radio.recommended.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 18),
-                    child: SizedBox(
-                      height: 190,
-                      child: radio.recommended.length >= 2
-                          // 有两个及以上推荐时，并排展示两张大卡
-                          ? Row(
-                              children: [
-                                Expanded(
-                                  child: _RadioHeroCard(
-                                    station: radio.recommended[0],
-                                    loading:
-                                        _loadingStationId ==
-                                        radio.recommended[0].id,
-                                    onTap: () =>
-                                        _playStation(radio.recommended[0]),
-                                  ),
+                    child: radio.recommended.length >= 2
+                        // 有两个及以上推荐时，并排展示两张横卡
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: _RadioHeroCard(
+                                  station: radio.recommended[0],
+                                  loading:
+                                      _loadingStationId ==
+                                      radio.recommended[0].id,
+                                  onTap: () =>
+                                      _playStation(radio.recommended[0]),
                                 ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: _RadioHeroCard(
-                                    station: radio.recommended[1],
-                                    loading:
-                                        _loadingStationId ==
-                                        radio.recommended[1].id,
-                                    onTap: () =>
-                                        _playStation(radio.recommended[1]),
-                                  ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: _RadioHeroCard(
+                                  station: radio.recommended[1],
+                                  loading:
+                                      _loadingStationId ==
+                                      radio.recommended[1].id,
+                                  onTap: () =>
+                                      _playStation(radio.recommended[1]),
                                 ),
-                              ],
-                            )
-                          : _RadioHeroCard(
-                              station: radio.recommended.first,
-                              loading:
-                                  _loadingStationId ==
-                                  radio.recommended.first.id,
-                              onTap: () =>
-                                  _playStation(radio.recommended.first),
-                            ),
-                    ),
+                              ),
+                            ],
+                          )
+                        : _RadioHeroCard(
+                            station: radio.recommended.first,
+                            loading:
+                                _loadingStationId ==
+                                radio.recommended.first.id,
+                            onTap: () =>
+                                _playStation(radio.recommended.first),
+                          ),
                   ),
                 if (radio.recommended.length > 2) ...[
                   const SizedBox(height: 14),
@@ -1951,12 +1952,10 @@ class _RadioSectionState extends State<_RadioSection> {
                   const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 18),
-                    child: _SectionHeader(
+                    child: _RadioSectionTitle(
                       title: group.name,
-                      action: Icon(
-                        Icons.radio_rounded,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+                      icon: Icons.radio_rounded,
+                      trailingText: '${group.stations.length} 个电台',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1978,16 +1977,16 @@ class _RadioSectionState extends State<_RadioSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionHeader(
+              _RadioSectionTitle(
                 title: '推荐电台',
-                action: IconButton.filledTonal(
+                icon: Icons.radio_rounded,
+                action: IconButton(
                   tooltip: '刷新',
                   onPressed: _refresh,
                   icon: const Icon(Icons.refresh_rounded),
-                  style: IconButton.styleFrom(
-                    fixedSize: const Size.square(42),
-                    shape: const CircleBorder(),
-                  ),
+                  iconSize: 20,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
               const SizedBox(height: 12),
@@ -2007,12 +2006,10 @@ class _RadioSectionState extends State<_RadioSection> {
               ],
               for (final group in radio.groups) ...[
                 const SizedBox(height: 24),
-                _SectionHeader(
+                _RadioSectionTitle(
                   title: group.name,
-                  action: Icon(
-                    Icons.radio_rounded,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
+                  icon: Icons.radio_rounded,
+                  trailingText: '${group.stations.length} 个电台',
                 ),
                 const SizedBox(height: 12),
                 _RadioStationRail(
@@ -2031,6 +2028,66 @@ class _RadioSectionState extends State<_RadioSection> {
   }
 }
 
+/// 电台统一小节标题：32 主色图标底 + 17 粗标题，与排行榜/首页白卡语言一致。
+class _RadioSectionTitle extends StatelessWidget {
+  const _RadioSectionTitle({
+    required this.title,
+    required this.icon,
+    this.action,
+    this.trailingText,
+  });
+
+  final String title;
+  final IconData icon;
+  final Widget? action;
+  final String? trailingText;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: colorScheme.primary),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                ),
+          ),
+        ),
+        if (trailingText != null)
+          Text(
+            trailingText!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+          ),
+        if (action != null) ...[
+          const SizedBox(width: 8),
+          action!,
+        ],
+      ],
+    );
+  }
+}
+
 class _RadioHeroCard extends StatelessWidget {
   const _RadioHeroCard({
     required this.station,
@@ -2044,76 +2101,109 @@ class _RadioHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 2.08,
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 与首页白卡统一：白底 16 圆角 + 描边 + 轻阴影，左侧封面 + 右侧信息 + 主色圆播钮。
+    return Material(
+      color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
         onTap: loading ? null : onTap,
-        child: Ink(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainer,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (station.bannerUrl ?? station.artworkUrl case final url?)
-                  RetryableNetworkImage(
-                    url: url,
-                    fit: BoxFit.cover,
-                    cacheWidth: 600,
-                    cacheHeight: 300,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: .08),
-                        Colors.black.withValues(alpha: .72),
-                      ],
+          child: Row(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: .08),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
                     ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Artwork(
+                    url: station.artworkUrl ?? station.bannerUrl,
+                    size: 72,
+                    borderRadius: 12,
+                    icon: Icons.radio_rounded,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Spacer(),
-                      Text(
-                        station.name,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        '推荐电台',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
+                        style: TextStyle(
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
+                          letterSpacing: 0.2,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                      Text(
-                        station.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: .82),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      station.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            height: 1.2,
+                          ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      station.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                          ),
+                    ),
+                  ],
                 ),
-                Positioned(
-                  right: 14,
-                  bottom: 14,
-                  child: _RadioPlayBadge(loading: loading),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              _RadioPlayBadge(loading: loading),
+            ],
           ),
         ),
       ),
@@ -2138,12 +2228,13 @@ class _RadioStationRail extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    // 卡片内容约 176 高，轨道只多留一点透气，避免底部出现空白带。
     return SizedBox(
       height: 182,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: stations.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 13),
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           final station = stations[index];
           return _RadioStationCard(
@@ -2173,23 +2264,34 @@ class _RadioStationGrid extends StatelessWidget {
     if (stations.isEmpty) {
       return const SizedBox.shrink();
     }
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      itemCount: stations.length,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 160,
-        mainAxisSpacing: 16,
-        crossAxisSpacing: 14,
-        childAspectRatio: 0.72,
-      ),
-      itemBuilder: (context, index) {
-        final station = stations[index];
-        return _RadioStationCard(
-          station: station,
-          loading: loadingStationId == station.id,
-          onTap: () => onTap(station),
+    // 卡片高度 = 封面(格宽-16) + 60，纵横比按实测反推，
+    // 格子与卡片等高，不再出现底部大片留白。
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+        final count = (maxWidth / 170).floor().clamp(2, 7);
+        const spacing = 12.0;
+        final cellWidth = (maxWidth - spacing * (count - 1)) / count;
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          itemCount: stations.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: count,
+            mainAxisSpacing: spacing,
+            crossAxisSpacing: spacing,
+            childAspectRatio: cellWidth / (cellWidth + 44),
+          ),
+          itemBuilder: (context, index) {
+            final station = stations[index];
+            return _RadioStationCard(
+              station: station,
+              loading: loadingStationId == station.id,
+              onTap: () => onTap(station),
+              width: null,
+            );
+          },
         );
       },
     );
@@ -2201,73 +2303,125 @@ class _RadioStationCard extends StatelessWidget {
     required this.station,
     required this.loading,
     required this.onTap,
+    this.width = 132,
   });
 
   final FmStation station;
   final bool loading;
   final VoidCallback onTap;
+  /// 横滑轨道传固定宽；网格传 null 让卡片撑满格子，封面随格宽自适应。
+  final double? width;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 128,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: loading ? null : onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                Artwork(url: station.artworkUrl, size: 128, borderRadius: 10),
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: .42),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 8,
-                  bottom: 8,
-                  child: _RadioPlayBadge(loading: loading, compact: true),
-                ),
-              ],
-            ),
-            const SizedBox(height: 9),
-            Text(
-              station.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                height: 1.16,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              station.subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 与排行榜新歌卡统一的白卡：圆角 16 + 描边 + 轻阴影，封面圆角 + 右下主色播钮。
+    final card = Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-      ),
-    );
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: loading ? null : onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final side = (constraints.maxWidth.isFinite
+                              ? constraints.maxWidth
+                              : 116.0) -
+                          16.0;
+                      return Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: .08),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox.square(
+                                dimension: side,
+                                child: Artwork(
+                                  url: station.artworkUrl,
+                                  size: side,
+                                  borderRadius: 12,
+                                  icon: Icons.radio_rounded,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 6,
+                            bottom: 6,
+                            child: _RadioPlayBadge(loading: loading, compact: true),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      station.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            height: 1.2,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      station.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 11.5,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    final width = this.width;
+    if (width == null) return card;
+    return SizedBox(width: width, child: card);
   }
 }
 
@@ -2279,32 +2433,39 @@ class _RadioPlayBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = compact ? 30.0 : 42.0;
-    return SizedBox(
+    final colorScheme = Theme.of(context).colorScheme;
+    // 与全局圆形播钮统一：主色实心圆 + 白色图标 + 主色阴影。
+    final size = compact ? 32.0 : 44.0;
+    final iconSize = compact ? 18.0 : 24.0;
+    return Container(
       width: size,
       height: size,
-      child: loading
-          ? Center(
-              child: SizedBox.square(
-                dimension: compact ? 16 : 20,
-                child: const CircularProgressIndicator(
+      decoration: BoxDecoration(
+        color: colorScheme.primary,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.primary.withValues(alpha: .35),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Center(
+        child: loading
+            ? SizedBox.square(
+                dimension: compact ? 15 : 19,
+                child: CircularProgressIndicator(
                   strokeWidth: 2.2,
-                  color: Colors.white,
+                  color: colorScheme.onPrimary,
                 ),
+              )
+            : Icon(
+                Icons.play_arrow_rounded,
+                color: colorScheme.onPrimary,
+                size: iconSize,
               ),
-            )
-          : Icon(
-              Icons.play_arrow_rounded,
-              color: Colors.white,
-              size: compact ? 22 : 30,
-              shadows: const [
-                Shadow(
-                  color: Color(0x99000000),
-                  blurRadius: 8,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
+      ),
     );
   }
 }
@@ -2319,23 +2480,23 @@ class _RadioSkeleton extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SkeletonBox(width: 112, height: 24, radius: 8),
-          const SizedBox(height: 14),
-          const _SkeletonBox(width: double.infinity, height: 170, radius: 14),
+          const _SkeletonBox(width: 140, height: 32, radius: 10),
+          const SizedBox(height: 12),
+          const _SkeletonBox(width: double.infinity, height: 100, radius: 16),
           const SizedBox(height: 22),
-          const _SkeletonBox(width: 90, height: 22, radius: 8),
+          const _SkeletonBox(width: 120, height: 32, radius: 10),
           const SizedBox(height: 12),
           SizedBox(
-            height: 164,
+            height: 190,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: 3,
-              separatorBuilder: (_, _) => const SizedBox(width: 13),
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
                 return _SkeletonBox(
-                  width: index == 2 ? 76 : 128,
-                  height: 164,
-                  radius: 10,
+                  width: 132,
+                  height: 190,
+                  radius: 16,
                 );
               },
             ),
@@ -2627,8 +2788,10 @@ class _CarQuickStatsPillsState extends State<_CarQuickStatsPills> {
 
   @override
   Widget build(BuildContext context) {
+    // 外层已有左右 18 留白，这里只留顶部间距，保证与上方特征卡左右对齐。
+    const padding = EdgeInsets.only(top: 20);
     return Padding(
-      padding: EdgeInsets.only(top: widget.isSideBySide ? 0 : 20, right: 18),
+      padding: widget.isSideBySide ? EdgeInsets.zero : padding,
       child: Row(
         children: [
           Expanded(

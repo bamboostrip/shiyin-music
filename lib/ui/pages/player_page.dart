@@ -73,7 +73,63 @@ class _PlayerPageState extends State<PlayerPage> {
         builder: (context, _) {
           final song = widget.player.currentSong;
           if (song == null) {
-            return const Scaffold(body: SizedBox.shrink());
+            // 防御性空态：正常情况下底栏无歌时不会进播放页，
+            // 万一被外部路由直接打开，也不展示纯空白页。
+            final colorScheme = Theme.of(context).colorScheme;
+            return Scaffold(
+              backgroundColor: colorScheme.surface,
+              appBar: AppBar(
+                leading: IconButton(
+                  tooltip: '返回',
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+              ),
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(alpha: .10),
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Icon(
+                          Icons.music_note_rounded,
+                          size: 40,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        '还没有正在播放的歌曲',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '先去挑选一首喜欢的歌曲吧',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton.tonal(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        child: const Text('返回'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
           }
 
           return _PlayerBody(

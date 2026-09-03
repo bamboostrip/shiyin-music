@@ -98,11 +98,10 @@ class _SleepTimerSheetState extends State<_SleepTimerSheet> {
             ],
             const SizedBox(height: 16),
             // Finish song toggle
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
+            Material(
+              color: colorScheme.surfaceContainer,
+              borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
               child: SwitchListTile(
                 value: _finishSong,
                 onChanged: (v) {

@@ -1166,11 +1166,11 @@ class _SuggestionList extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? Colors.white.withValues(alpha: .06) : Colors.white;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Container(
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
@@ -1184,8 +1184,10 @@ class _SuggestionList extends StatelessWidget {
             ),
           ],
         ),
-        child: ClipRRect(
+        child: Material(
+          color: cardColor,
           borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 6),
             shrinkWrap: true,
