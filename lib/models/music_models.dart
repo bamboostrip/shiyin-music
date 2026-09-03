@@ -629,6 +629,7 @@ class Song {
     required this.title,
     required this.artist,
     required this.hash,
+    this.rawTitle,
     this.albumId,
     this.albumAudioId,
     this.albumName,
@@ -641,6 +642,7 @@ class Song {
 
   final String id;
   final String title;
+  final String? rawTitle;
   final String artist;
   final String hash;
   final String? albumId;
@@ -649,6 +651,9 @@ class Song {
   final String? coverUrl;
   final Duration? duration;
   final List<ArtistRef> artists;
+
+  /// 纯净歌名（已去除冗余歌手名前缀）。
+  String get cleanTitle => title;
 
   /// 标记是否为云盘歌曲。云盘歌曲的播放地址需通过 `/user/cloud/url` 获取。
   final bool isCloudDrive;
@@ -683,22 +688,32 @@ class Song {
           asString(json['singer_name']),
     );
     final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : asString(json['SingerName']) ??
+              asString(json['author_name']) ??
+              asString(json['singername']) ??
+              asString(json['singer_name']) ??
+              '未知艺人';
+
+    final rawTitle =
+        asString(json['songname']) ??
+        asString(json['SongName']) ??
+        asString(json['FileName']) ??
+        asString(json['name']) ??
+        asString(json['audio_name']) ??
+        '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
 
     return Song(
       id: songId ?? hash,
-      title:
-          asString(json['FileName']) ??
-          asString(json['songname']) ??
-          asString(json['name']) ??
-          asString(json['audio_name']) ??
-          '未知歌曲',
-      artist: artistName.isNotEmpty
-          ? artistName
-          : asString(json['SingerName']) ??
-                asString(json['author_name']) ??
-                asString(json['singername']) ??
-                asString(json['singer_name']) ??
-                '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash: hash,
       albumId: asString(json['AlbumID']) ?? asString(json['album_id']),
       albumAudioId: songId,
@@ -722,9 +737,19 @@ class Song {
     final audioId =
         asString(json['audio_id']) ?? asString(json['album_audio_id']);
     final author = asString(json['author_name']) ?? '未知艺人';
+    final artists = parseArtists(json, fallbackName: author);
+    final rawTitle =
+        asString(json['songname']) ?? asString(json['filename']) ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: author,
+      artists: artists,
+    );
+
     return Song(
       id: audioId ?? hash,
-      title: asString(json['songname']) ?? asString(json['filename']) ?? '未知歌曲',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
       artist: author,
       hash: hash,
       albumId: asString(json['album_id']),
@@ -732,7 +757,7 @@ class Song {
       albumName: asString(json['album_name']),
       coverUrl: normalizeImageUrl(asString(json['album_sizable_cover'])),
       duration: durationFromMilliseconds(json['timelength']),
-      artists: parseArtists(json, fallbackName: author),
+      artists: artists,
     );
   }
 
@@ -743,13 +768,22 @@ class Song {
       fallbackName: asString(json['author_name']),
     );
     final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : asString(json['author_name']) ?? '未知艺人';
+    final rawTitle =
+        asString(json['songname']) ?? asString(json['audio_name']) ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
+
     return Song(
       id: asString(json['mixsongid']) ?? songId ?? asString(json['hash']) ?? '',
-      title:
-          asString(json['songname']) ?? asString(json['audio_name']) ?? '未知歌曲',
-      artist: artistName.isNotEmpty
-          ? artistName
-          : asString(json['author_name']) ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash:
           asString(json['hash']) ??
           asString(json['hash_320']) ??
@@ -767,6 +801,7 @@ class Song {
   factory Song.fromPlaylist(Map<String, dynamic> json) {
     final artists = parseArtists(json);
     final artist = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artist.isNotEmpty ? artist : '未知艺人';
     final albumInfo = json['albuminfo'];
     final albumMap = albumInfo is Map<String, dynamic> ? albumInfo : null;
     final hash =
@@ -776,10 +811,19 @@ class Song {
         asString(json['FileHash']) ??
         '';
 
+    final rawTitle =
+        asString(json['name']) ?? asString(json['audio_name']) ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
+
     return Song(
       id: asString(json['fileid']) ?? asString(json['mixsongid']) ?? hash,
-      title: asString(json['name']) ?? asString(json['audio_name']) ?? '未知歌曲',
-      artist: artist.isNotEmpty ? artist : '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash: hash,
       albumId:
           asString(json['album_id']) ??
@@ -816,6 +860,15 @@ class Song {
       artists = [ArtistRef(id: artistId, name: authorName)];
     }
     final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist =
+        artistName.isNotEmpty ? artistName : authorName ?? '未知艺人';
+    final rawTitle =
+        asString(json['audio_name']) ?? asString(json['name']) ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
     final transParam = asMap(json['trans_param']);
 
     return Song(
@@ -824,8 +877,9 @@ class Song {
           asString(json['audio_id']) ??
           asString(json['hash']) ??
           '',
-      title: asString(json['audio_name']) ?? asString(json['name']) ?? '未知歌曲',
-      artist: artistName.isNotEmpty ? artistName : authorName ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash: asString(json['hash']) ?? '',
       albumId: asString(json['album_id']),
       albumAudioId: asString(json['album_audio_id']),
@@ -856,6 +910,14 @@ class Song {
           splitName.artist,
     );
     final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist =
+        artistName.isNotEmpty ? artistName : splitName.artist ?? '未知艺人';
+    final rawTitle = splitName.title ?? displayName ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
     final transParam = asMap(json['trans_param']);
 
     return Song(
@@ -865,8 +927,9 @@ class Song {
           asString(json['sid']) ??
           asString(json['hash']) ??
           '',
-      title: splitName.title ?? displayName ?? '未知歌曲',
-      artist: artistName.isNotEmpty ? artistName : splitName.artist ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash:
           asString(json['hash']) ??
           asString(json['FileHash']) ??
@@ -912,6 +975,15 @@ class Song {
         .where((artist) => artist.name.isNotEmpty)
         .toList();
     final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : asString(base['author_name']) ?? '未知艺人';
+    final rawTitle = asString(base['audio_name']) ?? '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
 
     return Song(
       id:
@@ -919,10 +991,9 @@ class Song {
           asString(base['album_id']) ??
           asString(json['id']) ??
           '',
-      title: asString(base['audio_name']) ?? '未知歌曲',
-      artist: artistName.isNotEmpty
-          ? artistName
-          : asString(base['author_name']) ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash: asString(audioInfo['hash']) ?? '',
       albumId: asString(base['album_id']),
       albumAudioId: asString(audioInfo['hash']) ?? asString(json['id']),
@@ -950,6 +1021,24 @@ class Song {
           asString(base['author_name']),
     );
     final artistName = artists.map((a) => a.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : asString(json['singername']) ??
+            asString(json['author_name']) ??
+            asString(base['author_name']) ??
+            '未知艺人';
+    final rawTitle =
+        asString(json['songname']) ??
+        asString(json['filename']) ??
+        asString(json['audio_name']) ??
+        asString(json['name']) ??
+        asString(base['audio_name']) ??
+        '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
 
     final hash =
         asString(json['hash']) ??
@@ -971,19 +1060,9 @@ class Song {
           asString(audioInfo['hash']) ??
           asString(json['hash']) ??
           '',
-      title:
-          asString(json['filename']) ??
-          asString(json['audio_name']) ??
-          asString(json['songname']) ??
-          asString(json['name']) ??
-          asString(base['audio_name']) ??
-          '未知歌曲',
-      artist: artistName.isNotEmpty
-          ? artistName
-          : asString(json['singername']) ??
-                asString(json['author_name']) ??
-                asString(base['author_name']) ??
-                '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
       hash: hash,
       albumId: asString(json['album_id']) ?? asString(base['album_id']),
       albumAudioId:
@@ -1016,6 +1095,7 @@ class Song {
   Map<String, dynamic> toCache() => {
     'id': id,
     'title': title,
+    if (rawTitle != null) 'rawTitle': rawTitle,
     'artist': artist,
     'hash': hash,
     'albumId': albumId,
@@ -1031,27 +1111,37 @@ class Song {
   };
 
   factory Song.fromCache(Map<String, dynamic> json) {
+    final title = asString(json['title']) ?? '未知歌曲';
+    final rawTitle = asString(json['rawTitle']);
+    final artist = asString(json['artist']) ?? '未知艺人';
+    final artists = asList(json['artists'])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (a) => ArtistRef(
+            id: asString(a['id']) ?? '',
+            name: asString(a['name']) ?? '',
+            avatarUrl: asString(a['avatarUrl']),
+          ),
+        )
+        .where((artist) => artist.name.isNotEmpty)
+        .toList();
+    final cleanedTitle = cleanSongTitle(
+      title,
+      artist: artist,
+      artists: artists,
+    );
     return Song(
       id: asString(json['id']) ?? '',
-      title: asString(json['title']) ?? '未知歌曲',
-      artist: asString(json['artist']) ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawTitle ?? title,
+      artist: artist,
       hash: asString(json['hash']) ?? '',
       albumId: asString(json['albumId']),
       albumAudioId: asString(json['albumAudioId']),
       albumName: asString(json['albumName']),
       coverUrl: asString(json['coverUrl']),
       duration: durationFromMilliseconds(json['durationMs']),
-      artists: asList(json['artists'])
-          .whereType<Map<String, dynamic>>()
-          .map(
-            (a) => ArtistRef(
-              id: asString(a['id']) ?? '',
-              name: asString(a['name']) ?? '',
-              avatarUrl: asString(a['avatarUrl']),
-            ),
-          )
-          .where((artist) => artist.name.isNotEmpty)
-          .toList(),
+      artists: artists,
       isCloudDrive: json['isCloudDrive'] == true,
       source: json['source'] is String
           ? SongSource.values.firstWhere(
@@ -1248,6 +1338,97 @@ _SongDisplayName _splitSongDisplayName(String? value) {
     artist: artist.isEmpty ? null : artist,
     title: title.isEmpty ? value : title,
   );
+}
+
+/// 清洗歌曲名称，剥离多余的「歌手名 - 」前缀，保留纯正歌名。
+///
+/// 当 [rawTitle] 包含 `歌手名 - 歌名` 格式，且前半部与 [artist] / [artists] 匹配时，
+/// 自动剔除前半部与分隔符。若前半部与歌手无关（例如《Part 1 - The Beginning》），
+/// 则安全保留原名不误切。
+String cleanSongTitle(
+  String? rawTitle, {
+  String? artist,
+  List<ArtistRef>? artists,
+}) {
+  if (rawTitle == null) {
+    return '未知歌曲';
+  }
+  final trimmed = rawTitle.trim();
+  if (trimmed.isEmpty) {
+    return '未知歌曲';
+  }
+
+  final separator = RegExp(r'\s+[-–—]\s+');
+  final match = separator.firstMatch(trimmed);
+  if (match == null) {
+    return trimmed;
+  }
+
+  final prefix = trimmed.substring(0, match.start).trim();
+  final suffix = trimmed.substring(match.end).trim();
+  if (suffix.isEmpty || prefix.isEmpty) {
+    return trimmed;
+  }
+
+  final cleanArtist = artist?.trim();
+  final isUnknownArtist = cleanArtist == null ||
+      cleanArtist.isEmpty ||
+      cleanArtist == '未知艺人' ||
+      cleanArtist == '群星';
+
+  if (isUnknownArtist) {
+    return suffix;
+  }
+
+  final prefixNorm = prefix.toLowerCase();
+  final artistNorm = cleanArtist.toLowerCase();
+
+  // 1. 完全相同
+  if (prefixNorm == artistNorm) {
+    return suffix;
+  }
+
+  // 2. 归一化多歌手分隔符（支持 /、\、顿号、逗号、& 等）
+  String normArtists(String s) => s
+      .toLowerCase()
+      .split(RegExp(r'[/、\\,，&+]|\s+'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .join(' ');
+
+  if (normArtists(prefix) == normArtists(cleanArtist)) {
+    return suffix;
+  }
+
+  // 3. 检查 artists 引用列表
+  if (artists != null &&
+      artists.any((a) => a.name.trim().toLowerCase() == prefixNorm)) {
+    return suffix;
+  }
+
+  // 4. 检查 prefix 是否为 cleanArtist 中的任一子歌手
+  final subArtists = cleanArtist
+      .split(RegExp(r'[/、\\,，&+]'))
+      .map((e) => e.trim().toLowerCase())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (subArtists.contains(prefixNorm)) {
+    return suffix;
+  }
+
+  // 5. 若 prefix 包含多个歌手，且每一个都在 cleanArtist 里
+  final prefixSubArtists = prefix
+      .split(RegExp(r'[/、\\,，&+]'))
+      .map((e) => e.trim().toLowerCase())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (prefixSubArtists.isNotEmpty &&
+      prefixSubArtists.every((pa) => artistNorm.contains(pa))) {
+    return suffix;
+  }
+
+  // 不匹配歌手前缀，安全保留原标题
+  return trimmed;
 }
 
 class PlaylistDetail {
@@ -2225,6 +2406,13 @@ class CloudDriveSongMeta {
     final rawName =
         asString(json['name']) ?? asString(json['audio_name']) ?? '';
     final cleanName = _stripCloudFileExtension(rawName, ext);
+    final resolvedArtist =
+        artistName.isNotEmpty ? artistName : authorName ?? '未知艺人';
+    final cleanedTitle = cleanSongTitle(
+      cleanName.isNotEmpty ? cleanName : '未知歌曲',
+      artist: resolvedArtist,
+      artists: artists,
+    );
 
     final song = Song(
       id:
@@ -2232,8 +2420,9 @@ class CloudDriveSongMeta {
           asString(json['album_audio_id']) ??
           asString(json['hash']) ??
           '',
-      title: cleanName.isNotEmpty ? cleanName : '未知歌曲',
-      artist: artistName.isNotEmpty ? artistName : authorName ?? '未知艺人',
+      title: cleanedTitle,
+      rawTitle: rawName,
+      artist: resolvedArtist,
       hash: asString(json['hash']) ?? asString(json['hash_std']) ?? '',
       albumId: asString(albumInfo['album_id']),
       albumAudioId:
@@ -2262,30 +2451,23 @@ class CloudDriveSongMeta {
 ///
 /// 优先按服务端返回的 `ext` 字段移除；若无则按常见音频后缀兜底。
 String _stripCloudFileExtension(String name, String? ext) {
-  var result = name.trim();
-  if (result.isEmpty) return result;
-
-  // 按服务端返回的 ext 移除（ext 可能带或不带点）
   if (ext != null && ext.isNotEmpty) {
     final normalizedExt = ext.startsWith('.') ? ext : '.$ext';
-    if (result.toLowerCase().endsWith(normalizedExt.toLowerCase())) {
-      result = result.substring(0, result.length - normalizedExt.length);
+    if (name.toLowerCase().endsWith(normalizedExt.toLowerCase())) {
+      return name.substring(0, name.length - normalizedExt.length);
     }
   }
-
-  // 兜底：移除常见音频文件后缀
-  final match = RegExp(
-    r'\.(mp3|flac|ape|wav|aac|m4a|ogg|wma|opus)$',
-    caseSensitive: false,
-  ).firstMatch(result);
-  if (match != null) {
-    result = result.substring(0, match.start);
+  final dot = name.lastIndexOf('.');
+  if (dot > 0) {
+    final possibleExt = name.substring(dot).toLowerCase();
+    if (const ['.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg']
+        .contains(possibleExt)) {
+      return name.substring(0, dot);
+    }
   }
-
-  return result.trim();
+  return name;
 }
 
-/// 网易云音乐搜索结果项。
 class NetEaseSong {
   const NetEaseSong({
     required this.id,
@@ -2304,20 +2486,28 @@ class NetEaseSong {
   /// 转换为 [Song]，标记来源为网易云。
   Song toSong() {
     final artistName = artists.map((a) => a.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty ? artistName : '未知艺人';
+    final artistRefs = artists
+        .map((a) => ArtistRef(id: '${a.id}', name: a.name))
+        .where((a) => a.name.isNotEmpty)
+        .toList();
+    final cleanedTitle = cleanSongTitle(
+      name,
+      artist: resolvedArtist,
+      artists: artistRefs,
+    );
     return Song(
       id: '$id',
-      title: name,
-      artist: artistName.isNotEmpty ? artistName : '未知艺人',
+      title: cleanedTitle,
+      rawTitle: name,
+      artist: resolvedArtist,
       hash: 'ne_$id',
       albumId: '${album.id}',
       albumAudioId: '$id',
       albumName: album.name,
       coverUrl: album.picUrl,
       duration: duration,
-      artists: artists
-          .map((a) => ArtistRef(id: '${a.id}', name: a.name))
-          .where((a) => a.name.isNotEmpty)
-          .toList(),
+      artists: artistRefs,
       source: SongSource.netease,
     );
   }

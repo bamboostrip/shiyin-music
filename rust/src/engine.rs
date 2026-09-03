@@ -877,6 +877,7 @@ mod tests {
             }
             assert!(!stations.is_empty(), "推荐电台为空，结构可能变化");
 
+            #[allow(dead_code)]
             fn count_songs(v: &serde_json::Value) -> (usize, Option<Vec<String>>) {
                 match v {
                     serde_json::Value::Object(map) => {

@@ -334,7 +334,7 @@ mod crypto_tests {
         let plain = "|1700000000000";
         let enc = aes_encrypt(plain, Some(key), Some(iv));
         assert!(enc.cipher_text.chars().all(|c| c.is_ascii_hexdigit()));
-        assert!(enc.cipher_text.len() % 32 == 0);
+        assert!(enc.cipher_text.len().is_multiple_of(32));
     }
 
     #[test]

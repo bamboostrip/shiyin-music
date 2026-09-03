@@ -154,15 +154,17 @@ class LocalMusicController extends ChangeNotifier {
       for (final item in result) {
         if (item is Map) {
           final filePath = item['filePath'] as String? ?? '';
-          final title = item['title'] as String? ?? '未知歌曲';
+          final rawTitle = item['title'] as String? ?? '未知歌曲';
           final artist = item['artist'] as String? ?? '未知艺人';
           final durationMs = item['duration'] as int?;
+          final cleanedTitle = cleanSongTitle(rawTitle, artist: artist);
 
           if (filePath.isNotEmpty) {
             list.add(
               Song(
                 id: filePath,
-                title: title,
+                title: cleanedTitle,
+                rawTitle: rawTitle,
                 artist: artist,
                 hash: filePath,
                 coverUrl: item['albumArtUri'] as String?,
