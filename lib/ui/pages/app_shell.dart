@@ -665,7 +665,6 @@ class _CenterDisc extends StatelessWidget {
   }
 }
 
-
 /// 在已有 [TextScaler] 基础上再乘固定倍数（Flutter 内置 TextScaler 无 `*` 运算符）。
 class _RelativeTextScaler extends TextScaler {
   const _RelativeTextScaler({required this.base, required this.multiplier});

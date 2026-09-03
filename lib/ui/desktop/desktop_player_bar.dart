@@ -119,24 +119,18 @@ class DesktopPlayerBar extends StatelessWidget {
                 color: colorScheme.onSurface,
               ),
               const SizedBox(width: 4),
-              AnimatedBuilder(
-                animation: player,
-                builder: (context, _) {
-                  final playing = player.isPlaying;
-                  return IconButton(
-                    tooltip: playing ? '暂停' : '播放',
-                    onPressed: player.isPreparing || song == null
-                        ? null
-                        : player.togglePlay,
-                    icon: Icon(
-                      playing
-                          ? Icons.pause_circle_rounded
-                          : Icons.play_circle_rounded,
-                      size: 40,
-                    ),
-                    color: colorScheme.primary,
-                  );
-                },
+              IconButton(
+                tooltip: player.isPlaying ? '暂停' : '播放',
+                onPressed: player.isPreparing || song == null
+                    ? null
+                    : player.togglePlay,
+                icon: Icon(
+                  player.isPlaying
+                      ? Icons.pause_circle_rounded
+                      : Icons.play_circle_rounded,
+                  size: 40,
+                ),
+                color: colorScheme.primary,
               ),
               const SizedBox(width: 4),
               IconButton(
