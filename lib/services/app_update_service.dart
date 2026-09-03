@@ -85,7 +85,11 @@ class AppUpdateService {
     if (decoded is! Map<String, dynamic>) {
       throw StateError('GitHub 返回数据格式异常');
     }
-    return AppVersionInfo.fromGitHubRelease(decoded);
+    // 按本机渲染器选附件：Skia 包只给 Skia 机，Impeller 包只给 Impeller 机。
+    return AppVersionInfo.fromGitHubRelease(
+      decoded,
+      renderer: AppConfig.renderer,
+    );
   }
 
   /// 在外部浏览器打开更新包链接（直链 APK，或回退的 Release 页面）。

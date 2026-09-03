@@ -19,9 +19,13 @@
             android:name=".MusicApplication"
             android:usesCleartextTraffic="true"
             android:icon="@mipmap/ic_launcher">
-        <!-- A/B 测试：恢复 Flutter 默认 Impeller（Vulkan）渲染引擎，
-             验证 Adreno 702 车机（QCM2290）无冻屏/渲染缺陷后保留；
-             如发现问题，git revert 本提交即回退 Skia。 -->
+        <!-- 渲染引擎由 gradle flavor 决定（见 build.gradle.kts productFlavors）：
+             skia 变体 → false（Skia，老 GPU 稳定），impeller 变体 → true
+             （Flutter 默认 Impeller/Vulkan）。此处仅占位，勿手改具体值；
+             本地验证某一渲染器用 `build_apk.bat [skia|impeller]`。 -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="${enableImpeller}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

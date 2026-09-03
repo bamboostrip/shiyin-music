@@ -5,6 +5,17 @@ class AppConfig {
   static const appVersion = '2.5.0';
   static const appVersionCode = '250';
 
+  /// 当前包的渲染引擎，由构建时 `--dart-define=APP_RENDERER=skia|impeller`
+  /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传）。更新检查用它选对应附件；
+  /// 本地 `flutter run` 没传时按 Impeller 默认处理。
+  static const renderer = String.fromEnvironment(
+    'APP_RENDERER',
+    defaultValue: 'impeller',
+  );
+
+  /// 渲染引擎展示名（关于页 / 日志用）。
+  static String get rendererLabel => renderer == 'skia' ? 'Skia' : 'Impeller';
+
   static const debugLyrics = bool.fromEnvironment(
     'KA_MUSIC_DEBUG_LYRICS',
     defaultValue: true,

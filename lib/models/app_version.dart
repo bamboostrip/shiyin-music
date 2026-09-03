@@ -53,28 +53,39 @@ class AppVersionInfo {
   ///
   /// - `tag_name`（去掉前导 `v`）作为 [versionName]
   /// - `body` 作为更新说明 [updateContent]
-  /// - 优先取附件中第一个 `.apk` 的 `browser_download_url` 作为 [downloadUrl]，
-  ///   没有附件时回退到 release 页面 [htmlUrl]
+  /// - 附件选择：[renderer] 非空时优先取文件名含 `-$renderer` 的 `.apk`
+  ///  （如 `shiyin-v2.5.1-skia-arm64.apk`），保证 Skia 机下 Skia 包、
+  ///   Impeller 机下 Impeller 包；找不到或 [renderer] 为空时回退到
+  ///   第一个 `.apk`（兼容双包之前的老 Release；发版时把 impeller 包
+  ///   放前面，老版本客户端行为不变）。没有附件时回退到 release 页面 [htmlUrl]
   /// - GitHub 不提供"强制更新"，故 [forceUpdate] 恒为 false
   factory AppVersionInfo.fromGitHubRelease(
     Map<String, dynamic> json, {
     String htmlUrl = '',
+    String renderer = '',
   }) {
     final rawTag = asString(json['tag_name']) ?? '';
     final versionName = stripVersionTagPrefix(rawTag);
 
     var downloadUrl = '';
+    var fallbackUrl = '';
     final assets = json['assets'];
     if (assets is List) {
+      final want = renderer.trim().toLowerCase();
       for (final asset in assets) {
         if (asset is! Map) continue;
         final name = asString(asset['name']) ?? '';
-        if (name.toLowerCase().endsWith('.apk')) {
-          downloadUrl = asString(asset['browser_download_url']) ?? '';
-          if (downloadUrl.isNotEmpty) break;
+        if (!name.toLowerCase().endsWith('.apk')) continue;
+        final url = asString(asset['browser_download_url']) ?? '';
+        if (url.isEmpty) continue;
+        if (fallbackUrl.isEmpty) fallbackUrl = url;
+        if (want.isNotEmpty && name.toLowerCase().contains('-$want')) {
+          downloadUrl = url;
+          break;
         }
       }
     }
+    downloadUrl = downloadUrl.isEmpty ? fallbackUrl : downloadUrl;
     final releasePageUrl = asString(json['html_url']) ?? htmlUrl;
     if (downloadUrl.isEmpty) {
       downloadUrl = releasePageUrl;

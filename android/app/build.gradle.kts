@@ -57,6 +57,22 @@ android {
         }
     }
 
+    // 渲染引擎双变体：skia（老 GPU 稳定）/ impeller（默认，Vulkan）。
+    // 仅控制 Manifest 的 io.flutter.embedding.android.EnableImpeller 开关；
+    // 包名、签名、versionCode 两变体完全一致，同版本跨变体可直接覆盖安装、
+    // 数据保留。构建必须带 --flavor（CI / build_apk.bat 已处理）。
+    flavorDimensions += "renderer"
+    productFlavors {
+        create("skia") {
+            dimension = "renderer"
+            manifestPlaceholders["enableImpeller"] = "false"
+        }
+        create("impeller") {
+            dimension = "renderer"
+            manifestPlaceholders["enableImpeller"] = "true"
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {

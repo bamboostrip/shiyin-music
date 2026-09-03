@@ -1,7 +1,7 @@
 # 时音 发版流程
 
 > 适用仓库：`bamboostrip/shiyin-music`
-> CI 工作流：`.github/workflows/build-android.yml`（打 `v*` tag 自动构建 arm64 APK 并附加到 Release）
+> CI 工作流：`.github/workflows/build-android.yml`（打 `v*` tag 自动构建 skia/impeller 双变体 arm64 APK 并按固定顺序附加到 Release）
 
 ---
 
@@ -107,13 +107,18 @@ gh run watch                   # 实时跟踪（可选）
 gh release view v2.4.2         # 确认 APK 已附加
 ```
 
-CI 完成后 Release 页面应包含：
+CI 完成后 Release 页面应包含（**顺序不能变**，impeller 在前）：
 - 手写 changelog
-- `app-release.apk` 附件（arm64-v8a）
+- `shiyin-vX.Y.Z-impeller-arm64.apk`（默认渲染，老版本客户端只拿第一个附件）
+- `shiyin-vX.Y.Z-skia-arm64.apk`（老 GPU 闪退/冻屏用户用这个）
+
+> 附件顺序由 workflow 的 publish-release job 保证；应用内更新按本机渲染器
+> 自动选包（`AppVersionInfo.fromGitHubRelease` 按 `-skia`/`-impeller` 后缀匹配），
+> Skia 机下 Skia 包、Impeller 机下 Impeller 包。
 
 ## 八、验证
 
-- 在设备上安装新 APK，确认「关于」页版本号正确
+- 在设备上安装对应变体 APK，确认「关于」页版本号正确且渲染引擎显示正确
 - 点击「检查更新」，应提示"当前已是最新版本"
 - 用旧版本 APK 点击「检查更新」，应弹出新版本更新弹窗
 

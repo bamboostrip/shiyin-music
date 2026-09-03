@@ -18,9 +18,14 @@ env:
 
 jobs:
   build-apk:
-    name: Build arm64-v8a release APK
+    name: Build arm64-v8a release APK (${{ matrix.flavor }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      matrix:
+        # 渲染引擎双变体：skia（老 GPU 稳定）/ impeller（默认）。
+        # 产物名必须含 -$flavor-，应用内更新靠它选包（见 AppVersionInfo）。
+        flavor: [impeller, skia]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,28 +91,49 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/PASSWORD not set; falling back to debug signing."
           fi
 
-      - name: Build release APK (arm64-v8a)
-        run: flutter build apk --release --target-platform android-arm64
+      - name: Build release APK (arm64-v8a, ${{ matrix.flavor }})
+        run: flutter build apk --release --target-platform android-arm64 --flavor ${{ matrix.flavor }} --dart-define=APP_RENDERER=${{ matrix.flavor }}
 
-      - name: Locate APK
+      - name: Rename APK with flavor
         id: apk
         run: |
-          APK=$(find build -name 'app-release.apk' -print -quit)
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
-          ls -lh "$APK"
+          SRC=$(find build -name "app-${{ matrix.flavor }}-release.apk" -print -quit)
+          DST="shiyin-${{ github.ref_name }}-${{ matrix.flavor }}-arm64.apk"
+          cp "$SRC" "$DST"
+          echo "path=$DST" >> "$GITHUB_OUTPUT"
+          ls -lh "$DST"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shiyin-arm64-${{ github.ref_name }}
+          name: apk-${{ matrix.flavor }}-${{ github.ref_name }}
           path: ${{ steps.apk.outputs.path }}
 
-      # 打 tag 时自动创建 GitHub Release 并附带 APK。
-      # Release 笔记由 gh CLI 手动创建，此处仅附加 APK；
-      # 若 Release 已存在则只更新附件，不覆盖 body。
+  # 双附件按固定顺序挂到 Release：impeller 在前、skia 在后。
+  # 老版本客户端不懂选包、只拿第一个附件，impeller 在前可保持它们行为不变。
+  publish-release:
+    name: Attach APKs to Release (impeller first)
+    needs: build-apk
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download impeller APK
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-impeller-${{ github.ref_name }}
+          path: dist
+
+      - name: Download skia APK
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-skia-${{ github.ref_name }}
+          path: dist
+
+      # Release 笔记由 gh CLI 手动创建，此处仅按顺序附加 APK，不覆盖 body。
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.apk.outputs.path }}
+          files: |
+            dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk
+            dist/shiyin-${{ github.ref_name }}-skia-arm64.apk
           name: 时音 ${{ github.ref_name }}

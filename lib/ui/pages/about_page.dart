@@ -86,7 +86,7 @@ class _AboutPageState extends State<AboutPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '版本 ${AppConfig.appVersion}',
+                  '版本 ${AppConfig.appVersion} · ${AppConfig.rendererLabel}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -140,6 +140,7 @@ class _AboutPageState extends State<AboutPage> {
                 children: [
                   const _InfoRow(label: '应用名称', value: AppConfig.appName),
                   const _InfoRow(label: '当前版本', value: AppConfig.appVersion),
+                  _InfoRow(label: '渲染引擎', value: AppConfig.rendererLabel),
                   _InfoLinkRow(
                     label: 'GitHub',
                     value: 'bamboostrip/shiyin-music',

@@ -44,7 +44,8 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-- 推送 `v*` tag 触发 GitHub Action「Build Android APK (arm64)」（约 10 分钟：cargo-ndk 编译 Rust + Flutter release APK）。
+- 推送 `v*` tag 触发 GitHub Action「Build Android APK (arm64)」（约 10 分钟×2 变体：cargo-ndk 编译 Rust + skia/impeller 双包）。
+- 双附件按固定顺序发布：`shiyin-vX.Y.Z-impeller-arm64.apk` 在前、`shiyin-vX.Y.Z-skia-arm64.apk` 在后（顺序不能换，老版本只拿第一个）。
 - 签名来自仓库 Secrets（`RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASSWORD`），未配置时回退 debug 签名，不可覆盖安装正式版。
 - 手动 `workflow_dispatch` 也可构建，但不会创建 Release。
 
@@ -61,8 +62,8 @@ gh release create vX.Y.Z --title "时音 vX.Y.Z" --notes "<更新内容>"
 ## 7. 验证
 
 ```bash
-gh run list --limit 1            # 构建应为 success
-gh release view vX.Y.Z           # assets 里应有 app-release.apk
+gh run list --limit 1            # 构建应为 success（两个 flavor job）
+gh release view vX.Y.Z           # assets 里应有两个 apk：impeller 在前、skia 在后
 ```
 
 ## 8. 收尾（可选）

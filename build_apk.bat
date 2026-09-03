@@ -13,9 +13,30 @@ set PATH=%JAVA_HOME%\bin;%ANDROID_HOME%\platform-tools;%PATH%
 
 cd /d E:\AIwork\kgka_Music_hl
 
-set BUILD_TYPE=%1
+rem 用法: build_apk.bat [impeller^|skia] [release^|debug]
+rem   第一个参数是渲染引擎，默认 impeller（老机器闪退/冻屏再打 skia 版）
+rem   第二个参数是构建类型，默认 release
+rem   兼容老用法：build_apk.bat debug 仍表示 impeller + debug
+set RENDERER=%1
+set BUILD_TYPE=%2
+if "%RENDERER%"=="" set RENDERER=impeller
+if "%RENDERER%"=="release" (
+    set BUILD_TYPE=release
+    set RENDERER=impeller
+)
+if "%RENDERER%"=="debug" (
+    set BUILD_TYPE=debug
+    set RENDERER=impeller
+)
 if "%BUILD_TYPE%"=="" set BUILD_TYPE=release
 
+if not "%RENDERER%"=="impeller" if not "%RENDERER%"=="skia" (
+    echo [失败] 渲染引擎只能是 impeller 或 skia，当前: %RENDERER%
+    pause
+    exit /b 1
+)
+
+echo [渲染引擎] %RENDERER%
 echo [构建类型] %BUILD_TYPE%
 echo.
 
@@ -38,7 +59,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo [3/3] 构建 APK...
-call E:\flutter\flutter\bin\flutter.bat build apk --%BUILD_TYPE%
+call E:\flutter\flutter\bin\flutter.bat build apk --%BUILD_TYPE% --flavor %RENDERER% --dart-define=APP_RENDERER=%RENDERER%
 if %ERRORLEVEL% neq 0 (
     echo [失败] 构建出错
     pause
@@ -48,10 +69,10 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo ============================================
 echo   ^[成功^] 构建成功！
-echo   APK：build\app\outputs\flutter-apk\app-%BUILD_TYPE%.apk
+echo   APK：build\app\outputs\flutter-apk\app-%RENDERER%-%BUILD_TYPE%.apk
 echo ============================================
 echo.
-echo 用法: build_apk.bat [release^|debug]
-echo   默认: release（22MB）
-echo   debug: 调试版（89MB）
+echo 用法: build_apk.bat [impeller^|skia] [release^|debug]
+echo   默认: impeller + release
+echo   示例: build_apk.bat（默认）、build_apk.bat skia、build_apk.bat skia release
 pause
