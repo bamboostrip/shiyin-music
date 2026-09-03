@@ -56,13 +56,15 @@ class _DesktopShellState extends State<DesktopShell> {
   var _homeTab = 0;
 
   /// HomePage.onTabSwitch 的 shell 级下标语义（0=我的, 1..3=三个子 tab）。
+  /// 越界值静默钳制，防止侧栏高亮失步（HomePage 当前只发 0..3，防御性收敛）。
   void _handleHomeTabSwitch(int shellIndex) {
     setState(() {
-      if (shellIndex <= 0) {
+      final clamped = shellIndex.clamp(0, 3);
+      if (clamped <= 0) {
         _section = _DesktopSection.library;
       } else {
         _section = _DesktopSection.home;
-        _homeTab = shellIndex - 1;
+        _homeTab = clamped - 1;
       }
     });
   }

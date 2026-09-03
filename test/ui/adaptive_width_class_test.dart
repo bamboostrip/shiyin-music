@@ -40,5 +40,11 @@ void main() {
         3,
       );
     });
+
+    test('medium 区间(600-839)恒返回 min（钉住早退守卫行为）', () {
+      expect(AdaptiveLayout.gridColumnsForWidth(600), 2);
+      expect(AdaptiveLayout.gridColumnsForWidth(700), 2);
+      expect(AdaptiveLayout.gridColumnsForWidth(839), 2);
+    });
   });
 }

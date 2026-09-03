@@ -19,6 +19,12 @@ class AdaptiveLayout {
   /// 超宽屏内容区域的最大宽度（已取消限制，保留常量供网格计算参考）。
   static const double wideMaxWidth = 1200;
 
+  /// 横轨转网格的宽度起点（逻辑像素），与 widthClassFor 的 expanded 对齐。
+  static const double kGridStartWidth = 840;
+
+  /// 网格列数计算时为两侧内容预留的总边距。
+  static const double kGridHorizontalPadding = 32;
+
   /// 是否为平板设备。
   ///
   /// 使用 [MediaQuery.sizeOf] 获取屏幕逻辑像素，
@@ -87,9 +93,10 @@ class AdaptiveLayout {
     int min = 2,
     int max = 6,
   }) {
-    if (width < 840) return min;
-    final columns = ((width - 32) ~/ minItemWidth).clamp(min, max);
-    return columns;
+    assert(minItemWidth > 0, 'minItemWidth 必须为正数');
+    assert(min <= max, 'min 不能大于 max');
+    if (width < kGridStartWidth) return min;
+    return ((width - kGridHorizontalPadding) ~/ minItemWidth).clamp(min, max);
   }
 }
 
