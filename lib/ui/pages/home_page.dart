@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../widgets/app_section.dart';
-import '../design_tokens.dart';
 
 import '../../config/app_config.dart';
 import '../../controllers/auth_controller.dart';
@@ -380,6 +379,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ignore: unused_element
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -452,7 +452,6 @@ class _HomePageState extends State<HomePage> {
                     onUpdateClose: () {
                       setState(() => _updateBannerDismissed = true);
                     },
-                    onSettingsTap: _openSettings,
                   ),
                 ),
                 SliverToBoxAdapter(
@@ -527,7 +526,6 @@ class _RecommendHeader extends StatelessWidget {
     required this.updateVersion,
     required this.onUpdateTap,
     required this.onUpdateClose,
-    required this.onSettingsTap,
   });
 
   final AuthController auth;
@@ -542,11 +540,9 @@ class _RecommendHeader extends StatelessWidget {
   final AppVersionInfo? updateVersion;
   final VoidCallback onUpdateTap;
   final VoidCallback onUpdateClose;
-  final VoidCallback onSettingsTap;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final size = MediaQuery.sizeOf(context);
     final isLandscape = size.width > size.height;
     // 车机模式专属样式仅在开启时生效，普通横屏不受影响。
@@ -558,49 +554,31 @@ class _RecommendHeader extends StatelessWidget {
         size.height >= 600 &&
         (size.width / size.height) > 2.0;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? const [Color(0xFF10233A), Color(0xFF06070A)]
-              : const [Color(0xFFDCEEFF), Color(0xFFF7FBFF), Colors.white],
-          stops: isDark ? const [0, 1] : const [0, .68, 1],
-        ),
-      ),
+    // 清新淡雅：与我的页面一致，无大面积渐变，靠白卡与留白区分层次
+    return ColoredBox(
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(18, isCarMode ? 4 : 10, 0, 12),
+          padding: EdgeInsets.fromLTRB(18, isCarMode ? 4 : 10, 18, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!isCarMode) ...[
-                Padding(
-                  padding: const EdgeInsets.only(right: 18),
-                  child: _TopTabs(
-                    auth: auth,
-                    index: sectionIndex,
-                    onChanged: onSectionChanged,
-                    onSettingsTap: onSettingsTap,
-                  ),
+                _TopTabs(
+                  auth: auth,
+                  index: sectionIndex,
+                  onChanged: onSectionChanged,
                 ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.only(right: 18),
-                  child: _SmartSearch(api: api, auth: auth, player: player),
-                ),
+                const SizedBox(height: 12),
+                _SmartSearch(api: api, auth: auth, player: player),
               ],
               if (updateVersion != null) ...[
                 const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.only(right: 18),
-                  child: AppUpdateBanner(
-                    version: updateVersion!,
-                    onTap: onUpdateTap,
-                    onClose: onUpdateClose,
-                  ),
+                AppUpdateBanner(
+                  version: updateVersion!,
+                  onTap: onUpdateTap,
+                  onClose: onUpdateClose,
                 ),
               ],
               if (sectionIndex == 0) ...[
@@ -674,76 +652,111 @@ class _TopTabs extends StatelessWidget {
     required this.auth,
     required this.index,
     required this.onChanged,
-    required this.onSettingsTap,
   });
 
   final AuthController auth;
   final int index;
   final ValueChanged<int> onChanged;
-  final VoidCallback onSettingsTap;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final tabs = ['推荐', '排行榜', '电台'];
-    return AnimatedBuilder(
-      animation: auth,
-      builder: (context, _) {
-        return Row(
-          children: [
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const tabs = [
+      (Icons.auto_awesome_rounded, '推荐'),
+      (Icons.bar_chart_rounded, '排行榜'),
+      (Icons.radio_rounded, '电台'),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: .06)
+            : Colors.white.withValues(alpha: .88),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .10)
+              : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: .20)
+                : const Color(0x0F000000),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < tabs.length; i++)
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final entry in tabs.indexed)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 30),
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onChanged(entry.$1),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                entry.$2,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      fontSize: 18,
-                                      color: entry.$1 == index
-                                          ? colorScheme.onSurface
-                                          : colorScheme.onSurfaceVariant,
-                                      fontWeight: entry.$1 == index
-                                          ? FontWeight.w900
-                                          : FontWeight.w700,
-                                    ),
-                              ),
-                              const SizedBox(height: 6),
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 180),
-                                width: entry.$1 == index ? 28 : 0,
-                                height: 3,
-                                decoration: BoxDecoration(
-                                  color: colorScheme.primary,
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                              ),
-                            ],
-                          ),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: i == index
+                        ? (isDark
+                            ? colorScheme.primary.withValues(alpha: .20)
+                            : Colors.white)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: i == index && !isDark
+                        ? Border.all(
+                            color:
+                                colorScheme.primary.withValues(alpha: .18),
+                            width: 1,
+                          )
+                        : null,
+                    boxShadow: i == index && !isDark
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: .06),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        tabs[i].$1,
+                        size: 16,
+                        color: i == index
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant
+                                .withValues(alpha: .85),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        tabs[i].$2,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: i == index
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          letterSpacing: -0.2,
+                          color: i == index
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-            IconButton(
-              tooltip: '设置',
-              onPressed: onSettingsTap,
-              icon: const Icon(Icons.settings_rounded),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }
@@ -770,38 +783,68 @@ class _SmartSearch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () => _openSearch(context),
-            child: DecoratedBox(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: () => _openSearch(context),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: .07)
+              : Colors.white.withValues(alpha: .92),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .88),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isDark
+                  ? Colors.black.withValues(alpha: .18)
+                  : const Color(0x0F000000),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.white.withValues(alpha: .08)
-                    : Colors.white.withValues(alpha: .92),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: Colors.white.withValues(alpha: .56)),
+                color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                child: Text(
-                  '搜索歌曲，歌手',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              child: Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: colorScheme.primary,
               ),
             ),
-          ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '搜索歌曲、歌手、专辑',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 14,
+              color: colorScheme.onSurfaceVariant.withValues(alpha: .45),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -821,14 +864,15 @@ class _FeatureShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 18),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final cardSize = (constraints.maxWidth - 10) / 2;
-          return SizedBox(
-            height: cardSize.clamp(140.0, 200.0),
-            child: Row(
+    final size = MediaQuery.sizeOf(context);
+    final isCar = size.width > size.height && ThemeController.instance.carModeEnabled;
+    // 车机下文字放大 1.12 倍，需预留更多高度避免 BOTTOM OVERFLOWED
+    final cardHeight = isCar ? 100.0 : 92.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SizedBox(
+          height: cardHeight,
+          child: Row(
               children: [
                 Expanded(
                   child: _FeatureCard(
@@ -872,7 +916,6 @@ class _FeatureShelf extends StatelessWidget {
             ),
           );
         },
-      ),
     );
   }
 }
@@ -894,82 +937,130 @@ class _FeatureCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: DecoratedBox(
+      child: Container(
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          gradient: LinearGradient(colors: gradient),
-          borderRadius: BorderRadius.circular(12),
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .92),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Stack(
-            children: [
-              if (imageUrl != null)
-                Positioned.fill(
-                  child: RetryableNetworkImage(
-                    url: imageUrl!,
-                    fit: BoxFit.cover,
-                    cacheWidth: 600,
-                    cacheHeight: 600,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        child: Row(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .08),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
                   ),
-                ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: .16),
-                        Colors.black.withValues(alpha: .54),
-                      ],
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: imageUrl == null
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: gradient),
+                        ),
+                        child: const Icon(Icons.album_rounded, color: Colors.white, size: 28),
+                      )
+                    : RetryableNetworkImage(
+                        url: imageUrl!,
+                        fit: BoxFit.cover,
+                        cacheWidth: 300,
+                        cacheHeight: 300,
+                        errorBuilder: (_, _, _) => DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(colors: gradient),
+                          ),
+                          child: const Icon(Icons.music_note_rounded, color: Colors.white, size: 26),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                      borderRadius: BorderRadius.circular(7),
                     ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 14,
-                bottom: 13,
-                child: Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white.withValues(alpha: .94),
-                  size: 32,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
+                    child: Text(
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
+                      style: TextStyle(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                        letterSpacing: 0.2,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: .82),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          height: 1.2,
+                        ),
+                  ),
+                      const SizedBox(height: 3),
+                  Text(
+                    '轻触播放',
+                    style: TextStyle(
+                      color: colorScheme.onSurfaceVariant.withValues(alpha: .62),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.play_arrow_rounded,
+                color: colorScheme.primary,
+                size: 20,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1362,15 +1453,34 @@ class _TopSongCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
+      borderRadius: BorderRadius.circular(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            child: Artwork(url: song.coverUrl, size: 110),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: .08)
+                    : Colors.white.withValues(alpha: .92),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Artwork(url: song.coverUrl, size: 110),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -1520,6 +1630,7 @@ class _PlaylistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
         final cardWidth = width ?? constraints.maxWidth;
@@ -1529,7 +1640,28 @@ class _PlaylistCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Artwork(url: playlist.coverUrl, size: size, borderRadius: 10),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: .08)
+                      : Colors.white.withValues(alpha: .92),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Artwork(url: playlist.coverUrl, size: size, borderRadius: 14),
+              ),
+            ),
             const SizedBox(height: 9),
             SizedBox(
               height: 42,
@@ -1560,7 +1692,7 @@ class _PlaylistCard extends StatelessWidget {
       return SizedBox(
         width: width,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           onTap: onTap,
           child: content,
         ),
@@ -1568,7 +1700,7 @@ class _PlaylistCard extends StatelessWidget {
     }
 
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       onTap: onTap,
       child: content,
     );
@@ -2536,31 +2668,46 @@ class _PillCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Material(
-      color: isDark
-          ? colorScheme.surfaceContainer
-          : Colors.white.withValues(alpha: 0.9),
-      borderRadius: BorderRadius.circular(28),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1DB954), // Spotify Green
-                  shape: BoxShape.circle,
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(28),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(28),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    color: colorScheme.primary,
+                    size: 20,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -2590,6 +2737,7 @@ class _PillCard extends StatelessWidget {
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),

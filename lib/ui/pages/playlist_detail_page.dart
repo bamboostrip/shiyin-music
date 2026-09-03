@@ -19,6 +19,7 @@ import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
+import '../design_tokens.dart';
 import 'artist_detail_page.dart';
 
 /// 缓存中完整歌单歌曲列表的 key 后缀。
@@ -1142,14 +1143,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     SliverAppBar(
                       pinned: true,
                       stretch: !_isSearching,
-                      expandedHeight: _isSearching ? 0 : 198,
+                      expandedHeight: _isSearching ? 0 : 232,
                       surfaceTintColor: Colors.transparent,
-                      // 头部渐变顶部为半透明 primary，收缩后若 toolbar 无不透明背景，
-                      // 列表内容会透过与标题/操作按钮重叠。这里用 scaffoldBackgroundColor
-                      // 作为不透明底色（与头部渐变底部一致，过渡自然），展开态被 _HeroHeader 覆盖。
-                      backgroundColor: Theme.of(
-                        context,
-                      ).scaffoldBackgroundColor,
+                      elevation: 0,
+                      scrolledUnderElevation: 1,
+                      shadowColor: Colors.black.withValues(alpha: .08),
+                      // 修复穿透：收起时用不透明 surface 遮挡滚动内容，展开时被 _HeroHeader 覆盖
+                      backgroundColor: Theme.of(context).colorScheme.surface,
                       leading: _isSelecting
                           ? IconButton(
                               tooltip: '取消',
@@ -1332,15 +1332,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       else ...[
                         SliverPadding(
                           padding: EdgeInsets.fromLTRB(
-                            12,
+                            16,
                             4,
-                            12,
-                            _isSelecting ? 100 : 12,
+                            16,
+                            _isSelecting ? 100 : 16,
                           ),
                           sliver: SliverList.separated(
                             itemCount: _filteredSongs.length,
                             separatorBuilder: (_, _) =>
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 8),
                             itemBuilder: (context, index) {
                               final song = _filteredSongs[index];
                               return _SongRow(
@@ -1467,17 +1467,36 @@ class _SimilarPlaylistCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: SizedBox(
         width: 120,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Artwork(url: playlist.coverUrl, size: 120),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: .08)
+                      : Colors.white.withValues(alpha: .92),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Artwork(url: playlist.coverUrl, size: 120),
+              ),
             ),
             const SizedBox(height: 6),
             Text(
@@ -1692,77 +1711,119 @@ class _HeroHeader extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.primary.withValues(alpha: isDark ? .28 : .18),
-            const Color(0xFFDCEEFF).withValues(alpha: isDark ? .08 : .92),
-            Theme.of(context).scaffoldBackgroundColor,
-          ],
-          stops: const [0, .58, 1],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? const [Color(0xFF162840), Color(0xFF0D121E), Color(0xFF06070A)]
+              : const [Color(0xFFDCEEFF), Color(0xFFF2F7FF), Color(0xFFFFFFFF)],
+          stops: isDark ? const [0, 0.55, 1] : const [0, 0.62, 1],
         ),
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 380;
-              final artworkSize = compact ? 90.0 : 102.0;
+          // 顶部避开 pinned AppBar 的 toolbar，避免白卡与导航重叠（状态栏已由 SafeArea 处理）
+          padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 10, 16, 14),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: .06)
+                  : Colors.white.withValues(alpha: .88),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: .10)
+                    : Colors.white.withValues(alpha: .92),
+                width: 1.1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? .22 : .08),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 360;
+                final artworkSize = compact ? 88.0 : 96.0;
 
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Artwork(
-                    url: info.coverUrl,
-                    size: artworkSize,
-                    borderRadius: 16,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          info.title,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                                height: 1.05,
-                              ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          info.subtitle?.trim().isNotEmpty == true
-                              ? info.subtitle!
-                              : _detailMeta(info),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          _detailMeta(info),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colorScheme.onSurfaceVariant),
-                        ),
-                      ],
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: .12),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Artwork(
+                        url: info.coverUrl,
+                        size: artworkSize,
+                        borderRadius: 16,
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            info.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.15,
+                                  letterSpacing: -0.3,
+                                ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (info.subtitle?.trim().isNotEmpty == true)
+                            Text(
+                              info.subtitle!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12.5,
+                                  ),
+                            ),
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _detailMeta(info),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11.5,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -1871,76 +1932,130 @@ class _Actions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isSearching = searchQuery != null && searchQuery!.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    isSearching
-                        ? '搜索结果：$searchResultCount 首'
-                        : loadedCount >= count
-                        ? '$count 首歌曲'
-                        : '已加载 $loadedCount / $count 首',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (!isSearching) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: onSortTap,
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: const Icon(Icons.sort_rounded, size: 16),
-                    label: Text(
-                      sortLabel,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: .06)
+              : Colors.white.withValues(alpha: .88),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .92),
+            width: 1.1,
           ),
-          if (!isSearching)
-            FilledButton.icon(
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('播放全部'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                shape: const StadiumBorder(),
-              ),
-            )
-          else if (searchResultCount != null && searchResultCount! > 0)
-            FilledButton.icon(
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('播放结果'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                shape: const StadiumBorder(),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Icon(
+                      Icons.music_note_rounded,
+                      size: 16,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      isSearching
+                          ? '搜索结果 · $searchResultCount 首'
+                          : loadedCount >= count
+                              ? '$count 首歌曲'
+                              : '已加载 $loadedCount / $count',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (!isSearching) ...[
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: onSortTap,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: .08)
+                              : colorScheme.surfaceContainerHighest.withValues(alpha: .9),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: colorScheme.outlineVariant.withValues(alpha: .5),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.sort_rounded, size: 14, color: colorScheme.primary),
+                            const SizedBox(width: 4),
+                            Text(
+                              sortLabel,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-        ],
+            const SizedBox(width: 12),
+            if (!isSearching)
+              FilledButton.icon(
+                onPressed: onPlay,
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: const Text('播放全部'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                  elevation: 0,
+                ),
+              )
+            else if (searchResultCount != null && searchResultCount! > 0)
+              FilledButton.icon(
+                onPressed: onPlay,
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: const Text('播放结果'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                  elevation: 0,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2061,6 +2176,7 @@ class _SongRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // 歌曲行响应 player 重建，高频更新会触发 Windows AXTree 竞态崩溃
     return ExcludeSemantics(
@@ -2069,22 +2185,44 @@ class _SongRow extends StatelessWidget {
         builder: (context, _) {
           final active = !selecting && player.currentSong?.hash == song.hash;
           final activeColor = colorScheme.primary;
-          return InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-              decoration: BoxDecoration(
-                color: selecting
-                    ? (selected
-                          ? activeColor.withValues(alpha: .08)
-                          : Colors.transparent)
-                    : active
-                    ? activeColor.withValues(alpha: .09)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-              ),
+          final bgColor = selecting
+              ? (selected
+                  ? activeColor.withValues(alpha: .10)
+                  : (isDark
+                      ? Colors.white.withValues(alpha: .04)
+                      : Colors.white.withValues(alpha: .85)))
+              : active
+                  ? activeColor.withValues(alpha: .10)
+                  : (isDark
+                      ? Colors.white.withValues(alpha: .05)
+                      : Colors.white);
+          final borderColor = selecting && selected || active
+              ? activeColor.withValues(alpha: .18)
+              : (isDark
+                  ? Colors.white.withValues(alpha: .08)
+                  : Colors.white.withValues(alpha: .92));
+          return Container(
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: borderColor, width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? .14 : .05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              onTap: onTap,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                ),
               child: Row(
                 children: [
                   if (selecting) ...[
@@ -2254,7 +2392,8 @@ class _SongRow extends StatelessWidget {
                 ],
               ),
             ),
-          );
+          ),
+        );
         },
       ),
     );

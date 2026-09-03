@@ -351,63 +351,86 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         toolbarHeight: 64,
         titleSpacing: 4,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         title: Container(
           height: 42,
           decoration: BoxDecoration(
-            color: isDark
-                ? colorScheme.surfaceContainerHighest
-                : colorScheme.surfaceContainerHighest.withValues(alpha: .54),
-            borderRadius: BorderRadius.circular(10),
+            color: isDark ? Colors.white.withValues(alpha: .07) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isDark
-                  ? colorScheme.outlineVariant.withValues(alpha: .85)
-                  : colorScheme.outlineVariant.withValues(alpha: .45),
-              width: 1,
+                  ? Colors.white.withValues(alpha: .10)
+                  : Colors.white.withValues(alpha: .92),
+              width: 1.1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: TextField(
-            controller: _controller,
-            focusNode: _focusNode,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _onSubmit(),
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: isDark
-                      ? colorScheme.onSurface.withValues(alpha: .92)
-                      : null,
+          child: Row(
+            children: [
+              const SizedBox(width: 6),
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-            decoration: InputDecoration(
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                color: isDark
-                    ? colorScheme.onSurface.withValues(alpha: .92)
-                    : colorScheme.onSurfaceVariant,
+                child: Icon(Icons.search_rounded, size: 16, color: colorScheme.primary),
               ),
-              suffixIcon: _controller.text.isNotEmpty
-                  ? IconButton(
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: isDark
-                            ? colorScheme.onSurface.withValues(alpha: .86)
-                            : null,
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _onSubmit(),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: isDark ? colorScheme.onSurface.withValues(alpha: .92) : null,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
                       ),
-                      onPressed: () {
-                        _controller.clear();
-                        _focusNode.requestFocus();
-                      },
-                    )
-                  : null,
-              hintText: '搜索歌曲，歌手',
-              hintStyle: TextStyle(
-                color: isDark
-                    ? colorScheme.onSurface.withValues(alpha: .62)
-                    : colorScheme.onSurfaceVariant,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    suffixIcon: _controller.text.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.close_rounded,
+                                size: 18,
+                                color: isDark
+                                    ? colorScheme.onSurface.withValues(alpha: .86)
+                                    : colorScheme.onSurfaceVariant),
+                            onPressed: () {
+                              _controller.clear();
+                              _focusNode.requestFocus();
+                              setState(() {});
+                            },
+                          )
+                        : null,
+                    hintText: '搜索歌曲、歌手、专辑',
+                    hintStyle: TextStyle(
+                      color: isDark
+                          ? colorScheme.onSurface.withValues(alpha: .62)
+                          : colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
               ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
+            ],
           ),
         ),
         actions: [
@@ -603,65 +626,119 @@ class _SearchPageState extends State<SearchPage> {
         );
       }
 
-      // 历史记录 + 热搜面板共存于一个可滚动列表
+      // 历史记录 + 热搜面板：统一为白卡圆角设计，与我的页面/首页一致
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final colorScheme = Theme.of(context).colorScheme;
       return ListView(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 160),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 160),
         children: [
           if (_searchHistory.isNotEmpty) ...[
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '搜索历史',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 20,
-                    ),
-                  ),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+                  width: 1.1,
                 ),
-                GestureDetector(
-                  onTap: () async {
-                    await _historyService.clear();
-                    _loadSearchHistory();
-                    if (mounted) {
-                      Toast.show('已清空搜索历史', type: ToastType.info);
-                    }
-                  },
-                  child: Icon(
-                    Icons.delete_outline_rounded,
-                    size: 22,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.history_rounded, size: 16, color: colorScheme.primary),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '搜索历史',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16,
+                              ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          await _historyService.clear();
+                          _loadSearchHistory();
+                          if (mounted) {
+                            Toast.show('已清空搜索历史', type: ToastType.info);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white.withValues(alpha: .08) : colorScheme.surfaceContainerHighest.withValues(alpha: .9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.delete_outline_rounded, size: 16, color: colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _searchHistory.map((keyword) {
+                      return _HistoryChip(
+                        keyword: keyword,
+                        onTap: () => _onKeywordTap(keyword),
+                        onDelete: () async {
+                          await _historyService.remove(keyword);
+                          _loadSearchHistory();
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _searchHistory.map((keyword) {
-                return _HistoryChip(
-                  keyword: keyword,
-                  onTap: () => _onKeywordTap(keyword),
-                  onDelete: () async {
-                    await _historyService.remove(keyword);
-                    _loadSearchHistory();
-                  },
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 14),
           ],
           if (_hotCategories.isEmpty)
             const SizedBox.shrink()
           else
-            // 热搜面板内部使用 Column + Expanded 结构，
-            // 这里用固定高度 SizedBox 提供布局边界。
-            SizedBox(
-              height: 550,
-              child: _HotSearchPanel(
-                categories: _hotCategories,
-                onTap: _onKeywordTap,
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+                  width: 1.1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: SizedBox(
+                height: 560,
+                child: _HotSearchPanel(
+                  categories: _hotCategories,
+                  onTap: _onKeywordTap,
+                ),
               ),
             ),
         ],
@@ -860,15 +937,26 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            '热搜',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w900,
-              fontSize: 20,
+        Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? .18 : .10),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.local_fire_department_rounded, size: 16, color: Theme.of(context).colorScheme.primary),
             ),
-          ),
+            const SizedBox(width: 10),
+            Text(
+              '热搜',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         SizedBox(
@@ -946,22 +1034,33 @@ class _CategoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: active
-          ? colorScheme.primary
-          : colorScheme.surfaceContainerHighest.withValues(alpha: .7),
-      borderRadius: BorderRadius.circular(16),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      decoration: BoxDecoration(
+        color: active
+            ? (isDark ? colorScheme.primary.withValues(alpha: .20) : Colors.white)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: active && !isDark
+            ? Border.all(color: colorScheme.primary.withValues(alpha: .18), width: 1)
+            : null,
+        boxShadow: active && !isDark
+            ? [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 8, offset: const Offset(0, 2))]
+            : null,
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
           child: Text(
             label,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: active ? colorScheme.onPrimary : colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
-            ),
+                  color: active ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: 13,
+                ),
           ),
         ),
       ),
@@ -1066,32 +1165,61 @@ class _SuggestionList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 160),
-      itemCount: suggestions.length,
-      separatorBuilder: (_, _) => Divider(
-        height: 1,
-        indent: 62,
-        color: colorScheme.outlineVariant.withValues(alpha: .4),
-      ),
-      itemBuilder: (context, index) {
-        final keyword = suggestions[index];
-        return ListTile(
-          leading: Icon(
-            Icons.search_rounded,
-            color: colorScheme.onSurfaceVariant,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+            width: 1.1,
           ),
-          title: Text(
-            keyword,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            shrinkWrap: true,
+            itemCount: suggestions.length,
+            separatorBuilder: (_, _) => Divider(
+              height: 1,
+              indent: 52,
+              color: colorScheme.outlineVariant.withValues(alpha: .35),
+            ),
+            itemBuilder: (context, index) {
+              final keyword = suggestions[index];
+              return ListTile(
+                dense: true,
+                leading: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.search_rounded, size: 16, color: colorScheme.primary),
+                ),
+                title: Text(
+                  keyword,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, fontSize: 14),
           ),
           onTap: () => onTap(keyword),
         );
       },
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1375,36 +1503,51 @@ class _HistoryChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.surfaceContainerHighest.withValues(alpha: .6),
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.only(left: 14, top: 7, bottom: 7, right: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                keyword,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(width: 4),
-              GestureDetector(
-                onTap: onDelete,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 16,
-                    color: colorScheme.onSurfaceVariant,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .08) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: .10) : colorScheme.outlineVariant.withValues(alpha: .45),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .14 : .05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12, top: 6, bottom: 6, right: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  keyword,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: onDelete,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white.withValues(alpha: .10) : colorScheme.surfaceContainerHighest.withValues(alpha: .9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.close_rounded, size: 12, color: colorScheme.onSurfaceVariant),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

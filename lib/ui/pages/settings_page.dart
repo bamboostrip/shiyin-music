@@ -12,6 +12,7 @@ import '../../services/music_api.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/toast.dart';
+import '../../services/vip_background_task.dart';
 import 'about_page.dart';
 import 'audio_interruption_settings_page.dart';
 import 'desktop_lyrics_settings_page.dart';
@@ -507,12 +508,21 @@ class SettingsPage extends StatelessWidget {
   Future<void> _claimVipNow(BuildContext context) async {
     final result = await auth.vipClaim.claimNow(auth.session);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.message),
-        duration: const Duration(seconds: 3),
-      ),
-    );
+    // 使用全局 Toast 而非 Scaffold SnackBar，避免随页面返回动画一起位移
+    switch (result.status) {
+      case VipClaimStatus.success:
+        Toast.success(result.message);
+        break;
+      case VipClaimStatus.alreadyClaimed:
+        Toast.info(result.message);
+        break;
+      case VipClaimStatus.failed:
+        Toast.error(result.message);
+        break;
+      default:
+        Toast.show(result.message);
+        break;
+    }
   }
 }
 

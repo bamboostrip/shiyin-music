@@ -307,11 +307,6 @@ class _LibraryPageState extends State<LibraryPage> {
                                   ),
                             ),
                           ),
-                          IconButton(
-                            tooltip: '创建歌单',
-                            onPressed: _showCreatePlaylistDialog,
-                            icon: const Icon(Icons.add_rounded),
-                          ),
                           if (!(_isLandscape(context) && widget.theme.carModeEnabled))
                             IconButton(
                               tooltip: '设置',
@@ -525,6 +520,10 @@ class _UserProfileHeader extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final profile = auth.profile;
+    final vipInfo = auth.vipInfo;
+    final hasVip = vipInfo?.hasVip ?? false;
+    final vipLabel = vipInfo?.activeVip?.typeLabel ?? 'VIP';
+    final expiry = vipInfo?.expiryDisplay;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -560,15 +559,25 @@ class _UserProfileHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  profile?.nickname ?? 'KA Music 用户',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20,
-                    letterSpacing: -0.3,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        profile?.nickname ?? 'KA Music 用户',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 20,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ),
+                    if (hasVip) ...[
+                      const SizedBox(width: 8),
+                      _VipBadge(label: vipLabel, isDark: isDark),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 5),
                 Row(
@@ -584,17 +593,73 @@ class _UserProfileHeader extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      auth.isLoggedIn ? '已登录' : '未登录',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12.5,
+                    Expanded(
+                      child: Text(
+                        hasVip && expiry != null ? expiry : (auth.isLoggedIn ? '已登录' : '未登录'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12.5,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VipBadge extends StatelessWidget {
+  const _VipBadge({required this.label, required this.isDark});
+
+  final String label;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    // 清新淡雅的香槟金配色，避免土黄/亮金
+    final bgGradient = isDark
+        ? null
+        : const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFFF9E8), Color(0xFFFFECB8)],
+          );
+    final bgColor = isDark ? const Color(0xFF3E3522) : null;
+    final borderColor = isDark
+        ? const Color(0xFFFFE2A6).withValues(alpha: .32)
+        : const Color(0xFFEAD9AE);
+    final textColor = isDark ? const Color(0xFFFFE2A6) : const Color(0xFF7A5D2E);
+    final iconColor = isDark ? const Color(0xFFFFD68A) : const Color(0xFFC2984A);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        gradient: bgGradient,
+        color: bgColor,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.diamond_rounded, size: 11, color: iconColor),
+          const SizedBox(width: 3.5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+              color: textColor,
+              height: 1,
             ),
           ),
         ],
