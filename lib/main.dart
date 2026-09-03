@@ -20,6 +20,7 @@ import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
 import 'services/network_monitor.dart';
 import 'ui/adaptive_layout.dart';
+import 'ui/desktop/desktop_window.dart';
 import 'ui/app_theme.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
@@ -39,6 +40,9 @@ Future<void> main() async {
   final client = await RustApiClient.getInstance();
   final api = MusicApi(client);
 
+  // 桌面形态（Windows 等）：初始化窗口尺寸/最小尺寸/几何记忆。
+  // 必须在 runApp 之前完成，避免首帧以错误尺寸渲染。
+  await DesktopWindow.ensureInitialized();
   final themeController = ThemeController();
   await themeController.detectAutomotive(const DeviceInfoService());
   await themeController.load();
