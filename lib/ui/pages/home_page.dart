@@ -1047,19 +1047,7 @@ class _FeatureCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.play_arrow_rounded,
-                color: colorScheme.primary,
-                size: 20,
-              ),
-            ),
+            _CirclePlayButton(size: 36, iconSize: 20, onTap: onTap),
           ],
         ),
       ),
@@ -1123,15 +1111,12 @@ class _SongSectionState extends State<_SongSection> {
             children: [
               _SectionHeader(
                 title: widget.title,
-                action: IconButton.filledTonal(
+                action: _CirclePlayButton(
                   tooltip: '播放',
-                  onPressed: () =>
+                  size: 42,
+                  iconSize: 24,
+                  onTap: () =>
                       widget.onPlay(widget.songs.first, widget.songs),
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  style: IconButton.styleFrom(
-                    fixedSize: const Size.square(42),
-                    shape: const CircleBorder(),
-                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1614,6 +1599,52 @@ class _SectionHeader extends StatelessWidget {
         action,
       ],
     );
+  }
+}
+
+/// 全局统一的淡雅圆形播放按钮：primary@.12 圆底 + primary 图标。
+/// 用于推荐区头、猜你喜欢/新碟、自建歌单等所有列表播放入口。
+class _CirclePlayButton extends StatelessWidget {
+  const _CirclePlayButton({
+    required this.onTap,
+    this.size = 36,
+    this.iconSize = 20,
+    this.tooltip,
+  });
+
+  final VoidCallback onTap;
+  final double size;
+  final double iconSize;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final button = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.play_arrow_rounded,
+        color: colorScheme.primary,
+        size: iconSize,
+      ),
+    );
+    final ink = Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: button,
+      ),
+    );
+    if (tooltip == null) return ink;
+    return Tooltip(message: tooltip!, child: ink);
   }
 }
 
@@ -2695,19 +2726,7 @@ class _PillCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    color: colorScheme.primary,
-                    size: 20,
-                  ),
-                ),
+                _CirclePlayButton(size: 36, iconSize: 20, onTap: onTap),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

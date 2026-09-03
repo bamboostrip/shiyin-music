@@ -57,9 +57,7 @@ class CarLeftPlayerPanel extends StatelessWidget {
         if (song == null) {
           return Container(
             width: panelWidth,
-            color: isDark
-                ? colorScheme.surfaceContainerLow
-                : const Color(0xFFF2F4F7),
+            color: colorScheme.surfaceContainer,
             padding: EdgeInsets.fromLTRB(
               panelPadding,
               sysPadding.top + verticalPadding,
@@ -94,9 +92,7 @@ class CarLeftPlayerPanel extends StatelessWidget {
             panelPadding,
             sysPadding.bottom + verticalPadding,
           ),
-          color: isDark
-              ? colorScheme.surfaceContainerLow
-              : const Color(0xFFF2F4F7),
+          color: colorScheme.surfaceContainer,
           child: ClipRect(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,21 +108,27 @@ class CarLeftPlayerPanel extends StatelessWidget {
                     ),
                     child: Container(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: .10)
+                              : Colors.white.withValues(alpha: .92),
+                          width: 1.1,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
+                            color: Colors.black.withValues(alpha: isDark ? .22 : .10),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
                           ),
                         ],
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
                         child: Artwork(
                           url: song.coverUrl,
                           size: artworkSize,
-                          borderRadius: 16,
+                          borderRadius: 20,
                         ),
                       ),
                     ),
@@ -174,14 +176,27 @@ class CarLeftPlayerPanel extends StatelessWidget {
                       animation: auth,
                       builder: (context, _) {
                         final liked = auth.isLiked(song);
-                        return IconButton(
-                          onPressed: song.source == SongSource.kugou
-                              ? () => auth.toggleLike(song)
-                              : null,
-                          icon: Icon(
-                            liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                            color: liked ? Colors.redAccent : colorScheme.onSurfaceVariant,
-                            size: 26,
+                        return Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: liked
+                                ? Colors.redAccent.withValues(alpha: .12)
+                                : (isDark
+                                    ? Colors.white.withValues(alpha: .08)
+                                    : colorScheme.surfaceContainerHighest.withValues(alpha: .9)),
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: song.source == SongSource.kugou
+                                ? () => auth.toggleLike(song)
+                                : null,
+                            icon: Icon(
+                              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              color: liked ? Colors.redAccent : colorScheme.onSurfaceVariant,
+                              size: 20,
+                            ),
                           ),
                         );
                       },
@@ -195,9 +210,22 @@ class CarLeftPlayerPanel extends StatelessWidget {
                   height: controlsHeight,
                   decoration: BoxDecoration(
                     color: isDark
-                        ? colorScheme.surfaceContainerHighest.withValues(alpha: 0.8)
-                        : Colors.black.withValues(alpha: 0.06),
+                        ? Colors.white.withValues(alpha: .06)
+                        : Colors.white,
                     borderRadius: BorderRadius.circular(40),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: .10)
+                          : Colors.white.withValues(alpha: .92),
+                      width: 1.1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
                   padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 12),
                   child: Row(
@@ -229,6 +257,13 @@ class CarLeftPlayerPanel extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: colorScheme.primary,
                           shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: colorScheme.primary.withValues(alpha: .35),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
                         child: IconButton(
                           padding: EdgeInsets.zero,
@@ -277,18 +312,20 @@ class CarLeftPlayerPanel extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       children: [
         Container(
-          padding: const EdgeInsets.all(6),
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
-            color: colorScheme.primary.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
+            color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             Icons.music_note_rounded,
             color: colorScheme.primary,
-            size: 18,
+            size: 16,
           ),
         ),
         const SizedBox(width: 8),
