@@ -933,6 +933,18 @@ class _HotSearchPanel extends StatefulWidget {
 
 class _HotSearchPanelState extends State<_HotSearchPanel> {
   var _page = 0;
+  // 切榜滑入方向：往后 +1（新页从右进）、往前 -1（新页从左进），
+  // 点 tab 与横滑都会先定方向再 setState，保证动画与手势一致。
+  var _slideDir = 1;
+
+  void _goToPage(int index, int total) {
+    final next = index.clamp(0, total - 1);
+    if (next == _page) return;
+    setState(() {
+      _slideDir = next > _page ? 1 : -1;
+      _page = next;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -978,7 +990,7 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
               return _CategoryTab(
                 label: categories[index].name,
                 active: active,
-                onTap: () => setState(() => _page = index),
+                onTap: () => _goToPage(index, categories.length),
               );
             },
           ),
@@ -987,28 +999,48 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
         // 各榜单列表按内容自然撑高、随外层 ListView 一起滚：
         // 之前是固定 560 高 + PageView + 内层 NeverScrollable，
         // 行数一多就被卡死在框里，外层怎么滑都看不到。
-        // IndexedStack 高度取最 tall 的一页，大字号/长榜单也不会被裁。
-        // 左右滑动手势保留：横滑切换榜单（替代 PageView 的 swipe）。
+        // 切榜动画用定向滑入 + 淡入（260ms，与之前 PageView 体感一致），
+        // 高度变化由 AnimatedSize 兜底；左右横滑手势保留。
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onHorizontalDragEnd: (details) {
             final v = details.primaryVelocity ?? 0;
-            if (v > 300 && page > 0) {
-              setState(() => _page = page - 1);
-            } else if (v < -300 && page < categories.length - 1) {
-              setState(() => _page = page + 1);
+            if (v > 300) {
+              _goToPage(page - 1, categories.length);
+            } else if (v < -300) {
+              _goToPage(page + 1, categories.length);
             }
           },
           child: AnimatedSize(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
-            // 只挂当前页：高度即当前榜单内容高，切榜时 AnimatedSize
-            // 做高低动画；IndexedBox 留白太多不用。
-            child: _CategoryKeywordList(
-              key: ValueKey('hot-$page-${categories[page].name}'),
-              keywords: categories[page].keywords,
-              onTap: widget.onTap,
+            // 只挂当前页：高度即当前榜单内容高。
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 260),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                final offset =
+                    Tween<Offset>(
+                      begin: Offset(0.28 * _slideDir, 0),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      ),
+                    );
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(position: offset, child: child),
+                );
+              },
+              child: _CategoryKeywordList(
+                key: ValueKey('hot-$page-${categories[page].name}'),
+                keywords: categories[page].keywords,
+                onTap: widget.onTap,
+              ),
             ),
           ),
         ),

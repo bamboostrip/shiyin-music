@@ -116,8 +116,11 @@ class _RankPageState extends State<RankPage>
               auth: widget.auth,
             ),
             // 榜单标题 + 刷新按钮（与首页白卡语言统一：32 图标底 + 17 粗标题 + 圆角刷新）
+            // 节奏与首页分区头对齐：标题行高锁 32（刷新钮同步压到 32，
+            // 否则 IconButton 默认 48 高度会把整行撑高、标题离卡片显远），
+            // 下间距 10→6。
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
               child: Row(
                 children: [
                   Container(
@@ -140,13 +143,18 @@ class _RankPageState extends State<RankPage>
                         ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    tooltip: '刷新',
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded),
-                    iconSize: 20,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    visualDensity: VisualDensity.compact,
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: IconButton(
+                      tooltip: '刷新',
+                      onPressed: _refresh,
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.refresh_rounded),
+                      iconSize: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ],
               ),
