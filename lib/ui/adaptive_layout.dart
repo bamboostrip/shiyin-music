@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+/// 窗口宽度分级（逻辑像素），阈值与设计文档 §3 一致。
+enum WindowWidthClass { compact, medium, expanded, large, expandedDesktop }
+
 /// 自适应布局工具类。
 ///
 /// 平板检测基于 Material Design 的 breakpoint：
@@ -63,6 +66,30 @@ class AdaptiveLayout {
         ? MediaQuery.sizeOf(context).width
         : maxWidth;
     return (effectiveWidth / minItemWidth).floor().clamp(2, 8);
+  }
+
+  /// 按宽度返回窗口分级（PC 适配断点体系入口）。
+  static WindowWidthClass widthClassFor(double width) {
+    if (width >= 1600) return WindowWidthClass.expandedDesktop;
+    if (width >= 1200) return WindowWidthClass.large;
+    if (width >= 840) return WindowWidthClass.expanded;
+    if (width >= 600) return WindowWidthClass.medium;
+    return WindowWidthClass.compact;
+  }
+
+  /// 按宽度与最小项宽计算网格列数，结果夹在 [min]–[max]。
+  ///
+  /// 宽度低于网格起点（840，即 expanded 断点）时直接返回 [min]。
+  /// 32 为两侧内容边距预留。
+  static int gridColumnsForWidth(
+    double width, {
+    double minItemWidth = 200,
+    int min = 2,
+    int max = 6,
+  }) {
+    if (width < 840) return min;
+    final columns = ((width - 32) ~/ minItemWidth).clamp(min, max);
+    return columns;
   }
 }
 
