@@ -811,20 +811,14 @@ class _SmartSearch extends StatelessWidget {
             ),
           ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                Icons.search_rounded,
-                size: 18,
-                color: colorScheme.primary,
+            Icon(
+              Icons.search_rounded,
+              size: 20,
+              color: colorScheme.onSurfaceVariant.withValues(
+                alpha: isDark ? .8 : .55,
               ),
             ),
             const SizedBox(width: 10),
@@ -873,48 +867,73 @@ class _FeatureShelf extends StatelessWidget {
     final cardHeight = isCar ? 100.0 : 92.0;
     return LayoutBuilder(
       builder: (context, constraints) {
+        // 18.5:9 主流手机宽度约 360~393dp，减去两侧 18dp 边距后
+        // 每张并排卡只剩 ~150dp，扣除封面 64 + 播放键 36 + 间距边距后，
+        // 中间文字列只剩 ~17dp：顶部标签被挤成空白、副标题截断、
+        // “轻触播放”被迫换行（即真机截图的样子）。窄屏改上下叠放，
+        // 每张独占整行宽度，文字区回到 ~190dp+，不再被截断。
+        final shelfWidth = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : size.width - 36;
+        final isNarrow = !isCar && shelfWidth < 520;
+
+        Widget guessCard({required bool compact}) => _FeatureCard(
+              title: '猜你喜欢',
+              subtitle: daily.songs.isEmpty
+                  ? '献给此刻迈步的你'
+                  : daily.songs.first.title,
+              imageUrl: daily.songs.isEmpty
+                  ? daily.coverUrl
+                  : daily.songs.first.coverUrl,
+              gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
+              onTap: onDailyPlay,
+              compact: compact,
+            );
+        Widget albumCard({required bool compact}) => albums.isNotEmpty
+            ? _FeatureCard(
+                title: '新碟上架',
+                subtitle:
+                    '${albums.first.singerName} · ${albums.first.albumName}',
+                imageUrl: albums.first.coverUrl,
+                gradient: const [
+                  Color(0xFF454A92),
+                  Color(0xFF78CAFF),
+                ],
+                onTap: onAlbumTap,
+                compact: compact,
+              )
+            : _FeatureCard(
+                title: '新碟上架',
+                subtitle: '暂无新专辑',
+                imageUrl: null,
+                gradient: const [
+                  Color(0xFF454A92),
+                  Color(0xFF78CAFF),
+                ],
+                onTap: () {},
+                compact: compact,
+              );
+
+        if (isNarrow) {
+          // 窄屏竖排不用固定高度，让卡片按内容自然撑高：
+          // 固定 76 时内高仅 ~54px，三行文字要 ~57px，必报
+          // BOTTOM OVERFLOWED 3.2px；自适应后约 78-80px，
+          // 大字号/长标题也不会再溢出。
+          return Column(
+            children: [
+              guessCard(compact: true),
+              const SizedBox(height: 10),
+              albumCard(compact: true),
+            ],
+          );
+        }
         return SizedBox(
           height: cardHeight,
           child: Row(
               children: [
-                Expanded(
-                  child: _FeatureCard(
-                    title: '猜你喜欢',
-                    subtitle: daily.songs.isEmpty
-                        ? '献给此刻迈步的你'
-                        : daily.songs.first.title,
-                    imageUrl: daily.songs.isEmpty
-                        ? daily.coverUrl
-                        : daily.songs.first.coverUrl,
-                    gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
-                    onTap: onDailyPlay,
-                  ),
-                ),
+                Expanded(child: guessCard(compact: false)),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: albums.isNotEmpty
-                      ? _FeatureCard(
-                          title: '新碟上架',
-                          subtitle:
-                              '${albums.first.singerName} · ${albums.first.albumName}',
-                          imageUrl: albums.first.coverUrl,
-                          gradient: const [
-                            Color(0xFF454A92),
-                            Color(0xFF78CAFF),
-                          ],
-                          onTap: onAlbumTap,
-                        )
-                      : _FeatureCard(
-                          title: '新碟上架',
-                          subtitle: '暂无新专辑',
-                          imageUrl: null,
-                          gradient: const [
-                            Color(0xFF454A92),
-                            Color(0xFF78CAFF),
-                          ],
-                          onTap: () {},
-                        ),
-                ),
+                Expanded(child: albumCard(compact: false)),
               ],
             ),
           );
@@ -930,6 +949,7 @@ class _FeatureCard extends StatelessWidget {
     required this.imageUrl,
     required this.gradient,
     required this.onTap,
+    this.compact = false,
   });
 
   final String title;
@@ -937,11 +957,24 @@ class _FeatureCard extends StatelessWidget {
   final String? imageUrl;
   final List<Color> gradient;
   final VoidCallback onTap;
+  /// 窄屏竖排模式：封面与播放键同步缩小，保证 76 高度内不溢出。
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 紧凑模式服务于 18.5:9 窄屏竖排卡：高度 76 - 内边距 20 = 56，
+    // 封面取 52 留 4px 呼吸；播放键同步缩小到 34。
+    final imageSize = compact ? 52.0 : 64.0;
+    final playSize = compact ? 34.0 : 36.0;
+    final playIconSize = compact ? 18.0 : 20.0;
+    final gap = compact ? 8.0 : 10.0;
+    // 紧凑模式纵向预算：76 - 内边距 20 = 56，需把两处间距压到 4/2、
+    // 标签上下垫压到 2，否则三行文字 (~57px) 会 BOTTOM OVERFLOW 1px。
+    final titleGap = compact ? 4.0 : 6.0;
+    final hintGap = compact ? 2.0 : 3.0;
+    final tagVPadding = compact ? 2.0 : 3.0;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -967,8 +1000,8 @@ class _FeatureCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 64,
-              height: 64,
+              width: imageSize,
+              height: imageSize,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
@@ -1002,22 +1035,29 @@ class _FeatureCard extends StatelessWidget {
                       ),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: gap),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: tagVPadding,
+                    ),
                     decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                      color: colorScheme.primary.withValues(
+                        alpha: isDark ? .18 : .10,
+                      ),
                       borderRadius: BorderRadius.circular(7),
                     ),
                     child: Text(
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: TextStyle(
                         color: colorScheme.primary,
                         fontWeight: FontWeight.w800,
@@ -1026,20 +1066,24 @@ class _FeatureCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: titleGap),
                   Text(
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    softWrap: false,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
                           height: 1.2,
                         ),
                   ),
-                      const SizedBox(height: 3),
+                  SizedBox(height: hintGap),
                   Text(
                     '轻触播放',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
                     style: TextStyle(
                       color: colorScheme.onSurfaceVariant.withValues(alpha: .62),
                       fontWeight: FontWeight.w600,
@@ -1049,8 +1093,8 @@ class _FeatureCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            _CirclePlayButton(size: 36, iconSize: 20, onTap: onTap),
+            SizedBox(width: gap),
+            _CirclePlayButton(size: playSize, iconSize: playIconSize, onTap: onTap),
           ],
         ),
       ),

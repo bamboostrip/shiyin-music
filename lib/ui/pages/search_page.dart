@@ -53,6 +53,9 @@ class _SearchPageState extends State<SearchPage> {
   List<SearchAlbumResult> _albumResults = const [];
   bool _loading = false;
   bool _searched = false;
+  // 输入框焦点态：外层白卡边框据此染 primary，内层强制无边框，
+  // 避免主题 focusedBorder 蓝圈和外卡叠成双边框。
+  bool _searchFocused = false;
   _SearchPlatform _platform = _SearchPlatform.kugou;
   _SearchType _searchType = _SearchType.song;
 
@@ -63,15 +66,25 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    _focusNode.addListener(_handleFocusChanged);
     _focusNode.requestFocus();
     _loadHotKeywords();
     _loadSearchHistory();
     _controller.addListener(_onTextChanged);
   }
 
+  void _handleFocusChanged() {
+    if (!mounted) return;
+    final focused = _focusNode.hasFocus;
+    if (focused != _searchFocused) {
+      setState(() => _searchFocused = focused);
+    }
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
+    _focusNode.removeListener(_handleFocusChanged);
     _controller.dispose();
     _focusNode.dispose();
     _results = const [];
@@ -250,10 +263,12 @@ class _SearchPageState extends State<SearchPage> {
                   : colorScheme.surfaceContainerHighest.withValues(alpha: .54),
               borderRadius: BorderRadius.circular(23),
               border: Border.all(
-                color: isDark
-                    ? colorScheme.outlineVariant.withValues(alpha: .85)
-                    : colorScheme.outlineVariant.withValues(alpha: .45),
-                width: 1,
+                color: _searchFocused
+                    ? colorScheme.primary.withValues(alpha: .65)
+                    : isDark
+                        ? colorScheme.outlineVariant.withValues(alpha: .85)
+                        : colorScheme.outlineVariant.withValues(alpha: .45),
+                width: _searchFocused ? 1.3 : 1,
               ),
             ),
             child: TextField(
@@ -267,6 +282,7 @@ class _SearchPageState extends State<SearchPage> {
                         : null,
                   ),
               decoration: InputDecoration(
+                filled: false,
                 prefixIcon: Icon(
                   Icons.search_rounded,
                   color: isDark
@@ -294,6 +310,11 @@ class _SearchPageState extends State<SearchPage> {
                       : colorScheme.onSurfaceVariant,
                 ),
                 border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(vertical: 11),
               ),
             ),
@@ -364,10 +385,12 @@ class _SearchPageState extends State<SearchPage> {
             color: isDark ? Colors.white.withValues(alpha: .07) : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: .10)
-                  : Colors.white.withValues(alpha: .92),
-              width: 1.1,
+              color: _searchFocused
+                  ? colorScheme.primary.withValues(alpha: .65)
+                  : isDark
+                      ? Colors.white.withValues(alpha: .10)
+                      : Colors.white.withValues(alpha: .92),
+              width: _searchFocused ? 1.3 : 1.1,
             ),
             boxShadow: [
               BoxShadow(
@@ -379,17 +402,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
           child: Row(
             children: [
-              const SizedBox(width: 6),
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: colorScheme.primary.withValues(alpha: isDark ? .18 : .12),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Icon(Icons.search_rounded, size: 16, color: colorScheme.primary),
-              ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 14),
               Expanded(
                 child: TextField(
                   controller: _controller,
@@ -403,6 +416,7 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                   decoration: InputDecoration(
                     isDense: true,
+                    filled: false,
                     suffixIcon: _controller.text.isNotEmpty
                         ? IconButton(
                             icon: Icon(Icons.close_rounded,
@@ -426,10 +440,18 @@ class _SearchPageState extends State<SearchPage> {
                       fontSize: 14,
                     ),
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   ),
                 ),
               ),
+              // 无文字时补右内边距：有清除按钮时按钮自带边距，无按钮时
+              // TextField 会贴到容器右边缘、压住外圈边框。
+              if (_controller.text.isEmpty) const SizedBox(width: 14),
             ],
           ),
         ),
@@ -733,12 +755,9 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 ],
               ),
-              child: SizedBox(
-                height: 560,
-                child: _HotSearchPanel(
-                  categories: _hotCategories,
-                  onTap: _onKeywordTap,
-                ),
+              child: _HotSearchPanel(
+                categories: _hotCategories,
+                onTap: _onKeywordTap,
               ),
             ),
         ],
@@ -913,29 +932,17 @@ class _HotSearchPanel extends StatefulWidget {
 }
 
 class _HotSearchPanelState extends State<_HotSearchPanel> {
-  late final PageController _pageController;
   var _page = 0;
-  var _pageScrolling = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _pageController = PageController();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final categories = widget.categories;
     if (categories.isEmpty) return const SizedBox.shrink();
+    final page = _page.clamp(0, categories.length - 1);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
@@ -967,51 +974,41 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
             itemCount: categories.length,
             separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (context, index) {
-              final active = index == _page;
+              final active = index == page;
               return _CategoryTab(
                 label: categories[index].name,
                 active: active,
-                onTap: () {
-                  _pageScrolling = true;
-                  _pageController.animateToPage(
-                    index,
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                  );
-                },
+                onTap: () => setState(() => _page = index),
               );
             },
           ),
         ),
         const SizedBox(height: 12),
-        Expanded(
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              if (notification is ScrollStartNotification) {
-                _pageScrolling = true;
-              } else if (notification is ScrollEndNotification) {
-                final page = (_pageController.page ?? _page.toDouble())
-                    .round()
-                    .clamp(0, categories.length - 1);
-                setState(() {
-                  _page = page;
-                  _pageScrolling = false;
-                });
-              }
-              return false;
-            },
-            child: PageView.builder(
-              controller: _pageController,
-              onPageChanged: (page) {
-                if (!_pageScrolling) setState(() => _page = page);
-              },
-              itemCount: categories.length,
-              itemBuilder: (context, index) {
-                return _CategoryKeywordList(
-                  keywords: categories[index].keywords,
-                  onTap: widget.onTap,
-                );
-              },
+        // 各榜单列表按内容自然撑高、随外层 ListView 一起滚：
+        // 之前是固定 560 高 + PageView + 内层 NeverScrollable，
+        // 行数一多就被卡死在框里，外层怎么滑都看不到。
+        // IndexedStack 高度取最 tall 的一页，大字号/长榜单也不会被裁。
+        // 左右滑动手势保留：横滑切换榜单（替代 PageView 的 swipe）。
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            final v = details.primaryVelocity ?? 0;
+            if (v > 300 && page > 0) {
+              setState(() => _page = page - 1);
+            } else if (v < -300 && page < categories.length - 1) {
+              setState(() => _page = page + 1);
+            }
+          },
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            // 只挂当前页：高度即当前榜单内容高，切榜时 AnimatedSize
+            // 做高低动画；IndexedBox 留白太多不用。
+            child: _CategoryKeywordList(
+              key: ValueKey('hot-$page-${categories[page].name}'),
+              keywords: categories[page].keywords,
+              onTap: widget.onTap,
             ),
           ),
         ),
@@ -1069,7 +1066,7 @@ class _CategoryTab extends StatelessWidget {
 }
 
 class _CategoryKeywordList extends StatelessWidget {
-  const _CategoryKeywordList({required this.keywords, required this.onTap});
+  const _CategoryKeywordList({super.key, required this.keywords, required this.onTap});
 
   final List<SearchHotKeyword> keywords;
   final ValueChanged<String> onTap;
