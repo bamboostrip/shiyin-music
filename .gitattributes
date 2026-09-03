@@ -2,3 +2,7 @@
 *.png binary
 *.ico binary
 *.jar binary
+
+# Windows 批处理必须 CRLF + BOM 才能被 cmd.exe 正确解析，
+# 仓库统一存 LF，检出时转 CRLF（工具重写文件后若变回 LF，重新检出即恢复）。
+*.bat text eol=crlf
