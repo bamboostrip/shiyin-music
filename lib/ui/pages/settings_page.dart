@@ -57,9 +57,10 @@ class SettingsPage extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) {
         final colorScheme = Theme.of(sheetContext).colorScheme;
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,29 +71,84 @@ class SettingsPage extends StatelessWidget {
                     sheetContext,
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                 ),
-                const SizedBox(height: 8),
-                for (final scale in ThemeController.fontScaleOptions) ...[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      scale == theme.fontScale
-                          ? Icons.radio_button_checked_rounded
-                          : Icons.radio_button_off_rounded,
-                      color: scale == theme.fontScale
-                          ? colorScheme.primary
-                          : colorScheme.onSurfaceVariant,
+                const SizedBox(height: 12),
+                Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: .10)
+                          : Colors.white.withValues(alpha: .92),
+                      width: 1.1,
                     ),
-                    title: Text(_fontScaleLabel(scale)),
-                    subtitle: Text(
-                      scale == 1.0
-                          ? '默认大小'
-                          : scale == 1.1
-                          ? '整体放大 10%'
-                          : '整体放大 20%',
-                    ),
-                    onTap: () => Navigator.of(sheetContext).pop(scale),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                ],
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final scale in ThemeController.fontScaleOptions) ...[
+                          InkWell(
+                            onTap: () => Navigator.of(sheetContext).pop(scale),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    scale == theme.fontScale
+                                        ? Icons.radio_button_checked_rounded
+                                        : Icons.radio_button_off_rounded,
+                                    color: scale == theme.fontScale
+                                        ? colorScheme.primary
+                                        : colorScheme.onSurfaceVariant.withValues(alpha: .6),
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _fontScaleLabel(scale),
+                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                                        ),
+                                        Text(
+                                          scale == 1.0
+                                              ? '默认大小'
+                                              : scale == 1.1
+                                              ? '整体放大 10%'
+                                              : '整体放大 20%',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (scale != ThemeController.fontScaleOptions.last)
+                            Divider(
+                              height: 1,
+                              indent: 52,
+                              color: colorScheme.outlineVariant.withValues(alpha: .24),
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -131,16 +187,16 @@ class SettingsPage extends StatelessWidget {
           builder: (context, _) {
             return AdaptiveContentPadding(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
                 children: [
                   // Account section
-                  _SectionHeader(title: '账号'),
+                  const _SectionHeader(title: '账号'),
                   const SizedBox(height: 8),
                   _SettingsCard(
                     children: [
                       _SettingsTile(
                         icon: Icons.sync_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF1E88E5),
                         title: '同步个人信息',
                         subtitle: '刷新头像、昵称和歌单数据',
                         loading: auth.isLoading,
@@ -151,7 +207,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.card_giftcard_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFFFFA000),
                         title: '自动领取VIP',
                         subtitle: auth.vipClaim.statusText(),
                         value: auth.vipClaim.autoEnabled,
@@ -160,7 +216,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.redeem_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFFFF5722),
                         title: '立即领取',
                         subtitle: auth.vipClaim.lastMessage,
                         loading: auth.vipClaim.isClaiming,
@@ -180,15 +236,15 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   // Playback section
-                  _SectionHeader(title: '播放'),
+                  const _SectionHeader(title: '播放'),
                   const SizedBox(height: 8),
                   _SettingsCard(
                     children: [
                       _SettingsTile(
                         icon: Icons.high_quality_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF7E57C2),
                         title: '默认音质',
                         subtitle: player.audioQuality.label,
                         onTap: () => _selectDefaultAudioQuality(context),
@@ -196,7 +252,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.auto_awesome_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF3F51B5),
                         title: '智能音质',
                         subtitle: '播放失败时自动降级音质重试',
                         value: player.smartQualityEnabled,
@@ -205,7 +261,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.power_settings_new_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF00897B),
                         title: '开机自启播放',
                         subtitle: '打开应用时自动播放上次的歌曲',
                         value: player.autoPlayOnStartupEnabled,
@@ -214,7 +270,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.bluetooth_audio_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF00ACC1),
                         title: '连接新音频设备自动播放',
                         subtitle: '连接蓝牙或耳机时自动恢复播放',
                         value: player.autoPlayOnDeviceConnected,
@@ -223,7 +279,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.volume_up_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF43A047),
                         title: '响度均衡',
                         subtitle: '基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异',
                         value: player.loudnessEnabled,
@@ -232,7 +288,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.graphic_eq_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF8E24AA),
                         title: '音效',
                         subtitle: player.audioEffectsLabel,
                         onTap: () => showAudioEffectsSheet(
@@ -243,7 +299,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.bar_chart_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFFD81B60),
                         title: '播放统计',
                         subtitle: '听歌时长、最常听歌手等',
                         onTap: () => Navigator.of(context).push(
@@ -255,7 +311,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.history_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF0288D1),
                         title: '播放历史',
                         subtitle: '最近播放的歌曲',
                         onTap: () => Navigator.of(context).push(
@@ -271,6 +327,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.block_rounded,
+                        iconColor: const Color(0xFFFF7043),
                         title: '后台打断机制',
                         subtitle: _audioInterruptionSummary(player),
                         onTap: () => Navigator.of(context).push(
@@ -282,8 +339,8 @@ class SettingsPage extends StatelessWidget {
                       ),
                       _SettingsDivider(),
                       _SettingsSwitchTile(
-                        icon: Icons.bar_chart_rounded,
-                        iconColor: colorScheme.primary,
+                        icon: Icons.timelapse_rounded,
+                        iconColor: const Color(0xFF7CB342),
                         title: '增加听歌时长',
                         subtitle: '每播放 30 分钟自动同步一次',
                         value: player.addListeningTimeEnabled,
@@ -293,7 +350,7 @@ class SettingsPage extends StatelessWidget {
                         _SettingsDivider(),
                         _SettingsSwitchTile(
                           icon: Icons.lyrics_rounded,
-                          iconColor: colorScheme.primary,
+                          iconColor: const Color(0xFF00B0FF),
                           title: '桌面歌词',
                           subtitle: '在其他应用上方显示歌词悬浮窗',
                           value: player.desktopLyricsEnabled,
@@ -308,7 +365,7 @@ class SettingsPage extends StatelessWidget {
                           _SettingsDivider(),
                           _SettingsTile(
                             icon: Icons.tune_rounded,
-                            iconColor: colorScheme.primary,
+                            iconColor: const Color(0xFF651FFF),
                             title: '歌词设置',
                             subtitle: '透明度、颜色、锁定位置等',
                             onTap: () => Navigator.of(context).push(
@@ -323,7 +380,7 @@ class SettingsPage extends StatelessWidget {
                           _SettingsDivider(),
                           _SettingsSwitchTile(
                             icon: Icons.bluetooth_rounded,
-                            iconColor: colorScheme.primary,
+                            iconColor: const Color(0xFF2979FF),
                             title: '车载蓝牙歌词',
                             subtitle: '通过系统广播将歌词同步到车机/第三方歌词 App',
                             value: player.bluetoothLyricsEnabled,
@@ -333,30 +390,30 @@ class SettingsPage extends StatelessWidget {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   // Cache section
-                  _SectionHeader(title: '缓存'),
+                  const _SectionHeader(title: '缓存'),
                   const SizedBox(height: 8),
                   _SettingsCard(
                     children: [
                       _SettingsTile(
                         icon: Icons.storage_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF009688),
                         title: '缓存管理',
                         subtitle: '查看和清理缓存',
                         onTap: () => _showCacheManagement(context),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   // Personalization section
-                  _SectionHeader(title: '个性化'),
+                  const _SectionHeader(title: '个性化'),
                   const SizedBox(height: 8),
                   _SettingsCard(
                     children: [
                       _SettingsTile(
                         icon: Icons.palette_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFFAB47BC),
                         title: '皮肤与背景',
                         subtitle: '配色方案与自定义全局背景图',
                         onTap: () => Navigator.of(context).push(
@@ -370,7 +427,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.text_fields_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF3F51B5),
                         title: '字体大小',
                         subtitle: _fontScaleLabel(theme.fontScale),
                         onTap: () => _selectFontScale(context, theme),
@@ -378,7 +435,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.screen_rotation_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF00897B),
                         title: '横屏模式',
                         subtitle: '允许手机横屏时自动旋转（平板默认开启）',
                         value: theme.landscapeEnabled,
@@ -392,7 +449,7 @@ class SettingsPage extends StatelessWidget {
                       _SettingsDivider(),
                       _SettingsSwitchTile(
                         icon: Icons.directions_car_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFFFF6F00),
                         title: '车机模式',
                         subtitle: '横屏时使用左侧播放面板布局并放大文字',
                         value: theme.carModeEnabled,
@@ -410,15 +467,15 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   // App section
-                  _SectionHeader(title: '应用'),
+                  const _SectionHeader(title: '应用'),
                   const SizedBox(height: 8),
                   _SettingsCard(
                     children: [
                       _SettingsTile(
                         icon: Icons.info_outline_rounded,
-                        iconColor: colorScheme.primary,
+                        iconColor: const Color(0xFF607D8B),
                         title: '关于',
                         subtitle: AppUpdateService.isSupportedPlatform
                             ? '版本、更新日志与检查更新'
@@ -536,13 +593,14 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
       child: Text(
         title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
           color: Theme.of(context).colorScheme.primary,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.8,
+          fontWeight: FontWeight.w900,
+          fontSize: 15,
+          letterSpacing: 0.2,
         ),
       ),
     );
@@ -556,15 +614,33 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .10)
+              : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(children: children),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        ),
       ),
     );
   }
@@ -592,59 +668,75 @@ class _SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 32,
-              child: loading
-                  ? SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: colorScheme.primary,
-                      ),
-                    )
-                  : Icon(
-                      icon,
-                      size: 22,
-                      color: iconColor ?? colorScheme.primary,
-                    ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: titleColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveColor = iconColor ?? colorScheme.primary;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: effectiveColor.withValues(alpha: isDark ? .22 : .10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: loading
+                      ? SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.0,
+                            color: effectiveColor,
+                          ),
+                        )
+                      : Icon(
+                          icon,
+                          size: 20,
+                          color: effectiveColor,
+                        ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      subtitle!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
+                      title,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: titleColor ?? colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
                       ),
                     ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            if (onTap != null)
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: colorScheme.outline,
-              ),
-          ],
+              if (onTap != null)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: .5),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -671,16 +763,26 @@ class _SettingsSwitchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveColor = iconColor ?? colorScheme.primary;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Row(
         children: [
-          SizedBox(
-            width: 32,
-            child: Icon(
-              icon,
-              size: 22,
-              color: iconColor ?? colorScheme.primary,
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: effectiveColor.withValues(alpha: isDark ? .22 : .10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Icon(
+                icon,
+                size: 20,
+                color: effectiveColor,
+              ),
             ),
           ),
           const SizedBox(width: 14),
@@ -690,9 +792,10 @@ class _SettingsSwitchTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
@@ -700,13 +803,20 @@ class _SettingsSwitchTile extends StatelessWidget {
                     subtitle!,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-          Switch(value: value, onChanged: onChanged),
+          const SizedBox(width: 8),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeTrackColor: colorScheme.primary,
+          ),
         ],
       ),
     );
@@ -718,8 +828,8 @@ class _SettingsDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Divider(
       height: 1,
-      indent: 62,
-      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .4),
+      indent: 64,
+      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .24),
     );
   }
 }
@@ -857,18 +967,20 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
               '缓存管理',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 16),
             _CacheItem(
@@ -937,15 +1049,34 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(12),
+                color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+                  width: 1.1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? .18 : .04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.rule_rounded,
-                    size: 22,
-                    color: Theme.of(context).colorScheme.primary,
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: isDark ? .22 : .10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.rule_rounded,
+                      size: 20,
+                      color: colorScheme.primary,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -954,24 +1085,24 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
                       children: [
                         Text(
                           '播放缓存上限',
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(fontWeight: FontWeight.w600),
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
                         ),
                         Text(
                           _formatLimit(widget.downloads?.playCacheLimit),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   TextButton(
                     onPressed: () => _selectCacheLimit(context),
-                    child: const Text('修改'),
+                    child: const Text('修改', style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
@@ -1029,15 +1160,35 @@ class _CacheItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(12),
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: .10) : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          Icon(icon, size: 22, color: colorScheme.primary),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: isDark ? .22 : .10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 20, color: colorScheme.primary),
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -1045,14 +1196,16 @@ class _CacheItem extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
                 Text(
                   size,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
                   ),
                 ),
               ],
@@ -1061,7 +1214,13 @@ class _CacheItem extends StatelessWidget {
           if (onClear != null)
             TextButton(
               onPressed: onClear,
-              child: Text('清理', style: TextStyle(color: colorScheme.error)),
+              child: Text(
+                '清理',
+                style: TextStyle(
+                  color: colorScheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
         ],
       ),

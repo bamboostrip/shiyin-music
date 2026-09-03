@@ -25,6 +25,7 @@ import '../services/super_lyric_service.dart';
 import '../services/vip_background_task.dart';
 import 'download_controller.dart';
 import 'local_music_controller.dart';
+import 'shuffle_queue.dart';
 
 enum PlaybackMode { playlistLoop, shuffle, singleLoop }
 
@@ -226,7 +227,7 @@ class PlayerController extends ChangeNotifier {
   // 平滑位置的上一次取值：用于过滤位置流的小幅倒退（音频缓冲/时钟抖动），
   // 避免歌词高亮和卡拉OK进度出现回跳。seek/换歌的大跨度回退会重建基线。
   Duration _lastSmoothPosition = Duration.zero;
-  final _random = math.Random();
+  final _shuffleQueue = ShuffleQueue();
 
   /// 高潮试听结束时间（播放到该时间自动暂停）。
   Duration? _climaxEndTime;
@@ -390,6 +391,9 @@ class PlayerController extends ChangeNotifier {
       PlaybackMode.shuffle => PlaybackMode.singleLoop,
       PlaybackMode.singleLoop => PlaybackMode.playlistLoop,
     };
+    if (playbackMode == PlaybackMode.shuffle) {
+      _shuffleQueue.reset(queue.length, currentIndex: currentIndex);
+    }
     _scheduleSavePlaybackState();
     notifyListeners();
     return playbackMode;
@@ -424,10 +428,22 @@ class PlayerController extends ChangeNotifier {
     _isChangingSource = true;
     errorMessage = null;
     currentSong = song;
+    final queueChanged = queue != null && !listEquals(this.queue, queue);
     if (queue != null && queue.isNotEmpty) {
       this.queue = queue;
     } else if (this.queue.isEmpty) {
       this.queue = [song];
+    }
+    if (playbackMode == PlaybackMode.shuffle) {
+      final songIndex = this.queue.indexWhere((item) => item.hash == song.hash);
+      if (queueChanged || _shuffleQueue.length != this.queue.length) {
+        _shuffleQueue.reset(
+          this.queue.length,
+          currentIndex: songIndex >= 0 ? songIndex : 0,
+        );
+      } else if (songIndex >= 0) {
+        _shuffleQueue.syncCurrentIndex(this.queue.length, songIndex);
+      }
     }
     lyrics = const [];
     _lastDesktopLyricIndex = -1;
@@ -629,6 +645,9 @@ class PlayerController extends ChangeNotifier {
   Future<void> replaceQueue(List<Song> songs) async {
     if (songs.isEmpty) return;
     queue = List<Song>.of(songs);
+    if (playbackMode == PlaybackMode.shuffle) {
+      _shuffleQueue.reset(queue.length, currentIndex: currentIndex);
+    }
     await _audioHandler.setSongQueue(
       queueSongs: queue,
       queueIndex: currentIndex,
@@ -676,6 +695,9 @@ class PlayerController extends ChangeNotifier {
     }
 
     queue = nextQueue;
+    if (playbackMode == PlaybackMode.shuffle) {
+      _shuffleQueue.reset(queue.length, currentIndex: currentIndex);
+    }
     await _audioHandler.setSongQueue(
       queueSongs: queue,
       queueIndex: currentIndex,
@@ -1038,6 +1060,23 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> previous() async {
+    if (queue.isEmpty) {
+      await seek(Duration.zero);
+      return;
+    }
+
+    if (playbackMode == PlaybackMode.shuffle) {
+      if (queue.length == 1) {
+        await seek(Duration.zero);
+        return;
+      }
+      final prevIndex = _shuffleQueue.previous(queue.length);
+      if (prevIndex >= 0 && prevIndex < queue.length) {
+        await playSong(queue[prevIndex], queue: queue);
+        return;
+      }
+    }
+
     final index = currentIndex;
     if (index > 0) {
       await playSong(queue[index - 1], queue: queue);
@@ -1850,6 +1889,10 @@ class PlayerController extends ChangeNotifier {
         );
       }
 
+      if (playbackMode == PlaybackMode.shuffle) {
+        _shuffleQueue.reset(queue.length, currentIndex: index);
+      }
+
       hasRestoredPlaybackState = true;
       notifyListeners();
     } catch (_) {}
@@ -2216,14 +2259,11 @@ class PlayerController extends ChangeNotifier {
     final index = currentIndex;
     if (playbackMode == PlaybackMode.shuffle) {
       if (queue.length == 1) return queue.first;
-
-      var nextIndex = _random.nextInt(queue.length);
-      if (index >= 0) {
-        while (nextIndex == index) {
-          nextIndex = _random.nextInt(queue.length);
-        }
+      final nextIndex = _shuffleQueue.next(queue.length);
+      if (nextIndex >= 0 && nextIndex < queue.length) {
+        return queue[nextIndex];
       }
-      return queue[nextIndex];
+      return queue.first;
     }
 
     if (index >= 0 && index < queue.length - 1) {
