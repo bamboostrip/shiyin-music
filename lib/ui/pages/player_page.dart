@@ -636,6 +636,8 @@ class _LandscapePlayerContent extends StatelessWidget {
                       flex: 12,
                       child: _LandscapeRightPanel(
                         player: player,
+                        auth: auth,
+                        song: song,
                         onQueue: onQueue,
                         compact: compact,
                       ),
@@ -670,73 +672,55 @@ class _LandscapeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: auth,
-      builder: (context, _) {
-        final liked = auth.isLiked(song);
-        return SizedBox(
-          height: compact ? 40 : 48,
-          child: Row(
-            children: [
-              _LandscapeHeaderButton(
-                tooltip: '返回',
-                size: compact ? 38 : 44,
-                iconSize: compact ? 30 : 34,
-                onPressed: onClose,
-                icon: Icons.keyboard_arrow_left_rounded,
-              ),
-              SizedBox(width: compact ? 10 : 18),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: .92),
-                        fontSize: compact ? 14 : 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    if (!compact)
-                      Text(
-                        song.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withValues(alpha: .7),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              _LandscapeHeaderButton(
-                tooltip: liked ? '取消喜欢' : '喜欢',
-                size: compact ? 38 : 44,
-                iconSize: compact ? 22 : 24,
-                onPressed: song.source == SongSource.kugou
-                    ? () => auth.toggleLike(song)
-                    : null,
-                icon: liked
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-              ),
-              SizedBox(width: compact ? 6 : 8),
-              _LandscapeHeaderButton(
-                tooltip: '更多',
-                size: compact ? 38 : 44,
-                iconSize: compact ? 22 : 24,
-                onPressed: () => _showMoreSheet(context),
-                icon: Icons.more_horiz_rounded,
-              ),
-            ],
+    return SizedBox(
+      height: compact ? 40 : 48,
+      child: Row(
+        children: [
+          _LandscapeHeaderButton(
+            tooltip: '返回',
+            size: compact ? 38 : 44,
+            iconSize: compact ? 30 : 34,
+            onPressed: onClose,
+            icon: Icons.keyboard_arrow_left_rounded,
           ),
-        );
-      },
+          SizedBox(width: compact ? 10 : 18),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: .92),
+                    fontSize: compact ? 14 : 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (!compact)
+                  Text(
+                    song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: .7),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _LandscapeHeaderButton(
+            tooltip: '更多',
+            size: compact ? 38 : 44,
+            iconSize: compact ? 22 : 24,
+            onPressed: () => _showMoreSheet(context),
+            icon: Icons.more_horiz_rounded,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1019,24 +1003,28 @@ class _LandscapeArtworkShowcaseState extends State<_LandscapeArtworkShowcase>
 class _LandscapeRightPanel extends StatelessWidget {
   const _LandscapeRightPanel({
     required this.player,
+    required this.auth,
+    required this.song,
     required this.onQueue,
     required this.compact,
   });
 
   final PlayerController player;
+  final AuthController auth;
+  final Song? song;
   final VoidCallback onQueue;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final song = player.currentSong;
+    final currentSong = song;
     return LayoutBuilder(
       builder: (context, constraints) {
         final veryTight = constraints.maxHeight < 250;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (song != null)
+            if (currentSong != null)
               Padding(
                 padding: EdgeInsets.only(
                   bottom: veryTight ? 6.0 : 12.0,
@@ -1047,7 +1035,7 @@ class _LandscapeRightPanel extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      song.title,
+                      currentSong.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -1058,7 +1046,7 @@ class _LandscapeRightPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      song.artist,
+                      currentSong.artist,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -1072,7 +1060,7 @@ class _LandscapeRightPanel extends StatelessWidget {
             Expanded(
               child: _LandscapeLyricPanel(
                 player: player,
-                songHash: song?.hash ?? '',
+                songHash: currentSong?.hash ?? '',
                 lyrics: player.lyrics,
                 compact: compact || veryTight,
               ),
@@ -1086,6 +1074,8 @@ class _LandscapeRightPanel extends StatelessWidget {
               onQueue: onQueue,
               compactOverride: true,
               denseOverride: veryTight,
+              likeAuth: auth,
+              likeSong: song,
             ),
           ],
         );
@@ -2473,6 +2463,8 @@ class _Controls extends StatelessWidget {
     this.bright = false,
     this.compactOverride = false,
     this.denseOverride = false,
+    this.likeAuth,
+    this.likeSong,
   });
 
   final PlayerController player;
@@ -2480,6 +2472,8 @@ class _Controls extends StatelessWidget {
   final bool bright;
   final bool compactOverride;
   final bool denseOverride;
+  final AuthController? likeAuth;
+  final Song? likeSong;
 
   @override
   Widget build(BuildContext context) {
@@ -2514,10 +2508,41 @@ class _Controls extends StatelessWidget {
             ? 46.0
             : (isCar ? 72.0 : (compact ? 56.0 : 64.0));
         final gap = dense ? 3.0 : (isCar ? 24.0 : (compact ? 5.0 : 9.0));
+        final likeAuth = this.likeAuth;
+        final likeSong = this.likeSong;
+        final showLike =
+            isCar && likeAuth != null && likeSong != null;
 
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // 车机模式：爱心放在播放模式按钮左侧，方便近距离触控。
+            if (showLike) ...[
+              AnimatedBuilder(
+                animation: likeAuth,
+                builder: (context, _) {
+                  final liked = likeAuth.isLiked(likeSong);
+                  return SizedBox.square(
+                    dimension: edgeButtonSize,
+                    child: IconButton(
+                      tooltip: liked ? '取消喜欢' : '喜欢',
+                      color: color,
+                      iconSize: edgeIconSize,
+                      padding: EdgeInsets.zero,
+                      onPressed: likeSong.source == SongSource.kugou
+                          ? () => likeAuth.toggleLike(likeSong)
+                          : null,
+                      icon: Icon(
+                        liked
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              SizedBox(width: gap),
+            ],
             SizedBox.square(
               dimension: edgeButtonSize,
               child: IconButton(
