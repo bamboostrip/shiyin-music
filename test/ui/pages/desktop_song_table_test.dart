@@ -462,6 +462,72 @@ void main() {
       await gesture2.removePointer();
     });
 
+    testWidgets('用户字体缩放 1.2 时按缩放后宽度判定截断（缩放才截断的文本有提示）',
+        (tester) async {
+      final fakePlayer = _FakePlayerController();
+      final fakeAuth = _FakeAuthController();
+      // 窄容器（400px）下歌名列可用宽度约 71px：5 个字在 scale 1.0
+      // （5×13.5=67.5px）恰好放得下，1.2 倍（81px）则被省略号截断。
+      const title = '海阔天空传';
+
+      Widget buildScaledRow(TextScaler scaler) {
+        return MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: scaler),
+            child: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 400,
+                  child: DesktopSongTableRow(
+                    song: const Song(
+                      id: '1',
+                      title: title,
+                      artist: '周杰伦',
+                      hash: 'hash_scaled',
+                      albumName: '叶惠美',
+                      duration: Duration(minutes: 4),
+                    ),
+                    index: 1,
+                    player: fakePlayer,
+                    auth: fakeAuth,
+                    canDelete: false,
+                    selecting: false,
+                    selected: false,
+                    isFocused: false,
+                    onTap: () {},
+                    onDoubleTap: () {},
+                    onPlay: () {},
+                    onAddToPlaylist: () {},
+                    onDelete: () {},
+                    onViewArtist: () {},
+                    onMore: () {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      Future<void> hoverAndCheck(TextScaler scaler, int expectedMatches) async {
+        await tester.pumpWidget(buildScaledRow(scaler));
+        final gesture =
+            await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await gesture.addPointer(location: Offset.zero);
+        await gesture.moveTo(tester.getCenter(find.text(title)));
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(find.text(title), findsNWidgets(expectedMatches));
+        await gesture.moveTo(Offset.zero);
+        await tester.pumpAndSettle();
+        await gesture.removePointer();
+      }
+
+      // 1.2 倍字体缩放：文本实际被截断 → 悬停显示完整提示
+      await hoverAndCheck(TextScaler.linear(1.2), 2);
+      // scale 1.0：同一文本放得下 → 不显示提示
+      await hoverAndCheck(TextScaler.noScaling, 1);
+    });
+
     testWidgets('showHoverActions=false 时悬停只显示时长（外部平台歌曲）',
         (tester) async {
       final fakePlayer = _FakePlayerController();

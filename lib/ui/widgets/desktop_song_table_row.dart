@@ -540,7 +540,8 @@ class _HoverTipText extends StatefulWidget {
 }
 
 class _HoverTipTextState extends State<_HoverTipText> {
-  static const _showDelay = Duration(milliseconds: 500);
+  // 与全局 tooltip 悬停等待时长保持一致（桌面 500ms token）。
+  static final Duration _showDelay = AppDesktopTheme.tooltipWaitDuration;
 
   final _layerLink = LayerLink();
   OverlayEntry? _entry;
@@ -557,7 +558,12 @@ class _HoverTipTextState extends State<_HoverTipText> {
     _hideTip();
   }
 
-  /// 单行排版下的自然宽度超出实际可用宽度 => 被省略号截断。
+  /// 按**用户实际字体缩放**单行排版的自然宽度超出实际可用宽度
+  /// => 被省略号截断。
+  ///
+  /// 必须把 `MediaQuery.textScalerOf` 传给 TextPainter，否则
+  /// fontScale > 1.0 时测宽偏小，截断文本会被误判为未截断，
+  /// 恰好在最需要提示的场景失效。
   bool _isTruncated() {
     final box = context.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return false;
@@ -565,6 +571,7 @@ class _HoverTipTextState extends State<_HoverTipText> {
       text: TextSpan(text: widget.text, style: widget.style),
       textDirection: TextDirection.ltr,
       maxLines: 1,
+      textScaler: MediaQuery.textScalerOf(context),
     )..layout();
     return painter.didExceedMaxLines || painter.width > box.size.width + 0.5;
   }
