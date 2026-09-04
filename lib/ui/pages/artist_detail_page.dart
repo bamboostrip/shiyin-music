@@ -10,7 +10,9 @@ import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
+import '../widgets/horizontal_wheel_scroll.dart';
 import '../adaptive_layout.dart';
+import '../form_factor.dart';
 import 'playlist_detail_page.dart';
 
 class ArtistDetailPage extends StatefulWidget {
@@ -34,8 +36,11 @@ class ArtistDetailPage extends StatefulWidget {
 class _ArtistDetailPageState extends State<ArtistDetailPage> {
   static const _pageSize = 30;
 
-  /// 头部展开高度（不含状态栏，SliverAppBar 会自动叠加）。
-  static const _headerExpandedHeight = 286.0;
+  /// 头部展开高度（移动端）。
+  static const _headerExpandedHeightMobile = 286.0;
+
+  /// 头部展开高度（PC 桌面端）。
+  static const _headerExpandedHeightDesktop = 210.0;
 
   final _scrollController = ScrollController();
   final _songs = <Song>[];
@@ -43,6 +48,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
   ArtistDetail? _detail;
   String? _resolvedArtistId;
+  String? _focusedSongKey;
   var _nextPage = 1;
   var _hasMore = true;
   var _isInitialLoading = true;
@@ -154,9 +160,12 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     // 头部完全收起（滚动距离 >= 展开高度 - 工具栏高度）后，把顶栏从
     // 透明切为不透明底色 + 主题色图标：透明工具栏会让列表内容从返回键
     // 下方穿透，收起瞬间头部照片刚好完全离开视口，切换不会突兀。
+    final expandedHeight = isDesktopFormFactor
+        ? _headerExpandedHeightDesktop
+        : _headerExpandedHeightMobile;
     final collapsed =
         _scrollController.hasClients &&
-        _scrollController.offset >= _headerExpandedHeight - kToolbarHeight;
+        _scrollController.offset >= expandedHeight - kToolbarHeight;
     if (collapsed != _isHeaderCollapsed) {
       setState(() => _isHeaderCollapsed = collapsed);
     }
@@ -234,13 +243,171 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     );
   }
 
+  String _songKey(Song song) =>
+      song.hash.isNotEmpty ? song.hash : song.id;
+
+  void _openArtist(Song song) {
+    final artist = song.artists.firstWhere(
+      (a) => a.name.isNotEmpty,
+      orElse: () => ArtistRef(id: '', name: song.artist),
+    );
+    if (artist.name.isEmpty) return;
+    if (artist.id.isNotEmpty &&
+        (_resolvedArtistId == artist.id || widget.artist.id == artist.id)) {
+      return;
+    }
+    if (artist.name == widget.artist.name || artist.name == _detail?.name) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ArtistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          artist: artist,
+          player: widget.player,
+        ),
+      ),
+    );
+  }
+
+  void _showSongMenu(Song song) {
+    showSongActionSheet(
+      context: context,
+      song: song,
+      actions: [
+        SongSheetAction(
+          icon: Icons.queue_music_rounded,
+          title: '下一首播放',
+          onTap: () => addSongToQueueWithFeedback(
+            context: context,
+            player: widget.player,
+            song: song,
+          ),
+        ),
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          onTap: () => showAddToPlaylistSheet(
+            context: context,
+            auth: widget.auth,
+            song: song,
+          ),
+        ),
+        if (widget.player.downloadController != null)
+          SongSheetAction(
+            icon: widget.player.downloadController!.isDownloaded(song)
+                ? Icons.download_done_rounded
+                : Icons.download_rounded,
+            title: widget.player.downloadController!.isDownloaded(song)
+                ? '已下载'
+                : '下载',
+            onTap: () => widget.player.downloadController!
+                .download(song, widget.player.audioQuality),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMobileAppBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final artistName = _detail?.name ?? widget.artist.name;
+    return SliverAppBar(
+      pinned: true,
+      expandedHeight: _headerExpandedHeightMobile,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      // 展开态透明叠在头部照片上（白色返回键）；收起后换不透明
+      // 底色 + 主题色，避免歌曲列表从工具栏下方穿透。
+      backgroundColor: _isHeaderCollapsed
+          ? theme.scaffoldBackgroundColor
+          : Colors.transparent,
+      foregroundColor: _isHeaderCollapsed
+          ? theme.colorScheme.onSurface
+          : Colors.white,
+      title: AnimatedOpacity(
+        opacity: _isHeaderCollapsed ? 1 : 0,
+        duration: const Duration(milliseconds: 150),
+        child: Text(
+          artistName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      flexibleSpace: FlexibleSpaceBar(
+        stretchModes: const [StretchMode.zoomBackground],
+        background: _ArtistHeader(
+          detail: _detail,
+          fallback: widget.artist,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopAppBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final artistName = _detail?.name ?? widget.artist.name;
+    return SliverAppBar(
+      pinned: true,
+      expandedHeight: _headerExpandedHeightDesktop,
+      surfaceTintColor: Colors.transparent,
+      backgroundColor: colorScheme.surface,
+      elevation: 0,
+      scrolledUnderElevation: 1,
+      shadowColor: Colors.black.withValues(alpha: .08),
+      foregroundColor: colorScheme.onSurface,
+      title: AnimatedBuilder(
+        animation: _scrollController,
+        builder: (context, _) {
+          var collapsed = false;
+          if (_scrollController.hasClients) {
+            final delta = _headerExpandedHeightDesktop - kToolbarHeight;
+            collapsed = delta <= 0 || _scrollController.offset > delta - 40;
+          }
+          return AnimatedOpacity(
+            opacity: collapsed ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: Text(
+              artistName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          );
+        },
+      ),
+      flexibleSpace: FlexibleSpaceBar(
+        background: _DesktopArtistHeroHeader(
+          detail: _detail,
+          fallback: widget.artist,
+          songsCount: _songs.length,
+          albumsCount: _albums.length,
+          onPlayAll: _songs.isEmpty
+              ? null
+              : () => widget.player.playSong(
+                  _songs.first,
+                  queue: List<Song>.of(_songs),
+                ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     // MiniPlayer 高度约 64，距底部 16，合计预留空间防止遮挡最后一首歌
     final miniPlayerSpace = bottomInset + 64 + 16;
     final theme = Theme.of(context);
-    final artistName = _detail?.name ?? widget.artist.name;
     return Scaffold(
       body: AdaptiveContentPadding(
         child: Stack(
@@ -250,41 +417,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
               child: CustomScrollView(
                 controller: _scrollController,
                 slivers: [
-                  SliverAppBar(
-                    pinned: true,
-                    expandedHeight: _headerExpandedHeight,
-                    elevation: 0,
-                    scrolledUnderElevation: 0,
-                    surfaceTintColor: Colors.transparent,
-                    // 展开态透明叠在头部照片上（白色返回键）；收起后换不透明
-                    // 底色 + 主题色，避免歌曲列表从工具栏下方穿透。
-                    backgroundColor: _isHeaderCollapsed
-                        ? theme.scaffoldBackgroundColor
-                        : Colors.transparent,
-                    foregroundColor: _isHeaderCollapsed
-                        ? theme.colorScheme.onSurface
-                        : Colors.white,
-                    title: AnimatedOpacity(
-                      opacity: _isHeaderCollapsed ? 1 : 0,
-                      duration: const Duration(milliseconds: 150),
-                      child: Text(
-                        artistName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    flexibleSpace: FlexibleSpaceBar(
-                      stretchModes: const [StretchMode.zoomBackground],
-                      background: _ArtistHeader(
-                        detail: _detail,
-                        fallback: widget.artist,
-                      ),
-                    ),
-                  ),
+                  if (isDesktopFormFactor)
+                    _buildDesktopAppBar(context)
+                  else
+                    _buildMobileAppBar(context),
                   if (_isInitialLoading)
                     const _ArtistDetailSkeleton()
                   else if (_errorMessage case final message?)
@@ -320,25 +456,87 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                         child: _EmptyArtistSongs(),
                       )
                     else ...[
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        sliver: SliverList.separated(
-                          itemCount: _songs.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 2),
-                          itemBuilder: (context, index) {
-                            final song = _songs[index];
-                            return _ArtistSongRow(
-                              song: song,
-                              auth: widget.auth,
-                              player: widget.player,
-                              onTap: () => widget.player.playSong(
-                                song,
-                                queue: List<Song>.of(_songs),
+                      if (isDesktopFormFactor) ...[
+                        SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _ArtistTableStickyHeaderDelegate(
+                            child: Container(
+                              color: theme.colorScheme.surface,
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: const DesktopSongTableHeader(
+                                selecting: false,
+                                allSelected: false,
+                                onToggleSelectAll: null,
                               ),
-                            );
-                          },
+                            ),
+                          ),
                         ),
-                      ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                          sliver: SliverFixedExtentList(
+                            itemExtent: 44.0,
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final song = _songs[index];
+                                return DesktopSongTableRow(
+                                  song: song,
+                                  index: index + 1,
+                                  player: widget.player,
+                                  auth: widget.auth,
+                                  canDelete: false,
+                                  selecting: false,
+                                  selected: false,
+                                  isFocused: _focusedSongKey == _songKey(song),
+                                  onTap: () {
+                                    setState(() => _focusedSongKey = _songKey(song));
+                                  },
+                                  onDoubleTap: () {
+                                    widget.player.playSong(
+                                      song,
+                                      queue: List<Song>.of(_songs),
+                                    );
+                                  },
+                                  onPlay: () {
+                                    widget.player.playSong(
+                                      song,
+                                      queue: List<Song>.of(_songs),
+                                    );
+                                  },
+                                  onAddToPlaylist: () => showAddToPlaylistSheet(
+                                    context: context,
+                                    auth: widget.auth,
+                                    song: song,
+                                  ),
+                                  onDelete: () {},
+                                  onViewArtist: () => _openArtist(song),
+                                  onMore: () => _showSongMenu(song),
+                                );
+                              },
+                              childCount: _songs.length,
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          sliver: SliverList.separated(
+                            itemCount: _songs.length,
+                            separatorBuilder: (_, _) => const SizedBox(height: 2),
+                            itemBuilder: (context, index) {
+                              final song = _songs[index];
+                              return _ArtistSongRow(
+                                song: song,
+                                auth: widget.auth,
+                                player: widget.player,
+                                onTap: () => widget.player.playSong(
+                                  song,
+                                  queue: List<Song>.of(_songs),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                       SliverToBoxAdapter(
                         child: _ArtistLoadMoreFooter(
                           hasMore: _hasMore,
@@ -347,30 +545,32 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           onRetry: _loadMore,
                         ),
                       ),
-                      // 底部留白：播放中时为 MiniPlayer 预留空间，
+                      // 底部留白：移动端播放中时为 MiniPlayer 预留空间，
                       // 防止卡片遮挡导致用户点不到最底部的几首歌。
-                      SliverToBoxAdapter(
-                        child: AnimatedBuilder(
-                          animation: widget.player,
-                          builder: (context, _) {
-                            final hasSong = widget.player.currentSong != null;
-                            return SizedBox(
-                              height: hasSong ? miniPlayerSpace : 0,
-                            );
-                          },
+                      if (!isDesktopFormFactor)
+                        SliverToBoxAdapter(
+                          child: AnimatedBuilder(
+                            animation: widget.player,
+                            builder: (context, _) {
+                              final hasSong = widget.player.currentSong != null;
+                              return SizedBox(
+                                height: hasSong ? miniPlayerSpace : 0,
+                              );
+                            },
+                          ),
                         ),
-                      ),
                     ],
                   ],
                 ],
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: bottomInset + 16,
-              child: MiniPlayer(player: widget.player, auth: widget.auth),
-            ),
+            if (!isDesktopFormFactor)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: bottomInset + 16,
+                child: MiniPlayer(player: widget.player, auth: widget.auth),
+              ),
           ],
         ),
       ),
@@ -509,6 +709,46 @@ class _ArtistAlbumSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isDesktopFormFactor) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '专辑 ${albums.length}',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 168,
+              child: HorizontalWheelScroll(
+                builder: (context, controller) => ListView.separated(
+                  controller: controller,
+                  scrollDirection: Axis.horizontal,
+                  itemCount: albums.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 14),
+                  itemBuilder: (context, index) {
+                    final album = albums[index];
+                    return MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: _ArtistAlbumCard(
+                        album: album,
+                        onTap: () => onTap(album),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return AppHorizontalRail<ArtistAlbum>(
       title: '专辑 ${albums.length}',
       items: albums,
@@ -578,7 +818,12 @@ class _SongSectionHeader extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+      padding: EdgeInsets.fromLTRB(
+        isDesktopFormFactor ? 18 : 18,
+        isDesktopFormFactor ? 8 : 4,
+        isDesktopFormFactor ? 18 : 18,
+        isDesktopFormFactor ? 8 : 12,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -589,15 +834,16 @@ class _SongSectionHeader extends StatelessWidget {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
             ),
           ),
-          TextButton.icon(
-            onPressed: onPlayAll,
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('播放'),
-            style: TextButton.styleFrom(
-              foregroundColor: colorScheme.primary,
-              visualDensity: VisualDensity.compact,
+          if (!isDesktopFormFactor)
+            TextButton.icon(
+              onPressed: onPlayAll,
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('播放'),
+              style: TextButton.styleFrom(
+                foregroundColor: colorScheme.primary,
+                visualDensity: VisualDensity.compact,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -927,3 +1173,165 @@ class _ArtistDetailError extends StatelessWidget {
     );
   }
 }
+
+/// PC 桌面端横排紧凑 Hero 头部。
+class _DesktopArtistHeroHeader extends StatelessWidget {
+  const _DesktopArtistHeroHeader({
+    required this.detail,
+    required this.fallback,
+    required this.songsCount,
+    required this.albumsCount,
+    required this.onPlayAll,
+  });
+
+  final ArtistDetail? detail;
+  final ArtistRef fallback;
+  final int songsCount;
+  final int albumsCount;
+  final VoidCallback? onPlayAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
+    final avatar = detail?.avatarUrl ?? fallback.avatarUrl;
+    final artistName = detail?.name ?? fallback.name;
+
+    final statText =
+        '$songsCount 首热门单曲${albumsCount > 0 ? ' · $albumsCount 张专辑' : ''}';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? const [Color(0xFF1B2E49), Color(0xFF0D121E), Color(0xFF06070A)]
+              : const [Color(0xFFD3E8FF), Color(0xFFEDF4FF), Color(0xFFFFFFFF)],
+          stops: isDark ? const [0, 0.55, 1] : const [0, 0.62, 1],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, kToolbarHeight, 28, 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(60),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          Colors.black.withValues(alpha: isDark ? .35 : .16),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Artwork(
+                  url: avatar,
+                  size: 120,
+                  borderRadius: 60,
+                ),
+              ),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      artistName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: colorScheme.onSurface,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(
+                          alpha: isDark ? .20 : .10,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        statText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: colorScheme.primary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: onPlayAll,
+                      icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                      label: const Text(
+                        '播放热门单曲',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 9,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// PC 桌面端表格吸顶代理。
+class _ArtistTableStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _ArtistTableStickyHeaderDelegate({required this.child});
+
+  final Widget child;
+
+  @override
+  double get minExtent => 36.0;
+
+  @override
+  double get maxExtent => 36.0;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) =>
+      child;
+
+  @override
+  bool shouldRebuild(covariant _ArtistTableStickyHeaderDelegate oldDelegate) =>
+      child != oldDelegate.child;
+}
+
