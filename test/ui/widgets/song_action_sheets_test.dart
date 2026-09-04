@@ -31,6 +31,7 @@ void main() {
     required Size size,
     required List<SongSheetAction> actions,
     Song song = testSong,
+    Offset? anchor,
   }) {
     return MaterialApp(
       home: MediaQuery(
@@ -44,6 +45,7 @@ void main() {
                     context: context,
                     song: song,
                     actions: actions,
+                    anchor: anchor,
                   );
                 },
                 child: const Text('Open Menu'),
@@ -195,6 +197,58 @@ void main() {
 
       expect(find.byType(Dialog), findsNothing);
       expect(actionTriggered, isFalse);
+    });
+    testWidgets('传入 anchor 时走锚定路由：不出现居中 Dialog，菜单宽 220 且不越界', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final actions = [
+        SongSheetAction(
+          icon: Icons.queue_music_rounded,
+          title: '下一首播放',
+          onTap: () {},
+        ),
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          onTap: () {},
+        ),
+      ];
+
+      // 锚点在屏幕右下角：菜单应翻转并保留边距，而不是居中。
+      await tester.pumpWidget(
+        buildHostWidget(
+          size: const Size(1280, 800),
+          actions: actions,
+          anchor: const Offset(1270, 780),
+        ),
+      );
+
+      await tester.tap(find.text('Open Menu'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.text('晴天'), findsOneWidget);
+      expect(find.text('下一首播放'), findsOneWidget);
+
+      // 锚定面板宽 220（PC 规格 200~220），且整体位于屏幕边距内（翻转生效）。
+      final positioned = tester.widgetList<Positioned>(
+        find.byWidgetPredicate(
+          (w) => w is Positioned && w.width != null && w.height != null,
+        ),
+      ).first;
+      expect(positioned.width, 220);
+      expect(positioned.left, greaterThanOrEqualTo(0));
+      expect(positioned.top, greaterThanOrEqualTo(0));
+      expect(positioned.left! + positioned.width!, lessThanOrEqualTo(1280));
+      expect(positioned.top! + positioned.height!, lessThanOrEqualTo(800));
+
+      // 点击菜单项后正常关闭。
+      await tester.tap(find.text('下一首播放'));
+      await tester.pumpAndSettle();
+      expect(find.text('下一首播放'), findsNothing);
     });
   });
 

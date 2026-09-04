@@ -271,10 +271,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     );
   }
 
-  void _showSongMenu(Song song) {
+  void _showSongMenu(Song song, {Offset? anchor}) {
     showSongActionSheet(
       context: context,
       song: song,
+      anchor: anchor,
       actions: [
         SongSheetAction(
           icon: Icons.queue_music_rounded,
@@ -510,6 +511,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                   onDelete: () {},
                                   onViewArtist: () => _openArtist(song),
                                   onMore: () => _showSongMenu(song),
+                                  onSecondaryMore: (position) =>
+                                      _showSongMenu(song, anchor: position),
                                 );
                               },
                               childCount: _songs.length,

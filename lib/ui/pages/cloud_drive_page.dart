@@ -5,6 +5,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
@@ -545,12 +546,14 @@ class _CloudSongRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                IconButton(
-                  tooltip: '更多',
-                  onPressed: () {
-                    showSongActionSheet(
-                      context: context,
-                      song: song,
+                Builder(builder: (moreButtonContext) {
+                  return IconButton(
+                    tooltip: '更多',
+                    onPressed: () {
+                      showSongActionSheet(
+                        context: moreButtonContext,
+                        anchor: anchorBelow(moreButtonContext),
+                        song: song,
                       actions: [
                         SongSheetAction(
                           icon: Icons.queue_music_rounded,
@@ -583,7 +586,8 @@ class _CloudSongRow extends StatelessWidget {
                     );
                   },
                   icon: const Icon(Icons.more_horiz_rounded),
-                ),
+                );
+                }),
               ],
             ),
           ),

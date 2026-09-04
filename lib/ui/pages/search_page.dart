@@ -9,6 +9,7 @@ import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
@@ -1452,12 +1453,14 @@ class _SearchResults extends StatelessWidget {
                             visualDensity: VisualDensity.compact,
                           ),
                         if (!isExternal)
-                          IconButton(
-                            tooltip: '更多',
-                            onPressed: () {
-                              showSongActionSheet(
-                                context: context,
-                                song: song,
+                          Builder(builder: (moreButtonContext) {
+                            return IconButton(
+                              tooltip: '更多',
+                              onPressed: () {
+                                showSongActionSheet(
+                                  context: moreButtonContext,
+                                  anchor: anchorBelow(moreButtonContext),
+                                  song: song,
                                 actions: [
                                   SongSheetAction(
                                     icon: Icons.queue_music_rounded,
@@ -1500,9 +1503,10 @@ class _SearchResults extends StatelessWidget {
                                 ],
                               );
                             },
-                            icon: const Icon(Icons.more_horiz_rounded),
-                            visualDensity: VisualDensity.compact,
-                          ),
+                              icon: const Icon(Icons.more_horiz_rounded),
+                              visualDensity: VisualDensity.compact,
+                            );
+                          }),
                         if (isExternal)
                           Padding(
                             padding: const EdgeInsets.only(right: 8),

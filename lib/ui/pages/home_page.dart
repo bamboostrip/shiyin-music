@@ -18,6 +18,7 @@ import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/hover_row.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/now_playing_badge.dart';
@@ -1397,12 +1398,14 @@ class _HomeSongRow extends StatelessWidget {
                     ),
                     visualDensity: VisualDensity.compact,
                   ),
-                  IconButton(
-                    tooltip: '更多',
-                    onPressed: () {
-                      showSongActionSheet(
-                        context: context,
-                        song: song,
+                  Builder(builder: (moreButtonContext) {
+                    return IconButton(
+                      tooltip: '更多',
+                      onPressed: () {
+                        showSongActionSheet(
+                          context: moreButtonContext,
+                          anchor: anchorBelow(moreButtonContext),
+                          song: song,
                         actions: [
                           SongSheetAction(
                             icon: Icons.queue_music_rounded,
@@ -1445,9 +1448,10 @@ class _HomeSongRow extends StatelessWidget {
                         ],
                       );
                     },
-                    icon: const Icon(Icons.more_horiz_rounded),
-                    visualDensity: VisualDensity.compact,
-                  ),
+                      icon: const Icon(Icons.more_horiz_rounded),
+                      visualDensity: VisualDensity.compact,
+                    );
+                  }),
                 ],
               ),
               ),

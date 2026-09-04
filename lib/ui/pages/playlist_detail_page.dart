@@ -13,6 +13,7 @@ import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../widgets/app_section.dart';
 import '../widgets/artwork.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/import_playlist_sheet.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
@@ -1038,10 +1039,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     );
   }
 
-  void _showSongMenu(Song song) {
+  void _showSongMenu(Song song, {Offset? anchor}) {
     showSongActionSheet(
       context: context,
       song: song,
+      anchor: anchor,
       actions: [
         SongSheetAction(
           icon: Icons.queue_music_rounded,
@@ -1663,6 +1665,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                     onDelete: () => _removeSong(song),
                                     onViewArtist: () => _openArtist(song),
                                     onMore: () => _showSongMenu(song),
+                                    onSecondaryMore: (position) =>
+                                        _showSongMenu(song, anchor: position),
                                   );
                                 },
                                 childCount: _filteredSongs.length,
@@ -3365,6 +3369,7 @@ class DesktopSongTableRow extends StatefulWidget {
     required this.onDelete,
     required this.onViewArtist,
     required this.onMore,
+    this.onSecondaryMore,
   });
 
   final Song song;
@@ -3383,6 +3388,10 @@ class DesktopSongTableRow extends StatefulWidget {
   final VoidCallback onViewArtist;
   final VoidCallback onMore;
 
+  /// PC 右键 / `...` 按钮触发"更多"时的位置回调（全局坐标），
+  /// 用于把歌曲操作菜单锚定到触发点；为空时回退到 [onMore]（无坐标）。
+  final void Function(Offset globalPosition)? onSecondaryMore;
+
   @override
   State<DesktopSongTableRow> createState() => _DesktopSongTableRowState();
 }
@@ -3391,6 +3400,15 @@ typedef _DesktopSongTableRow = DesktopSongTableRow;
 
 class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
   bool _hovering = false;
+
+  void _invokeMore([Offset? anchor]) {
+    final void Function(Offset)? positionAware = widget.onSecondaryMore;
+    if (positionAware != null && anchor != null) {
+      positionAware(anchor);
+    } else {
+      widget.onMore();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3471,7 +3489,9 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                         borderRadius: BorderRadius.circular(6),
                         onTap: widget.onTap,
                         onDoubleTap: widget.onDoubleTap,
-                        onSecondaryTap: widget.onMore,
+                        // PC 右键：在按下时取全局坐标，把菜单锚定到点击处。
+                        onSecondaryTapDown: (details) =>
+                            _invokeMore(details.globalPosition),
                       ),
                     ),
                   ),
@@ -3608,16 +3628,19 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                     onTap: widget.onAddToPlaylist,
                                   ),
                                   const SizedBox(width: 2),
-                                  _DesktopRowIconButton(
-                                    icon: canDelete
-                                        ? Icons.delete_outline_rounded
-                                        : Icons.more_horiz_rounded,
-                                    tooltip: canDelete ? '从歌单删除' : '更多',
-                                    danger: canDelete,
-                                    onTap: canDelete
-                                        ? widget.onDelete
-                                        : widget.onMore,
-                                  ),
+                                  Builder(builder: (moreButtonContext) {
+                                    return _DesktopRowIconButton(
+                                      icon: canDelete
+                                          ? Icons.delete_outline_rounded
+                                          : Icons.more_horiz_rounded,
+                                      tooltip: canDelete ? '从歌单删除' : '更多',
+                                      danger: canDelete,
+                                      onTap: canDelete
+                                          ? widget.onDelete
+                                          : () => _invokeMore(
+                                              anchorBelow(moreButtonContext)),
+                                    );
+                                  }),
                                   const SizedBox(width: 12),
                                 ],
                               )

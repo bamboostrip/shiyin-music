@@ -17,6 +17,7 @@ import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/artwork.dart';
 import '../widgets/climax_slider_track.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../form_factor.dart';
 import '../widgets/playback_speed_sheet.dart';
@@ -751,12 +752,14 @@ class _LandscapeHeader extends StatelessWidget {
               ],
             ),
           ),
-          _LandscapeHeaderButton(
-            tooltip: '更多',
-            size: compact ? 38 : 44,
-            iconSize: compact ? 22 : 24,
-            onPressed: () => _showMoreSheet(context),
-            icon: Icons.more_horiz_rounded,
+          Builder(
+            builder: (moreButtonContext) => _LandscapeHeaderButton(
+              tooltip: '更多',
+              size: compact ? 38 : 44,
+              iconSize: compact ? 22 : 24,
+              onPressed: () => _showMoreSheet(moreButtonContext),
+              icon: Icons.more_horiz_rounded,
+            ),
           ),
         ],
       ),
@@ -767,6 +770,8 @@ class _LandscapeHeader extends StatelessWidget {
     showSongActionSheet(
       context: context,
       song: song,
+      // PC：锚定到"更多"按钮下方（context 已由调用点传入按钮级 context）。
+      anchor: anchorBelow(context),
       actions: [
         SongSheetAction(
           icon: Icons.speed_rounded,
@@ -1333,10 +1338,12 @@ class _TopBar extends StatelessWidget {
                     : Icons.favorite_border_rounded,
               ),
               const SizedBox(width: 8),
-              _GlassIconButton(
-                tooltip: '更多',
-                onPressed: () => _showMoreSheet(context),
-                icon: Icons.more_horiz_rounded,
+              Builder(
+                builder: (moreButtonContext) => _GlassIconButton(
+                  tooltip: '更多',
+                  onPressed: () => _showMoreSheet(moreButtonContext),
+                  icon: Icons.more_horiz_rounded,
+                ),
               ),
             ],
           ),
@@ -1349,6 +1356,8 @@ class _TopBar extends StatelessWidget {
     showSongActionSheet(
       context: context,
       song: song,
+      // PC：锚定到"更多"按钮下方（context 已由调用点传入按钮级 context）。
+      anchor: anchorBelow(context),
       actions: [
         // Grid actions
         SongSheetAction(

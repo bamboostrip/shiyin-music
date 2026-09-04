@@ -8,6 +8,7 @@ import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
 import 'artwork.dart';
+import 'desktop_anchored_menu.dart';
 import 'toast.dart';
 
 class SongSheetAction {
@@ -32,15 +33,18 @@ Future<void> showSongActionSheet({
   required BuildContext context,
   required Song song,
   required List<SongSheetAction> actions,
+  Offset? anchor,
 }) {
   if (isDesktopFormFactor) {
     return _showDesktopSongActionMenu(
       context: context,
       song: song,
       actions: actions,
+      anchor: anchor,
     );
   }
 
+  // 移动端（含车机）完全忽略 anchor，底部/侧滑弹窗行为保持不变。
   final isLandscape = MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
   // 左侧滑入弹窗是车机专属交互，普通横屏用标准底部弹窗。
   final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
@@ -537,7 +541,24 @@ Future<void> _showDesktopSongActionMenu({
   required BuildContext context,
   required Song song,
   required List<SongSheetAction> actions,
+  Offset? anchor,
 }) {
+  // PC 规格：菜单锚定在触发点附近（右键位置 / ... 按钮下方），
+  // 屏幕边缘自动翻转；无坐标时退回原有居中弹窗兜底。
+  if (anchor != null) {
+    return showDesktopAnchoredMenu<void>(
+      context: context,
+      anchor: anchor,
+      builder: (menuContext) {
+        return _DesktopSongActionMenuPanel(
+          song: song,
+          actions: actions,
+          width: 220,
+        );
+      },
+    );
+  }
+
   return showDialog<void>(
     context: context,
     barrierDismissible: true,
@@ -562,6 +583,35 @@ class _DesktopSongActionMenuDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Center(
+        child: _DesktopSongActionMenuPanel(
+          song: song,
+          actions: actions,
+          width: 236,
+        ),
+      ),
+    );
+  }
+}
+
+/// 桌面端歌曲操作菜单面板：居中弹窗与锚定菜单共用，复用同一批菜单条目。
+class _DesktopSongActionMenuPanel extends StatelessWidget {
+  const _DesktopSongActionMenuPanel({
+    required this.song,
+    required this.actions,
+    required this.width,
+  });
+
+  final Song song;
+  final List<SongSheetAction> actions;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
@@ -576,101 +626,94 @@ class _DesktopSongActionMenuDialog extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.08)
         : colorScheme.outlineVariant.withValues(alpha: 0.6);
 
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: Center(
-        child: Container(
-          width: 236,
-          constraints: const BoxConstraints(maxHeight: 460),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor, width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(maxHeight: 460),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(13),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 顶部紧凑歌曲信息
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-                  child: Row(
-                    children: [
-                      Artwork(url: song.coverUrl, size: 32, borderRadius: 6),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              song.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              song.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 11,
-                                height: 1.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                        iconSize: 16,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                        splashRadius: 14,
-                        tooltip: '关闭',
-                      ),
-                    ],
-                  ),
-                ),
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: dividerColor,
-                ),
-                // 菜单项垂直排列
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 顶部紧凑歌曲信息
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+              child: Row(
+                children: [
+                  Artwork(url: song.coverUrl, size: 32, borderRadius: 6),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        for (final action in actions)
-                          _DesktopSongActionItem(action: action),
+                        Text(
+                          song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          song.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                            height: 1.2,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ),
-              ],
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    iconSize: 16,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                    splashRadius: 14,
+                    tooltip: '关闭',
+                  ),
+                ],
+              ),
             ),
-          ),
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: dividerColor,
+            ),
+            // 菜单项垂直排列
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final action in actions)
+                      _DesktopSongActionItem(action: action),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
