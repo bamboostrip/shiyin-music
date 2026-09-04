@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../adaptive_layout.dart';
+import '../form_factor.dart';
+import 'horizontal_wheel_scroll.dart';
+
 /// 统一的分区标题（标题 + 可选尾部操作）。
 class AppSectionHeader extends StatelessWidget {
   const AppSectionHeader({super.key, required this.title, this.action});
@@ -57,39 +61,71 @@ class AppHorizontalRail<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: EdgeInsets.only(top: topPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: headerPadding ?? padding,
-            child: AppSectionHeader(title: title, action: action),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wideDesktop =
+            isDesktopFormFactor && constraints.maxWidth >= AdaptiveLayout.kGridStartWidth;
+        return Padding(
+          padding: EdgeInsets.only(top: topPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: headerPadding ?? padding,
+                child: AppSectionHeader(title: title, action: action),
+              ),
+              const SizedBox(height: 12),
+              if (wideDesktop)
+                // 桌面宽窗：横轨转网格，列数随宽度收敛（设计 §3/§5）。
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: padding,
+                  itemCount: items.length,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: (itemWidth ?? 110) * 2 + separatorWidth,
+                    mainAxisSpacing: separatorWidth,
+                    crossAxisSpacing: separatorWidth,
+                    mainAxisExtent: height,
+                  ),
+                  itemBuilder: (context, index) {
+                    final child = itemBuilder(context, items[index]);
+                    return MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: child,
+                    );
+                  },
+                )
+              else
+                SizedBox(
+                  height: height,
+                  child: HorizontalWheelScroll(
+                    builder: (context, controller) => ListView.separated(
+                      controller: controller,
+                      scrollDirection: Axis.horizontal,
+                      padding: padding,
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) =>
+                          SizedBox(width: separatorWidth),
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        final child = itemBuilder(context, item);
+                        final sized = itemWidth == null
+                            ? child
+                            : SizedBox(width: itemWidth, child: child);
+                        // 桌面端显示手型光标，增强可点击感知。
+                        return MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: sized,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: height,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: padding,
-              itemCount: items.length,
-              separatorBuilder: (_, _) => SizedBox(width: separatorWidth),
-              itemBuilder: (context, index) {
-                final item = items[index];
-                final child = itemBuilder(context, item);
-                final sized = itemWidth == null
-                    ? child
-                    : SizedBox(width: itemWidth, child: child);
-                // 桌面端显示手型光标，增强可点击感知。
-                return MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: sized,
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
