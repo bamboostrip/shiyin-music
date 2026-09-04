@@ -12,15 +12,22 @@ import 'desktop_window.dart';
 /// Windows 系统托盘常驻（仅桌面形态，由 main.dart 门控调用）。
 ///
 /// - 左键单击：切换主窗显示/隐藏（最小化时恢复窗口）；
-/// - 右键单击：弹出菜单（显示/隐藏主窗、播放/暂停、上一首、下一首、退出）；
+/// - 右键单击：弹出菜单（显示/隐藏主窗、播放/暂停、上一首、下一首、
+///   解锁桌面歌词、退出）；
 /// - "退出"：先立即落盘窗口几何再销毁窗口。
 ///
-/// 不持有任何页面/控制器状态：[PlayerController] 仅由 [init] 的
-/// 菜单回调闭包引用，托盘本身不保存。
+/// 菜单构建一次并持有引用；「解锁桌面歌词」的可用状态（仅桌面歌词可见
+/// 且锁定时可用，QQ 音乐式：解锁入口在主程序）在每次右键弹出前刷新。
+/// [PlayerController] 仅用于弹出前读取实时状态与解锁操作，不持有页面状态。
 class DesktopTray {
   DesktopTray._();
 
   static SystemTray? _tray;
+  static Menu? _menu;
+  static PlayerController? _player;
+
+  /// 「解锁桌面歌词」菜单项名称（findItemByName 定位后刷新可用态）。
+  static const _kUnlockDesktopLyricsItemName = 'unlock_desktop_lyrics';
 
   /// 初始化托盘图标与菜单。重复调用（未 dispose）时直接忽略。
   ///
@@ -30,6 +37,7 @@ class DesktopTray {
   static Future<void> init({required PlayerController player}) async {
     if (!isDesktopFormFactor) return;
     if (_tray != null) return;
+    _player = player;
     try {
       await _initTray(player);
     } catch (error) {
@@ -76,24 +84,70 @@ class DesktopTray {
         onClicked: (_) => unawaited(player.next()),
       ),
       MenuSeparator(),
+      MenuItemLabel(
+        name: _kUnlockDesktopLyricsItemName,
+        label: '解锁桌面歌词',
+        enabled: _canUnlockDesktopLyrics(),
+        onClicked: (_) => unawaited(_unlockDesktopLyrics()),
+      ),
+      MenuSeparator(),
       MenuItemLabel(label: '退出', onClicked: (_) => unawaited(_exit())),
     ]);
     await tray.setContextMenu(menu);
+    _menu = menu;
     tray.registerSystemTrayEventHandler((eventName) {
       if (eventName == kSystemTrayEventClick) {
         unawaited(_toggleWindowVisibility());
       } else if (eventName == kSystemTrayEventRightClick) {
-        // Windows 右键只派发事件，弹出菜单需主动调用。
-        unawaited(tray.popUpContextMenu());
+        // Windows 右键只派发事件，弹出菜单需主动调用；
+        // 弹出前刷新「解锁桌面歌词」可用态（菜单只构建一次）。
+        unawaited(_popUpContextMenu());
       }
     });
     _tray = tray;
+  }
+
+  /// 仅当桌面歌词可见且锁定时允许解锁（QQ 音乐式基准）。
+  static bool _canUnlockDesktopLyrics() {
+    final player = _player;
+    if (player == null) return false;
+    return player.desktopLyricsEnabled && player.desktopLyricsSettings.locked;
+  }
+
+  /// 弹出前刷新「解锁桌面歌词」可用态，再弹出右键菜单。
+  static Future<void> _popUpContextMenu() async {
+    final tray = _tray;
+    if (tray == null) return;
+    try {
+      final item = _menu?.findItemByName<MenuItemLabel>(
+        _kUnlockDesktopLyricsItemName,
+      );
+      final canUnlock = _canUnlockDesktopLyrics();
+      if (item != null && item.enabled != canUnlock) {
+        await item.setEnable(canUnlock);
+      }
+    } on Exception catch (e) {
+      // 刷新失败只影响置灰展示，不阻断菜单弹出。
+      debugPrint('DesktopTray: 刷新解锁菜单项失败: $e');
+    }
+    await tray.popUpContextMenu();
+  }
+
+  /// 托盘解锁桌面歌词：走统一设置更新路径（持久化 + 通知设置页 + 回推子窗）。
+  static Future<void> _unlockDesktopLyrics() async {
+    final player = _player;
+    if (player == null || !_canUnlockDesktopLyrics()) return;
+    await player.updateDesktopLyricsSettings(
+      player.desktopLyricsSettings.copyWith(locked: false),
+    );
   }
 
   /// 销毁托盘图标。
   static Future<void> dispose() async {
     final tray = _tray;
     _tray = null;
+    _menu = null;
+    _player = null;
     await tray?.destroy();
   }
 

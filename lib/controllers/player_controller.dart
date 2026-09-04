@@ -127,6 +127,7 @@ class PlayerController extends ChangeNotifier {
     _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
     _desktopLyrics.setVisibilityChangedHandler(_handleDesktopLyricsVisibility);
     _desktopLyrics.setPlaybackActionHandler(_handleDesktopLyricsPlaybackAction);
+    _desktopLyrics.setLockChangedHandler(_handleDesktopLyricsLockChanged);
     _positionSub = audioPlayer.positionStream.listen((value) {
       if (!_isSeeking) {
         _setPositionBase(value, playing: isPlaying);
@@ -1759,6 +1760,18 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// 子窗工具栏请求切换锁定：统一走 updateDesktopLyricsSettings（落盘 +
+  /// notifyListeners 通知设置页 + 回推子窗后子窗重建并重设穿透）。
+  /// 锁定语义 = QQ 音乐式全穿透；解锁入口为托盘/设置页。
+  void _handleDesktopLyricsLockChanged(bool locked) {
+    if (desktopLyricsSettings.locked == locked) return;
+    unawaited(
+      updateDesktopLyricsSettings(
+        desktopLyricsSettings.copyWith(locked: locked),
+      ),
+    );
+  }
+
   Future<bool> checkDesktopLyricsPermission() =>
       _desktopLyrics.checkPermission();
 
@@ -2370,6 +2383,7 @@ class PlayerController extends ChangeNotifier {
     _saveStateTimer?.cancel();
     _desktopLyrics.setVisibilityChangedHandler(null);
     _desktopLyrics.setPlaybackActionHandler(null);
+    _desktopLyrics.setLockChangedHandler(null);
     positionListenable.dispose();
     unawaited(
       _audioEffects.configureEqualizer(

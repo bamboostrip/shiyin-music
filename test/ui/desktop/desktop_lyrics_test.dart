@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/services/desktop_lyrics_service.dart';
@@ -43,6 +44,40 @@ void main() {
       expect(restored.textColor, original.textColor);
       expect(restored.backgroundColor, original.backgroundColor);
       expect(restored.fontSize, original.fontSize);
+    });
+
+    test('兼容旧持久化字段：passthrough 仅解析保留，缺失字段取默认值', () {
+      // 旧版本 JSON：locked + passthrough 同时存在。
+      final legacy = DesktopLyricsSettings.fromMap(const {
+        'opacity': 0.5,
+        'locked': true,
+        'passthrough': true,
+        'fontSize': 20.0,
+      });
+      expect(legacy.locked, isTrue);
+      expect(legacy.passthrough, isTrue);
+      expect(legacy.opacity, 0.5);
+      expect(legacy.fontSize, 20.0);
+
+      // 字段缺失（更早版本）时不抛异常，逐项取默认值。
+      final minimal = DesktopLyricsSettings.fromMap(const {'locked': true});
+      expect(minimal.locked, isTrue);
+      expect(minimal.passthrough, isFalse);
+      expect(minimal.opacity, 0.0);
+      expect(minimal.fontSize, 24.0);
+    });
+
+    test('相等性与 copyWith（设置页监听外部锁定变化的基础）', () {
+      const locked = DesktopLyricsSettings(locked: true);
+      expect(const DesktopLyricsSettings(locked: true), locked);
+      expect(const DesktopLyricsSettings(locked: false, passthrough: true),
+          isNot(locked));
+
+      final unlocked = locked.copyWith(locked: false);
+      expect(unlocked.locked, isFalse);
+      expect(unlocked, const DesktopLyricsSettings());
+      // passthrough 字段保留解析，但 UI 已无该开关；锁定语义吸收穿透。
+      expect(locked.copyWith(locked: false).passthrough, isFalse);
     });
   });
 
@@ -242,6 +277,147 @@ void main() {
       expect(again, isTrue);
       expect(pushesOf('updateLyric').length, baseline + 2);
       expect(pushPayload(pushesOf('updateLyric').last)['current'], '第一句');
+    });
+
+    test('setLyricsLocked 转发回调；主窗处理后的 updateSettings 回推子窗',
+        () async {
+      final binding = TestDefaultBinaryMessengerBinding.instance;
+      setUpMultiWindowMocks(binding);
+      addTearDown(() => clearMultiWindowMocks(binding));
+
+      final reported = <bool>[];
+      final bridge = WindowsDesktopLyricsBridge(onLockChanged: reported.add);
+      await bridge.show(title: '标题', artist: '歌手');
+      await simulateChildMessage(binding, 'overlayReady');
+      outgoing.clear();
+
+      // 子窗工具栏锁定按钮上报 setLyricsLocked=true → 主窗回调。
+      await simulateChildMessage(binding, 'setLyricsLocked', true);
+      expect(reported, [true]);
+
+      // 模拟主窗侧（PlayerController）处理回调：落盘 + 回推新设置，
+      // 子窗不本地直改锁定状态，统一经 updateSettings 重建。
+      await bridge.updateSettings(const DesktopLyricsSettings(locked: true));
+      final pushes = pushesOf('updateSettings');
+      expect(pushes, hasLength(1));
+      expect(pushPayload(pushes.single)['locked'], isTrue);
+
+      // 子窗请求解锁同样转发。
+      await simulateChildMessage(binding, 'setLyricsLocked', false);
+      expect(reported, [true, false]);
+    });
+  });
+
+  group('锁定态纯歌词子树（QQ 音乐式全穿透）', () {
+    final contentKey = GlobalKey();
+
+    Future<void> pumpContent(
+      WidgetTester tester, {
+      required DesktopLyricsSettings settings,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: KeyedSubtree(
+            key: contentKey,
+            child: DesktopLyricsOverlayContent(
+              settings: settings,
+              current: '第一句歌词',
+              next: '第二句歌词',
+              isPlaying: true,
+              onControlPlayback: (_) {},
+              onToggleLock: (_) {},
+              onClose: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('锁定：只渲染歌词文字，无工具栏与任何 hover 组件',
+        (tester) async {
+      await pumpContent(
+        tester,
+        settings: const DesktopLyricsSettings(locked: true),
+      );
+
+      // 歌词文字仍在（含下一句）。
+      expect(find.text('第一句歌词'), findsOneWidget);
+      expect(find.text('第二句歌词'), findsOneWidget);
+
+      // 无任何依赖 hover 的窗内 UI：工具栏（Tooltip/图标）、MouseRegion。
+      // （限定在悬浮窗内容子树内：MaterialApp 自带框架级 MouseRegion。）
+      final content = find.byKey(contentKey);
+      expect(
+        find.descendant(of: content, matching: find.byType(Tooltip)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: content, matching: find.byType(MouseRegion)),
+        findsNothing,
+      );
+      // 工具栏全部图标（播放/锁定/关闭）在锁定子树中一律不存在。
+      const toolbarIcons = [
+        Icons.lock_open_rounded,
+        Icons.lock_rounded,
+        Icons.close_rounded,
+        Icons.play_arrow_rounded,
+        Icons.pause_rounded,
+        Icons.skip_previous_rounded,
+        Icons.skip_next_rounded,
+      ];
+      expect(
+        find.descendant(
+          of: content,
+          matching: find.byWidgetPredicate(
+            (w) => w is Icon && toolbarIcons.contains(w.icon),
+          ),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('未锁定：保留工具栏与锁按钮（悬停 UI 只属于非锁定态）',
+        (tester) async {
+      await pumpContent(tester, settings: const DesktopLyricsSettings());
+
+      expect(find.text('第一句歌词'), findsOneWidget);
+      expect(find.byType(Tooltip), findsWidgets);
+      expect(find.byIcon(Icons.lock_open_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+    });
+  });
+
+  group('applyDesktopLyricsPassthrough 锁定即穿透', () {
+    const windowManagerChannel = MethodChannel('window_manager');
+
+    test('locked ⇒ setIgnoreMouseEvents(true)；解锁恢复 false', () async {
+      final binding = TestDefaultBinaryMessengerBinding.instance;
+      final ignoreCalls = <bool>[];
+      binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowManagerChannel, (call) async {
+        if (call.method == 'setIgnoreMouseEvents') {
+          final args = call.arguments as Map;
+          ignoreCalls.add(args['ignore'] as bool);
+        }
+        return null;
+      });
+      addTearDown(() => binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(windowManagerChannel, null));
+
+      // 锁定即全穿透：不再受旧 passthrough 字段影响。
+      await applyDesktopLyricsPassthrough(
+        const DesktopLyricsSettings(locked: true, passthrough: false),
+      );
+      await applyDesktopLyricsPassthrough(
+        const DesktopLyricsSettings(locked: true, passthrough: true),
+      );
+      // 解锁恢复接收鼠标。
+      await applyDesktopLyricsPassthrough(
+        const DesktopLyricsSettings(locked: false),
+      );
+
+      expect(ignoreCalls, [true, true, false]);
     });
   });
 }

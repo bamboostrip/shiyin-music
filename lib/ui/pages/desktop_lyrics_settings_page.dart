@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../services/desktop_lyrics_service.dart';
+import '../form_factor.dart';
 
 class DesktopLyricsSettingsPage extends StatefulWidget {
   const DesktopLyricsSettingsPage({super.key, required this.player});
@@ -21,6 +22,10 @@ class _DesktopLyricsSettingsPageState
   void initState() {
     super.initState();
     _settings = widget.player.desktopLyricsSettings;
+    // 托盘「解锁桌面歌词」/子窗工具栏锁定按钮修改锁定状态后，设置页需跟随
+    // 刷新（PlayerController 是 ChangeNotifier，updateDesktopLyricsSettings
+    // 会 notifyListeners）。
+    widget.player.addListener(_syncFromPlayer);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         widget.player.setDesktopLyricsPreviewVisible(true);
@@ -30,8 +35,15 @@ class _DesktopLyricsSettingsPageState
 
   @override
   void dispose() {
+    widget.player.removeListener(_syncFromPlayer);
     widget.player.setDesktopLyricsPreviewVisible(false);
     super.dispose();
+  }
+
+  void _syncFromPlayer() {
+    final next = widget.player.desktopLyricsSettings;
+    if (next == _settings) return;
+    setState(() => _settings = next);
   }
 
   void _update(DesktopLyricsSettings Function(DesktopLyricsSettings s) fn) {
@@ -115,20 +127,31 @@ class _DesktopLyricsSettingsPageState
               _SwitchTile(
                 icon: Icons.lock_rounded,
                 iconColor: colorScheme.primary,
-                title: '锁定位置',
-                subtitle: '锁定后无法拖动移动歌词悬浮窗，点击悬浮窗锁图标可解锁',
+                title: isDesktopFormFactor ? '锁定桌面歌词' : '锁定位置',
+                subtitle: isDesktopFormFactor
+                    ? '锁定后桌面歌词鼠标穿透，可在托盘或此处解锁'
+                    : '锁定后无法拖动移动歌词悬浮窗，点击悬浮窗锁图标可解锁',
                 value: _settings.locked,
-                onChanged: (v) => _update((s) => s.copyWith(locked: v)),
+                // 桌面歌词未显示时锁定无意义：置灰。
+                onChanged: widget.player.desktopLyricsEnabled
+                    ? (v) => _update((s) => s.copyWith(locked: v))
+                    : null,
               ),
-              _SettingsDivider(),
-              _SwitchTile(
-                icon: Icons.touch_app_rounded,
-                iconColor: colorScheme.primary,
-                title: '触摸穿透',
-                subtitle: '启用后点击事件会穿透到下层应用',
-                value: _settings.passthrough,
-                onChanged: (v) => _update((s) => s.copyWith(passthrough: v)),
-              ),
+              // PC：锁定语义 = QQ 音乐式全穿透，"触摸穿透"已被锁定吸收，
+              // 不再提供独立开关（旧持久化字段仍兼容解析）。
+              // 移动端（Android 悬浮窗）locked 与 passthrough 是两个独立
+              // 原生行为，开关原样保留，不动移动端。
+              if (!isDesktopFormFactor) ...[
+                _SettingsDivider(),
+                _SwitchTile(
+                  icon: Icons.touch_app_rounded,
+                  iconColor: colorScheme.primary,
+                  title: '触摸穿透',
+                  subtitle: '启用后点击事件会穿透到下层应用',
+                  value: _settings.passthrough,
+                  onChanged: (v) => _update((s) => s.copyWith(passthrough: v)),
+                ),
+              ],
             ],
           ),
         ],

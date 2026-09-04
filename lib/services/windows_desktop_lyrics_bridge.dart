@@ -12,7 +12,9 @@
 //   overlayReady {}（子引擎通道就绪：主窗先打开就绪门控，再补发缓存的歌词与
 //   设置；门控打开前所有主->子推送静默跳过，避免子引擎 handler 注册完成前
 //   invoke 必抛的 MissingPluginException 竞态）/
-//   controlPlayback (action: 'previous' | 'togglePlay' | 'next')（悬停播控条触发主窗播控）。
+//   controlPlayback (action: 'previous' | 'togglePlay' | 'next')（悬停播控条触发主窗播控）/
+//   setLyricsLocked (locked: bool)（子窗工具栏请求切换锁定：主窗侧统一落盘、
+//   通知设置页，并把新 settings 回推子窗，子窗不本地直改锁定状态）。
 //
 // API 名以包源码为准（desktop_multi_window 0.2.1）：
 // - DesktopMultiWindow.createWindow([arguments]) -> WindowController
@@ -36,11 +38,14 @@ class WindowsDesktopLyricsBridge {
   WindowsDesktopLyricsBridge({
     DesktopLyricsVisibilityChanged? onVisibilityChanged,
     DesktopLyricsPlaybackAction? onPlaybackAction,
-  })  : _onVisibilityChanged = onVisibilityChanged,
-        _onPlaybackAction = onPlaybackAction;
+    DesktopLyricsLockChanged? onLockChanged,
+  }) : _onVisibilityChanged = onVisibilityChanged,
+       _onPlaybackAction = onPlaybackAction,
+       _onLockChanged = onLockChanged;
 
   final DesktopLyricsVisibilityChanged? _onVisibilityChanged;
   final DesktopLyricsPlaybackAction? _onPlaybackAction;
+  final DesktopLyricsLockChanged? _onLockChanged;
 
   /// 悬浮窗固定尺寸（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
   static const double overlayWidth = 780;
@@ -242,6 +247,11 @@ class WindowsDesktopLyricsBridge {
         if (action != null && action.isNotEmpty) {
           _onPlaybackAction?.call(action);
         }
+      } else if (call.method == 'setLyricsLocked') {
+        // 子窗工具栏锁定按钮：不在子窗本地直改状态，由回调方（PlayerController）
+        // 走 updateSettings 完成持久化 + 设置页通知，并经 updateSettings
+        // 回推子窗后统一重建（锁定即全穿透）。
+        _onLockChanged?.call(call.arguments == true);
       }
       return null;
     });

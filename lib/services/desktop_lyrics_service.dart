@@ -9,6 +9,10 @@ typedef DesktopLyricsVisibilityChanged =
 
 typedef DesktopLyricsPlaybackAction = void Function(String action);
 
+/// 子窗工具栏请求切换锁定状态（true=锁定，false=解锁）。
+/// 锁定语义 = QQ 音乐式全穿透，锁定/解锁统一由主窗落盘并回推子窗。
+typedef DesktopLyricsLockChanged = void Function(bool locked);
+
 class DesktopLyricsSettings {
   // 默认 QQ 音乐式透明悬浮：无底色（透明度 0），靠文字阴影保证可读性；
   // 字号 24 在 780x88 悬浮窗内展示效果最佳。用户可在设置页调回底色。
@@ -55,6 +59,26 @@ class DesktopLyricsSettings {
     'fontSize': fontSize,
   };
 
+  @override
+  bool operator ==(Object other) =>
+      other is DesktopLyricsSettings &&
+      other.opacity == opacity &&
+      other.locked == locked &&
+      other.passthrough == passthrough &&
+      other.textColor == textColor &&
+      other.backgroundColor == backgroundColor &&
+      other.fontSize == fontSize;
+
+  @override
+  int get hashCode => Object.hash(
+    opacity,
+    locked,
+    passthrough,
+    textColor,
+    backgroundColor,
+    fontSize,
+  );
+
   factory DesktopLyricsSettings.fromMap(Map<String, dynamic> map) {
     return DesktopLyricsSettings(
       opacity: (map['opacity'] as num?)?.toDouble() ?? 0.0,
@@ -72,13 +96,16 @@ class DesktopLyricsService {
   static bool _handlerAttached = false;
   static DesktopLyricsVisibilityChanged? _visibilityChanged;
   static DesktopLyricsPlaybackAction? _playbackAction;
+  static DesktopLyricsLockChanged? _lockChanged;
 
   /// Windows 桌面形态的悬浮窗桥接（进程级单例；Android 分支不使用）。
-  /// 可见性与播控回调经静态转发交给实例级 [_visibilityChanged] 与 [_playbackAction]。
+  /// 可见性、播控与锁定回调经静态转发交给实例级
+  /// [_visibilityChanged] / [_playbackAction] / [_lockChanged]。
   static final WindowsDesktopLyricsBridge? _windowsBridge = isDesktopFormFactor
       ? WindowsDesktopLyricsBridge(
           onVisibilityChanged: _forwardVisibilityChanged,
           onPlaybackAction: _forwardPlaybackAction,
+          onLockChanged: _forwardLockChanged,
         )
       : null;
 
@@ -91,6 +118,10 @@ class DesktopLyricsService {
 
   static void _forwardPlaybackAction(String action) {
     _playbackAction?.call(action);
+  }
+
+  static void _forwardLockChanged(bool locked) {
+    _lockChanged?.call(locked);
   }
 
   DesktopLyricsService() {
@@ -110,6 +141,10 @@ class DesktopLyricsService {
 
   void setPlaybackActionHandler(DesktopLyricsPlaybackAction? handler) {
     _playbackAction = handler;
+  }
+
+  void setLockChangedHandler(DesktopLyricsLockChanged? handler) {
+    _lockChanged = handler;
   }
 
   static void _attachHandler() {
