@@ -53,6 +53,12 @@ class PlayerController extends ChangeNotifier {
   static const _desktopLyricsEnabledSettingKey =
       'settings.desktop_lyrics_enabled';
   static const _desktopLyricsSettingsKey = 'settings.desktop_lyrics_settings';
+  // 桌面歌词设置版本号：v2 起默认透明悬浮（opacity 0.0/字号 24）。
+  // 老版本持久化的是旧默认值（0.8/16），不做迁移会盖掉代码新默认，
+  // 表现为“样式改了但重启无效”。版本对不上时丢弃旧值，用代码默认。
+  static const _desktopLyricsSettingsVersionKey =
+      'settings.desktop_lyrics_settings_version';
+  static const _desktopLyricsSettingsVersion = 2;
   static const _smartQualitySettingKey = 'settings.smart_quality_enabled';
   static const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
   static const _autoPlayOnDeviceConnectedSettingKey =
@@ -1700,6 +1706,14 @@ class PlayerController extends ChangeNotifier {
       _desktopLyricsSettingsKey,
       jsonEncode(settings.toMap()),
     );
+    await prefs.setInt(
+      _desktopLyricsSettingsVersionKey,
+      _desktopLyricsSettingsVersion,
+    );
+    debugPrint(
+      '[时音][桌面歌词] 设置已保存 opacity=${settings.opacity} '
+      'fontSize=${settings.fontSize}',
+    );
     notifyListeners();
     await _desktopLyrics.updateSettings(settings);
   }
@@ -1875,14 +1889,24 @@ class PlayerController extends ChangeNotifier {
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
     desktopLyricsEnabled =
         prefs.getBool(_desktopLyricsEnabledSettingKey) ?? desktopLyricsEnabled;
-    final dlSettingsRaw = prefs.getString(_desktopLyricsSettingsKey);
-    if (dlSettingsRaw != null && dlSettingsRaw.isNotEmpty) {
-      try {
-        final map = jsonDecode(dlSettingsRaw);
-        if (map is Map<String, dynamic>) {
-          desktopLyricsSettings = DesktopLyricsSettings.fromMap(map);
-        }
-      } catch (_) {}
+    final dlVersion =
+        prefs.getInt(_desktopLyricsSettingsVersionKey) ?? 0;
+    if (dlVersion >= _desktopLyricsSettingsVersion) {
+      final dlSettingsRaw = prefs.getString(_desktopLyricsSettingsKey);
+      if (dlSettingsRaw != null && dlSettingsRaw.isNotEmpty) {
+        try {
+          final map = jsonDecode(dlSettingsRaw);
+          if (map is Map<String, dynamic>) {
+            desktopLyricsSettings = DesktopLyricsSettings.fromMap(map);
+          }
+        } catch (_) {}
+      }
+    } else {
+      // 旧版本残留直接丢弃，并把版本号写到最新，避免每次启动重复判断。
+      await prefs.setInt(
+        _desktopLyricsSettingsVersionKey,
+        _desktopLyricsSettingsVersion,
+      );
     }
     unawaited(audioPlayer.setSpeed(playbackSpeed));
     if (desktopLyricsEnabled) {

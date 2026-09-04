@@ -56,13 +56,34 @@ class WindowsDesktopLyricsBridge {
   /// 最近一次记录的前台状态（诊断/调试用途）。
   bool get appForeground => _appForeground;
 
-  Future<bool> show({required String title, required String artist}) async {
+  /// show/hide 串行化队列：开关连点时 createWindow/close 都是异步多步，
+  /// 并发执行会造出幽灵窗口（hide 关了空引用，show 后续又把窗建出来；
+  /// 两个 show 并发则第二个覆盖 _window，第一个成孤儿只能点卡片 X 关）。
+  /// 所有创建/销毁走同一队列，顺序执行，终态必与最后一次操作一致。
+  Future<void> _serial = Future.value();
+
+  Future<T> _enqueue<T>(Future<T> Function() task) {
+    final next = _serial.then((_) => task());
+    _serial = next.then((_) {}, onError: (_) {});
+    return next;
+  }
+
+  Future<bool> show({required String title, required String artist}) =>
+      _enqueue(() => _showInner(title: title, artist: artist));
+
+  Future<void> hide() => _enqueue(_hideInner);
+
+  Future<bool> _showInner({required String title, required String artist}) async {
     if (_visible && _window != null) {
       // 已在展示：仅补发缓存内容（标题/歌手 v1 不上屏）。
       await _pushLyric();
       return true;
     }
     debugPrint('[桌面歌词主窗] show 开始 title=$title artist=$artist');
+    debugPrint(
+      '[桌面歌词主窗] 生效设置 opacity=${_settings.opacity} '
+      'fontSize=${_settings.fontSize}',
+    );
     try {
       // 懒注册主窗侧消息处理（先于子窗可能的 windowClosed 上报）。
       _ensureMethodHandler();
@@ -109,7 +130,7 @@ class WindowsDesktopLyricsBridge {
     }
   }
 
-  Future<void> hide() async {
+  Future<void> _hideInner() async {
     final window = _window;
     _visible = false;
     _window = null;
