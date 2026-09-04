@@ -3,6 +3,7 @@ import 'dart:math' as math;
 // window_manager 未重新导出 dart:ui 类型，Size/Offset 需自行引入。
 import 'dart:ui' show Offset, Rect, Size;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -45,21 +46,63 @@ class DesktopWindow {
     });
     _saver = _WindowGeometrySaver(prefs);
     windowManager.addListener(_saver!);
+    // 关闭按钮拦截恒开（桌面形态才走到这里）：native 收到 WM_CLOSE 后
+    // 不再直接销毁窗口，改由 [_WindowGeometrySaver.onWindowClose] 决定
+    // 隐藏到托盘还是真正退出。
+    await windowManager.setPreventClose(true);
   }
 
   static _WindowGeometrySaver? _saver;
 
+  /// "关闭时最小化到托盘"持久化键。
+  static const String kCloseToTrayPrefKey = 'window.closeToTray';
+
+  /// 读取关闭行为：true（默认）→ 关闭时隐藏到托盘；false → 真正退出。
+  static bool closeToTrayEnabled(SharedPreferences prefs) =>
+      prefs.getBool(kCloseToTrayPrefKey) ?? true;
+
+  /// 写入关闭行为设置。
+  static Future<void> setCloseToTray(SharedPreferences prefs, bool value) =>
+      prefs.setBool(kCloseToTrayPrefKey, value);
+
+  /// 立即持久化当前窗口几何（取消防抖）。
+  ///
+  /// 供托盘"退出"等在销毁窗口前调用，保证最后一次位置不丢失。
+  static Future<void> flushGeometry() async => _saver?.flush();
+
+  /// 重置窗口：清空持久化几何，恢复默认尺寸并居中。
+  ///
+  /// 非桌面形态只清 prefs，不触碰窗口管理器（可能未初始化）。
+  static Future<void> resetToDefault() async {
+    final prefs = await SharedPreferences.getInstance();
+    await DesktopWindowGeometry.reset(prefs);
+    if (!isDesktopFormFactor) return;
+    await windowManager.setBounds(
+      Rect.fromLTWH(0, 0, kDefaultSize.width, kDefaultSize.height),
+    );
+    await windowManager.center();
+  }
+
   /// 取当前所有显示器的可见区域（主显示器在前），钳制已保存几何。
+  ///
+  /// 显示器查询失败（驱动/远程会话异常等）时无从钳制，
+  /// 回退为直接使用保存几何，避免整个恢复流程失败。
   static Future<DesktopWindowGeometry> _clampToConnectedDisplays(
     DesktopWindowGeometry geometry,
   ) async {
-    final primary = await screenRetriever.getPrimaryDisplay();
-    final all = await screenRetriever.getAllDisplays();
-    // 主显示器排最前：钳制时优先落回主显示器（按 id 去重）。
-    final displays = <Display>[
-      primary,
-      ...all.where((display) => display.id != primary.id),
-    ];
+    final List<Display> displays;
+    try {
+      final primary = await screenRetriever.getPrimaryDisplay();
+      final all = await screenRetriever.getAllDisplays();
+      // 主显示器排最前：钳制时优先落回主显示器（按 id 去重）。
+      displays = [
+        primary,
+        ...all.where((display) => display.id != primary.id),
+      ];
+    } catch (error) {
+      debugPrint('DesktopWindow: 显示器查询失败，跳过钳制: $error');
+      return geometry;
+    }
     final visibleAreas = displays.map(_visibleAreaOf).toList();
     return DesktopWindowGeometry.clampToVisibleAreas(geometry, visibleAreas);
   }
@@ -179,7 +222,7 @@ class DesktopWindowGeometry {
   }
 }
 
-/// 监听窗口移动/缩放，防抖后持久化几何。
+/// 监听窗口移动/缩放，防抖后持久化几何；同时承担关闭拦截行为。
 class _WindowGeometrySaver extends WindowListener {
   _WindowGeometrySaver(this._prefs);
 
@@ -192,16 +235,43 @@ class _WindowGeometrySaver extends WindowListener {
   @override
   void onWindowResize() => _scheduleSave();
 
+  /// 关闭拦截（[DesktopWindow.ensureInitialized] 已 setPreventClose）：
+  /// 先取消防抖并立即落盘几何，再按用户设置决定隐藏到托盘还是真正退出。
+  @override
+  void onWindowClose() {
+    unawaited(_handleWindowClose());
+  }
+
+  Future<void> _handleWindowClose() async {
+    await flush();
+    if (DesktopWindow.closeToTrayEnabled(_prefs)) {
+      await windowManager.hide();
+    } else {
+      await windowManager.destroy();
+    }
+  }
+
   void _scheduleSave() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () async {
-      final bounds = await windowManager.getBounds();
-      await DesktopWindowGeometry(
-        left: bounds.left,
-        top: bounds.top,
-        width: bounds.width,
-        height: bounds.height,
-      ).save(_prefs);
+      await _saveNow();
     });
+  }
+
+  /// 取消防抖并立即保存当前几何。
+  Future<void> flush() async {
+    _debounce?.cancel();
+    _debounce = null;
+    await _saveNow();
+  }
+
+  Future<void> _saveNow() async {
+    final bounds = await windowManager.getBounds();
+    await DesktopWindowGeometry(
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    ).save(_prefs);
   }
 }

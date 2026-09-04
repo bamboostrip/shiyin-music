@@ -20,9 +20,11 @@ import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
 import 'services/network_monitor.dart';
 import 'ui/adaptive_layout.dart';
+import 'ui/desktop/desktop_tray.dart';
 import 'ui/desktop/desktop_window.dart';
 import 'ui/desktop/lyrics_overlay_window.dart';
 import 'ui/app_theme.dart';
+import 'ui/form_factor.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/widgets/toast.dart';
@@ -130,10 +132,16 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _downloads.initialize();
     });
+    // Windows 桌面：托盘常驻（左键切换窗口、右键菜单、退出）。
+    if (isDesktopFormFactor) {
+      unawaited(DesktopTray.init(player: _player));
+    }
   }
 
   @override
   void dispose() {
+    // 先摘除托盘，避免销毁中的控制器再被托盘菜单回调触发。
+    unawaited(DesktopTray.dispose());
     WidgetsBinding.instance.removeObserver(this);
     unawaited(NetworkMonitor.instance.stop());
     _auth.dispose();

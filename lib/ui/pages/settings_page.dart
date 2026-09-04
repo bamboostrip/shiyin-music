@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
@@ -20,6 +23,8 @@ import 'personalization_settings_page.dart';
 import 'playback_history_page.dart';
 import 'playback_stats_page.dart';
 import '../adaptive_layout.dart';
+import '../desktop/desktop_window.dart';
+import '../form_factor.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -394,6 +399,26 @@ class SettingsPage extends StatelessWidget {
                       ],
                     ],
                   ),
+                  const SizedBox(height: 20),
+                  // Desktop section（仅桌面形态：托盘关闭行为 + 窗口重置）
+                  if (isDesktopFormFactor) ...[
+                    const _SectionHeader(title: '桌面'),
+                    const SizedBox(height: 8),
+                    _SettingsCard(
+                      children: [
+                        const _CloseToTraySwitch(),
+                        _SettingsDivider(),
+                        _SettingsTile(
+                          icon: Icons.crop_square_rounded,
+                          iconColor: const Color(0xFF7CB342),
+                          title: '重置窗口',
+                          subtitle: '恢复默认窗口大小并居中',
+                          onTap: () =>
+                              unawaited(DesktopWindow.resetToDefault()),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   // Cache section
                   const _SectionHeader(title: '缓存'),
@@ -834,6 +859,55 @@ class _SettingsDivider extends StatelessWidget {
       height: 1,
       indent: 64,
       color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .24),
+    );
+  }
+}
+
+/// "关闭时最小化到托盘"开关（桌面形态专属）。
+///
+/// settings_page 整页为 StatelessWidget，为避免整页改造，
+/// 该开关独立成小组件，自行读写 prefs 键
+/// [DesktopWindow.kCloseToTrayPrefKey]（默认 true）。
+class _CloseToTraySwitch extends StatefulWidget {
+  const _CloseToTraySwitch();
+
+  @override
+  State<_CloseToTraySwitch> createState() => _CloseToTraySwitchState();
+}
+
+class _CloseToTraySwitchState extends State<_CloseToTraySwitch> {
+  /// 默认开启，与关闭行为默认值一致，prefs 读取完成后覆盖。
+  bool _closeToTray = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _closeToTray = DesktopWindow.closeToTrayEnabled(prefs);
+    });
+  }
+
+  Future<void> _onChanged(bool value) async {
+    setState(() => _closeToTray = value);
+    final prefs = await SharedPreferences.getInstance();
+    await DesktopWindow.setCloseToTray(prefs, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsSwitchTile(
+      icon: Icons.window_rounded,
+      iconColor: const Color(0xFF00B0FF),
+      title: '关闭时最小化到托盘',
+      subtitle: '点关闭按钮时隐藏到系统托盘，音乐不断',
+      value: _closeToTray,
+      onChanged: (value) => unawaited(_onChanged(value)),
     );
   }
 }
