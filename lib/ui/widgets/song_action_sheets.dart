@@ -6,6 +6,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../form_factor.dart';
 import 'artwork.dart';
 import 'toast.dart';
 
@@ -32,6 +33,14 @@ Future<void> showSongActionSheet({
   required Song song,
   required List<SongSheetAction> actions,
 }) {
+  if (isDesktopFormFactor) {
+    return _showDesktopSongActionMenu(
+      context: context,
+      song: song,
+      actions: actions,
+    );
+  }
+
   final isLandscape = MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
   // 左侧滑入弹窗是车机专属交互，普通横屏用标准底部弹窗。
   final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
@@ -517,6 +526,238 @@ class _CarGridActionItem extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _showDesktopSongActionMenu({
+  required BuildContext context,
+  required Song song,
+  required List<SongSheetAction> actions,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierColor: Colors.black.withValues(alpha: 0.28),
+    builder: (dialogContext) {
+      return _DesktopSongActionMenuDialog(
+        song: song,
+        actions: actions,
+      );
+    },
+  );
+}
+
+class _DesktopSongActionMenuDialog extends StatelessWidget {
+  const _DesktopSongActionMenuDialog({
+    required this.song,
+    required this.actions,
+  });
+
+  final Song song;
+  final List<SongSheetAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    final bgColor = isDark
+        ? const Color(0xFF1E212B)
+        : colorScheme.surface;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : colorScheme.outlineVariant.withValues(alpha: 0.8);
+    final dividerColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : colorScheme.outlineVariant.withValues(alpha: 0.6);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Center(
+        child: Container(
+          width: 236,
+          constraints: const BoxConstraints(maxHeight: 460),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(13),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 顶部紧凑歌曲信息
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                  child: Row(
+                    children: [
+                      Artwork(url: song.coverUrl, size: 32, borderRadius: 6),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 11,
+                                height: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                        iconSize: 16,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                        splashRadius: 14,
+                        tooltip: '关闭',
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: dividerColor,
+                ),
+                // 菜单项垂直排列
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final action in actions)
+                          _DesktopSongActionItem(action: action),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopSongActionItem extends StatefulWidget {
+  const _DesktopSongActionItem({required this.action});
+
+  final SongSheetAction action;
+
+  @override
+  State<_DesktopSongActionItem> createState() => _DesktopSongActionItemState();
+}
+
+class _DesktopSongActionItemState extends State<_DesktopSongActionItem> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final hoverColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : colorScheme.surfaceContainerHigh;
+    final color = widget.action.danger ? colorScheme.error : colorScheme.onSurface;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Semantics(
+        button: true,
+        label: widget.action.title,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            Navigator.of(context).pop();
+            Future<void>.delayed(
+              const Duration(milliseconds: 100),
+              () => widget.action.onTap(),
+            );
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: 38,
+            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: _hovering ? hoverColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  widget.action.icon,
+                  size: 18,
+                  color: color,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    widget.action.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ),
+                if (widget.action.subtitle != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.action.subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
