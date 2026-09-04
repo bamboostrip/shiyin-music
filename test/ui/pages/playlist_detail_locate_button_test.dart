@@ -268,6 +268,12 @@ void main() {
       expect(find.byType(LocateCurrentSongButton), findsNothing);
     });
 
+    testWidgets('播放歌曲不属于本歌单（队列不匹配）不显示定位按钮', (tester) async {
+      player.play(outsiderSong, [outsiderSong]);
+      await pumpPage(tester, const Size(480, 850));
+      expect(find.byType(LocateCurrentSongButton), findsNothing);
+    });
+
     testWidgets('点击按钮深页限量加载后滚动到目标行', (tester) async {
       player.play(songs[55], songs);
       await pumpPage(tester, const Size(480, 850));

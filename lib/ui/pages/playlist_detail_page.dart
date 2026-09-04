@@ -1782,10 +1782,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               // 右下角手动定位按钮：进入页面不再自动滚动，由用户点击定位。
               // 多选模式下隐藏（给多选底栏让位）；显隐用 AnimatedBuilder 只
               // 重建按钮子树，响应切歌，不 setState 整页。
+              // bottom 在 MiniPlayer 顶边之上再留 8px 间隙，避免按钮阴影
+              // 贴住迷你播放条。
               if (!_isSelecting)
                 Positioned(
                   right: isDesktopFormFactor ? 24.0 : 16.0,
-                  bottom: bottomInset + _miniPlayerExtent + 10,
+                  bottom: bottomInset + _miniPlayerExtent + 10 + 8,
                   child: AnimatedBuilder(
                     animation: widget.player,
                     builder: (context, _) {
