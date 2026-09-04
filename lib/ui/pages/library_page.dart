@@ -310,6 +310,7 @@ class _LibraryPageState extends State<LibraryPage> {
                           if (!(_isLandscape(context) && widget.theme.carModeEnabled))
                             IconButton(
                               tooltip: '设置',
+                              mouseCursor: SystemMouseCursors.click,
                               onPressed: _openSettings,
                               icon: const Icon(Icons.settings_rounded),
                               iconSize: 22,
@@ -388,13 +389,15 @@ class _LibraryPageState extends State<LibraryPage> {
                             icon: const Icon(Icons.add_rounded, size: 20),
                             visualDensity: VisualDensity.compact,
                             tooltip: '新建歌单',
+                            mouseCursor: SystemMouseCursors.click,
                             onPressed: _showCreatePlaylistDialog,
                           ),
                           if (created.isNotEmpty)
                             IconButton(
                               icon: const Icon(Icons.sort_rounded, size: 19),
                               visualDensity: VisualDensity.compact,
-                              tooltip: _sortModeLabel,
+                              tooltip: '排序方式: $_sortModeLabel',
+                              mouseCursor: SystemMouseCursors.click,
                               onPressed: () => _showSortSheet(context),
                             ),
                         ],
@@ -775,6 +778,7 @@ class _QuickHubTile extends StatefulWidget {
 
 class _QuickHubTileState extends State<_QuickHubTile> {
   bool _isPressed = false;
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -784,91 +788,115 @@ class _QuickHubTileState extends State<_QuickHubTile> {
 
     final primaryColor = widget.gradientColors.last;
     final cardBgColor = isDark
-        ? Colors.white.withValues(alpha: .06)
-        : Colors.white.withValues(alpha: .85);
+        ? (_isHovered
+            ? Colors.white.withValues(alpha: .10)
+            : Colors.white.withValues(alpha: .06))
+        : (_isHovered
+            ? Colors.white
+            : Colors.white.withValues(alpha: .85));
     final cardBorderColor = isDark
-        ? Colors.white.withValues(alpha: .12)
-        : Colors.white.withValues(alpha: .92);
+        ? (_isHovered
+            ? Colors.white.withValues(alpha: .24)
+            : Colors.white.withValues(alpha: .12))
+        : (_isHovered
+            ? primaryColor.withValues(alpha: .35)
+            : Colors.white.withValues(alpha: .92));
 
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _isPressed = true),
-      onTapUp: (_) => setState(() => _isPressed = false),
-      onTapCancel: () => setState(() => _isPressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _isPressed ? 0.95 : 1.0,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        child: Container(
-          height: 68,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: cardBgColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: cardBorderColor, width: 1.1),
-            boxShadow: [
-              BoxShadow(
-                color: isDark
-                    ? Colors.black.withValues(alpha: .20)
-                    : const Color(0x0C000000),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _isPressed = true),
+        onTapUp: (_) => setState(() => _isPressed = false),
+        onTapCancel: () => setState(() => _isPressed = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _isPressed ? 0.95 : (_isHovered ? 1.015 : 1.0),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            height: 68,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: cardBgColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: cardBorderColor,
+                width: _isHovered ? 1.3 : 1.1,
               ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: widget.gradientColors,
+              boxShadow: [
+                BoxShadow(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: _isHovered ? .35 : .20)
+                      : (_isHovered
+                          ? const Color(0x18000000)
+                          : const Color(0x0C000000)),
+                  blurRadius: _isHovered ? 14 : 10,
+                  offset: Offset(0, _isHovered ? 4 : 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: widget.gradientColors,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primaryColor.withValues(
+                          alpha: _isHovered
+                              ? (isDark ? .55 : .40)
+                              : (isDark ? .40 : .30),
+                        ),
+                        blurRadius: _isHovered ? 10 : 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: primaryColor.withValues(alpha: isDark ? .40 : .30),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  child: Icon(widget.icon, color: Colors.white, size: 22),
                 ),
-                child: Icon(widget.icon, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                        letterSpacing: -0.2,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                          letterSpacing: -0.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w500,
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -904,45 +932,53 @@ class _CollapsibleSection extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: onToggle,
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-            child: Row(
-              children: [
-                AnimatedRotation(
-                  turns: isExpanded ? 0.0 : -0.25,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  child: Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 22,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                  ),
-                ),
-                if (count != null) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    '$count',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+        Material(
+          color: Colors.transparent,
+          child: Tooltip(
+            message: isExpanded ? '点击收起 $title' : '点击展开 $title',
+            waitDuration: const Duration(milliseconds: 500),
+            child: InkWell(
+              onTap: onToggle,
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+                child: Row(
+                  children: [
+                    AnimatedRotation(
+                      turns: isExpanded ? 0.0 : -0.25,
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 22,
+                        color: colorScheme.onSurface,
+                      ),
                     ),
-                  ),
-                ],
-                const Spacer(),
-                ...?trailingActions,
-              ],
+                    const SizedBox(width: 4),
+                    Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (count != null) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '$count',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    ...?trailingActions,
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -978,62 +1014,66 @@ class _CloudDriveSectionItem extends StatelessWidget {
       borderRadius: AppRadius.lg,
       padding: EdgeInsets.zero,
       enableTouchFlex: false,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF68B0FB), Color(0xFF3378FF)],
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          mouseCursor: SystemMouseCursors.click,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF68B0FB), Color(0xFF3378FF)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF3378FF).withValues(alpha: isDark ? .40 : .30),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF3378FF).withValues(alpha: isDark ? .40 : .30),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  child: const Icon(Icons.cloud_rounded, color: Colors.white, size: 22),
                 ),
-                child: const Icon(Icons.cloud_rounded, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '云盘音乐',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '云盘音乐',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '随时随地，同步云端音乐资产',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 12,
+                      const SizedBox(height: 2),
+                      Text(
+                        '随时随地，同步云端音乐资产',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: colorScheme.outline,
-              ),
-            ],
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: colorScheme.outline,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1059,6 +1099,7 @@ class _SortOptionTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
+      mouseCursor: SystemMouseCursors.click,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
@@ -1207,6 +1248,7 @@ class _PlaylistGroup extends StatelessWidget {
             borderRadius: AppRadius.lg,
             padding: EdgeInsets.zero,
             child: _PlaylistRow(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
               playlist: playlists[i],
               selected: multiSelectMode && selectedIndices.contains(i),
               multiSelectMode: multiSelectMode,
@@ -1228,6 +1270,7 @@ class _PlaylistGroup extends StatelessWidget {
         children: [
           for (var i = 0; i < playlists.length; i++) ...[
             _PlaylistRow(
+              borderRadius: BorderRadius.circular(AppRadius.md),
               playlist: playlists[i],
               selected: multiSelectMode && selectedIndices.contains(i),
               multiSelectMode: multiSelectMode,
@@ -1251,13 +1294,14 @@ class _PlaylistGroup extends StatelessWidget {
 
 // --- 9. 歌单列表单项 (Playlist Row) ---
 
-class _PlaylistRow extends StatelessWidget {
+class _PlaylistRow extends StatefulWidget {
   const _PlaylistRow({
     required this.playlist,
     required this.onTap,
     this.onLongPress,
     this.selected = false,
     this.multiSelectMode = false,
+    this.borderRadius,
   });
 
   final PlaylistSummary playlist;
@@ -1265,73 +1309,112 @@ class _PlaylistRow extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool selected;
   final bool multiSelectMode;
+  final BorderRadius? borderRadius;
+
+  @override
+  State<_PlaylistRow> createState() => _PlaylistRowState();
+}
+
+class _PlaylistRowState extends State<_PlaylistRow> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: [
-            if (multiSelectMode)
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
-                  child: selected
-                      ? Icon(
-                          Icons.check_circle_rounded,
-                          key: const ValueKey('checked'),
-                          size: 26,
-                          color: colorScheme.primary,
-                        )
-                      : Icon(
-                          Icons.radio_button_unchecked_rounded,
-                          key: const ValueKey('unchecked'),
-                          size: 26,
-                          color: colorScheme.outline,
-                        ),
-                ),
-              )
-            else
-              Artwork(url: playlist.coverUrl, size: 44, borderRadius: 8),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    final hoverColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : colorScheme.surfaceContainerHigh;
+    final effectiveRadius =
+        widget.borderRadius ?? BorderRadius.circular(AppRadius.md);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: _isHovered ? hoverColor : Colors.transparent,
+          borderRadius: effectiveRadius,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: effectiveRadius,
+            mouseCursor: SystemMouseCursors.click,
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
                 children: [
-                  Text(
-                    playlist.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
+                  if (widget.multiSelectMode)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        child: widget.selected
+                            ? Icon(
+                                Icons.check_circle_rounded,
+                                key: const ValueKey('checked'),
+                                size: 26,
+                                color: colorScheme.primary,
+                              )
+                            : Icon(
+                                Icons.radio_button_unchecked_rounded,
+                                key: const ValueKey('unchecked'),
+                                size: 26,
+                                color: colorScheme.outline,
+                              ),
+                      ),
+                    )
+                  else
+                    Artwork(
+                      url: widget.playlist.coverUrl,
+                      size: 44,
+                      borderRadius: 8,
+                    ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.playlist.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    playlist.songCount == null
-                        ? (playlist.subtitle ?? '歌单')
-                        : '${playlist.songCount} 首歌',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.playlist.songCount == null
+                              ? (widget.playlist.subtitle ?? '歌单')
+                              : '${widget.playlist.songCount} 首歌',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
                         ),
+                      ],
+                    ),
                   ),
+                  if (!widget.multiSelectMode)
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 20,
+                      color: colorScheme.outline,
+                    ),
                 ],
               ),
             ),
-            if (!multiSelectMode)
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: colorScheme.outline,
-              ),
-          ],
+          ),
         ),
       ),
     );
