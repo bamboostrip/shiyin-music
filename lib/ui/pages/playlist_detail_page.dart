@@ -15,6 +15,7 @@ import '../widgets/app_section.dart';
 import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../widgets/import_playlist_sheet.dart';
+import '../widgets/locate_current_song_button.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
@@ -56,6 +57,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   static const _heroExpandedHeightMobile = 412.0;
   static const _heroExpandedHeightDesktop = 236.0;
   static const _stickyHeaderHeight = 68.0;
+
+  /// MiniPlayer 悬浮条总高（64 内容 + 2 进度条），定位按钮悬浮其上方。
+  static const _miniPlayerExtent = 66.0;
 
   double get _heroExpandedHeight =>
       isDesktopFormFactor ? _heroExpandedHeightDesktop : _heroExpandedHeightMobile;
@@ -101,8 +105,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   /// 多选批量下载进行中。
   bool _isBatchDownloading = false;
 
-  /// 自动定位当前播放歌曲相关状态。
-  bool _autoLocateDone = false;
+  /// 手动定位当前播放歌曲（右下角定位按钮）相关状态。
   bool _isLocating = false;
   int? _locateTargetIndex;
   final GlobalKey _locateRowKey = GlobalKey();
@@ -548,12 +551,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         });
         return;
       }
-      // 有缓存数据，保持不报错（降级），继续走相似歌单/自动定位。
+      // 有缓存数据，保持不报错（降级），继续走相似歌单加载。
     }
     unawaited(_loadSimilarPlaylists());
-    if (widget.player.currentSong != null && _errorMessage == null) {
-      unawaited(_autoLocateCurrentSong());
-    }
   }
 
   /// 加载相似歌单（增强展示，失败静默忽略）。
@@ -643,16 +643,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  /// 打开页面时自动定位到当前播放的歌曲（滚动到其所在行）。
+  /// 手动定位到当前播放的歌曲（右下角定位按钮触发，滚动到其所在行）。
   ///
   /// 当前歌曲尚未加载（分页懒加载）时：若播放队列与当前歌单匹配
   /// （已加载歌曲全部属于当前队列），逐页加载直到找到；否则不再额外请求，
-  /// 避免打开任意歌单都触发全量加载。
-  Future<void> _autoLocateCurrentSong() async {
-    if (_autoLocateDone || _isLocating) return;
+  /// 避免点一次按钮就触发全量加载。
+  Future<void> _locateCurrentSong() async {
+    if (_isLocating) return;
     final current = widget.player.currentSong;
     if (current == null) return;
-    _autoLocateDone = true;
     _isLocating = true;
     try {
       var index = _filteredSongs.indexWhere((s) => s.hash == current.hash);
@@ -684,6 +683,17 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final queueHashes = widget.player.queue.map((s) => s.hash).toSet();
     if (queueHashes.isEmpty || _songs.isEmpty) return false;
     return _songs.every((s) => queueHashes.contains(s.hash));
+  }
+
+  /// 定位按钮可见性：当前有播放歌曲，且该歌曲已在已加载歌曲列表中；
+  /// 尚未加载到时用「队列像来自本歌单」做代理（深页场景，点击后限量
+  /// 加载再定位）。搜索过滤把当前歌滤掉时列表滚不到它，直接隐藏。
+  bool get _canShowLocateButton {
+    final current = widget.player.currentSong;
+    if (current == null) return false;
+    if (_filteredSongs.any((s) => s.hash == current.hash)) return true;
+    if (_searchQuery.isNotEmpty) return false;
+    return _queueMatchesThisPlaylist();
   }
 
   /// 滚动到展示列表中 [displayIndex] 所在行：先按固定行高估算偏移跳转，
@@ -1768,6 +1778,25 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                   right: 0,
                   bottom: bottomInset + 10,
                   child: MiniPlayer(player: widget.player, auth: widget.auth),
+                ),
+              // 右下角手动定位按钮：进入页面不再自动滚动，由用户点击定位。
+              // 多选模式下隐藏（给多选底栏让位）；显隐用 AnimatedBuilder 只
+              // 重建按钮子树，响应切歌，不 setState 整页。
+              if (!_isSelecting)
+                Positioned(
+                  right: isDesktopFormFactor ? 24.0 : 16.0,
+                  bottom: bottomInset + _miniPlayerExtent + 10,
+                  child: AnimatedBuilder(
+                    animation: widget.player,
+                    builder: (context, _) {
+                      if (!_canShowLocateButton) {
+                        return const SizedBox.shrink();
+                      }
+                      return LocateCurrentSongButton(
+                        onPressed: _locateCurrentSong,
+                      );
+                    },
+                  ),
                 ),
             ],
           ),
