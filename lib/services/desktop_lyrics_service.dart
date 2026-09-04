@@ -8,13 +8,15 @@ typedef DesktopLyricsVisibilityChanged =
     void Function({required bool visible, required bool userClosed});
 
 class DesktopLyricsSettings {
+  // 默认 QQ 音乐式透明悬浮：无底色（透明度 0），靠文字阴影保证可读性；
+  // 字号 24 在 720x120 悬浮窗内展示效果最佳。用户可在设置页调回底色。
   const DesktopLyricsSettings({
-    this.opacity = 0.8,
+    this.opacity = 0.0,
     this.locked = false,
     this.passthrough = false,
     this.textColor = 0xFFFFFFFF,
     this.backgroundColor = 0xFF1A1A2E,
-    this.fontSize = 16.0,
+    this.fontSize = 24.0,
   });
 
   final double opacity;
@@ -53,12 +55,12 @@ class DesktopLyricsSettings {
 
   factory DesktopLyricsSettings.fromMap(Map<String, dynamic> map) {
     return DesktopLyricsSettings(
-      opacity: (map['opacity'] as num?)?.toDouble() ?? 0.8,
+      opacity: (map['opacity'] as num?)?.toDouble() ?? 0.0,
       locked: map['locked'] as bool? ?? false,
       passthrough: map['passthrough'] as bool? ?? false,
       textColor: (map['textColor'] as num?)?.toInt() ?? 0xFFFFFFFF,
       backgroundColor: (map['backgroundColor'] as num?)?.toInt() ?? 0xFF1A1A2E,
-      fontSize: (map['fontSize'] as num?)?.toDouble() ?? 16.0,
+      fontSize: (map['fontSize'] as num?)?.toDouble() ?? 24.0,
     );
   }
 }

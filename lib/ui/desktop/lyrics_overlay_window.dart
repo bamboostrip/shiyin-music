@@ -203,24 +203,30 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   }
 
   debugPrint('[桌面歌词悬浮窗] [9/9] runApp 开始');
-  // 子引擎未捕获的 Dart 异常也打印出来，避免静默。
-  runZonedGuarded(() {
-    runApp(_LyricsOverlayApp(model: model));
-    debugPrint('[桌面歌词悬浮窗] [9/9] runApp 已调用，等待首帧');
-    // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)）。首帧渲染完成
-    // 后再显示：此前 show() 在 runApp 之前调用，空窗口先行贴屏，
-    // 既闪现白底默认窗，也可能与引擎首帧初始化竞态。
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      debugPrint('[桌面歌词悬浮窗] 首帧回调触发，show 开始');
-      try {
-        await shownController.show();
-        debugPrint('[桌面歌词悬浮窗] show ok');
-      } catch (e) {
-        debugPrint('[桌面歌词悬浮窗] show 失败: $e');
-      }
-    });
-  }, (error, stack) {
-    debugPrint('[桌面歌词悬浮窗] 未捕获异常: $error\n$stack');
+  // 子引擎异常上报：必须与 binding 同 zone，不能用 runZonedGuarded 包 runApp
+  // （binding 在根 zone 初始化，换 zone 会触发 Zone mismatch 断言）。
+  final flutterOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    debugPrint('[桌面歌词悬浮窗] FlutterError: ${details.exception}\n${details.stack}');
+    flutterOnError?.call(details);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    debugPrint('[桌面歌词悬浮窗] 未捕获异步异常: $error\n$stack');
+    return true;
+  };
+  runApp(_LyricsOverlayApp(model: model));
+  debugPrint('[桌面歌词悬浮窗] [9/9] runApp 已调用，等待首帧');
+  // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)）。首帧渲染完成
+  // 后再显示：此前 show() 在 runApp 之前调用，空窗口先行贴屏，
+  // 既闪现白底默认窗，也可能与引擎首帧初始化竞态。
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    debugPrint('[桌面歌词悬浮窗] 首帧回调触发，show 开始');
+    try {
+      await shownController.show();
+      debugPrint('[桌面歌词悬浮窗] show ok');
+    } catch (e) {
+      debugPrint('[桌面歌词悬浮窗] show 失败: $e');
+    }
   });
 }
 
@@ -375,8 +381,10 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
       animation: widget.model,
       builder: (context, _) {
         final settings = widget.model.settings;
+        // 透明度允许拉到 0（QQ 音乐式纯悬浮文字）；底盒照常绘制以保留
+        // 拖动热区，alpha 为 0 时仅文字 + 阴影可见。
         final background = Color(settings.backgroundColor).withValues(
-          alpha: settings.opacity.clamp(0.05, 1.0).toDouble(),
+          alpha: settings.opacity.clamp(0.0, 1.0).toDouble(),
         );
         final textColor = Color(settings.textColor);
         final locked = settings.locked;
@@ -392,11 +400,11 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
               children: [
                 Positioned.fill(
                   child: Padding(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.all(4),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: background,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: _lyricsBody(
                         settings: settings,
@@ -467,7 +475,23 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
         softWrap: false,
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.center,
-        style: TextStyle(fontSize: fontSize, color: color, fontWeight: fontWeight),
+        // QQ 音乐式文字阴影：无底色时靠阴影在亮壁纸上保持可读。
+        style: TextStyle(
+          fontSize: fontSize,
+          color: color,
+          fontWeight: fontWeight,
+          shadows: [
+            Shadow(
+              color: Colors.black.withValues(alpha: .65),
+              blurRadius: 6,
+              offset: const Offset(0, 1),
+            ),
+            Shadow(
+              color: Colors.black.withValues(alpha: .35),
+              blurRadius: 14,
+            ),
+          ],
+        ),
       ),
     );
   }
