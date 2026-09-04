@@ -546,48 +546,54 @@ class _CloudSongRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                Builder(builder: (moreButtonContext) {
-                  return IconButton(
-                    tooltip: '更多',
-                    onPressed: () {
-                      showSongActionSheet(
-                        context: moreButtonContext,
-                        anchor: anchorBelow(moreButtonContext),
-                        song: song,
-                      actions: [
-                        SongSheetAction(
-                          icon: Icons.queue_music_rounded,
-                          title: '下一首播放',
-                          onTap: () => addSongToQueueWithFeedback(
-                            context: context,
-                            player: player,
-                            song: song,
-                          ),
-                        ),
-                        SongSheetAction(
-                          icon: Icons.person_rounded,
-                          title: '查看歌手',
-                          onTap: onViewArtist,
-                        ),
-                        if (player.downloadController != null)
-                          SongSheetAction(
-                            icon: player.downloadController!.isDownloaded(song)
-                                ? Icons.download_done_rounded
-                                : Icons.download_rounded,
-                            title: player.downloadController!.isDownloaded(song)
-                                ? '已下载'
-                                : '下载',
-                            onTap: () => player.downloadController!.download(
-                              song,
-                              player.audioQuality,
+                Builder(
+                  builder: (moreButtonContext) {
+                    return IconButton(
+                      tooltip: '更多',
+                      onPressed: () {
+                        showSongActionSheet(
+                          context: moreButtonContext,
+                          anchor: anchorBelow(moreButtonContext),
+                          song: song,
+                          actions: [
+                            SongSheetAction(
+                              icon: Icons.queue_music_rounded,
+                              title: '下一首播放',
+                              onTap: () => addSongToQueueWithFeedback(
+                                context: context,
+                                player: player,
+                                song: song,
+                              ),
                             ),
-                          ),
-                      ],
+                            SongSheetAction(
+                              icon: Icons.person_rounded,
+                              title: '查看歌手',
+                              onTap: onViewArtist,
+                            ),
+                            if (player.downloadController != null)
+                              SongSheetAction(
+                                icon:
+                                    player.downloadController!.isDownloaded(
+                                      song,
+                                    )
+                                    ? Icons.download_done_rounded
+                                    : Icons.download_rounded,
+                                title:
+                                    player.downloadController!.isDownloaded(
+                                      song,
+                                    )
+                                    ? '已下载'
+                                    : '下载',
+                                onTap: () => player.downloadController!
+                                    .download(song, player.audioQuality),
+                              ),
+                          ],
+                        );
+                      },
+                      icon: const Icon(Icons.more_horiz_rounded),
                     );
                   },
-                  icon: const Icon(Icons.more_horiz_rounded),
-                );
-                }),
+                ),
               ],
             ),
           ),
