@@ -105,7 +105,7 @@ class DesktopSidebar extends StatelessWidget {
   }
 }
 
-class _SearchPill extends StatelessWidget {
+class _SearchPill extends StatefulWidget {
   const _SearchPill({
     required this.isDark,
     required this.colorScheme,
@@ -117,43 +117,58 @@ class _SearchPill extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_SearchPill> createState() => _SearchPillState();
+}
+
+class _SearchPillState extends State<_SearchPill> {
+  var _focused = false;
+
+  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(21),
-        child: Container(
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest
-                .withValues(alpha: isDark ? 1 : .54),
-            borderRadius: BorderRadius.circular(21),
-            border: Border.all(
-              color: colorScheme.outlineVariant
-                  .withValues(alpha: isDark ? .85 : .45),
-              width: 1,
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(21),
+      onFocusChange: (focused) => setState(() => _focused = focused),
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: widget.colorScheme.surfaceContainerHighest
+              .withValues(alpha: widget.isDark ? 1 : .54),
+          borderRadius: BorderRadius.circular(21),
+          border: Border.all(
+            color: widget.colorScheme.outlineVariant
+                .withValues(alpha: widget.isDark ? .85 : .45),
+            width: 1,
+          ),
+        ),
+        // 键盘焦点环：画在内容之上，不影响布局与既有 hover 样式。
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(21),
+          border: Border.all(
+            color: _focused
+                ? widget.colorScheme.primary.withValues(alpha: .75)
+                : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: 20,
+              color: widget.colorScheme.onSurfaceVariant,
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.search_rounded,
-                size: 20,
-                color: colorScheme.onSurfaceVariant,
+            const SizedBox(width: 8),
+            Text(
+              '搜索音乐',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: widget.colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 8),
-              Text(
-                '搜索音乐',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -179,6 +194,7 @@ class _NavItemTile extends StatefulWidget {
 
 class _NavItemTileState extends State<_NavItemTile> {
   var _hovering = false;
+  var _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -186,50 +202,68 @@ class _NavItemTileState extends State<_NavItemTile> {
     final foreground = selected
         ? widget.colorScheme.primary
         : widget.colorScheme.onSurfaceVariant;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: Semantics(
-        button: true,
+    return Semantics(
+      button: true,
+      onTap: widget.onTap,
+      child: InkWell(
         onTap: widget.onTap,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            height: 44,
-            margin: const EdgeInsets.symmetric(vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: selected
-                  ? widget.colorScheme.primary.withValues(alpha: .12)
-                  : _hovering
-                      ? widget.colorScheme.surfaceContainerHigh
-                      : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+        excludeFromSemantics: true, // 语义由外层 Semantics 提供，避免重复
+        borderRadius: BorderRadius.circular(12),
+        // 视觉全部由下方容器自绘；InkWell 的 ink 反馈全部透明，
+        // 保证既有 hover 样式不被叠加的默认色改变。
+        // InkWell 只负责：Tab 焦点可达、Enter/Space 激活（ActivateIntent）、
+        // 悬停回调与点击光标。
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        focusColor: Colors.transparent,
+        mouseCursor: SystemMouseCursors.click,
+        onHover: (hovering) => setState(() => _hovering = hovering),
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          height: 44,
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? widget.colorScheme.primary.withValues(alpha: .12)
+                : _hovering
+                    ? widget.colorScheme.surfaceContainerHigh
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          // 键盘焦点环：画在内容之上，不影响布局与 hover 样式。
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _focused
+                  ? widget.colorScheme.primary.withValues(alpha: .75)
+                  : Colors.transparent,
+              width: 1.5,
             ),
-            child: Row(
-              children: [
-                Icon(
-                  selected ? widget.item.activeIcon : widget.item.icon,
-                  size: 22,
-                  color: foreground,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.item.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                      color: foreground,
-                    ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected ? widget.item.activeIcon : widget.item.icon,
+                size: 22,
+                color: foreground,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    color: foreground,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

@@ -16,6 +16,7 @@ import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
+import '../keyboard_focus_guard.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
 import 'dart:math' as math;
@@ -194,6 +195,15 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  /// 键盘提交（Enter）入口：IME 组词期间忽略提交。
+  ///
+  /// 组词中的 Enter 是"选词"而非"确认"，照常提交会误发搜索
+  /// （见 keyboard_focus_guard.dart 的 IME 守卫；纯防御，触屏无风险）。
+  void _onSubmitFromKeyboard() {
+    if (isImeComposingActive(_controller.value)) return;
+    _onSubmit();
+  }
+
   void _onKeywordTap(String keyword) {
     _controller.text = keyword;
     _controller.selection = TextSelection.fromPosition(
@@ -277,7 +287,7 @@ class _SearchPageState extends State<SearchPage> {
               controller: _controller,
               focusNode: _focusNode,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _onSubmit(),
+              onSubmitted: (_) => _onSubmitFromKeyboard(),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: isDark
                         ? colorScheme.onSurface.withValues(alpha: .92)
@@ -410,7 +420,7 @@ class _SearchPageState extends State<SearchPage> {
                   controller: _controller,
                   focusNode: _focusNode,
                   textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _onSubmit(),
+                  onSubmitted: (_) => _onSubmitFromKeyboard(),
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: isDark ? colorScheme.onSurface.withValues(alpha: .92) : null,
                         fontWeight: FontWeight.w600,

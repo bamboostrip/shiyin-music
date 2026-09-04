@@ -159,12 +159,20 @@ class _DesktopShellState extends State<DesktopShell> {
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _OpenSearchIntent(),
+        // Ctrl+1-6 直达侧栏分区：1-3 = 推荐/排行榜/电台，
+        // 4-6 = 我的音乐/已下载/设置（与侧栏自上而下顺序一致）。
         SingleActivator(LogicalKeyboardKey.digit1, control: true):
-            _SelectHomeSectionIntent(0),
+            _SelectSidebarSectionIntent(0),
         SingleActivator(LogicalKeyboardKey.digit2, control: true):
-            _SelectHomeSectionIntent(1),
+            _SelectSidebarSectionIntent(1),
         SingleActivator(LogicalKeyboardKey.digit3, control: true):
-            _SelectHomeSectionIntent(2),
+            _SelectSidebarSectionIntent(2),
+        SingleActivator(LogicalKeyboardKey.digit4, control: true):
+            _SelectSidebarSectionIntent(3),
+        SingleActivator(LogicalKeyboardKey.digit5, control: true):
+            _SelectSidebarSectionIntent(4),
+        SingleActivator(LogicalKeyboardKey.digit6, control: true):
+            _SelectSidebarSectionIntent(5),
         SingleActivator(LogicalKeyboardKey.enter):
             _OpenPlayerIntent(),
         SingleActivator(LogicalKeyboardKey.numpadEnter):
@@ -172,25 +180,27 @@ class _DesktopShellState extends State<DesktopShell> {
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
+          _OpenSearchIntent: GuardedCallbackAction<_OpenSearchIntent>(
+            desktop: true,
+            guard: (_) => isFocusInsideInteractiveControl(),
             onInvoke: (_) {
-              // 焦点在输入框/按钮内时让位：避免遮蔽控件自身的 Enter/空格激活。
-              if (isFocusInsideInteractiveControl()) return null;
               _openSearch(context);
               return null;
             },
           ),
-          _SelectHomeSectionIntent:
-              CallbackAction<_SelectHomeSectionIntent>(
+          _SelectSidebarSectionIntent:
+              GuardedCallbackAction<_SelectSidebarSectionIntent>(
+            desktop: true,
+            guard: (_) => isFocusInsideInteractiveControl(),
             onInvoke: (intent) {
-              if (isFocusInsideInteractiveControl()) return null;
               _selectSection(intent.index);
               return null;
             },
           ),
-          _OpenPlayerIntent: CallbackAction<_OpenPlayerIntent>(
+          _OpenPlayerIntent: GuardedCallbackAction<_OpenPlayerIntent>(
+            desktop: true,
+            guard: (_) => isFocusInsideInteractiveControl(),
             onInvoke: (_) {
-              if (isFocusInsideInteractiveControl()) return null;
               _openPlayerPage(context);
               return null;
             },
@@ -288,8 +298,9 @@ class _OpenSearchIntent extends Intent {
   const _OpenSearchIntent();
 }
 
-class _SelectHomeSectionIntent extends Intent {
-  const _SelectHomeSectionIntent(this.index);
+/// Ctrl+1-6：选择侧栏分区（0-2 = 首页三个子 tab，3-5 = 我的音乐/已下载/设置）。
+class _SelectSidebarSectionIntent extends Intent {
+  const _SelectSidebarSectionIntent(this.index);
   final int index;
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,6 +18,7 @@ import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import '../desktop/desktop_shell.dart';
 import '../keyboard_focus_guard.dart';
+import '../keyboard_shortcuts.dart';
 import '../form_factor.dart';
 import 'home_page.dart';
 import 'library_page.dart';
@@ -697,7 +700,12 @@ class _RelativeTextScaler extends TextScaler {
   String toString() => '$base × $multiplier';
 }
 
-/// 全局快捷键作用域（桌面端）：空格播放/暂停，左右键切歌。
+/// 全局快捷键作用域（双端共用，按 [isDesktopFormFactor] 选表）：
+///
+/// - 移动/车机端（历史行为保持）：空格播放/暂停，←/→ 切歌，↑/↓ 音量。
+/// - 桌面端：空格播放/暂停（焦点在可滚动区域时退让给滚动翻页），
+///   ←/→ 快退/快进 ±5 秒，Ctrl+←/→ 切歌，↑/↓ 音量。
+///   按键表映射见 keyboard_shortcuts.dart。
 class AppShortcutScope extends StatelessWidget {
   const AppShortcutScope({
     super.key,
@@ -708,54 +716,87 @@ class AppShortcutScope extends StatelessWidget {
   final PlayerController player;
   final Widget child;
 
+  Map<ShortcutActivator, Intent> _buildShortcutTable({required bool desktop}) {
+    Intent bindingsFor(AppShortcutAction action) => switch (action) {
+          AppShortcutAction.playPause => const _PlayPauseIntent(),
+          AppShortcutAction.previousTrack => const _PreviousIntent(),
+          AppShortcutAction.nextTrack => const _NextIntent(),
+          AppShortcutAction.seekBackward => const _SeekIntent(backward: true),
+          AppShortcutAction.seekForward => const _SeekIntent(backward: false),
+          AppShortcutAction.volumeUp => const _VolumeUpIntent(),
+          AppShortcutAction.volumeDown => const _VolumeDownIntent(),
+        };
+    return {
+      for (final action in AppShortcutAction.values)
+        for (final activator in appShortcutActivators(action, desktop: desktop))
+          activator: bindingsFor(action),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
+    final desktop = isDesktopFormFactor;
     return Shortcuts(
-      shortcuts: {
-        const SingleActivator(LogicalKeyboardKey.space):
-            const _PlayPauseIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowRight):
-            const _NextIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft):
-            const _PreviousIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowUp):
-            const _VolumeUpIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowDown):
-            const _VolumeDownIntent(),
-      },
+      shortcuts: _buildShortcutTable(desktop: desktop),
       child: Actions(
         actions: {
-          _PlayPauseIntent: CallbackAction<_PlayPauseIntent>(
+          _PlayPauseIntent: GuardedCallbackAction<_PlayPauseIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
             onInvoke: (_) {
-              if (!isFocusInsideInteractiveControl()) player.togglePlay();
-              return null;
-            },
-          ),
-          _NextIntent: CallbackAction<_NextIntent>(
-            onInvoke: (_) {
-              if (!isFocusInsideInteractiveControl()) player.next();
-              return null;
-            },
-          ),
-          _PreviousIntent: CallbackAction<_PreviousIntent>(
-            onInvoke: (_) {
-              if (!isFocusInsideInteractiveControl()) player.previous();
-              return null;
-            },
-          ),
-          _VolumeUpIntent: CallbackAction<_VolumeUpIntent>(
-            onInvoke: (_) {
-              if (!isFocusInsideInteractiveControl()) {
-                player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
+              if (desktop && isFocusInsideScrollableRegion()) {
+                // 空格退让：焦点在普通可滚动区域内 → 向下翻一页。
+                scrollFocusedRegionByPage(forward: true);
+              } else {
+                player.togglePlay();
               }
               return null;
             },
           ),
-          _VolumeDownIntent: CallbackAction<_VolumeDownIntent>(
+          _NextIntent: GuardedCallbackAction<_NextIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
             onInvoke: (_) {
-              if (!isFocusInsideInteractiveControl()) {
-                player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
+              unawaited(player.next());
+              return null;
+            },
+          ),
+          _PreviousIntent: GuardedCallbackAction<_PreviousIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
+            onInvoke: (_) {
+              unawaited(player.previous());
+              return null;
+            },
+          ),
+          _SeekIntent: GuardedCallbackAction<_SeekIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
+            onInvoke: (intent) {
+              final target = computeSeekTarget(
+                position: player.position,
+                duration: player.duration,
+                forward: !intent.backward,
+              );
+              if (target != null) {
+                unawaited(player.seek(target));
               }
+              return null;
+            },
+          ),
+          _VolumeUpIntent: GuardedCallbackAction<_VolumeUpIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
+            onInvoke: (_) {
+              player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
+              return null;
+            },
+          ),
+          _VolumeDownIntent: GuardedCallbackAction<_VolumeDownIntent>(
+            desktop: desktop,
+            guard: (_) => isFocusInsideInteractiveControl(),
+            onInvoke: (_) {
+              player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
               return null;
             },
           ),
@@ -776,6 +817,12 @@ class _NextIntent extends Intent {
 
 class _PreviousIntent extends Intent {
   const _PreviousIntent();
+}
+
+/// ←/→ 快退/快进（桌面端），[backward] 为 true 表示快退。
+class _SeekIntent extends Intent {
+  const _SeekIntent({required this.backward});
+  final bool backward;
 }
 
 class _VolumeUpIntent extends Intent {
