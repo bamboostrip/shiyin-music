@@ -8,8 +8,10 @@
 // - main -> sub：updateLyric {current, next, isPlaying} /
 //   updateSettings {DesktopLyricsSettings.toMap()}
 //   （不向子窗发 close：主窗侧关闭直接走原生 window.close）。
-// - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调）/
-//   overlayReady {}（子引擎通道就绪，主窗补发缓存的歌词与设置）/
+// - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调与就绪门控复位）/
+//   overlayReady {}（子引擎通道就绪：主窗先打开就绪门控，再补发缓存的歌词与
+//   设置；门控打开前所有主->子推送静默跳过，避免子引擎 handler 注册完成前
+//   invoke 必抛的 MissingPluginException 竞态）/
 //   controlPlayback (action: 'previous' | 'togglePlay' | 'next')（悬停播控条触发主窗播控）。
 //
 // API 名以包源码为准（desktop_multi_window 0.2.1）：
@@ -48,6 +50,12 @@ class WindowsDesktopLyricsBridge {
   bool _handlerRegistered = false;
   bool _visible = false;
 
+  /// 子窗消息通道就绪门控：子引擎完成样式/位置设置并注册消息 handler 后
+  /// 才会上报 overlayReady（见 lyrics_overlay_window.dart）。在此之前对子窗
+  /// 的任何 invokeMethod 都抛 MissingPluginException，故推送路径在此期间
+  /// 只更新缓存、不真正 invoke，待 overlayReady 握手后统一补发。
+  bool _overlayReady = false;
+
   // 最近一次推送的内容：悬浮窗引擎启动存在窗口期，重show/补发时以缓存为准。
   DesktopLyricsSettings _settings = const DesktopLyricsSettings();
   String _current = '';
@@ -80,11 +88,17 @@ class WindowsDesktopLyricsBridge {
 
   Future<bool> _showInner({required String title, required String artist}) async {
     if (_visible && _window != null) {
-      // 已在展示：仅补发缓存内容（标题/歌手 v1 不上屏）。
+      // 已在展示：复用旧窗，仅补发缓存内容（标题/歌手 v1 不上屏）。
+      // 此处不得重置 _overlayReady：复用路径里子引擎不会重新上报
+      // overlayReady，误重置会导致歌词停止刷新；若子引擎仍在启动窗口期，
+      // _pushLyric 的门控会静默跳过，由随后的 overlayReady 握手补发。
       await _pushLyric();
       return true;
     }
     try {
+      // 重建子窗：复位就绪门控，新引擎必须等待新一轮 overlayReady 握手
+      // （上一窗口的就绪状态对新建引擎无效）。
+      _overlayReady = false;
       // 懒注册主窗侧消息处理（先于子窗可能的 windowClosed 上报）。
       _ensureMethodHandler();
       final window = await DesktopMultiWindow.createWindow(
@@ -130,6 +144,8 @@ class WindowsDesktopLyricsBridge {
     final window = _window;
     _visible = false;
     _window = null;
+    // 子窗随之销毁：就绪状态失效，重开需等待新引擎的 overlayReady 握手。
+    _overlayReady = false;
     if (window == null) return;
     try {
       // 主窗发起的关闭直接走原生 close（WM_CLOSE -> 销毁子窗与子引擎），
@@ -158,11 +174,12 @@ class WindowsDesktopLyricsBridge {
 
   Future<void> updateSettings(DesktopLyricsSettings settings) async {
     _settings = settings;
-    if (!_visible) return;
+    // 未就绪（子引擎启动窗口期）只更新缓存，由 overlayReady 握手后补发。
+    if (!_visible || !_overlayReady) return;
     try {
       await _invokeSub('updateSettings', settings.toMap());
     } on Exception {
-      // 子窗未就绪/已退出：缓存待下次 show 重发。
+      // 子窗已退出：缓存待下次 show 重发。
     }
   }
 
@@ -179,6 +196,9 @@ class WindowsDesktopLyricsBridge {
   }
 
   Future<void> _pushLyric() async {
+    // 就绪门控：子引擎 handler 注册完成前不 invoke（缓存已是最新，
+    // overlayReady 握手后会补发），从源头消除 MissingPluginException。
+    if (!_overlayReady) return;
     try {
       await _invokeSub('updateLyric', <String, dynamic>{
         'current': _current,
@@ -186,8 +206,8 @@ class WindowsDesktopLyricsBridge {
         'isPlaying': _isPlaying,
       });
     } on Exception catch (e) {
-      // 子窗未就绪（引擎启动窗口期）或已退出：缓存待下次补发。
-      debugPrint('[桌面歌词主窗] updateLyric 推送失败（子窗未就绪可能）: $e');
+      // 最后防线：握手后的意外竞态（如窗口恰在销毁）。缓存待下次补发。
+      debugPrint('[桌面歌词主窗] updateLyric 未送达，已缓存待补发: $e');
     }
   }
 
@@ -202,11 +222,15 @@ class WindowsDesktopLyricsBridge {
     _handlerRegistered = true;
     DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
       if (call.method == 'windowClosed') {
+        // 子窗销毁：就绪门控同步失效，重建/重开需等待新一轮握手。
+        _overlayReady = false;
         _visible = false;
         _window = null;
         _onVisibilityChanged?.call(visible: false, userClosed: true);
       } else if (call.method == 'overlayReady') {
-        // 子引擎通道就绪：补发启动窗口期内可能丢失的歌词与设置。
+        // 子引擎通道就绪：先打开就绪门控（本次补发自身也走门控路径），
+        // 再补发启动窗口期内可能丢失的歌词与设置。
+        _overlayReady = true;
         await _pushLyric();
         try {
           await _invokeSub('updateSettings', _settings.toMap());
