@@ -132,8 +132,10 @@ class _DesktopLyricsSettingsPageState
                     ? '锁定后桌面歌词鼠标穿透，可在托盘或此处解锁'
                     : '锁定后无法拖动移动歌词悬浮窗，点击悬浮窗锁图标可解锁',
                 value: _settings.locked,
-                // 桌面歌词未显示时锁定无意义：置灰。
-                onChanged: widget.player.desktopLyricsEnabled
+                // PC：桌面歌词未显示时锁定无意义，置灰。
+                // 移动端保持原行为：开关始终可点（不改移动端）。
+                onChanged: !isDesktopFormFactor ||
+                        widget.player.desktopLyricsEnabled
                     ? (v) => _update((s) => s.copyWith(locked: v))
                     : null,
               ),
