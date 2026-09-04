@@ -7,7 +7,6 @@
 // 消息协议（main -> sub）：
 // - updateLyric    {current, next, isPlaying}
 // - updateSettings {DesktopLyricsSettings.toMap()}
-// - close          {}
 // 消息协议（sub -> main）：
 // - windowClosed   {}（用户手动关闭悬浮窗）
 import 'dart:async';
@@ -20,14 +19,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../services/desktop_lyrics_service.dart';
-
-/// 悬浮窗固定尺寸（v1：不随内容 setSize，文本居中截断）。
-const double _overlayWidth = 720;
-const double _overlayHeight = 120;
+import '../../services/windows_desktop_lyrics_bridge.dart';
 
 /// 拖动结束后的位置持久化键（与 brief 约定一致）。
 const String _kWindowLeftKey = 'desktop_lyrics.window.left';
 const String _kWindowTopKey = 'desktop_lyrics.window.top';
+
+/// 拖动结束后位置持久化的防抖间隔（WM_MOVE 风暴下合并落盘）。
+const Duration _kPersistDebounce = Duration(milliseconds: 500);
 
 /// desktop_multi_window 子窗口参数判定（约定见包源码：
 /// args = ['multi_window', windowId, argumentsJson]）。
@@ -63,7 +62,12 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   await windowManager.setAlwaysOnTop(true);
   await windowManager.setSkipTaskbar(true);
   await windowManager.setTitle('桌面歌词');
-  await windowManager.setSize(const Size(_overlayWidth, _overlayHeight));
+  await windowManager.setSize(
+    const Size(
+      WindowsDesktopLyricsBridge.overlayWidth,
+      WindowsDesktopLyricsBridge.overlayHeight,
+    ),
+  );
   await _applyPassthrough(settings);
 
   // 恢复上次拖动位置。
@@ -99,8 +103,6 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
           model.settings = DesktopLyricsSettings.fromMap(message);
           await _applyPassthrough(model.settings);
         }
-      case 'close':
-        await closeLyricsOverlayWindow();
     }
     return null;
   });
@@ -128,6 +130,9 @@ Future<void> closeLyricsOverlayWindow() async {
   } on Exception {
     // 主窗可能已退出；仍然销毁自身。
   }
+  // 注意：子引擎内销毁窗口在 window_manager + desktop_multi_window 组合下
+  // 存在上游已知崩溃风险（MixinNetwork/flutter-plugins#137、
+  // window_manager#549）；验收时需反复开关/拖动中关闭压测。
   await windowManager.destroy();
 }
 
@@ -206,6 +211,7 @@ class _LyricsOverlayHome extends StatefulWidget {
 class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
     with WindowListener {
   bool _hovering = false;
+  Timer? _persistDebounce;
 
   @override
   void initState() {
@@ -215,15 +221,22 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
 
   @override
   void dispose() {
+    // 取消未触发的防抖保存并立即补存一次，避免最后一次移动丢失。
+    _persistDebounce?.cancel();
+    unawaited(_persistPosition());
     windowManager.removeListener(this);
     super.dispose();
   }
 
   // 拖动为原生模态循环，PointerUp 不一定派发回 Flutter；
   // onWindowMoved 在移动循环结束后触发，是持久化位置的可靠时机。
+  // WM_MOVE 期间会密集回调，防抖合并为停止 500ms 后的一次落盘。
   @override
   void onWindowMoved() {
-    unawaited(_persistPosition());
+    _persistDebounce?.cancel();
+    _persistDebounce = Timer(_kPersistDebounce, () {
+      unawaited(_persistPosition());
+    });
   }
 
   Future<void> _persistPosition() async {

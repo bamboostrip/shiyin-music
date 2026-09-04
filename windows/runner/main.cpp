@@ -3,9 +3,9 @@
 #include <windows.h>
 
 #include <desktop_multi_window/desktop_multi_window_plugin.h>
+#include <window_manager/window_manager_plugin.h>
 
 #include "flutter_window.h"
-#include "flutter/generated_plugin_registrant.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
@@ -28,14 +28,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   // desktop_multi_window 创建的子窗口引擎默认只注册该插件自身（见插件源码
-  // flutter_window.cc：仅 InternalMultiWindowPlugin + WindowChannel）。
-  // 通过窗口创建回调为子引擎补齐主工程全部插件（window_manager、
-  // shared_preferences 等），桌面歌词悬浮窗才能在子引擎中调用这些通道。
+  // flutter_window.cc：InternalMultiWindowPlugin + WindowChannel(id)，
+  // 后者已把子引擎 "mixin.one/flutter_multi_window_channel" 的原生处理器
+  // 绑定为子窗自身）。回调里禁止 RegisterPlugins 全量注册：重复注册
+  // DesktopMultiWindowPlugin 会再建一个 WindowChannel(0) 覆盖子引擎处理器，
+  // 且 AttachFlutterMainWindow 因主窗已存在早退，临时 WindowChannel 析构时
+  // 调用 SetMethodCallHandler(nullptr)，子窗 -> 主窗的 windowClosed 随之
+  // 丢失。这里仿照包示例（desktop_multi_window example/flutter_window.cc 的
+  // DesktopLifecyclePlugin）只补注册悬浮窗必需的 window_manager；
+  // shared_preferences_windows 为纯 Dart 插件（dartPluginClass），无需原生注册。
   DesktopMultiWindowSetWindowCreatedCallback(
       [](void *view_controller) {
-        RegisterPlugins(reinterpret_cast<flutter::FlutterViewController *>(
-                            view_controller)
-                            ->engine());
+        auto *flutter_view_controller =
+            reinterpret_cast<flutter::FlutterViewController *>(view_controller);
+        auto *registry = flutter_view_controller->engine();
+        WindowManagerPluginRegisterWithRegistrar(
+            registry->GetRegistrarForPlugin("WindowManagerPlugin"));
       });
 
   FlutterWindow window(project);

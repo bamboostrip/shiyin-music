@@ -6,7 +6,8 @@
 //
 // 消息协议（与悬浮窗侧约定一致）：
 // - main -> sub：updateLyric {current, next, isPlaying} /
-//   updateSettings {DesktopLyricsSettings.toMap()} / close {}
+//   updateSettings {DesktopLyricsSettings.toMap()}
+//   （不向子窗发 close：主窗侧关闭直接走原生 window.close）。
 // - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调）。
 //
 // API 名以包源码为准（desktop_multi_window 0.2.1）：
@@ -32,9 +33,9 @@ class WindowsDesktopLyricsBridge {
 
   final DesktopLyricsVisibilityChanged? _onVisibilityChanged;
 
-  /// 悬浮窗固定尺寸（与悬浮窗侧 v1 约定一致）。
-  static const double _overlayWidth = 720;
-  static const double _overlayHeight = 120;
+  /// 悬浮窗固定尺寸（与悬浮窗侧 v1 约定一致；主窗/子窗共用的唯一定义处）。
+  static const double overlayWidth = 720;
+  static const double overlayHeight = 120;
 
   WindowController? _window;
   bool _handlerRegistered = false;
@@ -72,8 +73,19 @@ class WindowsDesktopLyricsBridge {
           'artist': artist,
         }),
       );
-      await window.setFrame(await _defaultFrame());
-      await window.show();
+      try {
+        await window.setFrame(await _defaultFrame());
+        await window.show();
+      } on Exception {
+        // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
+        // 原生窗口游离残留；再按创建失败路径统一处理。
+        try {
+          await window.close();
+        } on Exception {
+          // 窗口可能已被销毁。
+        }
+        rethrow;
+      }
       _window = window;
       _visible = true;
       return true;
@@ -174,12 +186,13 @@ class WindowsDesktopLyricsBridge {
       final display = await screenRetriever.getPrimaryDisplay();
       final size = display.size;
       origin = Offset(
-        (size.width - _overlayWidth) / 2,
-        size.height - _overlayHeight - 80,
+        (size.width - overlayWidth) / 2,
+        size.height - overlayHeight - 80,
       );
     } on Exception {
       // 拿不到显示器信息时退回固定位置。
     }
-    return origin & const Size(_overlayWidth, _overlayHeight);
+    return origin & const Size(WindowsDesktopLyricsBridge.overlayWidth,
+        WindowsDesktopLyricsBridge.overlayHeight);
   }
 }

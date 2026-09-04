@@ -89,7 +89,9 @@ class DesktopLyricsService {
 
   static bool get isSupportedPlatform {
     return !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android || isDesktopFormFactor);
+        (defaultTargetPlatform == TargetPlatform.android ||
+            // 桌面歌词桥接目前仅在 Windows 验证；macOS/Linux 走同一分支但未经原生验证（子窗口插件注册方式不同）。
+            isDesktopFormFactor);
   }
 
   void setVisibilityChangedHandler(DesktopLyricsVisibilityChanged? handler) {
