@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/widgets/app_section.dart';
+import 'package:shiyin_music/ui/widgets/horizontal_wheel_scroll.dart';
 
 Widget _wrap(Widget child) =>
     MaterialApp(home: Scaffold(body: child));
@@ -35,6 +36,8 @@ void main() {
     await pumpRail(tester, rail(), const Size(700, 800));
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
+    // 横轨必须包裹在滚轮横滚组件内（桌面滚轮可横向滚动）。
+    expect(find.byType(HorizontalWheelScroll), findsOneWidget);
   });
 
   testWidgets('桌面宽窗(≥840)：转网格', (tester) async {

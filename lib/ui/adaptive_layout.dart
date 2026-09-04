@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'form_factor.dart';
+
 /// 窗口宽度分级（逻辑像素），阈值与设计文档 §3 一致。
 enum WindowWidthClass { compact, medium, expanded, large, expandedDesktop }
 
@@ -21,6 +23,10 @@ class AdaptiveLayout {
 
   /// 横轨转网格的宽度起点（逻辑像素），与 widthClassFor 的 expanded 对齐。
   static const double kGridStartWidth = 840;
+
+  /// 桌面形态且宽度达到网格起点（横轨转网格的唯一门控入口）。
+  static bool isDesktopGridWidth(double width) =>
+      isDesktopFormFactor && width >= kGridStartWidth;
 
   /// 网格列数计算时为两侧内容预留的总边距。
   static const double kGridHorizontalPadding = 32;

@@ -14,6 +14,7 @@ import '../pages/library_page.dart';
 import '../pages/player_page.dart';
 import '../pages/search_page.dart';
 import '../pages/settings_page.dart';
+import '../keyboard_focus_guard.dart';
 import '../widgets/lazy_indexed_stack.dart';
 import 'desktop_player_bar.dart';
 import 'desktop_sidebar.dart';
@@ -179,6 +180,8 @@ class _DesktopShellState extends State<DesktopShell> {
         actions: <Type, Action<Intent>>{
           _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
             onInvoke: (_) {
+              // 焦点在输入框/按钮内时让位：避免遮蔽控件自身的 Enter/空格激活。
+              if (isFocusInsideInteractiveControl()) return null;
               _openSearch(context);
               return null;
             },
@@ -186,12 +189,17 @@ class _DesktopShellState extends State<DesktopShell> {
           _SelectHomeSectionIntent:
               CallbackAction<_SelectHomeSectionIntent>(
             onInvoke: (intent) {
+              if (isFocusInsideInteractiveControl()) return null;
               _selectSection(intent.index);
               return null;
             },
           ),
           _OpenPlayerIntent: CallbackAction<_OpenPlayerIntent>(
-            onInvoke: (_) => _openPlayerPage(context),
+            onInvoke: (_) {
+              if (isFocusInsideInteractiveControl()) return null;
+              _openPlayerPage(context);
+              return null;
+            },
           ),
         },
         child: Scaffold(

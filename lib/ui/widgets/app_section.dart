@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../adaptive_layout.dart';
-import '../form_factor.dart';
 import 'horizontal_wheel_scroll.dart';
 
 /// 统一的分区标题（标题 + 可选尾部操作）。
@@ -64,7 +63,7 @@ class AppHorizontalRail<T> extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wideDesktop =
-            isDesktopFormFactor && constraints.maxWidth >= AdaptiveLayout.kGridStartWidth;
+            AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth);
         return Padding(
           padding: EdgeInsets.only(top: topPadding),
           child: Column(

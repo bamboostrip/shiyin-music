@@ -297,8 +297,10 @@ class SettingsPage extends StatelessWidget {
                             player: player,
                           ),
                         ),
-                        _SettingsDivider(),
                       ],
+                      // 尾部分隔线在守卫外：桌面隐藏音效瓦片时，
+                      // 响度均衡与播放统计之间仍保留分隔线。
+                      _SettingsDivider(),
                       _SettingsTile(
                         icon: Icons.bar_chart_rounded,
                         iconColor: const Color(0xFFD81B60),

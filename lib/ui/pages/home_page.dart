@@ -1544,8 +1544,6 @@ class _PlaylistRail extends StatelessWidget {
       );
     }
 
-    final isDesktopWide =
-        isDesktopFormFactor && size.width >= AdaptiveLayout.kGridStartWidth;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Column(
@@ -1558,47 +1556,53 @@ class _PlaylistRail extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (isDesktopWide)
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              itemCount: playlists.length,
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 160,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.60,
-              ),
-              itemBuilder: (context, index) {
-                final playlist = playlists[index];
-                return _PlaylistCard(
-                  playlist: playlist,
-                  onTap: () => onTap(playlist),
-                );
-              },
-            )
-          else
-            SizedBox(
-              height: 204,
-              child: HorizontalWheelScroll(
-                builder: (context, controller) => ListView.separated(
-                  controller: controller,
+          // 门控统一读内容宽度（constraints.maxWidth），与其他分区一致；
+          // 非桌面恒为 false，保持横轨（语义不变）。
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 18),
-                  scrollDirection: Axis.horizontal,
                   itemCount: playlists.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 14),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 160,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 14,
+                    childAspectRatio: 0.60,
+                  ),
                   itemBuilder: (context, index) {
                     final playlist = playlists[index];
                     return _PlaylistCard(
                       playlist: playlist,
                       onTap: () => onTap(playlist),
-                      width: 128,
                     );
                   },
+                );
+              }
+              return SizedBox(
+                height: 204,
+                child: HorizontalWheelScroll(
+                  builder: (context, controller) => ListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: playlists.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 14),
+                    itemBuilder: (context, index) {
+                      final playlist = playlists[index];
+                      return _PlaylistCard(
+                        playlist: playlist,
+                        onTap: () => onTap(playlist),
+                        width: 128,
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -2274,8 +2278,7 @@ class _RadioStationRail extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         // 桌面宽窗直接复用车机网格组件（同参数、同卡片），保持视觉一致。
-        if (isDesktopFormFactor &&
-            constraints.maxWidth >= AdaptiveLayout.kGridStartWidth) {
+        if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
           return _RadioStationGrid(
             stations: stations,
             loadingStationId: loadingStationId,

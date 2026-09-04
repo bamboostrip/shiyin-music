@@ -9,7 +9,6 @@ import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../../services/network_monitor.dart';
 import '../adaptive_layout.dart';
-import '../form_factor.dart';
 import '../widgets/artwork.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
@@ -304,8 +303,7 @@ class _NewSongsSection extends StatelessWidget {
                 builder: (context, constraints) {
                   final showCount = songs.length > 10 ? 10 : songs.length;
                   // 桌面宽窗：横轨转网格（项宽 ~120、行高 142），不再横向滚动。
-                  if (isDesktopFormFactor &&
-                      constraints.maxWidth >= AdaptiveLayout.kGridStartWidth) {
+                  if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
                     return GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),

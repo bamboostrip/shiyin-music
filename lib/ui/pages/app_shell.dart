@@ -15,6 +15,7 @@ import '../widgets/toast.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import '../desktop/desktop_shell.dart';
+import '../keyboard_focus_guard.dart';
 import '../form_factor.dart';
 import 'home_page.dart';
 import 'library_page.dart';
@@ -726,25 +727,25 @@ class AppShortcutScope extends StatelessWidget {
         actions: {
           _PlayPauseIntent: CallbackAction<_PlayPauseIntent>(
             onInvoke: (_) {
-              if (!_isFocusInsideInteractiveControl()) player.togglePlay();
+              if (!isFocusInsideInteractiveControl()) player.togglePlay();
               return null;
             },
           ),
           _NextIntent: CallbackAction<_NextIntent>(
             onInvoke: (_) {
-              if (!_isFocusInsideInteractiveControl()) player.next();
+              if (!isFocusInsideInteractiveControl()) player.next();
               return null;
             },
           ),
           _PreviousIntent: CallbackAction<_PreviousIntent>(
             onInvoke: (_) {
-              if (!_isFocusInsideInteractiveControl()) player.previous();
+              if (!isFocusInsideInteractiveControl()) player.previous();
               return null;
             },
           ),
           _VolumeUpIntent: CallbackAction<_VolumeUpIntent>(
             onInvoke: (_) {
-              if (!_isFocusInsideInteractiveControl()) {
+              if (!isFocusInsideInteractiveControl()) {
                 player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
               }
               return null;
@@ -752,7 +753,7 @@ class AppShortcutScope extends StatelessWidget {
           ),
           _VolumeDownIntent: CallbackAction<_VolumeDownIntent>(
             onInvoke: (_) {
-              if (!_isFocusInsideInteractiveControl()) {
+              if (!isFocusInsideInteractiveControl()) {
                 player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
               }
               return null;
@@ -762,28 +763,6 @@ class AppShortcutScope extends StatelessWidget {
         child: Focus(autofocus: true, child: child),
       ),
     );
-  }
-
-  /// 焦点位于输入框或按钮等可交互控件内时返回 true。
-  ///
-  /// 此时应忽略全局快捷键，让按键落到默认行为（编辑文本/激活按钮）上。
-  bool _isFocusInsideInteractiveControl() {
-    final focused = FocusManager.instance.primaryFocus;
-    if (focused == null || focused.context == null) return false;
-    var interactive = false;
-    focused.context!.visitAncestorElements((element) {
-      final widget = element.widget;
-      if (widget is EditableText ||
-          widget is SelectableText ||
-          widget is ButtonStyleButton ||
-          widget is IconButton ||
-          widget is RawMaterialButton) {
-        interactive = true;
-        return false;
-      }
-      return true;
-    });
-    return interactive;
   }
 }
 
