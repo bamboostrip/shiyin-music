@@ -6,6 +6,7 @@ import '../pages/player_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/climax_slider_track.dart';
 import '../widgets/queue_sheet.dart';
+import 'player_bar_widgets.dart';
 
 /// 秒数 → `mm:ss`（≥1h 时 `h:mm:ss`）。
 String formatDuration(Duration d) {
@@ -140,6 +141,9 @@ class DesktopPlayerBar extends StatelessWidget {
                 icon: const Icon(Icons.skip_next_rounded, size: 28),
                 color: colorScheme.onSurface,
               ),
+              // 播放模式（与全屏播放页共用同一 controller 字段）
+              const SizedBox(width: 4),
+              PlayModeButton(player: player),
               const Spacer(),
               // 进度区（拖拽中显示拖拽位置，松手 seek）
               if (song != null) ...[
@@ -230,38 +234,47 @@ class _ProgressBarState extends State<_ProgressBar> {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-            SizedBox(
-              width: 280,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 12),
-                  // 高潮起始标记（与播放页同一套轨道，多端数据同源）。
-                  trackShape: ClimaxSliderTrackShape(
-                    climaxStart: climaxStartFraction(
-                      climax: widget.player.climax,
-                      durationMs: durationMs,
+            // 悬停显示该位置时间气泡；拖拽中不显示（拖拽本身有位置反馈）。
+            HoverTimeBubble(
+              duration: widget.player.duration,
+              showBubble: _dragValue == null && durationMs > 0,
+              formatDuration: formatDuration,
+              child: SizedBox(
+                width: 280,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                    // 高潮起始标记（与播放页同一套轨道，多端数据同源）。
+                    trackShape: ClimaxSliderTrackShape(
+                      climaxStart: climaxStartFraction(
+                        climax: widget.player.climax,
+                        durationMs: durationMs,
+                      ),
+                      markerColor:
+                          colorScheme.primary.withValues(alpha: .45),
                     ),
-                    markerColor:
-                        colorScheme.primary.withValues(alpha: .45),
                   ),
-                ),
-                child: Slider(
-                  value: progress,
-                  onChanged: durationMs > 0
-                      ? (value) => setState(() => _dragValue = value)
-                      : null,
-                  onChangeEnd: durationMs > 0
-                      ? (value) {
-                          widget.player.seek(
-                            Duration(milliseconds: (durationMs * value).round()),
-                          );
-                          setState(() => _dragValue = null);
-                        }
-                      : null,
+                  child: Slider(
+                    value: progress,
+                    onChanged: durationMs > 0
+                        ? (value) => setState(() => _dragValue = value)
+                        : null,
+                    onChangeEnd: durationMs > 0
+                        ? (value) {
+                            widget.player.seek(
+                              Duration(
+                                milliseconds:
+                                    (durationMs * value).round(),
+                              ),
+                            );
+                            setState(() => _dragValue = null);
+                          }
+                        : null,
+                  ),
                 ),
               ),
             ),
@@ -294,7 +307,6 @@ class _VolumeControlState extends State<_VolumeControl> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return AnimatedBuilder(
       animation: widget.player,
       builder: (context, _) {
@@ -304,15 +316,8 @@ class _VolumeControlState extends State<_VolumeControl> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              volume <= 0
-                  ? Icons.volume_off_rounded
-                  : volume < 0.5
-                      ? Icons.volume_down_rounded
-                      : Icons.volume_up_rounded,
-              size: 20,
-              color: colorScheme.onSurfaceVariant,
-            ),
+            // 点击静音/取消静音（记忆静音前音量），图标区滚轮 ±5%。
+            VolumeIconButton(player: widget.player),
             SizedBox(
               width: 96,
               child: SliderTheme(
