@@ -99,6 +99,16 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     debugPrint('[桌面歌词悬浮窗] setTitleBarStyle 失败: $e');
   }
   try {
+    await windowManager.setAsFrameless();
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setAsFrameless 失败: $e');
+  }
+  try {
+    await windowManager.setHasShadow(false);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setHasShadow 失败: $e');
+  }
+  try {
     await windowManager.setBackgroundColor(Colors.transparent);
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] setBackgroundColor 失败: $e');
@@ -371,9 +381,9 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
         final showToolbar = _hovering && !clickThrough;
 
         // 常态：背景纯透明（若用户在设置中显式调高 opacity 则兼容展示）
-        // 悬停：平滑淡入现代半透暗调卡片背景（0xB8141823）
+        // 悬停：平滑淡入现代半透暗调卡片背景（0xCC141823）
         final cardColor = _hovering
-            ? const Color(0xB8141823)
+            ? const Color(0xCC141823)
             : (settings.opacity > 0
                 ? Color(settings.backgroundColor).withValues(
                     alpha: settings.opacity.clamp(0.0, 1.0),
@@ -385,7 +395,7 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
                 color: Colors.white.withValues(alpha: 0.12),
                 width: 1.0,
               )
-            : Border.all(color: Colors.transparent, width: 1.0);
+            : null;
 
         final cardShadows = _hovering
             ? [
@@ -395,7 +405,7 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
                   offset: const Offset(0, 4),
                 ),
               ]
-            : const <BoxShadow>[];
+            : null;
 
         final draggable = !locked;
 
@@ -405,57 +415,54 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
           onExit: (_) => setState(() => _hovering = false),
           child: Material(
             type: MaterialType.transparency,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(16),
-                  border: cardBorder,
-                  boxShadow: cardShadows,
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Stack(
-                    children: [
-                      // 歌词主体与整卡拖拽热区
-                      Positioned.fill(
-                        child: draggable
-                            ? DragToMoveArea(
-                                child: Container(
-                                  color: Colors.transparent,
-                                  child: _lyricsBody(
-                                    settings: settings,
-                                    textColor: textColor,
-                                  ),
-                                ),
-                              )
-                            : Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: cardBorder,
+                boxShadow: cardShadows,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Stack(
+                  children: [
+                    // 歌词主体与整卡拖拽热区
+                    Positioned.fill(
+                      child: draggable
+                          ? DragToMoveArea(
+                              child: Container(
                                 color: Colors.transparent,
                                 child: _lyricsBody(
                                   settings: settings,
                                   textColor: textColor,
                                 ),
                               ),
-                      ),
-                      // 悬停微型磨砂操作卡片顶部浮现操作栏
-                      Positioned(
-                        top: 6,
-                        right: 8,
-                        child: AnimatedOpacity(
-                          opacity: showToolbar ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeInOut,
-                          child: IgnorePointer(
-                            ignoring: !showToolbar,
-                            child: _toolbar(settings: settings),
-                          ),
+                            )
+                          : Container(
+                              color: Colors.transparent,
+                              child: _lyricsBody(
+                                settings: settings,
+                                textColor: textColor,
+                              ),
+                            ),
+                    ),
+                    // 悬停微型磨砂操作卡片顶部浮现操作栏
+                    Positioned(
+                      top: 6,
+                      right: 8,
+                      child: AnimatedOpacity(
+                        opacity: showToolbar ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeInOut,
+                        child: IgnorePointer(
+                          ignoring: !showToolbar,
+                          child: _toolbar(settings: settings),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
