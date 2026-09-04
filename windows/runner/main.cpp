@@ -2,7 +2,10 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <desktop_multi_window/desktop_multi_window_plugin.h>
+
 #include "flutter_window.h"
+#include "flutter/generated_plugin_registrant.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
@@ -23,6 +26,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       GetCommandLineArguments();
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
+
+  // desktop_multi_window 创建的子窗口引擎默认只注册该插件自身（见插件源码
+  // flutter_window.cc：仅 InternalMultiWindowPlugin + WindowChannel）。
+  // 通过窗口创建回调为子引擎补齐主工程全部插件（window_manager、
+  // shared_preferences 等），桌面歌词悬浮窗才能在子引擎中调用这些通道。
+  DesktopMultiWindowSetWindowCreatedCallback(
+      [](void *view_controller) {
+        RegisterPlugins(reinterpret_cast<flutter::FlutterViewController *>(
+                            view_controller)
+                            ->engine());
+      });
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);

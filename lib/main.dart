@@ -21,12 +21,20 @@ import 'services/music_api.dart';
 import 'services/network_monitor.dart';
 import 'ui/adaptive_layout.dart';
 import 'ui/desktop/desktop_window.dart';
+import 'ui/desktop/lyrics_overlay_window.dart';
 import 'ui/app_theme.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/widgets/toast.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  // desktop_multi_window 子窗口（桌面歌词悬浮窗）入口分流：
+  // 子窗口引擎会以 args=['multi_window', id, arguments] 重新执行 main()，
+  // 必须最先识别并 return，严禁执行音频服务/主窗窗口管理等重量级初始化。
+  if (isLyricsOverlayWindowArgs(args)) {
+    await runLyricsOverlayWindow(args);
+    return;
+  }
   WidgetsFlutterBinding.ensureInitialized();
   // 图片缓存策略（车机 2-4GB RAM，内存有限但不宜过小）：
   // - maximumSizeBytes = 64MB：封面经 Artwork 解码后最大 600×600×4B ≈ 1.4MB/张，

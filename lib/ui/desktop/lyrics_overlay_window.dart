@@ -1,0 +1,378 @@
+// 桌面歌词悬浮窗（desktop_multi_window 子窗口入口 + UI）。
+//
+// 仅在 Windows 桌面形态由主窗经 WindowsDesktopLyricsBridge 创建；
+// 子窗口引擎会重新执行 main()（desktop_multi_window 约定），main.dart
+// 顶部按 `multi_window` 参数分流到本文件 [runLyricsOverlayWindow]。
+//
+// 消息协议（main -> sub）：
+// - updateLyric    {current, next, isPlaying}
+// - updateSettings {DesktopLyricsSettings.toMap()}
+// - close          {}
+// 消息协议（sub -> main）：
+// - windowClosed   {}（用户手动关闭悬浮窗）
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodCall;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:window_manager/window_manager.dart';
+
+import '../../services/desktop_lyrics_service.dart';
+
+/// 悬浮窗固定尺寸（v1：不随内容 setSize，文本居中截断）。
+const double _overlayWidth = 720;
+const double _overlayHeight = 120;
+
+/// 拖动结束后的位置持久化键（与 brief 约定一致）。
+const String _kWindowLeftKey = 'desktop_lyrics.window.left';
+const String _kWindowTopKey = 'desktop_lyrics.window.top';
+
+/// desktop_multi_window 子窗口参数判定（约定见包源码：
+/// args = ['multi_window', windowId, argumentsJson]）。
+bool isLyricsOverlayWindowArgs(List<String> args) {
+  return args.length >= 2 && args.first == 'multi_window';
+}
+
+/// 子窗口入口：桌面歌词悬浮窗。
+///
+/// 注意：必须在 main() 任何重量级初始化（音频服务/窗口管理/DesktopWindow）
+/// 之前调用并 return；本函数自带子引擎所需的最小初始化。
+@pragma("vm:entry-point")
+Future<void> runLyricsOverlayWindow(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // WindowController.fromWindowId 为同步工厂（0.2.1 源码），
+  // 通道调用延迟到方法真正执行时，此时绑定已初始化。
+  final windowController = WindowController.fromWindowId(int.parse(args[1]));
+  // 包 0.2.1 的 WindowController 无 arguments getter，
+  // 初始参数经 createWindow 的 arguments 字符串由 main(args[2]) 传入。
+  final initialArgs = args.length > 2 && args[2].isNotEmpty
+      ? jsonDecode(args[2]) as Map<String, dynamic>
+      : const <String, dynamic>{};
+  final settings = DesktopLyricsSettings.fromMap(
+    (initialArgs['settings'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{},
+  );
+
+  // 子引擎内 window_manager 作用于本悬浮窗自身（ensureInitialized 将
+  // native_window 绑定为当前引擎根 HWND，见 window_manager 源码）。
+  await windowManager.ensureInitialized();
+  await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+  await windowManager.setAlwaysOnTop(true);
+  await windowManager.setSkipTaskbar(true);
+  await windowManager.setTitle('桌面歌词');
+  await windowManager.setSize(const Size(_overlayWidth, _overlayHeight));
+  await _applyPassthrough(settings);
+
+  // 恢复上次拖动位置。
+  final prefs = await SharedPreferences.getInstance();
+  final left = prefs.getDouble(_kWindowLeftKey);
+  final top = prefs.getDouble(_kWindowTopKey);
+  if (left != null && top != null) {
+    await windowManager.setPosition(Offset(left, top));
+  }
+
+  final model = _OverlayModel(
+    settings: settings,
+    current: initialArgs['current'] as String? ?? '',
+    next: initialArgs['next'] as String? ?? '',
+    isPlaying: initialArgs['isPlaying'] as bool? ?? false,
+  );
+
+  // 尽早注册消息处理，缩短主窗早期消息的丢失窗口期
+  // （主窗 createWindow 后立即推送初始内容）。
+  DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
+    switch (call.method) {
+      case 'updateLyric':
+        final message = (call.arguments as Map?)?.cast<String, dynamic>();
+        if (message != null) {
+          model
+            ..current = message['current'] as String? ?? model.current
+            ..next = message['next'] as String? ?? model.next
+            ..isPlaying = message['isPlaying'] as bool? ?? model.isPlaying;
+        }
+      case 'updateSettings':
+        final message = (call.arguments as Map?)?.cast<String, dynamic>();
+        if (message != null) {
+          model.settings = DesktopLyricsSettings.fromMap(message);
+          await _applyPassthrough(model.settings);
+        }
+      case 'close':
+        await closeLyricsOverlayWindow();
+    }
+    return null;
+  });
+
+  // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)），就绪后显示。
+  await windowController.show();
+  runApp(_LyricsOverlayApp(model: model));
+}
+
+/// locked && passthrough 时让鼠标穿透悬浮窗（锁定态由主窗设置页解锁）。
+Future<void> _applyPassthrough(DesktopLyricsSettings settings) async {
+  try {
+    await windowManager.setIgnoreMouseEvents(
+      settings.locked && settings.passthrough,
+    );
+  } on Exception {
+    // setIgnoreMouseEvents 失败不影响歌词展示。
+  }
+}
+
+/// 关闭悬浮窗：先通知主窗（触发 enabled=false 持久化），再销毁自身。
+Future<void> closeLyricsOverlayWindow() async {
+  try {
+    await DesktopMultiWindow.invokeMethod(0, 'windowClosed');
+  } on Exception {
+    // 主窗可能已退出；仍然销毁自身。
+  }
+  await windowManager.destroy();
+}
+
+class _OverlayModel extends ChangeNotifier {
+  _OverlayModel({
+    required DesktopLyricsSettings settings,
+    required String current,
+    required String next,
+    required bool isPlaying,
+  }) : _settings = settings,
+       _current = current,
+       _next = next,
+       _isPlaying = isPlaying;
+
+  DesktopLyricsSettings _settings;
+  String _current;
+  String _next;
+  bool _isPlaying;
+
+  DesktopLyricsSettings get settings => _settings;
+  String get current => _current;
+  String get next => _next;
+  bool get isPlaying => _isPlaying;
+
+  set settings(DesktopLyricsSettings value) {
+    if (_settings == value) return;
+    _settings = value;
+    notifyListeners();
+  }
+
+  set current(String value) {
+    if (_current == value) return;
+    _current = value;
+    notifyListeners();
+  }
+
+  set next(String value) {
+    if (_next == value) return;
+    _next = value;
+    notifyListeners();
+  }
+
+  set isPlaying(bool value) {
+    if (_isPlaying == value) return;
+    _isPlaying = value;
+    notifyListeners();
+  }
+}
+
+class _LyricsOverlayApp extends StatelessWidget {
+  const _LyricsOverlayApp({required this.model});
+
+  final _OverlayModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    // 与主窗一致：Windows 桌面排除语义树，规避 AXTree 竞态崩溃。
+    return ExcludeSemantics(
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: _LyricsOverlayHome(model: model),
+      ),
+    );
+  }
+}
+
+class _LyricsOverlayHome extends StatefulWidget {
+  const _LyricsOverlayHome({required this.model});
+
+  final _OverlayModel model;
+
+  @override
+  State<_LyricsOverlayHome> createState() => _LyricsOverlayHomeState();
+}
+
+class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
+    with WindowListener {
+  bool _hovering = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  // 拖动为原生模态循环，PointerUp 不一定派发回 Flutter；
+  // onWindowMoved 在移动循环结束后触发，是持久化位置的可靠时机。
+  @override
+  void onWindowMoved() {
+    unawaited(_persistPosition());
+  }
+
+  Future<void> _persistPosition() async {
+    try {
+      final position = await windowManager.getPosition();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_kWindowLeftKey, position.dx);
+      await prefs.setDouble(_kWindowTopKey, position.dy);
+    } on Exception {
+      // 位置持久化失败不影响展示。
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.model,
+      builder: (context, _) {
+        final settings = widget.model.settings;
+        final background = Color(settings.backgroundColor).withValues(
+          alpha: settings.opacity.clamp(0.05, 1.0).toDouble(),
+        );
+        final textColor = Color(settings.textColor);
+        final locked = settings.locked;
+        final clickThrough = locked && settings.passthrough;
+        final showToolbar = _hovering && !clickThrough;
+
+        return MouseRegion(
+          onEnter: (_) => setState(() => _hovering = true),
+          onExit: (_) => setState(() => _hovering = false),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: background,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: _lyricsBody(
+                        settings: settings,
+                        textColor: textColor,
+                        draggable: !locked,
+                      ),
+                    ),
+                  ),
+                ),
+                if (showToolbar)
+                  Positioned(
+                    top: 10,
+                    right: 14,
+                    child: _toolbar(settings: settings),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _lyricsBody({
+    required DesktopLyricsSettings settings,
+    required Color textColor,
+    required bool draggable,
+  }) {
+    final model = widget.model;
+    final body = Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _lyricLine(
+            text: model.current.isEmpty ? '暂无歌词' : model.current,
+            fontSize: settings.fontSize,
+            color: textColor,
+            fontWeight: FontWeight.bold,
+          ),
+          SizedBox(height: settings.fontSize * 0.15),
+          _lyricLine(
+            text: model.next,
+            fontSize: settings.fontSize * 0.6,
+            color: textColor.withValues(alpha: 0.7),
+            fontWeight: FontWeight.normal,
+          ),
+        ],
+      ),
+    );
+    if (!draggable) {
+      return body;
+    }
+    return DragToMoveArea(child: body);
+  }
+
+  Widget _lyricLine({
+    required String text,
+    required double fontSize,
+    required Color color,
+    required FontWeight fontWeight,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      height: fontSize * 1.3,
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: fontSize, color: color, fontWeight: fontWeight),
+      ),
+    );
+  }
+
+  Widget _toolbar({required DesktopLyricsSettings settings}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: settings.locked ? '解锁位置' : '锁定位置',
+            icon: Icon(
+              settings.locked ? Icons.lock : Icons.lock_open,
+              size: 16,
+              color: Colors.white,
+            ),
+            onPressed: () {
+              // v1：悬浮窗内锁定为会话级（主窗设置页下次 updateSettings 会覆盖）。
+              widget.model.settings = widget.model.settings.copyWith(
+                locked: !widget.model.settings.locked,
+              );
+              unawaited(_applyPassthrough(widget.model.settings));
+            },
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: '关闭桌面歌词',
+            icon: const Icon(Icons.close, size: 16, color: Colors.white),
+            onPressed: () => unawaited(closeLyricsOverlayWindow()),
+          ),
+        ],
+      ),
+    );
+  }
+}
