@@ -18,6 +18,7 @@ import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
+import '../widgets/cover_play_overlay.dart';
 import '../widgets/home_song_row.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/toast.dart';
@@ -402,113 +403,119 @@ class _HomePageState extends State<HomePage> {
       future: _future,
       builder: (context, snapshot) {
         final data = snapshot.data ?? _cachedData;
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              if (data == null &&
-                  (_future == null ||
-                      snapshot.connectionState == ConnectionState.waiting))
-                const SliverToBoxAdapter(child: _HomeSkeleton())
-              else if (data == null && snapshot.hasError)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _ErrorView(
-                    message: snapshot.error.toString(),
-                    onRetry: _refresh,
-                  ),
-                )
-              else ...[
-                SliverToBoxAdapter(
-                  child: _RecommendHeader(
-                    auth: widget.auth,
-                    daily: data!.daily,
-                    sectionIndex: _sectionIndex,
-                    onSectionChanged: (value) {
-                      if (value == -1) {
-                        widget.onTabSwitch?.call(0); // Switch to My tab
-                      } else {
-                        setState(() => _sectionIndex = value);
-                        widget.onTabSwitch?.call(value + 1);
-                      }
-                    },
-                    onDailyPlay: () {
-                      final songs = data.daily.songs;
-                      if (songs.isNotEmpty) {
-                        widget.player.playSong(songs.first, queue: songs);
-                      }
-                    },
-                    onDailyTap: () => _openDailyRecommend(data.daily),
-                    api: widget.api,
-                    player: widget.player,
-                    updateVersion: _updateBannerDismissed
-                        ? null
-                        : _availableUpdate,
-                    onUpdateTap: () {
-                      _showUpdateDetails();
-                    },
-                    onUpdateClose: () {
-                      setState(() => _updateBannerDismissed = true);
-                    },
-                  ),
+        // 桌面端：无下拉刷新手势（PC 无此惯例），滚动物理用桌面常规；
+        // 数据重载入口改为页头刷新按钮（复用 _refresh 同一逻辑）。
+        // 移动端 / 车机端：RefreshIndicator + AlwaysScrollable 原样。
+        final isDesktop = isDesktopFormFactor;
+        final content = CustomScrollView(
+          physics: isDesktop
+              ? const ClampingScrollPhysics()
+              : const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            if (data == null &&
+                (_future == null ||
+                    snapshot.connectionState == ConnectionState.waiting))
+              const SliverToBoxAdapter(child: _HomeSkeleton())
+            else if (data == null && snapshot.hasError)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _ErrorView(
+                  message: snapshot.error.toString(),
+                  onRetry: _refresh,
                 ),
-                SliverToBoxAdapter(
-                  child: Column(
-                    children: [
-                      _PersistentTabPane(
-                        visible: _sectionIndex == 0,
-                        child: Column(
-                          children: [
-                            _SongSection(
-                              title: '母带音质·精选',
-                              songs: data.daily.songs,
-                              onPlay: _playSong,
-                              isLiked: (song) => widget.auth.isLiked(song),
-                              onLikeTap: (song) => widget.auth.toggleLike(song),
-                              auth: widget.auth,
-                              player: widget.player,
-                              onViewArtist: _openArtist,
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: _RecommendHeader(
+                  auth: widget.auth,
+                  daily: data!.daily,
+                  sectionIndex: _sectionIndex,
+                  onSectionChanged: (value) {
+                    if (value == -1) {
+                      widget.onTabSwitch?.call(0); // Switch to My tab
+                    } else {
+                      setState(() => _sectionIndex = value);
+                      widget.onTabSwitch?.call(value + 1);
+                    }
+                  },
+                  onDailyPlay: () {
+                    final songs = data.daily.songs;
+                    if (songs.isNotEmpty) {
+                      widget.player.playSong(songs.first, queue: songs);
+                    }
+                  },
+                  onDailyTap: () => _openDailyRecommend(data.daily),
+                  api: widget.api,
+                  player: widget.player,
+                  updateVersion:
+                      _updateBannerDismissed ? null : _availableUpdate,
+                  onUpdateTap: () {
+                    _showUpdateDetails();
+                  },
+                  onUpdateClose: () {
+                    setState(() => _updateBannerDismissed = true);
+                  },
+                  onRefresh: isDesktop ? _refresh : null,
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Column(
+                  children: [
+                    _PersistentTabPane(
+                      visible: _sectionIndex == 0,
+                      child: Column(
+                        children: [
+                          _SongSection(
+                            title: '母带音质·精选',
+                            songs: data.daily.songs,
+                            onPlay: _playSong,
+                            isLiked: (song) => widget.auth.isLiked(song),
+                            onLikeTap: (song) => widget.auth.toggleLike(song),
+                            auth: widget.auth,
+                            player: widget.player,
+                            onViewArtist: _openArtist,
+                          ),
+                          _PlaylistRail(
+                            playlists: data.playlists,
+                            onTap: _openPlaylist,
+                          ),
+                          if (data.topSongs.isNotEmpty)
+                            _TopSongRail(
+                              songs: data.topSongs,
+                              onPlay: (song) =>
+                                  _playSong(song, data.topSongs),
                             ),
-                            _PlaylistRail(
-                              playlists: data.playlists,
-                              onTap: _openPlaylist,
-                            ),
-                            if (data.topSongs.isNotEmpty)
-                              _TopSongRail(
-                                songs: data.topSongs,
-                                onPlay: (song) =>
-                                    _playSong(song, data.topSongs),
-                              ),
-                          ],
-                        ),
+                        ],
                       ),
-                      _PersistentTabPane(
-                        visible: _sectionIndex == 1,
-                        child: RankPage(
-                          api: widget.api,
-                          auth: widget.auth,
-                          player: widget.player,
-                        ),
+                    ),
+                    _PersistentTabPane(
+                      visible: _sectionIndex == 1,
+                      child: RankPage(
+                        api: widget.api,
+                        auth: widget.auth,
+                        player: widget.player,
                       ),
-                      _PersistentTabPane(
-                        visible: _sectionIndex == 2,
-                        child: _RadioSection(
-                          api: widget.api,
-                          player: widget.player,
-                        ),
+                    ),
+                    _PersistentTabPane(
+                      visible: _sectionIndex == 2,
+                      child: _RadioSection(
+                        api: widget.api,
+                        player: widget.player,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                // 悬浮播放条留白仅手机/平板/车机需要；桌面播放栏占位于骨架底部。
-                SliverToBoxAdapter(
-                  child: SizedBox(height: isDesktopFormFactor ? 24 : 166),
-                ),
-              ],
+              ),
+              // 悬浮播放条留白仅手机/平板/车机需要；桌面播放栏占位于骨架底部。
+              SliverToBoxAdapter(
+                child: SizedBox(height: isDesktopFormFactor ? 24 : 166),
+              ),
             ],
-          ),
+          ],
         );
+        return isDesktop
+            ? content
+            : RefreshIndicator(onRefresh: _refresh, child: content);
       },
     );
   }
@@ -527,6 +534,7 @@ class _RecommendHeader extends StatelessWidget {
     required this.updateVersion,
     required this.onUpdateTap,
     required this.onUpdateClose,
+    this.onRefresh,
   });
 
   final AuthController auth;
@@ -540,6 +548,9 @@ class _RecommendHeader extends StatelessWidget {
   final AppVersionInfo? updateVersion;
   final VoidCallback onUpdateTap;
   final VoidCallback onUpdateClose;
+
+  /// 桌面端下拉刷新的替代入口（页头刷新按钮）；移动端 / 车机端不传。
+  final Future<void> Function()? onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -565,11 +576,35 @@ class _RecommendHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!isCarMode) ...[
-                _TopTabs(
-                  auth: auth,
-                  index: sectionIndex,
-                  onChanged: onSectionChanged,
-                ),
+                // 桌面端在页签右侧提供刷新按钮（替代下拉刷新手势）；
+                // 移动端 / 车机端不传 onRefresh，渲染与原来完全一致。
+                if (onRefresh != null)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _TopTabs(
+                          auth: auth,
+                          index: sectionIndex,
+                          onChanged: onSectionChanged,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip: '刷新',
+                        onPressed: onRefresh,
+                        icon: const Icon(Icons.refresh_rounded),
+                        iconSize: 20,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  )
+                else
+                  _TopTabs(
+                    auth: auth,
+                    index: sectionIndex,
+                    onChanged: onSectionChanged,
+                  ),
                 const SizedBox(height: 12),
                 _SmartSearch(api: api, auth: auth, player: player),
               ],
@@ -1363,26 +1398,35 @@ class _TopSongCard extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: .08)
-                        : Colors.white.withValues(alpha: .92),
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+              // 桌面端：hover 封面浮现播放蒙层，点击 = 直接播放（与单击同义）；
+              // 移动端 / 车机端 enabled=false，结构与接入前一致。
+              CoverPlayOverlay(
+                enabled: isDesktopFormFactor,
+                onPlay: onTap,
+                borderRadius: 14,
+                cover: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: .08)
+                          : Colors.white.withValues(alpha: .92),
+                      width: 1,
                     ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Artwork(url: song.coverUrl, size: coverWidth),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: isDark ? .14 : .06,
+                        ),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Artwork(url: song.coverUrl, size: coverWidth),
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
