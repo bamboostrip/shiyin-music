@@ -10,7 +10,7 @@ import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
-import '../widgets/horizontal_wheel_scroll.dart';
+import '../widgets/album_grid.dart';
 import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import 'playlist_detail_page.dart';
@@ -434,12 +434,19 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                     )
                   else ...[
                     if (_albums.isNotEmpty)
-                      SliverToBoxAdapter(
-                        child: _ArtistAlbumSection(
-                          albums: _albums,
-                          onTap: _openAlbum,
-                        ),
-                      ),
+                      isDesktopFormFactor
+                          // PC：QQ 音乐风格响应式网格（sliver，随宽度自适应列数）。
+                          ? AlbumSliverGridSection(
+                              albums: _albums,
+                              onTap: _openAlbum,
+                            )
+                          // 移动端 / 车机端：保持原横轨。
+                          : SliverToBoxAdapter(
+                              child: _ArtistAlbumSection(
+                                albums: _albums,
+                                onTap: _openAlbum,
+                              ),
+                            ),
                     SliverToBoxAdapter(
                       child: _SongSectionHeader(
                         count: _songs.length,
@@ -703,7 +710,7 @@ class _ArtistPosterFallback extends StatelessWidget {
   }
 }
 
-/// 歌手专辑横向区块。
+/// 歌手专辑横向区块（移动端 / 车机端横轨；PC 端为 AlbumSliverGridSection）。
 class _ArtistAlbumSection extends StatelessWidget {
   const _ArtistAlbumSection({required this.albums, required this.onTap});
 
@@ -712,46 +719,6 @@ class _ArtistAlbumSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isDesktopFormFactor) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '专辑 ${albums.length}',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 168,
-              child: HorizontalWheelScroll(
-                builder: (context, controller) => ListView.separated(
-                  controller: controller,
-                  scrollDirection: Axis.horizontal,
-                  itemCount: albums.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 14),
-                  itemBuilder: (context, index) {
-                    final album = albums[index];
-                    return MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: _ArtistAlbumCard(
-                        album: album,
-                        onTap: () => onTap(album),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     return AppHorizontalRail<ArtistAlbum>(
       title: '专辑 ${albums.length}',
       items: albums,

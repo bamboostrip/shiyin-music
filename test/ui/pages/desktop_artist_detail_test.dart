@@ -9,6 +9,7 @@ import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/artist_detail_page.dart';
 import 'package:shiyin_music/ui/pages/playlist_detail_page.dart';
+import 'package:shiyin_music/ui/widgets/album_grid.dart';
 import 'package:shiyin_music/ui/widgets/horizontal_wheel_scroll.dart';
 import 'package:shiyin_music/ui/widgets/mini_player.dart';
 
@@ -175,12 +176,23 @@ void main() {
     );
   }
 
+  /// PC 用例使用更大的测试表面：默认 800x600 下，专辑网格比旧横向轨道
+  /// 更高，第二行歌曲行会落在视口外（SliverFixedExtentList 不构建
+  /// 视口外条目），需要完整看到 2 行表格行。
+  void useDesktopSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   group('ArtistDetailPage PC 桌面端适配 (isDesktopFormFactor == true)', () {
     setUp(() {
       debugDesktopFormFactorOverride = true;
     });
 
     testWidgets('渲染桌面端紧凑横排头部与统计信息及【播放热门单曲】按钮', (tester) async {
+      useDesktopSurface(tester);
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
 
@@ -189,10 +201,11 @@ void main() {
       expect(find.text('2 首热门单曲 · 1 张专辑'), findsOneWidget);
       expect(find.text('播放热门单曲'), findsOneWidget);
 
-      // 专辑横轨区域与 HorizontalWheelScroll
+      // 专辑区为 PC 响应式网格（不再使用横向滚轮轨道）
       expect(find.text('专辑 1'), findsOneWidget);
       expect(find.text('范特西'), findsOneWidget);
-      expect(find.byType(HorizontalWheelScroll), findsOneWidget);
+      expect(find.byType(AlbumSliverGridSection), findsOneWidget);
+      expect(find.byType(HorizontalWheelScroll), findsNothing);
 
       // 表格表头存在
       expect(find.byType(DesktopSongTableHeader), findsOneWidget);
@@ -210,6 +223,7 @@ void main() {
     });
 
     testWidgets('双击表格行直接播放歌曲，单击设置聚焦', (tester) async {
+      useDesktopSurface(tester);
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
 
@@ -231,6 +245,7 @@ void main() {
     });
 
     testWidgets('点击头部【播放热门单曲】播放第一首并传递完整队列', (tester) async {
+      useDesktopSurface(tester);
       await tester.pumpWidget(buildSubject());
       await tester.pumpAndSettle();
 
@@ -246,6 +261,7 @@ void main() {
     });
 
     testWidgets('桌面端不渲染独立悬浮 MiniPlayer', (tester) async {
+      useDesktopSurface(tester);
       player.currentSong = testSong1;
       player.isPlaying = true;
 
