@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/music_models.dart';
+import '../services/desktop_system_integration.dart';
 import '../services/download_service.dart';
 import '../services/music_api.dart';
 
@@ -108,6 +109,10 @@ class DownloadController extends ChangeNotifier {
   final Map<String, DownloadEntry> _downloads = {}; // key = hash
   final Map<String, PlayCacheEntry> _playCache = {}; // key = hash_quality
   bool _initialized = false;
+
+  /// 桌面下载完成通知（仅桌面形态由 main.dart 注入；移动端/车机为 null，
+  /// 全部通知逻辑零开销跳过）。
+  DesktopDownloadNotifier? desktopNotifier;
 
   int _playCacheLimit = 300 * 1024 * 1024; // 默认 300MB
   int get playCacheLimit => _playCacheLimit;
@@ -324,6 +329,16 @@ class DownloadController extends ChangeNotifier {
     var failed = 0;
     var cursor = 0;
 
+    // 桌面形态：整个批次结束后一次性通知（[BatchDownloadTracker]），
+    // 避免批量下载每曲一弹刷屏；移动端 desktopNotifier 为 null 直接跳过。
+    // tracker 作为参数随传输闭包传递，并发批次互不串扰（旧批次残留事件
+    // 计入旧 tracker，不再影响新批次）。
+    BatchDownloadTracker? tracker;
+    if (desktopNotifier != null) {
+      tracker = BatchDownloadTracker(onComplete: _onBatchDownloadCompleted)
+        ..begin();
+    }
+
     Future<void> worker() async {
       while (cursor < songs.length) {
         final song = songs[cursor++];
@@ -343,6 +358,9 @@ class DownloadController extends ChangeNotifier {
         );
         notifyListeners();
 
+        // 一个通知单元 = 一首歌的完整处理（地址解析 + 文件传输）：
+        // 开始即计数，结束（无论成败）恰好一次，保证计数守恒。
+        tracker?.trackStarted();
         try {
           final playUrl = await _api.songUrl(song, quality: quality);
           if (playUrl.url.isEmpty) {
@@ -354,10 +372,19 @@ class DownloadController extends ChangeNotifier {
             );
             notifyListeners();
             failed++;
+            tracker?.trackFinished(succeeded: false);
             continue;
           }
           enqueued++;
-          unawaited(_transfer(song, quality, playUrl.url));
+          unawaited(
+            _transfer(
+              song,
+              quality,
+              playUrl.url,
+              partOfBatch: true,
+              batchTracker: tracker,
+            ),
+          );
         } catch (error) {
           _downloads[hash] = DownloadEntry(
             song: song,
@@ -367,6 +394,7 @@ class DownloadController extends ChangeNotifier {
           );
           notifyListeners();
           failed++;
+          tracker?.trackFinished(succeeded: false);
         }
       }
     }
@@ -383,8 +411,20 @@ class DownloadController extends ChangeNotifier {
   }
 
   /// 文件传输（播放地址已解析）。成功后写入已下载索引，失败进入失败列表。
-  Future<void> _transfer(Song song, AudioQuality quality, String url) async {
+  ///
+  /// [partOfBatch] 为 true 时完成事件交给本批次自带的 [batchTracker]
+  /// （整个批次只通知一次，一次批量 = 一个任务 = 一条通知）；
+  /// 为 false 时（单曲下载）成功即弹一次桌面通知。播放缓存不经过本方法，
+  /// 不会被通知。
+  Future<void> _transfer(
+    Song song,
+    AudioQuality quality,
+    String url, {
+    bool partOfBatch = false,
+    BatchDownloadTracker? batchTracker,
+  }) async {
     final hash = song.hash;
+    var succeeded = false;
     try {
       final path = await _service.download(
         song: song,
@@ -409,6 +449,7 @@ class DownloadController extends ChangeNotifier {
       );
       notifyListeners();
       await _persistDownloads();
+      succeeded = true;
     } catch (error) {
       _downloads[hash] = DownloadEntry(
         song: song,
@@ -417,7 +458,48 @@ class DownloadController extends ChangeNotifier {
         error: error.toString(),
       );
       notifyListeners();
+    } finally {
+      _notifyDesktopDownloadCompleted(
+        song,
+        partOfBatch: partOfBatch,
+        succeeded: succeeded,
+        batchTracker: batchTracker,
+      );
     }
+  }
+
+  /// 桌面下载完成通知入口（非桌面 desktopNotifier 为 null 时零开销）。
+  void _notifyDesktopDownloadCompleted(
+    Song song, {
+    required bool partOfBatch,
+    required bool succeeded,
+    BatchDownloadTracker? batchTracker,
+  }) {
+    if (partOfBatch) {
+      // 交给本批次的聚合器：全部单元结束后统一通知一次。
+      batchTracker?.trackFinished(succeeded: succeeded);
+      return;
+    }
+    // 单曲下载：只对成功弹通知；失败沿用页内失败列表提示。
+    if (!succeeded) return;
+    desktopNotifier?.notifyDownloadCompleted(
+      title: kDownloadNotificationTitle,
+      body: singleDownloadNotificationBody(
+        songTitle: song.title,
+        artist: song.artist,
+      ),
+    );
+  }
+
+  /// 批量下载全部结束后的一次性通知。
+  void _onBatchDownloadCompleted(int succeeded, int failed) {
+    desktopNotifier?.notifyDownloadCompleted(
+      title: kDownloadNotificationTitle,
+      body: batchDownloadNotificationBody(
+        succeeded: succeeded,
+        failed: failed,
+      ),
+    );
   }
 
   /// 移除一条失败记录（从失败列表清除）。

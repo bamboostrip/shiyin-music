@@ -41,6 +41,10 @@ class DesktopWindow {
         final clamped = await _clampToConnectedDisplays(geometry);
         await windowManager.setPosition(clamped.offset);
       }
+      // 最大化记忆：先按标记还原最大化再显示，避免"先小窗后放大"的闪烁。
+      if (DesktopWindow.maximizedPreferred(prefs)) {
+        await windowManager.maximize();
+      }
       await windowManager.show();
       await windowManager.focus();
     });
@@ -57,6 +61,9 @@ class DesktopWindow {
   /// "关闭时最小化到托盘"持久化键。
   static const String kCloseToTrayPrefKey = 'window.closeToTray';
 
+  /// 最大化状态持久化键（由 [_WindowGeometrySaver] 随事件写入）。
+  static const String kMaximizedPrefKey = 'window.maximized';
+
   /// 读取关闭行为：true（默认）→ 关闭时隐藏到托盘；false → 真正退出。
   static bool closeToTrayEnabled(SharedPreferences prefs) =>
       prefs.getBool(kCloseToTrayPrefKey) ?? true;
@@ -65,17 +72,22 @@ class DesktopWindow {
   static Future<void> setCloseToTray(SharedPreferences prefs, bool value) =>
       prefs.setBool(kCloseToTrayPrefKey, value);
 
+  /// 读取最大化记忆：true → 上次退出时窗口处于最大化，启动后应还原。
+  static bool maximizedPreferred(SharedPreferences prefs) =>
+      prefs.getBool(kMaximizedPrefKey) ?? false;
+
   /// 立即持久化当前窗口几何（取消防抖）。
   ///
   /// 供托盘"退出"等在销毁窗口前调用，保证最后一次位置不丢失。
   static Future<void> flushGeometry() async => _saver?.flush();
 
-  /// 重置窗口：清空持久化几何，恢复默认尺寸并居中。
+  /// 重置窗口：清空持久化几何与最大化标记，恢复默认尺寸并居中。
   ///
   /// 非桌面形态只清 prefs，不触碰窗口管理器（可能未初始化）。
   static Future<void> resetToDefault() async {
     final prefs = await SharedPreferences.getInstance();
     await DesktopWindowGeometry.reset(prefs);
+    await prefs.remove(kMaximizedPrefKey);
     if (!isDesktopFormFactor) return;
     await windowManager.setBounds(
       Rect.fromLTWH(0, 0, kDefaultSize.width, kDefaultSize.height),
@@ -234,6 +246,18 @@ class _WindowGeometrySaver extends WindowListener {
 
   @override
   void onWindowResize() => _scheduleSave();
+
+  /// 最大化状态记忆：随事件立即落盘（无需防抖，低频事件）。
+  /// 最大化/还原时窗口管理器也会派发 resize，几何本身由 [_scheduleSave] 走防抖。
+  @override
+  void onWindowMaximize() {
+    unawaited(_prefs.setBool(DesktopWindow.kMaximizedPrefKey, true));
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    unawaited(_prefs.setBool(DesktopWindow.kMaximizedPrefKey, false));
+  }
 
   /// 关闭拦截（[DesktopWindow.ensureInitialized] 已 setPreventClose）：
   /// 先取消防抖并立即落盘几何，再按用户设置决定隐藏到托盘还是真正退出。

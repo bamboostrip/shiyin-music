@@ -50,4 +50,19 @@ void main() {
     await DesktopWindowGeometry.reset(prefs);
     expect(DesktopWindowGeometry.load(prefs), isNull);
   });
+
+  group('最大化记忆（Task 4）', () {
+    test('无标记时默认不还原最大化', () async {
+      final prefs = await SharedPreferences.getInstance();
+      expect(DesktopWindow.maximizedPreferred(prefs), isFalse);
+    });
+
+    test('最大化标记读写往返', () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(DesktopWindow.kMaximizedPrefKey, true);
+      expect(DesktopWindow.maximizedPreferred(prefs), isTrue);
+      await prefs.setBool(DesktopWindow.kMaximizedPrefKey, false);
+      expect(DesktopWindow.maximizedPreferred(prefs), isFalse);
+    });
+  });
 }

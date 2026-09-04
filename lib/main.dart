@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
+import 'package:local_notifier/local_notifier.dart';
 
 import 'config/app_config.dart';
 import 'controllers/auth_controller.dart';
@@ -14,6 +15,7 @@ import 'controllers/theme_controller.dart';
 import 'core/api_client_interface.dart';
 import 'core/rust_api_client.dart';
 import 'services/cache_service.dart';
+import 'services/desktop_system_integration.dart';
 import 'services/device_info_service.dart';
 import 'services/download_service.dart';
 import 'services/music_audio_handler.dart';
@@ -110,6 +112,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   late final ThemeController _theme;
   late final LocalMusicController _localMusic;
 
+  /// 主窗标题随播放（仅桌面形态创建并绑定）。
+  DesktopWindowTitleBinder? _windowTitleBinder;
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +140,24 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     // Windows 桌面：托盘常驻（左键切换窗口、右键菜单、退出）。
     if (isDesktopFormFactor) {
       unawaited(DesktopTray.init(player: _player));
+      // 桌面系统集成：下载完成通知 + 主窗标题随播放。
+      // local_notifier 初始化失败时降级为无通知，不影响其余功能。
+      unawaited(_initDesktopNotifications());
+      _windowTitleBinder = DesktopWindowTitleBinder(
+        titleOf: () => _player.currentSong?.title,
+        artistOf: () => _player.currentSong?.artist,
+      )..attach(_player);
+    }
+  }
+
+  /// 桌面下载完成通知：初始化 local_notifier（通知点击把主窗带到前台）
+  /// 并注入下载控制器；移动端/车机不进入本路径。
+  Future<void> _initDesktopNotifications() async {
+    try {
+      await localNotifier.setup(appName: AppConfig.appName);
+      _downloads.desktopNotifier = const LocalNotifierDownloadNotifier();
+    } catch (error) {
+      debugPrint('ShiyinApp: local_notifier 初始化失败，下载通知降级: $error');
     }
   }
 
@@ -142,6 +165,8 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   void dispose() {
     // 先摘除托盘，避免销毁中的控制器再被托盘菜单回调触发。
     unawaited(DesktopTray.dispose());
+    // 解除标题监听，避免悬空回调触发 windowManager.setTitle。
+    _windowTitleBinder?.detach();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(NetworkMonitor.instance.stop());
     _auth.dispose();

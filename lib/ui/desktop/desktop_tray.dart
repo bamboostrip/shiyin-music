@@ -13,12 +13,15 @@ import 'desktop_window.dart';
 ///
 /// - 左键单击：切换主窗显示/隐藏（最小化时恢复窗口）；
 /// - 右键单击：弹出菜单（显示/隐藏主窗、播放/暂停、上一首、下一首、
-///   解锁桌面歌词、退出）；
+///   「桌面歌词」勾选项、解锁桌面歌词、退出）；
+/// - 「桌面歌词」：勾选态跟随 [PlayerController.desktopLyricsEnabled]，
+///   点击切换悬浮窗显示/隐藏；
 /// - "退出"：先立即落盘窗口几何再销毁窗口。
 ///
-/// 菜单构建一次并持有引用；「解锁桌面歌词」的可用状态（仅桌面歌词可见
-/// 且锁定时可用，QQ 音乐式：解锁入口在主程序）在每次右键弹出前刷新。
-/// [PlayerController] 仅用于弹出前读取实时状态与解锁操作，不持有页面状态。
+/// 菜单构建一次并持有引用；「桌面歌词」勾选态与「解锁桌面歌词」的可用
+/// 状态（仅桌面歌词可见且锁定时可用，QQ 音乐式：解锁入口在主程序）在
+/// 每次右键弹出前刷新。
+/// [PlayerController] 仅用于弹出前读取实时状态与切换/解锁操作，不持有页面状态。
 class DesktopTray {
   DesktopTray._();
 
@@ -28,6 +31,9 @@ class DesktopTray {
 
   /// 「解锁桌面歌词」菜单项名称（findItemByName 定位后刷新可用态）。
   static const _kUnlockDesktopLyricsItemName = 'unlock_desktop_lyrics';
+
+  /// 「桌面歌词」勾选项名称（findItemByName 定位后刷新勾选态）。
+  static const _kDesktopLyricsItemName = 'desktop_lyrics_toggle';
 
   /// 初始化托盘图标与菜单。重复调用（未 dispose）时直接忽略。
   ///
@@ -84,6 +90,12 @@ class DesktopTray {
         onClicked: (_) => unawaited(player.next()),
       ),
       MenuSeparator(),
+      MenuItemCheckbox(
+        name: _kDesktopLyricsItemName,
+        label: '桌面歌词',
+        checked: _isDesktopLyricsEnabled(),
+        onClicked: (_) => unawaited(_toggleDesktopLyrics()),
+      ),
       MenuItemLabel(
         name: _kUnlockDesktopLyricsItemName,
         label: '解锁桌面歌词',
@@ -100,11 +112,41 @@ class DesktopTray {
         unawaited(_toggleWindowVisibility());
       } else if (eventName == kSystemTrayEventRightClick) {
         // Windows 右键只派发事件，弹出菜单需主动调用；
-        // 弹出前刷新「解锁桌面歌词」可用态（菜单只构建一次）。
+        // 弹出前刷新「桌面歌词」勾选态与「解锁桌面歌词」可用态
+        // （菜单只构建一次）。
         unawaited(_popUpContextMenu());
       }
     });
     _tray = tray;
+  }
+
+  /// 桌面歌词开关当前状态（跟随 PlayerController，托盘不另存状态）。
+  static bool _isDesktopLyricsEnabled() {
+    final player = _player;
+    if (player == null) return false;
+    return player.desktopLyricsEnabled;
+  }
+
+  /// 托盘切换桌面歌词：走统一设置更新路径（持久化 + 通知设置页 + 回推子窗）。
+  /// 权限失败时 setDesktopLyricsEnabled 内部会回退为关，随后刷新勾选态
+  /// 保证菜单与真实状态一致。
+  static Future<void> _toggleDesktopLyrics() async {
+    final player = _player;
+    if (player == null) return;
+    await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
+    await _refreshDesktopLyricsCheckState();
+  }
+
+  /// 把「桌面歌词」勾选态刷新为当前实际状态。
+  static Future<void> _refreshDesktopLyricsCheckState() async {
+    final item = _menu?.findItemByName<MenuItemCheckbox>(
+      _kDesktopLyricsItemName,
+    );
+    if (item == null) return;
+    final checked = _isDesktopLyricsEnabled();
+    if (item.checked != checked) {
+      await item.setCheck(checked);
+    }
   }
 
   /// 仅当桌面歌词可见且锁定时允许解锁（QQ 音乐式基准）。
@@ -114,7 +156,7 @@ class DesktopTray {
     return player.desktopLyricsEnabled && player.desktopLyricsSettings.locked;
   }
 
-  /// 弹出前刷新「解锁桌面歌词」可用态，再弹出右键菜单。
+  /// 弹出前刷新「桌面歌词」勾选态与「解锁桌面歌词」可用态，再弹出右键菜单。
   static Future<void> _popUpContextMenu() async {
     final tray = _tray;
     if (tray == null) return;
@@ -126,9 +168,10 @@ class DesktopTray {
       if (item != null && item.enabled != canUnlock) {
         await item.setEnable(canUnlock);
       }
+      await _refreshDesktopLyricsCheckState();
     } on Exception catch (e) {
-      // 刷新失败只影响置灰展示，不阻断菜单弹出。
-      debugPrint('DesktopTray: 刷新解锁菜单项失败: $e');
+      // 刷新失败只影响置灰/勾选展示，不阻断菜单弹出。
+      debugPrint('DesktopTray: 刷新桌面歌词菜单项失败: $e');
     }
     await tray.popUpContextMenu();
   }

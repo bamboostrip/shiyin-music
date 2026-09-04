@@ -11,6 +11,7 @@ import '../../controllers/theme_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
+import '../../services/desktop_system_integration.dart';
 import '../../services/music_api.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
@@ -276,15 +277,18 @@ class SettingsPage extends StatelessWidget {
                         onChanged: player.setAutoPlayOnStartupEnabled,
                       ),
                       _SettingsDivider(),
-                      _SettingsSwitchTile(
-                        icon: Icons.bluetooth_audio_rounded,
-                        iconColor: const Color(0xFF00ACC1),
-                        title: '连接新音频设备自动播放',
-                        subtitle: '连接蓝牙或耳机时自动恢复播放',
-                        value: player.autoPlayOnDeviceConnected,
-                        onChanged: player.setAutoPlayOnDeviceConnected,
-                      ),
-                      _SettingsDivider(),
+                      // 移动端/车机专属：桌面隐藏（含其前导分隔线，避免双线）。
+                      if (!isDesktopFormFactor) ...[
+                        _SettingsSwitchTile(
+                          icon: Icons.bluetooth_audio_rounded,
+                          iconColor: const Color(0xFF00ACC1),
+                          title: '连接新音频设备自动播放',
+                          subtitle: '连接蓝牙或耳机时自动恢复播放',
+                          value: player.autoPlayOnDeviceConnected,
+                          onChanged: player.setAutoPlayOnDeviceConnected,
+                        ),
+                        _SettingsDivider(),
+                      ],
                       _SettingsSwitchTile(
                         icon: Icons.volume_up_rounded,
                         iconColor: const Color(0xFF43A047),
@@ -337,27 +341,30 @@ class SettingsPage extends StatelessWidget {
                         ),
                       ),
                       _SettingsDivider(),
-                      _SettingsTile(
-                        icon: Icons.block_rounded,
-                        iconColor: const Color(0xFFFF7043),
-                        title: '后台打断机制',
-                        subtitle: _audioInterruptionSummary(player),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                AudioInterruptionSettingsPage(player: player),
+                      // 移动端/车机专属：桌面隐藏（含前导分隔线）。
+                      if (!isDesktopFormFactor) ...[
+                        _SettingsTile(
+                          icon: Icons.block_rounded,
+                          iconColor: const Color(0xFFFF7043),
+                          title: '后台打断机制',
+                          subtitle: _audioInterruptionSummary(player),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  AudioInterruptionSettingsPage(player: player),
+                            ),
                           ),
                         ),
-                      ),
-                      _SettingsDivider(),
-                      _SettingsSwitchTile(
-                        icon: Icons.timelapse_rounded,
-                        iconColor: const Color(0xFF7CB342),
-                        title: '增加听歌时长',
-                        subtitle: '每播放 30 分钟自动同步一次',
-                        value: player.addListeningTimeEnabled,
-                        onChanged: player.setAddListeningTimeEnabled,
-                      ),
+                        _SettingsDivider(),
+                        _SettingsSwitchTile(
+                          icon: Icons.timelapse_rounded,
+                          iconColor: const Color(0xFF7CB342),
+                          title: '增加听歌时长',
+                          subtitle: '每播放 30 分钟自动同步一次',
+                          value: player.addListeningTimeEnabled,
+                          onChanged: player.setAddListeningTimeEnabled,
+                        ),
+                      ],
                       if (player.isDesktopLyricsSupported) ...[
                         _SettingsDivider(),
                         _SettingsSwitchTile(
@@ -410,6 +417,8 @@ class SettingsPage extends StatelessWidget {
                     _SettingsCard(
                       children: [
                         const _CloseToTraySwitch(),
+                        _SettingsDivider(),
+                        const _AutoStartSwitch(),
                         _SettingsDivider(),
                         _SettingsTile(
                           icon: Icons.crop_square_rounded,
@@ -914,6 +923,71 @@ class _CloseToTraySwitchState extends State<_CloseToTraySwitch> {
       title: '关闭时最小化到托盘',
       subtitle: '点关闭按钮时隐藏到系统托盘，音乐不断',
       value: _closeToTray,
+      onChanged: (value) => unawaited(_onChanged(value)),
+    );
+  }
+}
+
+/// "开机自启"开关（桌面形态专属）。
+///
+/// 与 [_CloseToTraySwitch] 同模式：独立小组件避免整页改 Stateful。
+/// 切换即 register/unregister（[autoStartManager]，可注入测试 fake）；
+/// 失败或注册表实际状态与预期不符时回滚 UI 并提示，
+/// 保证开关始终反映 OS 真实状态。
+class _AutoStartSwitch extends StatefulWidget {
+  const _AutoStartSwitch();
+
+  @override
+  State<_AutoStartSwitch> createState() => _AutoStartSwitchState();
+}
+
+class _AutoStartSwitchState extends State<_AutoStartSwitch> {
+  /// 默认关；OS 实际状态读取完成后覆盖。
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final enabled = await autoStartManager.isEnabled();
+      if (!mounted) return;
+      setState(() => _enabled = enabled);
+    } on Exception {
+      // 读取失败保持默认关（与开关初值一致），不影响页面其余功能。
+    }
+  }
+
+  Future<void> _onChanged(bool value) async {
+    // 乐观更新：立即反馈点击。
+    setState(() => _enabled = value);
+    try {
+      await autoStartManager.setEnabled(value);
+      // 以 OS 实际状态为准（如注册表写入被组策略拦截时 enable 静默失败）。
+      final actual = await autoStartManager.isEnabled();
+      if (!mounted) return;
+      if (actual != value) {
+        setState(() => _enabled = actual);
+        Toast.error('设置开机自启失败');
+      }
+    } on Exception {
+      if (!mounted) return;
+      setState(() => _enabled = !value);
+      Toast.error('设置开机自启失败');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsSwitchTile(
+      icon: Icons.rocket_launch_rounded,
+      iconColor: const Color(0xFF3949AB),
+      title: '开机自启',
+      subtitle: '登录系统时自动启动时音',
+      value: _enabled,
       onChanged: (value) => unawaited(_onChanged(value)),
     );
   }
