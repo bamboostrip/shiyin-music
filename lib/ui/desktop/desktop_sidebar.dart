@@ -190,42 +190,46 @@ class _NavItemTileState extends State<_NavItemTile> {
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
+      child: Semantics(
+        button: true,
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          height: 44,
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: selected
-                ? widget.colorScheme.primary.withValues(alpha: .12)
-                : _hovering
-                    ? widget.colorScheme.surfaceContainerHigh
-                    : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                selected ? widget.item.activeIcon : widget.item.icon,
-                size: 22,
-                color: foreground,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  widget.item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                    color: foreground,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            height: 44,
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: selected
+                  ? widget.colorScheme.primary.withValues(alpha: .12)
+                  : _hovering
+                      ? widget.colorScheme.surfaceContainerHigh
+                      : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  selected ? widget.item.activeIcon : widget.item.icon,
+                  size: 22,
+                  color: foreground,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      color: foreground,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

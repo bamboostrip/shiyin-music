@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
@@ -10,6 +11,7 @@ import '../../services/music_api.dart';
 import '../pages/downloaded_songs_page.dart';
 import '../pages/home_page.dart';
 import '../pages/library_page.dart';
+import '../pages/player_page.dart';
 import '../pages/search_page.dart';
 import '../pages/settings_page.dart';
 import '../widgets/lazy_indexed_stack.dart';
@@ -92,6 +94,15 @@ class _DesktopShellState extends State<DesktopShell> {
     );
   }
 
+  void _openPlayerPage(BuildContext context) {
+    if (widget.player.currentSong == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerPage(player: widget.player, auth: widget.auth),
+      ),
+    );
+  }
+
   int get _sidebarIndex {
     return switch (_section) {
       _DesktopSection.home => _homeTab,
@@ -149,7 +160,41 @@ class _DesktopShellState extends State<DesktopShell> {
       ),
     ];
 
-    return Scaffold(
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _OpenSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.digit1, control: true):
+            _SelectHomeSectionIntent(0),
+        SingleActivator(LogicalKeyboardKey.digit2, control: true):
+            _SelectHomeSectionIntent(1),
+        SingleActivator(LogicalKeyboardKey.digit3, control: true):
+            _SelectHomeSectionIntent(2),
+        SingleActivator(LogicalKeyboardKey.enter):
+            _OpenPlayerIntent(),
+        SingleActivator(LogicalKeyboardKey.numpadEnter):
+            _OpenPlayerIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
+            onInvoke: (_) {
+              _openSearch(context);
+              return null;
+            },
+          ),
+          _SelectHomeSectionIntent:
+              CallbackAction<_SelectHomeSectionIntent>(
+            onInvoke: (intent) {
+              _selectSection(intent.index);
+              return null;
+            },
+          ),
+          _OpenPlayerIntent: CallbackAction<_OpenPlayerIntent>(
+            onInvoke: (_) => _openPlayerPage(context),
+          ),
+        },
+        child: Scaffold(
       body: Row(
         children: [
           DesktopSidebar(
@@ -206,6 +251,22 @@ class _DesktopShellState extends State<DesktopShell> {
           ),
         ],
       ),
+        ),
+      ),
     );
   }
+}
+
+/// 桌面骨架专属快捷键意图。
+class _OpenSearchIntent extends Intent {
+  const _OpenSearchIntent();
+}
+
+class _SelectHomeSectionIntent extends Intent {
+  const _SelectHomeSectionIntent(this.index);
+  final int index;
+}
+
+class _OpenPlayerIntent extends Intent {
+  const _OpenPlayerIntent();
 }

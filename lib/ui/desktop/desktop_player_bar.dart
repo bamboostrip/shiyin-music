@@ -255,43 +255,55 @@ class _VolumeControl extends StatefulWidget {
 }
 
 class _VolumeControlState extends State<_VolumeControl> {
-  late double _volume = widget.player.volume.clamp(0.0, 1.0);
+  double? _dragValue;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          _volume <= 0
-              ? Icons.volume_off_rounded
-              : _volume < 0.5
-                  ? Icons.volume_down_rounded
-                  : Icons.volume_up_rounded,
-          size: 20,
-          color: colorScheme.onSurfaceVariant,
-        ),
-        SizedBox(
-          width: 96,
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 12),
+    return AnimatedBuilder(
+      animation: widget.player,
+      builder: (context, _) {
+        // 拖拽中显示拖拽值，其余时刻跟随 player（快捷键/其他入口改动即时同步）。
+        final volume =
+            (_dragValue ?? widget.player.volume).clamp(0.0, 1.0);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              volume <= 0
+                  ? Icons.volume_off_rounded
+                  : volume < 0.5
+                      ? Icons.volume_down_rounded
+                      : Icons.volume_up_rounded,
+              size: 20,
+              color: colorScheme.onSurfaceVariant,
             ),
-            child: Slider(
-              value: _volume,
-              onChanged: (value) {
-                setState(() => _volume = value);
-                widget.player.setVolume(value);
-              },
+            SizedBox(
+              width: 96,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 12),
+                ),
+                child: Slider(
+                  value: volume,
+                  onChanged: (value) {
+                    setState(() => _dragValue = value);
+                    widget.player.setVolume(value);
+                  },
+                  onChangeEnd: (value) {
+                    widget.player.setVolume(value);
+                    setState(() => _dragValue = null);
+                  },
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

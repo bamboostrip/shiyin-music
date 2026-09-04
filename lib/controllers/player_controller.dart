@@ -309,8 +309,11 @@ class PlayerController extends ChangeNotifier {
   double get volume => _audioHandler.audioPlayer.volume;
 
   /// 设置音量（0.0–1.0），越界值自动夹取。
-  Future<void> setVolume(double value) =>
-      _audioHandler.audioPlayer.setVolume(value.clamp(0.0, 1.0));
+  /// 音量会被快捷键等非 UI 入口修改，通知监听者以同步播放栏滑块。
+  Future<void> setVolume(double value) async {
+    await _audioHandler.audioPlayer.setVolume(value.clamp(0.0, 1.0));
+    notifyListeners();
+  }
 
   bool get isAudioEffectsSupported => _audioEffects.isAudioEffectsSupported;
   bool get isBassBoostSupported => _audioEffects.isBassBoostSupported;

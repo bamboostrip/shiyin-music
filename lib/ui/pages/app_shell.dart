@@ -717,6 +717,10 @@ class AppShortcutScope extends StatelessWidget {
             const _NextIntent(),
         const SingleActivator(LogicalKeyboardKey.arrowLeft):
             const _PreviousIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowUp):
+            const _VolumeUpIntent(),
+        const SingleActivator(LogicalKeyboardKey.arrowDown):
+            const _VolumeDownIntent(),
       },
       child: Actions(
         actions: {
@@ -735,6 +739,22 @@ class AppShortcutScope extends StatelessWidget {
           _PreviousIntent: CallbackAction<_PreviousIntent>(
             onInvoke: (_) {
               if (!_isFocusInsideInteractiveControl()) player.previous();
+              return null;
+            },
+          ),
+          _VolumeUpIntent: CallbackAction<_VolumeUpIntent>(
+            onInvoke: (_) {
+              if (!_isFocusInsideInteractiveControl()) {
+                player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
+              }
+              return null;
+            },
+          ),
+          _VolumeDownIntent: CallbackAction<_VolumeDownIntent>(
+            onInvoke: (_) {
+              if (!_isFocusInsideInteractiveControl()) {
+                player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
+              }
               return null;
             },
           ),
@@ -777,4 +797,12 @@ class _NextIntent extends Intent {
 
 class _PreviousIntent extends Intent {
   const _PreviousIntent();
+}
+
+class _VolumeUpIntent extends Intent {
+  const _VolumeUpIntent();
+}
+
+class _VolumeDownIntent extends Intent {
+  const _VolumeDownIntent();
 }
