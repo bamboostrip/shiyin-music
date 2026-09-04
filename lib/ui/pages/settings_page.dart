@@ -418,8 +418,10 @@ class SettingsPage extends StatelessWidget {
                         ),
                       ],
                     ),
+                    // 与下一节（缓存）的间距：放在门控内，
+                    // 避免移动端桌面块被跳过时间距 20→40 翻倍。
+                    const SizedBox(height: 20),
                   ],
-                  const SizedBox(height: 20),
                   // Cache section
                   const _SectionHeader(title: '缓存'),
                   const SizedBox(height: 8),

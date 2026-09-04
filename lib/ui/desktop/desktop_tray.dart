@@ -9,7 +9,7 @@ import 'desktop_window.dart';
 
 /// Windows 系统托盘常驻（仅桌面形态，由 main.dart 门控调用）。
 ///
-/// - 左键单击：切换主窗显示/隐藏；
+/// - 左键单击：切换主窗显示/隐藏（最小化时恢复窗口）；
 /// - 右键单击：弹出菜单（显示/隐藏主窗、播放/暂停、上一首、下一首、退出）；
 /// - "退出"：先立即落盘窗口几何再销毁窗口。
 ///
@@ -81,6 +81,13 @@ class DesktopTray {
   }
 
   static Future<void> _toggleWindowVisibility() async {
+    // isVisible 在窗口最小化时仍返回 true：需先检查最小化状态，
+    // 左键单击应恢复窗口而不是把最小化窗口再隐藏一次。
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+      await _showWindow();
+      return;
+    }
     if (await windowManager.isVisible()) {
       await windowManager.hide();
     } else {
