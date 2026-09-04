@@ -142,7 +142,10 @@ class PlayerController extends ChangeNotifier {
       }
     });
     _durationSub = audioPlayer.durationStream.listen((value) {
-      duration = value ?? Duration.zero;
+      // 恢复占位保护：引擎无音频源时的 null 回调不清空歌曲元数据占位时长，
+      // 真实音频加载后非 null 值会正常覆盖。
+      if (value == null) return;
+      duration = value;
       _emitPosition();
       notifyListeners();
     });
@@ -1924,8 +1927,19 @@ class PlayerController extends ChangeNotifier {
         _shuffleQueue.reset(queue.length, currentIndex: index);
       }
 
+      // 恢复元数据占位 + 补拉：此前只还原了队列/当前歌曲，引擎时长、
+      // 歌词、高潮全是空的——未开启自动播放时进播放页就是 00:00 +
+      // 暂无歌词 + 无高潮标记。时长先用歌曲元数据占位（引擎加载后覆盖），
+      // 歌词走缓存优先（30 天）+ 静默刷新，高潮走网络补拉。
+      duration = currentSong?.duration ?? Duration.zero;
+
       hasRestoredPlaybackState = true;
       notifyListeners();
+      final restored = currentSong;
+      if (restored != null) {
+        unawaited(loadLyrics(restored));
+        unawaited(_loadClimax(restored));
+      }
     } catch (_) {}
   }
 
