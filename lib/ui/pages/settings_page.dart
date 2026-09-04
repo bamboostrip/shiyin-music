@@ -190,6 +190,9 @@ class SettingsPage extends StatelessWidget {
             auth.vipClaim,
           ]),
           builder: (context, _) {
+            // 横屏/车机只在平板上出现：手机上无用，桌面上恒横屏且无车机概念。
+            final showOrientationTiles =
+                !isDesktopFormFactor && AdaptiveLayout.isTablet(context);
             return AdaptiveContentPadding(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
@@ -464,38 +467,40 @@ class SettingsPage extends StatelessWidget {
                         onTap: () => _selectFontScale(context, theme),
                       ),
                       _SettingsDivider(),
-                      _SettingsSwitchTile(
-                        icon: Icons.screen_rotation_rounded,
-                        iconColor: const Color(0xFF00897B),
-                        title: '横屏模式',
-                        subtitle: '允许手机横屏时自动旋转（平板默认开启）',
-                        value: theme.landscapeEnabled,
-                        onChanged: (value) {
-                          theme.setLandscapeEnabled(
-                            value,
-                            AdaptiveLayout.isTablet(context),
-                          );
-                        },
-                      ),
-                      _SettingsDivider(),
-                      _SettingsSwitchTile(
-                        icon: Icons.directions_car_rounded,
-                        iconColor: const Color(0xFFFF6F00),
-                        title: '车机模式',
-                        subtitle: '横屏时使用左侧播放面板布局并放大文字',
-                        value: theme.carModeEnabled,
-                        onChanged: (value) async {
-                          await theme.setCarModeEnabled(value);
-                          // 通知渠道在启动时按车机模式定向，切换后需完全重启
-                          // 进程才生效；原生车机设备始终走静默渠道，无需提示
-                          if (!theme.isAutomotiveDevice) {
-                            Toast.show(
-                              '车机模式已切换，建议重启应用以同步通知栏显示方式',
-                              duration: const Duration(seconds: 4),
+                      if (showOrientationTiles) ...[
+                        _SettingsSwitchTile(
+                          icon: Icons.screen_rotation_rounded,
+                          iconColor: const Color(0xFF00897B),
+                          title: '横屏模式',
+                          subtitle: '允许手机横屏时自动旋转（平板默认开启）',
+                          value: theme.landscapeEnabled,
+                          onChanged: (value) {
+                            theme.setLandscapeEnabled(
+                              value,
+                              AdaptiveLayout.isTablet(context),
                             );
-                          }
-                        },
-                      ),
+                          },
+                        ),
+                        _SettingsDivider(),
+                        _SettingsSwitchTile(
+                          icon: Icons.directions_car_rounded,
+                          iconColor: const Color(0xFFFF6F00),
+                          title: '车机模式',
+                          subtitle: '横屏时使用左侧播放面板布局并放大文字',
+                          value: theme.carModeEnabled,
+                          onChanged: (value) async {
+                            await theme.setCarModeEnabled(value);
+                            // 通知渠道在启动时按车机模式定向，切换后需完全重启
+                            // 进程才生效；原生车机设备始终走静默渠道，无需提示
+                            if (!theme.isAutomotiveDevice) {
+                              Toast.show(
+                                '车机模式已切换，建议重启应用以同步通知栏显示方式',
+                                duration: const Duration(seconds: 4),
+                              );
+                            }
+                          },
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 20),

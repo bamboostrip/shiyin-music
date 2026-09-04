@@ -4,6 +4,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../pages/player_page.dart';
 import '../widgets/artwork.dart';
+import '../widgets/climax_slider_track.dart';
 import '../widgets/queue_sheet.dart';
 
 /// 秒数 → `mm:ss`（≥1h 时 `h:mm:ss`）。
@@ -238,6 +239,15 @@ class _ProgressBarState extends State<_ProgressBar> {
                       const RoundSliderThumbShape(enabledThumbRadius: 6),
                   overlayShape:
                       const RoundSliderOverlayShape(overlayRadius: 12),
+                  // 高潮起始标记（与播放页同一套轨道，多端数据同源）。
+                  trackShape: ClimaxSliderTrackShape(
+                    climaxStart: climaxStartFraction(
+                      climax: widget.player.climax,
+                      durationMs: durationMs,
+                    ),
+                    markerColor:
+                        colorScheme.primary.withValues(alpha: .45),
+                  ),
                 ),
                 child: Slider(
                   value: progress,

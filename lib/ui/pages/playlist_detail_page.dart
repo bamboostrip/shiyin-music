@@ -20,6 +20,7 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
 import '../design_tokens.dart';
+import '../form_factor.dart';
 import 'artist_detail_page.dart';
 
 /// 缓存中完整歌单歌曲列表的 key 后缀。
@@ -50,8 +51,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   /// 参考主流音乐 App 的歌单头：进入时居中大封面（图2），上滑时列表
   /// 圆角面板上移覆盖（图3），置顶后仅留标题+粘性歌曲操作条（图4）。
-  static const _heroExpandedHeight = 412.0;
+  /// 桌面端用紧凑横排头（仿 QQ 音乐 PC：封面左、信息右），高度减半。
+  static const _heroExpandedHeightMobile = 412.0;
+  static const _heroExpandedHeightDesktop = 236.0;
   static const _stickyHeaderHeight = 68.0;
+
+  double get _heroExpandedHeight =>
+      isDesktopFormFactor ? _heroExpandedHeightDesktop : _heroExpandedHeightMobile;
 
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
@@ -1977,6 +1983,146 @@ class _HeroHeader extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // 桌面端紧凑横排头（仿 QQ 音乐 PC）：封面 120 左置，
+    // 标题/副标题/meta/操作右置，高度收敛在 236 内。
+    // 移动端居中大封面 412 在 PC 上过于空旷（分享/下载占满首屏）。
+    if (isDesktopFormFactor) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isDark
+                ? const [Color(0xFF1B2E49), Color(0xFF0D121E), Color(0xFF06070A)]
+                : const [Color(0xFFD3E8FF), Color(0xFFEDF4FF), Color(0xFFFFFFFF)],
+            stops: isDark ? const [0, 0.55, 1] : const [0, 0.62, 1],
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, kToolbarHeight + 8, 24, 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            Colors.black.withValues(alpha: isDark ? .35 : .18),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Artwork(
+                    url: info.coverUrl,
+                    size: 120,
+                    borderRadius: 18,
+                  ),
+                ),
+                const SizedBox(width: 22),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        info.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              height: 1.2,
+                              letterSpacing: -0.3,
+                            ),
+                      ),
+                      if (info.subtitle?.trim().isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            info.subtitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12.5,
+                                ),
+                          ),
+                        ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(
+                            alpha: isDark ? .20 : .10,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _detailMeta(info),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11.5,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          _HeroPillAction(
+                            icon: Icons.share_rounded,
+                            label: '分享',
+                            onTap: onShare,
+                          ),
+                          if (showCollect) ...[
+                            const SizedBox(width: 10),
+                            _HeroPillAction(
+                              icon: isInLibrary
+                                  ? Icons.bookmark_added_rounded
+                                  : Icons.bookmark_add_outlined,
+                              label: mutating
+                                  ? '请稍候'
+                                  : (isInLibrary ? '已收藏' : '收藏'),
+                              onTap: isInLibrary ? onMore : onCollect,
+                            ),
+                          ],
+                          const SizedBox(width: 10),
+                          _HeroPillAction(
+                            icon: downloading
+                                ? Icons.downloading_rounded
+                                : Icons.download_rounded,
+                            label: downloading ? '下载中' : '下载',
+                            onTap: downloadAvailable && !downloading
+                                ? onDownloadAll
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -2156,6 +2302,63 @@ class _HeroCircleAction extends StatelessWidget {
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Hero 区胶囊操作按钮（桌面紧凑头专用）：图标 + 文字横排一颗胶囊，
+/// 比圆形双行按钮更省纵向空间。
+class _HeroPillAction extends StatelessWidget {
+  const _HeroPillAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final enabled = onTap != null;
+    final fg = enabled
+        ? colorScheme.onSurface
+        : colorScheme.onSurface.withValues(alpha: .38);
+
+    return Opacity(
+      opacity: enabled ? 1 : .55,
+      child: Material(
+        color: isDark
+            ? Colors.white.withValues(alpha: .10)
+            : Colors.white.withValues(alpha: .78),
+        borderRadius: BorderRadius.circular(20),
+        elevation: 0,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: fg),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2589,7 +2792,7 @@ class _LoadMoreFooter extends StatelessWidget {
   }
 }
 
-class _SongRow extends StatelessWidget {
+class _SongRow extends StatefulWidget {
   const _SongRow({
     super.key,
     required this.song,
@@ -2616,28 +2819,54 @@ class _SongRow extends StatelessWidget {
   final VoidCallback onViewArtist;
 
   @override
+  State<_SongRow> createState() => _SongRowState();
+}
+
+class _SongRowState extends State<_SongRow> {
+  var _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final song = widget.song;
+    final index = widget.index;
+    final player = widget.player;
+    final canDelete = widget.canDelete;
+    final selecting = widget.selecting;
+    final selected = widget.selected;
+    final onTap = widget.onTap;
+    final onAddToPlaylist = widget.onAddToPlaylist;
+    final onDelete = widget.onDelete;
+    final onViewArtist = widget.onViewArtist;
 
     // 歌曲行响应 player 重建，高频更新会触发 Windows AXTree 竞态崩溃
-    return ExcludeSemantics(
-      child: AnimatedBuilder(
-        animation: player,
-        builder: (context, _) {
-          final active = !selecting && player.currentSong?.hash == song.hash;
-          final activeColor = colorScheme.primary;
-          final bgColor = selecting
-              ? (selected
-                  ? activeColor.withValues(alpha: .10)
-                  : (isDark
-                      ? Colors.white.withValues(alpha: .04)
-                      : Colors.white.withValues(alpha: .85)))
-              : active
-                  ? activeColor.withValues(alpha: .10)
-                  : (isDark
-                      ? Colors.white.withValues(alpha: .05)
-                      : Colors.white);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: ExcludeSemantics(
+        child: AnimatedBuilder(
+          animation: player,
+          builder: (context, _) {
+            final active = !selecting && player.currentSong?.hash == song.hash;
+            final activeColor = colorScheme.primary;
+            final bgColor = selecting
+                ? (selected
+                    ? activeColor.withValues(alpha: .10)
+                    : (isDark
+                        ? Colors.white.withValues(alpha: .04)
+                        : Colors.white.withValues(alpha: .85)))
+                : active
+                    ? activeColor.withValues(alpha: .10)
+                    // PC hover 反馈：悬停一行给底色，用户才知道可点。
+                    : _hovering
+                        ? (isDark
+                            ? Colors.white.withValues(alpha: .09)
+                            : colorScheme.surfaceContainerHigh)
+                        : (isDark
+                            ? Colors.white.withValues(alpha: .05)
+                            : Colors.white);
           final borderColor = selecting && selected || active
               ? activeColor.withValues(alpha: .18)
               : (isDark
@@ -2835,6 +3064,7 @@ class _SongRow extends StatelessWidget {
           ),
         );
         },
+        ),
       ),
     );
   }

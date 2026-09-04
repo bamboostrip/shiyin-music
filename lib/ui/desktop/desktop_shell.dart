@@ -58,6 +58,29 @@ class _DesktopShellState extends State<DesktopShell> {
   /// HomePage 子 tab（0=推荐, 1=排行榜, 2=电台），HomePage.sectionIndex 语义。
   var _homeTab = 0;
 
+  /// 内容区内嵌导航：歌单/搜索/歌手等详情只覆盖中间内容区，
+  /// 侧栏与底部播放栏常驻（PC 软件逻辑）。内层页面的
+  /// `Navigator.of(context).push` 会自动命中本 Navigator，无需改调用点。
+  final _contentNavKey = GlobalKey<NavigatorState>();
+
+  /// Tab 切换修订号：内嵌 Navigator 会缓存 `/` 路由，父级 setState
+  /// 不会重建路由内容，故用 notifier 显式驱动 [_DesktopContent] 重建。
+  final _tabsRevision = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _tabsRevision.dispose();
+    super.dispose();
+  }
+
+  /// 回到内容根页（切换侧栏分区时关闭已打开的歌单/搜索等详情）。
+  void _popToContentRoot() {
+    final inner = _contentNavKey.currentState;
+    if (inner != null && inner.canPop()) {
+      inner.popUntil((route) => route.isFirst);
+    }
+  }
+
   /// HomePage.onTabSwitch 的 shell 级下标语义（0=我的, 1..3=三个子 tab）。
   /// 越界值静默钳制，防止侧栏高亮失步（HomePage 当前只发 0..3，防御性收敛）。
   void _handleHomeTabSwitch(int shellIndex) {
@@ -70,9 +93,11 @@ class _DesktopShellState extends State<DesktopShell> {
         _homeTab = clamped - 1;
       }
     });
+    _tabsRevision.value++;
   }
 
   void _selectSection(int sidebarIndex) {
+    _popToContentRoot();
     setState(() {
       if (sidebarIndex <= 2) {
         _section = _DesktopSection.home;
@@ -81,26 +106,32 @@ class _DesktopShellState extends State<DesktopShell> {
         _section = _DesktopSection.values[sidebarIndex - 2];
       }
     });
+    _tabsRevision.value++;
+  }
+
+  /// 内容区内推页（保留侧栏+底栏）。内层 Navigator 尚未就绪时
+  /// 退回根 Navigator，避免快捷键时序导致打不开。
+  void _pushContent(BuildContext context, Widget page) {
+    final inner = _contentNavKey.currentState;
+    if (inner != null) {
+      inner.push(MaterialPageRoute(builder: (_) => page));
+    } else {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+    }
   }
 
   void _openSearch(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SearchPage(
-          api: widget.api,
-          auth: widget.auth,
-          player: widget.player,
-        ),
-      ),
+    _pushContent(
+      context,
+      SearchPage(api: widget.api, auth: widget.auth, player: widget.player),
     );
   }
 
   void _openPlayerPage(BuildContext context) {
     if (widget.player.currentSong == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerPage(player: widget.player, auth: widget.auth),
-      ),
+    _pushContent(
+      context,
+      PlayerPage(player: widget.player, auth: widget.auth),
     );
   }
 
@@ -124,43 +155,6 @@ class _DesktopShellState extends State<DesktopShell> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      HomePage(
-        api: widget.api,
-        auth: widget.auth,
-        player: widget.player,
-        cache: widget.cache,
-        theme: widget.theme,
-        downloads: widget.downloads,
-        localMusic: widget.localMusic,
-        sectionIndex: _homeTab,
-        onTabSwitch: _handleHomeTabSwitch,
-      ),
-      LibraryPage(
-        api: widget.api,
-        auth: widget.auth,
-        player: widget.player,
-        downloads: widget.downloads,
-        theme: widget.theme,
-        localMusic: widget.localMusic,
-      ),
-      DownloadedSongsPage(
-        api: widget.api,
-        auth: widget.auth,
-        player: widget.player,
-        downloads: widget.downloads,
-      ),
-      SettingsPage(
-        api: widget.api,
-        auth: widget.auth,
-        player: widget.player,
-        theme: widget.theme,
-        localMusic: widget.localMusic,
-        cache: widget.cache,
-        downloads: widget.downloads,
-      ),
-    ];
-
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.keyF, control: true):
@@ -248,9 +242,33 @@ class _DesktopShellState extends State<DesktopShell> {
             child: Column(
               children: [
                 Expanded(
-                  child: LazyIndexedStack(
-                    index: _contentIndex,
-                    children: pages,
+                  // 内容区内嵌导航：`/` 为分区内容（侧栏切换），push 的
+                  // 歌单/搜索/歌手详情只覆盖本区域，侧栏与底栏常驻。
+                  child: Navigator(
+                    key: _contentNavKey,
+                    initialRoute: '/',
+                    onGenerateRoute: (settings) {
+                      if (settings.name == '/') {
+                        return MaterialPageRoute(
+                          settings: settings,
+                          builder: (_) => _DesktopContent(
+                            revision: _tabsRevision,
+                            sectionProvider: () => _section,
+                            homeTabProvider: () => _homeTab,
+                            contentIndexProvider: () => _contentIndex,
+                            api: widget.api,
+                            auth: widget.auth,
+                            player: widget.player,
+                            cache: widget.cache,
+                            downloads: widget.downloads,
+                            theme: widget.theme,
+                            localMusic: widget.localMusic,
+                            onHomeTabSwitch: _handleHomeTabSwitch,
+                          ),
+                        );
+                      }
+                      return null;
+                    },
                   ),
                 ),
                 DesktopPlayerBar(player: widget.player, auth: widget.auth),
@@ -277,4 +295,82 @@ class _SelectHomeSectionIntent extends Intent {
 
 class _OpenPlayerIntent extends Intent {
   const _OpenPlayerIntent();
+}
+
+/// 桌面内容根页：分区 Tab 容器，活在内嵌 Navigator 的 `/` 路由下。
+///
+/// 经 [_DesktopShellState._tabsRevision] 驱动重建（内嵌 Navigator 会缓存
+/// 路由，父级 setState 到不了这里）。各分区的页面实例由
+/// [LazyIndexedStack] 保活，切分区不丢滚动与加载状态。
+class _DesktopContent extends StatelessWidget {
+  const _DesktopContent({
+    required this.revision,
+    required this.sectionProvider,
+    required this.homeTabProvider,
+    required this.contentIndexProvider,
+    required this.api,
+    required this.auth,
+    required this.player,
+    required this.cache,
+    required this.downloads,
+    required this.theme,
+    required this.localMusic,
+    required this.onHomeTabSwitch,
+  });
+
+  final ValueNotifier<int> revision;
+  final _DesktopSection Function() sectionProvider;
+  final int Function() homeTabProvider;
+  final int Function() contentIndexProvider;
+  final MusicApi api;
+  final AuthController auth;
+  final PlayerController player;
+  final CacheService cache;
+  final DownloadController downloads;
+  final ThemeController theme;
+  final LocalMusicController localMusic;
+  final ValueChanged<int> onHomeTabSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: revision,
+      builder: (_, _, _) {
+        return LazyIndexedStack(
+          index: contentIndexProvider(),
+          children: [
+            HomePage(
+              api: api,
+              auth: auth,
+              player: player,
+              cache: cache,
+              theme: theme,
+              downloads: downloads,
+              localMusic: localMusic,
+              sectionIndex: homeTabProvider(),
+              onTabSwitch: onHomeTabSwitch,
+            ),
+            LibraryPage(
+              api: api,
+              auth: auth,
+              player: player,
+              downloads: downloads,
+              theme: theme,
+              localMusic: localMusic,
+            ),
+            DownloadedSongsPage(api: api, auth: auth, player: player, downloads: downloads),
+            SettingsPage(
+              api: api,
+              auth: auth,
+              player: player,
+              theme: theme,
+              localMusic: localMusic,
+              cache: cache,
+              downloads: downloads,
+            ),
+          ],
+        );
+      },
+    );
+  }
 }

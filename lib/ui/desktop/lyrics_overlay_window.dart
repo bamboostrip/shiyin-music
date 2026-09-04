@@ -44,76 +44,144 @@ bool isLyricsOverlayWindowArgs(List<String> args) {
 @pragma("vm:entry-point")
 Future<void> runLyricsOverlayWindow(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('[桌面歌词悬浮窗] 启动 argsLength=${args.length}');
 
-  // WindowController.fromWindowId 为同步工厂（0.2.1 源码），
-  // 通道调用延迟到方法真正执行时，此时绑定已初始化。
-  final windowController = WindowController.fromWindowId(int.parse(args[1]));
+  // 参数解析失败直接返回，不让子引擎带病启动（此前 jsonDecode/int.parse
+  // 无保护，畸形参数会导致子引擎未处理异常）。
+  WindowController? windowController;
+  try {
+    if (args.length < 2) {
+      debugPrint('[桌面歌词悬浮窗] 参数不足，直接退出');
+      return;
+    }
+    windowController = WindowController.fromWindowId(int.parse(args[1]));
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] 解析窗口ID失败: $e');
+    return;
+  }
   _overlayWindowController = windowController;
-  // 包 0.2.1 的 WindowController 无 arguments getter，
-  // 初始参数经 createWindow 的 arguments 字符串由 main(args[2]) 传入。
-  final initialArgs = args.length > 2 && args[2].isNotEmpty
-      ? jsonDecode(args[2]) as Map<String, dynamic>
-      : const <String, dynamic>{};
-  final settings = DesktopLyricsSettings.fromMap(
-    (initialArgs['settings'] as Map?)?.cast<String, dynamic>() ??
-        const <String, dynamic>{},
-  );
+  final shownController = windowController;
 
+  var settings = const DesktopLyricsSettings();
+  var current = '';
+  var next = '';
+  var isPlaying = false;
+  if (args.length > 2 && args[2].isNotEmpty) {
+    try {
+      // 包 0.2.1 的 WindowController 无 arguments getter，
+      // 初始参数经 createWindow 的 arguments 字符串由 main(args[2]) 传入。
+      final initialArgs = jsonDecode(args[2]) as Map<String, dynamic>;
+      settings = DesktopLyricsSettings.fromMap(
+        (initialArgs['settings'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{},
+      );
+      current = initialArgs['current'] as String? ?? '';
+      next = initialArgs['next'] as String? ?? '';
+      isPlaying = initialArgs['isPlaying'] as bool? ?? false;
+    } catch (e) {
+      debugPrint('[桌面歌词悬浮窗] 解析初始参数失败，使用默认值: $e');
+    }
+  }
+
+  // 每个原生窗口调用独立 try/catch：此前任何一步抛异常都会中断整个
+  // 子引擎启动，且无法从日志定位是哪一步。分步日志、互不干扰。
   // 子引擎内 window_manager 作用于本悬浮窗自身（ensureInitialized 将
   // native_window 绑定为当前引擎根 HWND，见 window_manager 源码）。
-  await windowManager.ensureInitialized();
-  await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
-  await windowManager.setAlwaysOnTop(true);
-  await windowManager.setSkipTaskbar(true);
-  await windowManager.setTitle('桌面歌词');
-  await windowManager.setSize(
-    const Size(
-      WindowsDesktopLyricsBridge.overlayWidth,
-      WindowsDesktopLyricsBridge.overlayHeight,
-    ),
-  );
+  try {
+    await windowManager.ensureInitialized();
+    debugPrint('[桌面歌词悬浮窗] windowManager 初始化 ok');
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] windowManager 初始化失败: $e');
+  }
+  try {
+    await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setTitleBarStyle 失败: $e');
+  }
+  try {
+    await windowManager.setAlwaysOnTop(true);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setAlwaysOnTop 失败: $e');
+  }
+  try {
+    await windowManager.setSkipTaskbar(true);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setSkipTaskbar 失败: $e');
+  }
+  try {
+    await windowManager.setTitle('桌面歌词');
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setTitle 失败: $e');
+  }
+  try {
+    await windowManager.setSize(
+      const Size(
+        WindowsDesktopLyricsBridge.overlayWidth,
+        WindowsDesktopLyricsBridge.overlayHeight,
+      ),
+    );
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setSize 失败: $e');
+  }
   await _applyPassthrough(settings);
 
-  // 恢复上次拖动位置。
-  final prefs = await SharedPreferences.getInstance();
-  final left = prefs.getDouble(_kWindowLeftKey);
-  final top = prefs.getDouble(_kWindowTopKey);
-  if (left != null && top != null) {
-    await windowManager.setPosition(Offset(left, top));
+  // 恢复上次拖动位置（失败不影响展示）。
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final left = prefs.getDouble(_kWindowLeftKey);
+    final top = prefs.getDouble(_kWindowTopKey);
+    if (left != null && top != null) {
+      await windowManager.setPosition(Offset(left, top));
+    }
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] 恢复窗口位置失败: $e');
   }
 
   final model = _OverlayModel(
     settings: settings,
-    current: initialArgs['current'] as String? ?? '',
-    next: initialArgs['next'] as String? ?? '',
-    isPlaying: initialArgs['isPlaying'] as bool? ?? false,
+    current: current,
+    next: next,
+    isPlaying: isPlaying,
   );
 
   // 尽早注册消息处理，缩短主窗早期消息的丢失窗口期
   // （主窗 createWindow 后立即推送初始内容）。
-  DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
-    switch (call.method) {
-      case 'updateLyric':
-        final message = (call.arguments as Map?)?.cast<String, dynamic>();
-        if (message != null) {
-          model
-            ..current = message['current'] as String? ?? model.current
-            ..next = message['next'] as String? ?? model.next
-            ..isPlaying = message['isPlaying'] as bool? ?? model.isPlaying;
-        }
-      case 'updateSettings':
-        final message = (call.arguments as Map?)?.cast<String, dynamic>();
-        if (message != null) {
-          model.settings = DesktopLyricsSettings.fromMap(message);
-          await _applyPassthrough(model.settings);
-        }
-    }
-    return null;
-  });
+  try {
+    DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
+      switch (call.method) {
+        case 'updateLyric':
+          final message = (call.arguments as Map?)?.cast<String, dynamic>();
+          if (message != null) {
+            model
+              ..current = message['current'] as String? ?? model.current
+              ..next = message['next'] as String? ?? model.next
+              ..isPlaying = message['isPlaying'] as bool? ?? model.isPlaying;
+          }
+        case 'updateSettings':
+          final message = (call.arguments as Map?)?.cast<String, dynamic>();
+          if (message != null) {
+            model.settings = DesktopLyricsSettings.fromMap(message);
+            await _applyPassthrough(model.settings);
+          }
+      }
+      return null;
+    });
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] 注册消息处理失败: $e');
+  }
 
-  // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)），就绪后显示。
-  await windowController.show();
   runApp(_LyricsOverlayApp(model: model));
+  // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)）。首帧渲染完成
+  // 后再显示：此前 show() 在 runApp 之前调用，空窗口先行贴屏，
+  // 既闪现白底默认窗，也可能与引擎首帧初始化竞态。
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    try {
+      await shownController.show();
+      debugPrint('[桌面歌词悬浮窗] show ok');
+    } catch (e) {
+      debugPrint('[桌面歌词悬浮窗] show 失败: $e');
+    }
+  });
 }
 
 /// locked && passthrough 时让鼠标穿透悬浮窗（锁定态由主窗设置页解锁）。

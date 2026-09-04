@@ -16,7 +16,9 @@ import '../../services/lyric_converter.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/artwork.dart';
+import '../widgets/climax_slider_track.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
+import '../form_factor.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -289,7 +291,40 @@ class _PlayerBodyState extends State<_PlayerBody> {
                               onArtistTap: _openArtist,
                             ),
                           )
-                        : HorizontalWheelPageScroll(
+                        // 桌面端：纵向滚轮留给歌词列表，不劫持为左右翻页。
+                        // 封面/歌词仍可拖动或点圆点切换。
+                        : isDesktopFormFactor
+                            ? NotificationListener<ScrollNotification>(
+                                onNotification: _handlePageScrollNotification,
+                                child: PageView(
+                                  controller: _pageController,
+                                  allowImplicitScrolling: true,
+                                  onPageChanged: (value) =>
+                                      _setPageState(page: value),
+                                  children: [
+                                    _PosterPlayerPage(
+                                      key: const PageStorageKey(
+                                        'poster-player-page',
+                                      ),
+                                      player: widget.player,
+                                      song: widget.song,
+                                      onQueue: widget.onQueue,
+                                    ),
+                                    _LyricPlayerPage(
+                                      key: const PageStorageKey(
+                                        'lyric-player-page',
+                                      ),
+                                      player: widget.player,
+                                      song: widget.song,
+                                      focusRequest: _lyricFocusRequest,
+                                      isPageActive: _lyricPageActive,
+                                      isPageVisible: _lyricPageVisible,
+                                      isPageTransitioning: _pageScrolling,
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : HorizontalWheelPageScroll(
                             controller: _pageController,
                             child: NotificationListener<ScrollNotification>(
                               onNotification: _handlePageScrollNotification,
@@ -1780,6 +1815,8 @@ class _LyricPlayerPageState extends State<_LyricPlayerPage>
     super.initState();
     _displayMode = _initialLyricDisplayMode(widget.player.lyrics);
     _loadLyricScale();
+    // 兜底：非点歌路径（恢复播放/静默失败）进页时歌词可能为空，补拉一次。
+    unawaited(widget.player.ensureLyricsLoaded());
   }
 
   Future<void> _loadLyricScale() async {
@@ -1808,6 +1845,11 @@ class _LyricPlayerPageState extends State<_LyricPlayerPage>
         widget.player.lyrics,
         _displayMode,
       );
+    }
+    // 同一首歌但歌词为空（之前请求失败）：切回来时再补拉一次。
+    if (oldWidget.song.hash == widget.song.hash &&
+        widget.player.lyrics.isEmpty) {
+      unawaited(widget.player.ensureLyricsLoaded());
     }
   }
 
@@ -2037,12 +2079,44 @@ class _LyricViewportState extends State<_LyricViewport>
     final lyrics = widget.lyrics;
     if (lyrics.isEmpty) {
       return Center(
-        child: Text(
-          widget.isPreparing ? '正在准备音乐...' : '暂无歌词',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.isPreparing ? '正在准备音乐...' : '暂无歌词',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            // 非 preparing 且无歌词：大概率是之前请求失败，给手动重试入口。
+            if (!widget.isPreparing)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _GlassIconButton(
+                  tooltip: '重新加载歌词',
+                  onPressed: () =>
+                      unawaited(widget.player.ensureLyricsLoaded()),
+                  icon: Icons.refresh_rounded,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // 桌面端：flutter_lyric 的 LyricView 只处理触摸拖动，不响应鼠标滚轮；
+    // 且控制器无对外滚动接口。用原生 ListView 实现 PC 式歌词列表：
+    // 滚轮/触摸均可滚动，点击切歌，空闲自动跟随。
+    if (isDesktopFormFactor) {
+      return ExcludeSemantics(
+        child: _DesktopLyricList(
+          player: widget.player,
+          songHash: widget.songHash,
+          lyrics: lyrics,
+          activeIndex: widget.activeIndex,
+          displayMode: widget.displayMode,
+          lyricScale: widget.lyricScale,
         ),
       );
     }
@@ -2083,6 +2157,186 @@ class _LyricViewportState extends State<_LyricViewport>
     return ExcludeSemantics(
       // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
       child: LyricView(controller: _lyricController, style: lyricStyle),
+    );
+  }
+}
+
+/// 桌面端歌词列表（PC 软件逻辑）。
+///
+/// flutter_lyric 的自绘视图不消费 [PointerScrollEvent]，滚轮无法滚动；
+/// 这里用原生 [ListView] 实现：滚轮/拖动均可滚动，点击行跳转播放，
+/// 用户滚动时暂停自动跟随，空闲 [resumeDelay] 后恢复跟随当前行。
+class _DesktopLyricList extends StatefulWidget {
+  const _DesktopLyricList({
+    required this.player,
+    required this.songHash,
+    required this.lyrics,
+    required this.activeIndex,
+    required this.displayMode,
+    required this.lyricScale,
+  });
+
+  final PlayerController player;
+  final String songHash;
+  final List<LyricLine> lyrics;
+  final int activeIndex;
+  final _LyricDisplayMode displayMode;
+  final double lyricScale;
+
+  @override
+  State<_DesktopLyricList> createState() => _DesktopLyricListState();
+}
+
+class _DesktopLyricListState extends State<_DesktopLyricList> {
+  static const _resumeDelay = Duration(milliseconds: 2500);
+
+  final _scrollController = ScrollController();
+  final _rowKeys = <int, GlobalKey>{};
+  Timer? _resumeTimer;
+  var _userHolding = false;
+  var _lastActive = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastActive = widget.activeIndex;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToActive(animate: false);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _DesktopLyricList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.songHash != widget.songHash) {
+      _rowKeys.clear();
+      _resumeTimer?.cancel();
+      _userHolding = false;
+      _lastActive = widget.activeIndex;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToActive(animate: false);
+      });
+      return;
+    }
+    // 歌词异步加载完成（空 -> 有）时补一次定位；首帧行 key 尚未创建，
+    // 放到 postFrame 等行构建完再滚。
+    if (oldWidget.lyrics.length != widget.lyrics.length) {
+      _lastActive = widget.activeIndex;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_userHolding) _scrollToActive(animate: false);
+      });
+      return;
+    }
+    if (widget.activeIndex != _lastActive) {
+      _lastActive = widget.activeIndex;
+      if (!_userHolding) {
+        _scrollToActive(animate: true);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _resumeTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToActive({required bool animate}) {
+    if (!mounted || widget.activeIndex < 0) return;
+    final key = _rowKeys[widget.activeIndex];
+    final rowContext = key?.currentContext;
+    if (rowContext == null) return;
+    Scrollable.ensureVisible(
+      rowContext,
+      alignment: 0.34,
+      duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollStartNotification) {
+      _resumeTimer?.cancel();
+      if (!_userHolding) setState(() => _userHolding = true);
+    } else if (notification is ScrollEndNotification) {
+      _resumeTimer?.cancel();
+      _resumeTimer = Timer(_resumeDelay, () {
+        if (!mounted) return;
+        setState(() => _userHolding = false);
+        _scrollToActive(animate: true);
+      });
+    }
+    return false;
+  }
+
+  String? _secondaryText(LyricLine line) {
+    return switch (widget.displayMode) {
+      _LyricDisplayMode.lyricsWithTranslation =>
+        line.translation?.isNotEmpty == true ? line.translation : null,
+      _LyricDisplayMode.lyricsWithRomanization =>
+        line.romanization?.isNotEmpty == true ? line.romanization : null,
+      _LyricDisplayMode.lyricsOnly => null,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: _handleScrollNotification,
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(20, 140, 20, 180),
+        itemCount: widget.lyrics.length,
+        itemBuilder: (context, index) {
+          final line = widget.lyrics[index];
+          final active = index == widget.activeIndex;
+          final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
+          final secondary = _secondaryText(line);
+          return GestureDetector(
+            key: key,
+            behavior: HitTestBehavior.opaque,
+            onTap: () => widget.player.seek(line.time),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 180),
+                      style: Theme.of(context).textTheme.headlineMedium!.copyWith(
+                        color: active
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: .34),
+                        fontSize: (active ? 30.0 : 24.0) * widget.lyricScale,
+                        height: 1.3,
+                        fontWeight: active ? FontWeight.w900 : FontWeight.w800,
+                      ),
+                      child: Text(line.text),
+                    ),
+                    if (secondary != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        secondary,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white.withValues(
+                            alpha: active ? .72 : .44,
+                          ),
+                          fontSize: 15.0 * widget.lyricScale,
+                          height: 1.3,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -2371,102 +2625,10 @@ class _Progress extends StatelessWidget {
   }
 }
 
-/// 进度条轨道：在轨道内部标记高潮起始位置（替代原先轨道下方的圆点）。
-///
-/// 绘制顺序：整条未播放底轨 -> 高潮起点小标记 -> 已播放进度（系统默认
-/// 加高 2px，播放头经过后盖住标记）。thumb 位置由 Slider 框架按全宽线性
-/// 映射传入，标记同样按全宽线性映射定位。
-class _ClimaxSliderTrackShape extends RoundedRectSliderTrackShape {
-  const _ClimaxSliderTrackShape({
-    required this.climaxStart,
-    required this.markerColor,
-  });
-
-  final double? climaxStart;
-  final Color markerColor;
-
-  @override
-  void paint(
-    PaintingContext context,
-    Offset offset, {
-    required RenderBox parentBox,
-    required SliderThemeData sliderTheme,
-    required Animation<double> enableAnimation,
-    required TextDirection textDirection,
-    required Offset thumbCenter,
-    Offset? secondaryOffset,
-    bool isDiscrete = false,
-    bool isEnabled = false,
-    double additionalActiveTrackHeight = 2,
-  }) {
-    if (sliderTheme.trackHeight == null || sliderTheme.trackHeight! <= 0) {
-      return;
-    }
-
-    final canvas = context.canvas;
-    final trackRect = getPreferredRect(
-      parentBox: parentBox,
-      offset: offset,
-      sliderTheme: sliderTheme,
-      isEnabled: isEnabled,
-      isDiscrete: isDiscrete,
-    );
-    final trackRadius = Radius.circular(trackRect.height / 2);
-    final activePaint = Paint()
-      ..color = ColorTween(
-        begin: sliderTheme.disabledActiveTrackColor,
-        end: sliderTheme.activeTrackColor,
-      ).evaluate(enableAnimation)!;
-    final inactivePaint = Paint()
-      ..color = ColorTween(
-        begin: sliderTheme.disabledInactiveTrackColor,
-        end: sliderTheme.inactiveTrackColor,
-      ).evaluate(enableAnimation)!;
-
-    // 1. 整条未播放底轨。
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(trackRect, trackRadius),
-      inactivePaint,
-    );
-
-    // 2. 高潮起点标记：沿用高潮段的高亮色，只取起点处一小段，
-    //    高度与轨道完全齐平（不超出进度条），水平方向夹在轨道范围内。
-    final start = climaxStart;
-    if (start != null) {
-      final markerWidth = (trackRect.height * 1.6).clamp(6.0, 9.0);
-      final centerDx = (trackRect.left + start * trackRect.width).clamp(
-        trackRect.left + markerWidth / 2,
-        trackRect.right - markerWidth / 2,
-      );
-      final markerRect = Rect.fromCenter(
-        center: Offset(centerDx, trackRect.center.dy),
-        width: markerWidth,
-        height: trackRect.height,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(markerRect, trackRadius),
-        Paint()..color = markerColor,
-      );
-    }
-
-    // 3. 已播放进度（与系统默认一致，加高 2px；播放头经过后覆盖标记）。
-    if (thumbCenter.dx > trackRect.left) {
-      final activeRect = Rect.fromLTRB(
-        trackRect.left,
-        trackRect.top - additionalActiveTrackHeight / 2,
-        thumbCenter.dx,
-        trackRect.bottom + additionalActiveTrackHeight / 2,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          activeRect,
-          Radius.circular((trackRect.height + additionalActiveTrackHeight) / 2),
-        ),
-        activePaint,
-      );
-    }
-  }
-}
+/// 播放页进度条的高潮标记轨道已抽到共享组件 [ClimaxSliderTrackShape]
+/// （`lib/ui/widgets/climax_slider_track.dart`），与桌面底部播放栏共用，
+/// 此处保留别名以收敛改动。
+typedef _ClimaxSliderTrackShape = ClimaxSliderTrackShape;
 
 class _Controls extends StatelessWidget {
   const _Controls({

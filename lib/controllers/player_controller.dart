@@ -23,6 +23,7 @@ import '../services/playback_history_service.dart';
 import '../services/playback_stats_service.dart';
 import '../services/super_lyric_service.dart';
 import '../services/vip_background_task.dart';
+import '../ui/form_factor.dart';
 import 'download_controller.dart';
 import 'local_music_controller.dart';
 import 'shuffle_queue.dart';
@@ -1009,6 +1010,15 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// 进入播放页时的兜底：[loadLyrics] 只在 [playSong] 成功加载音频后触发，
+  /// 恢复播放/请求失败等路径下歌词可能为空，进页必须补拉一次。
+  /// 已有歌词时直接返回，不产生额外请求。
+  Future<void> ensureLyricsLoaded() async {
+    final song = currentSong;
+    if (song == null || lyrics.isNotEmpty) return;
+    await loadLyrics(song);
+  }
+
   Future<void> togglePlay() async {
     if (audioPlayer.playing) {
       await _audioHandler.pause();
@@ -1431,12 +1441,16 @@ class PlayerController extends ChangeNotifier {
     if (enabled) {
       final hasPermission = await _desktopLyrics.checkPermission();
       if (!hasPermission) {
+        debugPrint('[时音][桌面歌词] 开启失败：checkPermission=false');
         desktopLyricsEnabled = false;
         await prefs.setBool(_desktopLyricsEnabledSettingKey, false);
         notifyListeners();
         await _desktopLyrics.requestPermission();
         return;
       }
+      debugPrint(
+        '[时音][桌面歌词] 已开启 hasSong=${currentSong != null} isDesktop=$isDesktopFormFactor',
+      );
       final song = currentSong;
       if (song != null) {
         await _syncDesktopLyricsVisibility();
@@ -1447,9 +1461,12 @@ class PlayerController extends ChangeNotifier {
   }
 
   bool get _shouldShowDesktopLyrics {
-    return desktopLyricsEnabled &&
-        currentSong != null &&
-        (!_isAppForeground || _desktopLyricsPreviewVisible);
+    if (!desktopLyricsEnabled || currentSong == null) return false;
+    // 桌面端（Windows 等）：开启即显示，与前台/后台无关（PC 软件逻辑）。
+    // AppLifecycleState 在桌面基本恒为 resumed，沿用移动端的
+    // “后台才悬浮”判断会导致前台点开启毫无反应（图4问题）。
+    if (isDesktopFormFactor) return true;
+    return !_isAppForeground || _desktopLyricsPreviewVisible;
   }
 
   Future<void> _syncDesktopLyricsVisibility() async {
@@ -1464,7 +1481,10 @@ class PlayerController extends ChangeNotifier {
       title: song.title,
       artist: song.artist,
     );
-    if (shown) {
+    debugPrint('[时音][桌面歌词] show=${song.title} result=$shown');
+    if (!shown) {
+      debugPrint('[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限');
+    } else {
       _syncDesktopLyrics();
       _syncDesktopPlayState();
       _syncDesktopKaraokeProgress();

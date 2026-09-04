@@ -18,6 +18,7 @@ import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
+import '../widgets/hover_row.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
@@ -1123,6 +1124,49 @@ class _SongSectionState extends State<_SongSection> {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final maxWidth = constraints.maxWidth;
+                  // 桌面端（PC 软件逻辑）：纵向多列一次看全，外层页面纵滚，
+                  // 不做左右翻页、不显示分页圆点。
+                  if (isDesktopFormFactor) {
+                    final int crossAxisCount;
+                    if (maxWidth >= 1050) {
+                      crossAxisCount = 3;
+                    } else if (maxWidth >= 650) {
+                      crossAxisCount = 2;
+                    } else {
+                      crossAxisCount = 1;
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (int col = 0; col < crossAxisCount; col++) ...[
+                          if (col > 0) const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                for (
+                                  int i = col;
+                                  i < widget.songs.length;
+                                  i += crossAxisCount
+                                )
+                                  _HomeSongRow(
+                                    song: widget.songs[i],
+                                    queue: widget.songs,
+                                    onPlay: widget.onPlay,
+                                    isLiked: widget.isLiked(widget.songs[i]),
+                                    onLikeTap: () =>
+                                        widget.onLikeTap(widget.songs[i]),
+                                    auth: widget.auth,
+                                    player: widget.player,
+                                    onViewArtist: () =>
+                                        widget.onViewArtist(widget.songs[i]),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  }
                   final int crossAxisCount;
                   final int itemsPerPage;
                   if (maxWidth >= 1050) {
@@ -1267,10 +1311,13 @@ class _HomeSongRow extends StatelessWidget {
           final active =
               song.hash.isNotEmpty && player.currentSong?.hash == song.hash;
           final activeColor = colorScheme.primary;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => onPlay(song, queue),
-            child: AnimatedContainer(
+          return HoverRow(
+            hoverColor: colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(14),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onPlay(song, queue),
+              child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
               decoration: BoxDecoration(
@@ -1403,6 +1450,7 @@ class _HomeSongRow extends StatelessWidget {
                   ),
                 ],
               ),
+              ),
             ),
           );
         },
@@ -1420,14 +1468,59 @@ class _TopSongRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppHorizontalRail<Song>(
-      title: '新歌速递',
-      items: songs,
-      height: 162,
-      itemWidth: 110,
-      topPadding: 20,
-      itemBuilder: (context, song) =>
-          _TopSongCard(song: song, onTap: () => onPlay(song)),
+    // 桌面宽窗：转网格并让封面撑满格宽（此前复用横轨的固定 110 封面，
+    // 格子比图大一圈，hover 时大片空白，见新歌速递截图箭头处）。
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 18),
+                  child: _SectionHeader(
+                    title: '新歌速递',
+                    action: SizedBox.shrink(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  itemCount: songs.length,
+                  gridDelegate:
+                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 160,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 14,
+                    // 正方形封面 + 两行文字 ≈ 宽:高 = 0.72。
+                    childAspectRatio: 0.72,
+                  ),
+                  itemBuilder: (context, index) => MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: _TopSongCard(
+                      song: songs[index],
+                      onTap: () => onPlay(songs[index]),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return AppHorizontalRail<Song>(
+          title: '新歌速递',
+          items: songs,
+          height: 162,
+          itemWidth: 110,
+          topPadding: 20,
+          itemBuilder: (context, song) =>
+              _TopSongCard(song: song, onTap: () => onPlay(song)),
+        );
+      },
     );
   }
 }
@@ -1445,45 +1538,55 @@ class _TopSongCard extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: .08)
-                    : Colors.white.withValues(alpha: .92),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 横轨下外层定宽 110；桌面网格下撑满格宽做正方形封面。
+          final coverWidth = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : 110.0;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: .08)
+                        : Colors.white.withValues(alpha: .92),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Artwork(url: song.coverUrl, size: 110),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            song.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-          ),
-          Text(
-            song.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-          ),
-        ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Artwork(url: song.coverUrl, size: coverWidth),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
+              Text(
+                song.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12, color: colorScheme.onSurfaceVariant),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
