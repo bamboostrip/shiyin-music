@@ -770,12 +770,16 @@ class _LandscapeHeader extends StatelessWidget {
             if (!ok) Toast.error('暂无高潮片段');
           },
         ),
-        SongSheetAction(
-          icon: Icons.graphic_eq_rounded,
-          title: '音效',
-          subtitle: player.audioEffectsLabel,
-          onTap: () => showAudioEffectsSheet(context: context, player: player),
-        ),
+        if (player.isAudioEffectsSupported)
+          SongSheetAction(
+            icon: Icons.graphic_eq_rounded,
+            title: '音效',
+            subtitle: player.audioEffectsLabel,
+            onTap: () => showAudioEffectsSheet(
+              context: context,
+              player: player,
+            ),
+          ),
         if (song.source == SongSource.kugou)
           SongSheetAction(
             icon: Icons.playlist_add_rounded,
@@ -1336,12 +1340,16 @@ class _TopBar extends StatelessWidget {
           isGrid: true,
           onTap: () => _showAudioQualityPicker(context, player),
         ),
-        SongSheetAction(
-          icon: Icons.graphic_eq_rounded,
-          title: '音效',
-          isGrid: true,
-          onTap: () => showAudioEffectsSheet(context: context, player: player),
-        ),
+        if (player.isAudioEffectsSupported)
+          SongSheetAction(
+            icon: Icons.graphic_eq_rounded,
+            title: '音效',
+            isGrid: true,
+            onTap: () => showAudioEffectsSheet(
+              context: context,
+              player: player,
+            ),
+          ),
         SongSheetAction(
           icon: Icons.auto_awesome_rounded,
           title: '高潮',

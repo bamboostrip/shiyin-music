@@ -285,18 +285,20 @@ class SettingsPage extends StatelessWidget {
                         value: player.loudnessEnabled,
                         onChanged: player.setLoudnessEnabled,
                       ),
-                      _SettingsDivider(),
-                      _SettingsTile(
-                        icon: Icons.graphic_eq_rounded,
-                        iconColor: const Color(0xFF8E24AA),
-                        title: '音效',
-                        subtitle: player.audioEffectsLabel,
-                        onTap: () => showAudioEffectsSheet(
-                          context: context,
-                          player: player,
+                      if (player.isAudioEffectsSupported) ...[
+                        _SettingsDivider(),
+                        _SettingsTile(
+                          icon: Icons.graphic_eq_rounded,
+                          iconColor: const Color(0xFF8E24AA),
+                          title: '音效',
+                          subtitle: player.audioEffectsLabel,
+                          onTap: () => showAudioEffectsSheet(
+                            context: context,
+                            player: player,
+                          ),
                         ),
-                      ),
-                      _SettingsDivider(),
+                        _SettingsDivider(),
+                      ],
                       _SettingsTile(
                         icon: Icons.bar_chart_rounded,
                         iconColor: const Color(0xFFD81B60),
