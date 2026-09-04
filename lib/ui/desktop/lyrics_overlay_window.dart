@@ -25,6 +25,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../services/desktop_lyrics_service.dart';
 import '../../services/windows_desktop_lyrics_bridge.dart';
+import '../design_tokens.dart';
 
 /// 子窗口控制器（入口函数创建后模块级持有，供关闭流程使用）。
 WindowController? _overlayWindowController;
@@ -747,7 +748,7 @@ class _ToolbarButtonState extends State<_ToolbarButton> {
   Widget build(BuildContext context) {
     return Tooltip(
       message: widget.tooltip,
-      waitDuration: const Duration(milliseconds: 300),
+      waitDuration: AppDesktopTheme.tooltipWaitDuration,
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),

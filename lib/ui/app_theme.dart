@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
 
+import 'design_tokens.dart';
+import 'form_factor.dart';
+
 class AppTheme {
   static const blue = Color(0xFF1478FF);
   static const musicRed = Color(0xFFFF2D55);
+
+  /// 桌面形态的页面转场：三桌面平台统一为轻快 fade。
+  static const Map<TargetPlatform, PageTransitionsBuilder>
+      _desktopPageTransitions = <TargetPlatform, PageTransitionsBuilder>{
+    TargetPlatform.windows: _FadePageTransitionsBuilder(),
+    TargetPlatform.macOS: _FadePageTransitionsBuilder(),
+    TargetPlatform.linux: _FadePageTransitionsBuilder(),
+  };
 
   static ThemeData light({Color? seedColor, bool transparentBackground = false}) {
     return _theme(Brightness.light,
@@ -22,6 +33,8 @@ class AppTheme {
     bool transparentBackground = false,
   }) {
     final isDark = brightness == Brightness.dark;
+    // 桌面形态（OS 判定）才注入桌面主题层；测试经 debugDesktopFormFactorOverride 覆盖。
+    final desktop = isDesktopFormFactor;
     final scheme = ColorScheme.fromSeed(seedColor: seedColor, brightness: brightness)
         .copyWith(
           primary: isDark ? _lighten(seedColor, 0.18) : seedColor,
@@ -119,11 +132,68 @@ class AppTheme {
           borderSide: BorderSide(color: scheme.primary, width: 1.3),
         ),
       ),
+      // —— 桌面形态专属主题层 ——
+      // 移动端/车机对应项为 null（= Flutter 默认），主题逐项不变。
+      scrollbarTheme: desktop ? _desktopScrollbarTheme(scheme) : null,
+      tooltipTheme: desktop
+          ? const TooltipThemeData(
+              waitDuration: AppDesktopTheme.tooltipWaitDuration,
+            )
+          : null,
+      pageTransitionsTheme: desktop
+          ? const PageTransitionsTheme(builders: _desktopPageTransitions)
+          : null,
+    );
+  }
+
+  /// 桌面细滚动条：常态半透明细条，hover 加粗加深；轨道全透明，
+  /// 颜色统一由 scheme 派生（浅色主题取深字色 / 深色主题取浅字色），两套主题同构。
+  static ScrollbarThemeData _desktopScrollbarTheme(ColorScheme scheme) {
+    return ScrollbarThemeData(
+      thickness: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.hovered)
+            ? AppDesktopTheme.scrollbarHoverThickness
+            : AppDesktopTheme.scrollbarThickness,
+      ),
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.hovered)
+            ? scheme.onSurface.withValues(alpha: 0.55)
+            : scheme.onSurface.withValues(alpha: 0.30),
+      ),
+      trackColor: const WidgetStatePropertyAll(Colors.transparent),
+      trackBorderColor: const WidgetStatePropertyAll(Colors.transparent),
+      radius: AppDesktopTheme.scrollbarRadius,
+      crossAxisMargin: AppDesktopTheme.scrollbarCrossAxisMargin,
+      mainAxisMargin: AppDesktopTheme.scrollbarMainAxisMargin,
+      minThumbLength: AppDesktopTheme.scrollbarMinThumbLength,
     );
   }
 
   /// 将颜色向白色方向提亮。
   static Color _lighten(Color color, [double amount = 0.2]) {
     return Color.lerp(color, Colors.white, amount) ?? color;
+  }
+}
+
+/// 桌面轻快页面转场：纯 fade（180ms），替代移动端 Material Zoom 的缩放位移。
+/// 忽略 secondaryAnimation：被覆盖页保持静止，新页在其上方淡入（标准桌面 fade）。
+class _FadePageTransitionsBuilder extends PageTransitionsBuilder {
+  const _FadePageTransitionsBuilder();
+
+  @override
+  Duration get transitionDuration => AppDesktopTheme.pageTransitionDuration;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: animation.drive(CurveTween(curve: Curves.easeOut)),
+      child: child,
+    );
   }
 }

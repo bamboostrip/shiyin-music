@@ -3751,7 +3751,7 @@ class _DesktopRowIconButton extends StatelessWidget {
 
     return Tooltip(
       message: tooltip,
-      waitDuration: const Duration(milliseconds: 300),
+      waitDuration: AppDesktopTheme.tooltipWaitDuration,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(

@@ -936,7 +936,7 @@ class _CollapsibleSection extends StatelessWidget {
           color: Colors.transparent,
           child: Tooltip(
             message: isExpanded ? '点击收起 $title' : '点击展开 $title',
-            waitDuration: const Duration(milliseconds: 500),
+            waitDuration: AppDesktopTheme.tooltipWaitDuration,
             child: InkWell(
               onTap: onToggle,
               mouseCursor: SystemMouseCursors.click,

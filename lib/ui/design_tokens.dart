@@ -25,3 +25,34 @@ abstract final class AppShadow {
     BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 2)),
   ];
 }
+
+/// 桌面形态专属主题 Token：滚动条 / Tooltip / 页面转场。
+///
+/// 仅桌面形态（isDesktopFormFactor）由 AppTheme 条件注入；
+/// 移动端/车机不使用，保持 Flutter 默认，主题逐项不变。
+abstract final class AppDesktopTheme {
+  /// 滚动条常态厚度（细条）。
+  static const double scrollbarThickness = 6;
+
+  /// 滚动条 hover 厚度（加粗）。
+  static const double scrollbarHoverThickness = 9;
+
+  /// 滚动条圆角（取常态厚度一半，视觉为全圆细条）。
+  static const Radius scrollbarRadius = Radius.circular(3);
+
+  /// 滚动条 thumb 距视口边缘的横向间距。
+  static const double scrollbarCrossAxisMargin = 2;
+
+  /// 滚动条 thumb 距滚动区两端的纵向留白。
+  static const double scrollbarMainAxisMargin = 4;
+
+  /// 滚动条 thumb 最小长度（Flutter 默认 18）：短列表不至于
+  /// thumb 过短难以命中，也避免边界处长度剧烈变化产生闪烁。
+  static const double scrollbarMinThumbLength = 48;
+
+  /// 桌面 Tooltip 统一等待时长（全项目唯一取值来源）。
+  static const Duration tooltipWaitDuration = Duration(milliseconds: 500);
+
+  /// 桌面页面转场时长（轻快 fade，替代移动端 Material Zoom 的 300ms）。
+  static const Duration pageTransitionDuration = Duration(milliseconds: 180);
+}
