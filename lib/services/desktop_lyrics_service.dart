@@ -7,9 +7,11 @@ import 'windows_desktop_lyrics_bridge.dart';
 typedef DesktopLyricsVisibilityChanged =
     void Function({required bool visible, required bool userClosed});
 
+typedef DesktopLyricsPlaybackAction = void Function(String action);
+
 class DesktopLyricsSettings {
   // 默认 QQ 音乐式透明悬浮：无底色（透明度 0），靠文字阴影保证可读性；
-  // 字号 24 在 720x120 悬浮窗内展示效果最佳。用户可在设置页调回底色。
+  // 字号 24 在 780x88 悬浮窗内展示效果最佳。用户可在设置页调回底色。
   const DesktopLyricsSettings({
     this.opacity = 0.0,
     this.locked = false,
@@ -69,12 +71,14 @@ class DesktopLyricsService {
   static const _channel = MethodChannel('kgka_music_hl/desktop_lyrics');
   static bool _handlerAttached = false;
   static DesktopLyricsVisibilityChanged? _visibilityChanged;
+  static DesktopLyricsPlaybackAction? _playbackAction;
 
   /// Windows 桌面形态的悬浮窗桥接（进程级单例；Android 分支不使用）。
-  /// 可见性回调经静态转发交给实例级 [_visibilityChanged]。
+  /// 可见性与播控回调经静态转发交给实例级 [_visibilityChanged] 与 [_playbackAction]。
   static final WindowsDesktopLyricsBridge? _windowsBridge = isDesktopFormFactor
       ? WindowsDesktopLyricsBridge(
           onVisibilityChanged: _forwardVisibilityChanged,
+          onPlaybackAction: _forwardPlaybackAction,
         )
       : null;
 
@@ -83,6 +87,10 @@ class DesktopLyricsService {
     required bool userClosed,
   }) {
     _visibilityChanged?.call(visible: visible, userClosed: userClosed);
+  }
+
+  static void _forwardPlaybackAction(String action) {
+    _playbackAction?.call(action);
   }
 
   DesktopLyricsService() {
@@ -100,21 +108,29 @@ class DesktopLyricsService {
     _visibilityChanged = handler;
   }
 
+  void setPlaybackActionHandler(DesktopLyricsPlaybackAction? handler) {
+    _playbackAction = handler;
+  }
+
   static void _attachHandler() {
     if (_handlerAttached) return;
     _handlerAttached = true;
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'onVisibilityChanged') {
-        return;
+      if (call.method == 'onVisibilityChanged') {
+        final args = call.arguments;
+        if (args is! Map) {
+          return;
+        }
+        _visibilityChanged?.call(
+          visible: args['visible'] as bool? ?? false,
+          userClosed: args['userClosed'] as bool? ?? false,
+        );
+      } else if (call.method == 'controlPlayback') {
+        final action = call.arguments?.toString();
+        if (action != null && action.isNotEmpty) {
+          _playbackAction?.call(action);
+        }
       }
-      final args = call.arguments;
-      if (args is! Map) {
-        return;
-      }
-      _visibilityChanged?.call(
-        visible: args['visible'] as bool? ?? false,
-        userClosed: args['userClosed'] as bool? ?? false,
-      );
     });
   }
 

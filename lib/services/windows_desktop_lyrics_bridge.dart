@@ -9,7 +9,8 @@
 //   updateSettings {DesktopLyricsSettings.toMap()}
 //   （不向子窗发 close：主窗侧关闭直接走原生 window.close）。
 // - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调）/
-//   overlayReady {}（子引擎通道就绪，主窗补发缓存的歌词与设置）。
+//   overlayReady {}（子引擎通道就绪，主窗补发缓存的歌词与设置）/
+//   controlPlayback (action: 'previous' | 'togglePlay' | 'next')（悬停播控条触发主窗播控）。
 //
 // API 名以包源码为准（desktop_multi_window 0.2.1）：
 // - DesktopMultiWindow.createWindow([arguments]) -> WindowController
@@ -30,14 +31,18 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'desktop_lyrics_service.dart';
 
 class WindowsDesktopLyricsBridge {
-  WindowsDesktopLyricsBridge({DesktopLyricsVisibilityChanged? onVisibilityChanged})
-    : _onVisibilityChanged = onVisibilityChanged;
+  WindowsDesktopLyricsBridge({
+    DesktopLyricsVisibilityChanged? onVisibilityChanged,
+    DesktopLyricsPlaybackAction? onPlaybackAction,
+  })  : _onVisibilityChanged = onVisibilityChanged,
+        _onPlaybackAction = onPlaybackAction;
 
   final DesktopLyricsVisibilityChanged? _onVisibilityChanged;
+  final DesktopLyricsPlaybackAction? _onPlaybackAction;
 
-  /// 悬浮窗固定尺寸（与悬浮窗侧 v1 约定一致；主窗/子窗共用的唯一定义处）。
-  static const double overlayWidth = 720;
-  static const double overlayHeight = 120;
+  /// 悬浮窗固定尺寸（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
+  static const double overlayWidth = 780;
+  static const double overlayHeight = 88;
 
   WindowController? _window;
   bool _handlerRegistered = false;
@@ -207,6 +212,11 @@ class WindowsDesktopLyricsBridge {
           await _invokeSub('updateSettings', _settings.toMap());
         } on Exception catch (e) {
           debugPrint('[桌面歌词主窗] updateSettings 补发失败: $e');
+        }
+      } else if (call.method == 'controlPlayback') {
+        final action = call.arguments?.toString();
+        if (action != null && action.isNotEmpty) {
+          _onPlaybackAction?.call(action);
         }
       }
       return null;

@@ -126,6 +126,7 @@ class PlayerController extends ChangeNotifier {
     );
     _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
     _desktopLyrics.setVisibilityChangedHandler(_handleDesktopLyricsVisibility);
+    _desktopLyrics.setPlaybackActionHandler(_handleDesktopLyricsPlaybackAction);
     _positionSub = audioPlayer.positionStream.listen((value) {
       if (!_isSeeking) {
         _setPositionBase(value, playing: isPlaying);
@@ -1745,6 +1746,19 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _handleDesktopLyricsPlaybackAction(String action) {
+    switch (action) {
+      case 'previous':
+        unawaited(previous());
+      case 'togglePlay':
+        unawaited(togglePlay());
+      case 'next':
+        unawaited(next());
+      default:
+        debugPrint('[时音][player] 未知桌面歌词播控指令: $action');
+    }
+  }
+
   Future<bool> checkDesktopLyricsPermission() =>
       _desktopLyrics.checkPermission();
 
@@ -2354,6 +2368,8 @@ class PlayerController extends ChangeNotifier {
     _devicesSub?.cancel();
     _completionFallbackTimer?.cancel();
     _saveStateTimer?.cancel();
+    _desktopLyrics.setVisibilityChangedHandler(null);
+    _desktopLyrics.setPlaybackActionHandler(null);
     positionListenable.dispose();
     unawaited(
       _audioEffects.configureEqualizer(

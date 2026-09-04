@@ -11,6 +11,7 @@
 // - windowClosed   {}（用户手动关闭悬浮窗）
 // - overlayReady   {}（子引擎消息通道就绪，主窗收到后补发缓存的歌词与设置，
 //   消除 createWindow 到 setMethodHandler 之间启动窗口期的消息丢失）
+// - controlPlayback (action: 'previous' | 'togglePlay' | 'next')（悬停播控条触发主窗播控）
 import 'dart:async';
 import 'dart:convert';
 
@@ -96,6 +97,11 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] setTitleBarStyle 失败: $e');
+  }
+  try {
+    await windowManager.setBackgroundColor(Colors.transparent);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setBackgroundColor 失败: $e');
   }
   try {
     await windowManager.setAlwaysOnTop(true);
@@ -345,52 +351,113 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
     }
   }
 
+  Future<void> _controlPlayback(String action) async {
+    try {
+      await DesktopMultiWindow.invokeMethod(0, 'controlPlayback', action);
+    } catch (e) {
+      debugPrint('[桌面歌词悬浮窗] 发送播控指令 $action 失败: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.model,
       builder: (context, _) {
         final settings = widget.model.settings;
-        // 透明度允许拉到 0（QQ 音乐式纯悬浮文字）；底盒照常绘制以保留
-        // 拖动热区，alpha 为 0 时仅文字 + 阴影可见。
-        final background = Color(settings.backgroundColor).withValues(
-          alpha: settings.opacity.clamp(0.0, 1.0).toDouble(),
-        );
         final textColor = Color(settings.textColor);
         final locked = settings.locked;
         final clickThrough = locked && settings.passthrough;
         final showToolbar = _hovering && !clickThrough;
 
+        // 常态：背景纯透明（若用户在设置中显式调高 opacity 则兼容展示）
+        // 悬停：平滑淡入现代半透暗调卡片背景（0xB8141823）
+        final cardColor = _hovering
+            ? const Color(0xB8141823)
+            : (settings.opacity > 0
+                ? Color(settings.backgroundColor).withValues(
+                    alpha: settings.opacity.clamp(0.0, 1.0),
+                  )
+                : Colors.transparent);
+
+        final cardBorder = _hovering
+            ? Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
+                width: 1.0,
+              )
+            : Border.all(color: Colors.transparent, width: 1.0);
+
+        final cardShadows = _hovering
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : const <BoxShadow>[];
+
+        final draggable = !locked;
+
         return MouseRegion(
+          hitTestBehavior: HitTestBehavior.opaque,
           onEnter: (_) => setState(() => _hovering = true),
           onExit: (_) => setState(() => _hovering = false),
           child: Material(
             type: MaterialType.transparency,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: background,
-                        borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: cardBorder,
+                  boxShadow: cardShadows,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: Stack(
+                    children: [
+                      // 歌词主体与整卡拖拽热区
+                      Positioned.fill(
+                        child: draggable
+                            ? DragToMoveArea(
+                                child: Container(
+                                  color: Colors.transparent,
+                                  child: _lyricsBody(
+                                    settings: settings,
+                                    textColor: textColor,
+                                  ),
+                                ),
+                              )
+                            : Container(
+                                color: Colors.transparent,
+                                child: _lyricsBody(
+                                  settings: settings,
+                                  textColor: textColor,
+                                ),
+                              ),
                       ),
-                      child: _lyricsBody(
-                        settings: settings,
-                        textColor: textColor,
-                        draggable: !locked,
+                      // 悬停微型磨砂操作卡片顶部浮现操作栏
+                      Positioned(
+                        top: 6,
+                        right: 8,
+                        child: AnimatedOpacity(
+                          opacity: showToolbar ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeInOut,
+                          child: IgnorePointer(
+                            ignoring: !showToolbar,
+                            child: _toolbar(settings: settings),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
-                if (showToolbar)
-                  Positioned(
-                    top: 10,
-                    right: 14,
-                    child: _toolbar(settings: settings),
-                  ),
-              ],
+              ),
             ),
           ),
         );
@@ -401,33 +468,34 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   Widget _lyricsBody({
     required DesktopLyricsSettings settings,
     required Color textColor,
-    required bool draggable,
   }) {
     final model = widget.model;
-    final body = Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _lyricLine(
-            text: model.current.isEmpty ? '暂无歌词' : model.current,
-            fontSize: settings.fontSize,
-            color: textColor,
-            fontWeight: FontWeight.bold,
-          ),
-          SizedBox(height: settings.fontSize * 0.15),
-          _lyricLine(
-            text: model.next,
-            fontSize: settings.fontSize * 0.6,
-            color: textColor.withValues(alpha: 0.7),
-            fontWeight: FontWeight.normal,
-          ),
-        ],
+    final hasNext = model.next.trim().isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _lyricLine(
+              text: model.current.isEmpty ? '暂无歌词' : model.current,
+              fontSize: settings.fontSize,
+              color: textColor,
+              fontWeight: FontWeight.bold,
+            ),
+            if (hasNext) ...[
+              const SizedBox(height: 3),
+              _lyricLine(
+                text: model.next,
+                fontSize: settings.fontSize * 0.58,
+                color: textColor.withValues(alpha: 0.60),
+                fontWeight: FontWeight.normal,
+              ),
+            ],
+          ],
+        ),
       ),
     );
-    if (!draggable) {
-      return body;
-    }
-    return DragToMoveArea(child: body);
   }
 
   Widget _lyricLine({
@@ -438,26 +506,24 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   }) {
     return SizedBox(
       width: double.infinity,
-      height: fontSize * 1.3,
       child: Text(
         text,
         maxLines: 1,
         softWrap: false,
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.center,
-        // QQ 音乐式文字阴影：无底色时靠阴影在亮壁纸上保持可读。
         style: TextStyle(
           fontSize: fontSize,
           color: color,
           fontWeight: fontWeight,
           shadows: [
             Shadow(
-              color: Colors.black.withValues(alpha: .65),
+              color: Colors.black.withValues(alpha: 0.75),
               blurRadius: 6,
               offset: const Offset(0, 1),
             ),
             Shadow(
-              color: Colors.black.withValues(alpha: .35),
+              color: Colors.black.withValues(alpha: 0.45),
               blurRadius: 14,
             ),
           ],
@@ -469,35 +535,125 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   Widget _toolbar({required DesktopLyricsSettings settings}) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
+        color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.10),
+          width: 0.5,
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: settings.locked ? '解锁位置' : '锁定位置',
-            icon: Icon(
-              settings.locked ? Icons.lock : Icons.lock_open,
-              size: 16,
-              color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ToolbarButton(
+              icon: Icons.skip_previous_rounded,
+              tooltip: '上一曲',
+              iconSize: 18,
+              onPressed: () => unawaited(_controlPlayback('previous')),
             ),
-            onPressed: () {
-              // v1：悬浮窗内锁定为会话级（主窗设置页下次 updateSettings 会覆盖）。
-              widget.model.settings = widget.model.settings.copyWith(
-                locked: !widget.model.settings.locked,
-              );
-              unawaited(_applyPassthrough(widget.model.settings));
-            },
+            const SizedBox(width: 2),
+            _ToolbarButton(
+              icon: widget.model.isPlaying
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              tooltip: widget.model.isPlaying ? '暂停' : '播放',
+              iconSize: 18,
+              onPressed: () => unawaited(_controlPlayback('togglePlay')),
+            ),
+            const SizedBox(width: 2),
+            _ToolbarButton(
+              icon: Icons.skip_next_rounded,
+              tooltip: '下一曲',
+              iconSize: 18,
+              onPressed: () => unawaited(_controlPlayback('next')),
+            ),
+            Container(
+              width: 1,
+              height: 14,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            _ToolbarButton(
+              icon: settings.locked
+                  ? Icons.lock_rounded
+                  : Icons.lock_open_rounded,
+              tooltip: settings.locked ? '解锁歌词' : '锁定歌词',
+              iconSize: 18,
+              onPressed: () {
+                widget.model.settings = widget.model.settings.copyWith(
+                  locked: !widget.model.settings.locked,
+                );
+                unawaited(_applyPassthrough(widget.model.settings));
+              },
+            ),
+            const SizedBox(width: 2),
+            _ToolbarButton(
+              icon: Icons.close_rounded,
+              tooltip: '关闭桌面歌词',
+              iconSize: 18,
+              onPressed: () => unawaited(closeLyricsOverlayWindow()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolbarButton extends StatefulWidget {
+  const _ToolbarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.iconSize = 18,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final double iconSize;
+
+  @override
+  State<_ToolbarButton> createState() => _ToolbarButtonState();
+}
+
+class _ToolbarButtonState extends State<_ToolbarButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 300),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onPressed,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? Colors.white.withValues(alpha: 0.18)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              widget.icon,
+              size: widget.iconSize,
+              color: _hovered
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.88),
+            ),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: '关闭桌面歌词',
-            icon: const Icon(Icons.close, size: 16, color: Colors.white),
-            onPressed: () => unawaited(closeLyricsOverlayWindow()),
-          ),
-        ],
+        ),
       ),
     );
   }
