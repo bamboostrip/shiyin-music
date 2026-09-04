@@ -8,7 +8,8 @@
 // - main -> sub：updateLyric {current, next, isPlaying} /
 //   updateSettings {DesktopLyricsSettings.toMap()}
 //   （不向子窗发 close：主窗侧关闭直接走原生 window.close）。
-// - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调）。
+// - sub -> main：windowClosed {}（用户手动关闭，触发可见性回调）/
+//   overlayReady {}（子引擎通道就绪，主窗补发缓存的歌词与设置）。
 //
 // API 名以包源码为准（desktop_multi_window 0.2.1）：
 // - DesktopMultiWindow.createWindow([arguments]) -> WindowController
@@ -187,6 +188,15 @@ class WindowsDesktopLyricsBridge {
         _visible = false;
         _window = null;
         _onVisibilityChanged?.call(visible: false, userClosed: true);
+      } else if (call.method == 'overlayReady') {
+        // 子引擎通道就绪：补发启动窗口期内可能丢失的歌词与设置。
+        debugPrint('[桌面歌词主窗] 子引擎就绪，补发缓存内容');
+        await _pushLyric();
+        try {
+          await _invokeSub('updateSettings', _settings.toMap());
+        } on Exception catch (e) {
+          debugPrint('[桌面歌词主窗] updateSettings 补发失败: $e');
+        }
       }
       return null;
     });

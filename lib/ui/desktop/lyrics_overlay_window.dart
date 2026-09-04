@@ -9,6 +9,8 @@
 // - updateSettings {DesktopLyricsSettings.toMap()}
 // 消息协议（sub -> main）：
 // - windowClosed   {}（用户手动关闭悬浮窗）
+// - overlayReady   {}（子引擎消息通道就绪，主窗收到后补发缓存的歌词与设置，
+//   消除 createWindow 到 setMethodHandler 之间启动窗口期的消息丢失）
 import 'dart:async';
 import 'dart:convert';
 
@@ -114,13 +116,11 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] [3/9] setAlwaysOnTop 失败: $e');
   }
-  debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar 开始');
-  try {
-    await windowManager.setSkipTaskbar(true);
-    debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar ok');
-  } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar 失败: $e');
-  }
+  // [4/9] setSkipTaskbar 已跳过：真机日志定位其原生调用直接杀进程
+  // （日志停在“setSkipTaskbar 开始”，Dart 层 try/catch 收不到任何异常）。
+  // 在 window_manager 修复/找到安全替代方案前，悬浮窗会暂时在任务栏
+  // 占一个“桌面歌词”图标，不影响歌词展示与拖动。
+  debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar 已跳过（原生崩溃，暂保留任务栏图标）');
   debugPrint('[桌面歌词悬浮窗] [5/9] setTitle 开始');
   try {
     await windowManager.setTitle('桌面歌词');
@@ -191,6 +191,15 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     debugPrint('[桌面歌词悬浮窗] [8/9] setMethodHandler ok');
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] [8/9] 注册消息处理失败: $e');
+  }
+
+  // 向主窗上报就绪：启动窗口期内主窗的推送会因通道未就绪而丢失，
+  // 主窗收到后会补发缓存的歌词与设置。
+  try {
+    await DesktopMultiWindow.invokeMethod(0, 'overlayReady');
+    debugPrint('[桌面歌词悬浮窗] overlayReady 已上报');
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] overlayReady 上报失败: $e');
   }
 
   debugPrint('[桌面歌词悬浮窗] [9/9] runApp 开始');
