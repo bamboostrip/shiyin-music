@@ -14,8 +14,11 @@ import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../../services/network_monitor.dart';
+import '../adaptive_layout.dart';
+import '../form_factor.dart';
 import '../widgets/app_update_widgets.dart';
 import '../widgets/artwork.dart';
+import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
@@ -499,7 +502,10 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
                 ),
-                const SliverToBoxAdapter(child: SizedBox(height: 166)),
+                // 悬浮播放条留白仅手机/平板/车机需要；桌面播放栏占位于骨架底部。
+                SliverToBoxAdapter(
+                  child: SizedBox(height: isDesktopFormFactor ? 24 : 166),
+                ),
               ],
             ],
           ),
@@ -1138,7 +1144,9 @@ class _SongSectionState extends State<_SongSection> {
                     children: [
                       SizedBox(
                         height: rowCount * 76.0,
-                        child: PageView.builder(
+                        child: HorizontalWheelPageScroll(
+                          controller: _pageController,
+                          child: PageView.builder(
                           controller: _pageController,
                           itemCount: pageCount,
                           onPageChanged: (i) => setState(() => _page = i),
@@ -1188,6 +1196,7 @@ class _SongSectionState extends State<_SongSection> {
                               ],
                             );
                           },
+                          ),
                         ),
                       ),
                       if (pageCount > 1) ...[
@@ -1535,6 +1544,8 @@ class _PlaylistRail extends StatelessWidget {
       );
     }
 
+    final isDesktopWide =
+        isDesktopFormFactor && size.width >= AdaptiveLayout.kGridStartWidth;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Column(
@@ -1547,23 +1558,47 @@ class _PlaylistRail extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 204,
-            child: ListView.separated(
+          if (isDesktopWide)
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(horizontal: 18),
-              scrollDirection: Axis.horizontal,
               itemCount: playlists.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 160,
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 14,
+                childAspectRatio: 0.60,
+              ),
               itemBuilder: (context, index) {
                 final playlist = playlists[index];
                 return _PlaylistCard(
                   playlist: playlist,
                   onTap: () => onTap(playlist),
-                  width: 128,
                 );
               },
+            )
+          else
+            SizedBox(
+              height: 204,
+              child: HorizontalWheelScroll(
+                builder: (context, controller) => ListView.separated(
+                  controller: controller,
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: playlists.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 14),
+                  itemBuilder: (context, index) {
+                    final playlist = playlists[index];
+                    return _PlaylistCard(
+                      playlist: playlist,
+                      onTap: () => onTap(playlist),
+                      width: 128,
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -2236,23 +2271,38 @@ class _RadioStationRail extends StatelessWidget {
     if (stations.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    // 卡片内容高度充足（封面116 + 标题 + 副标题），轨道188彻底杜绝底部溢出且呼吸感匀称。
-    return SizedBox(
-      height: 188,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: stations.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          final station = stations[index];
-          return _RadioStationCard(
-            station: station,
-            loading: loadingStationId == station.id,
-            onTap: () => onTap(station),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 桌面宽窗直接复用车机网格组件（同参数、同卡片），保持视觉一致。
+        if (isDesktopFormFactor &&
+            constraints.maxWidth >= AdaptiveLayout.kGridStartWidth) {
+          return _RadioStationGrid(
+            stations: stations,
+            loadingStationId: loadingStationId,
+            onTap: onTap,
           );
-        },
-      ),
+        }
+        // 卡片内容高度充足（封面116 + 标题 + 副标题），轨道188彻底杜绝底部溢出且呼吸感匀称。
+        return SizedBox(
+          height: 188,
+          child: HorizontalWheelScroll(
+            builder: (context, controller) => ListView.separated(
+              controller: controller,
+              scrollDirection: Axis.horizontal,
+              itemCount: stations.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final station = stations[index];
+                return _RadioStationCard(
+                  station: station,
+                  loading: loadingStationId == station.id,
+                  onTap: () => onTap(station),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
