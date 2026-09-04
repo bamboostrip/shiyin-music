@@ -2969,7 +2969,7 @@ class _PillCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: colorScheme.onSurfaceVariant,
-                        fontSize: 13,
+                        fontSize: 15,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2978,7 +2978,7 @@ class _PillCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w900,
                         color: colorScheme.onSurface,
-                        fontSize: 16,
+                        fontSize: 18,
                       ),
                     ),
                   ],

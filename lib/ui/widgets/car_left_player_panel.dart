@@ -176,9 +176,12 @@ class CarLeftPlayerPanel extends StatelessWidget {
                       animation: auth,
                       builder: (context, _) {
                         final liked = auth.isLiked(song);
+                        // 车机远距离触控：收藏按钮加大，保证 >=48dp 触控目标。
+                        final favBtnSize = isSmallScreen ? 52.0 : 60.0;
+                        final favIconSize = isSmallScreen ? 30.0 : 34.0;
                         return Container(
-                          width: 38,
-                          height: 38,
+                          width: favBtnSize,
+                          height: favBtnSize,
                           decoration: BoxDecoration(
                             color: liked
                                 ? Colors.redAccent.withValues(alpha: .12)
@@ -195,7 +198,7 @@ class CarLeftPlayerPanel extends StatelessWidget {
                             icon: Icon(
                               liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                               color: liked ? Colors.redAccent : colorScheme.onSurfaceVariant,
-                              size: 20,
+                              size: favIconSize,
                             ),
                           ),
                         );

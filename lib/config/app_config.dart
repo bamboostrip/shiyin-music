@@ -2,8 +2,8 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '时音';
-  static const appVersion = '2.5.0';
-  static const appVersionCode = '250';
+  static const appVersion = '2.5.1';
+  static const appVersionCode = '251';
 
   /// 当前包的渲染引擎，由构建时 `--dart-define=APP_RENDERER=skia|impeller`
   /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传）。更新检查用它选对应附件；
