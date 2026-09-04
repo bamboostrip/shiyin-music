@@ -21,6 +21,9 @@ import 'package:window_manager/window_manager.dart';
 import '../../services/desktop_lyrics_service.dart';
 import '../../services/windows_desktop_lyrics_bridge.dart';
 
+/// 子窗口控制器（入口函数创建后模块级持有，供关闭流程使用）。
+WindowController? _overlayWindowController;
+
 /// 拖动结束后的位置持久化键（与 brief 约定一致）。
 const String _kWindowLeftKey = 'desktop_lyrics.window.left';
 const String _kWindowTopKey = 'desktop_lyrics.window.top';
@@ -45,6 +48,7 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   // WindowController.fromWindowId 为同步工厂（0.2.1 源码），
   // 通道调用延迟到方法真正执行时，此时绑定已初始化。
   final windowController = WindowController.fromWindowId(int.parse(args[1]));
+  _overlayWindowController = windowController;
   // 包 0.2.1 的 WindowController 无 arguments getter，
   // 初始参数经 createWindow 的 arguments 字符串由 main(args[2]) 传入。
   final initialArgs = args.length > 2 && args[2].isNotEmpty
@@ -130,10 +134,17 @@ Future<void> closeLyricsOverlayWindow() async {
   } on Exception {
     // 主窗可能已退出；仍然销毁自身。
   }
-  // 注意：子引擎内销毁窗口在 window_manager + desktop_multi_window 组合下
-  // 存在上游已知崩溃风险（MixinNetwork/flutter-plugins#137、
-  // window_manager#549）；验收时需反复开关/拖动中关闭压测。
-  await windowManager.destroy();
+  // 必须用 WindowController.close()（原生 PostMessage(WM_SYSCOMMAND, SC_CLOSE)，
+  // 仅销毁本子窗口并正确清理 WindowChannel/FlutterWindow）。子引擎内绝不可
+  // 调用 window_manager.destroy()：其 Windows 实现为 PostQuitMessage(0)
+  // （window_manager.cpp Destroy()），子引擎与主窗共享平台线程消息循环，
+  // WM_QUIT 会连带退出整个应用。上游 destroy 相关崩溃记录
+  // （MixinNetwork/flutter-plugins#137、window_manager#549）仅适用于
+  // destroy() 关闭路径，本文件已不再使用。
+  final controller = _overlayWindowController;
+  if (controller != null) {
+    await controller.close();
+  }
 }
 
 class _OverlayModel extends ChangeNotifier {

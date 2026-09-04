@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -21,9 +23,28 @@ class DesktopTray {
   static SystemTray? _tray;
 
   /// 初始化托盘图标与菜单。重复调用（未 dispose）时直接忽略。
+  ///
+  /// 托盘初始化失败（个别环境无托盘，initSystemTray 会抛出而非返回
+  /// false）时不影响主流程：同时关闭"X 最小化到托盘"，保证 X 按钮
+  /// 仍可真正退出应用，避免应用不可达。
   static Future<void> init({required PlayerController player}) async {
     if (!isDesktopFormFactor) return;
     if (_tray != null) return;
+    try {
+      await _initTray(player);
+    } catch (error) {
+      // 捕获 Exception 与 Error：托盘失败只降级，不允许中断启动。
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(DesktopWindow.kCloseToTrayPrefKey, false);
+      } on Exception {
+        // prefs 写入失败不影响主流程。
+      }
+      debugPrint('DesktopTray: 托盘初始化失败，已改为 X 直接退出: $error');
+    }
+  }
+
+  static Future<void> _initTray(PlayerController player) async {
     final tray = SystemTray();
     final ok = await tray.initSystemTray(
       // system_tray 在 Windows 上把该路径解析为
@@ -33,8 +54,9 @@ class DesktopTray {
       toolTip: DesktopWindow.kWindowTitle,
     );
     if (!ok) {
-      // 个别环境下托盘初始化失败：不常驻托盘，也不影响主流程。
-      return;
+      // 个别环境下 initSystemTray 返回 false 而非抛出：
+      // 统一走 init() 的降级路径（关闭 closeToTray），避免应用不可达。
+      throw StateError('initSystemTray returned false');
     }
     final menu = Menu();
     await menu.buildFrom([

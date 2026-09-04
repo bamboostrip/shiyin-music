@@ -74,8 +74,12 @@ class WindowsDesktopLyricsBridge {
         }),
       );
       try {
+        // 子引擎就绪需数百毫秒，且悬浮窗入口在完成无标题栏样式/尺寸/位置
+        // 恢复后会自行 show()（见 lyrics_overlay_window.dart 入口末尾）。
+        // 主窗侧不得提前 show()，否则会闪现白底带标题栏的默认 720x120 窗口；
+        // 此处仅预置默认位置（首次展示无记忆位置时兜底，后续由悬浮窗自行
+        // 覆盖为记忆位置）。
         await window.setFrame(await _defaultFrame());
-        await window.show();
       } on Exception {
         // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
         // 原生窗口游离残留；再按创建失败路径统一处理。
