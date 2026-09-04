@@ -2172,6 +2172,7 @@ class RankCategory {
     this.imageUrl,
     this.children = const [],
     this.songs = const [],
+    this.updateFrequency = '',
   });
 
   final int rankId;
@@ -2180,6 +2181,7 @@ class RankCategory {
   final String? imageUrl;
   final List<RankCategory> children;
   final List<Song> songs;
+  final String updateFrequency;
 
   factory RankCategory.fromJson(Map<String, dynamic> json) {
     final children = asList(
@@ -2197,6 +2199,10 @@ class RankCategory {
       imageUrl: normalizeImageUrl(asString(json['imgurl'])),
       children: children,
       songs: songs,
+      updateFrequency: asString(json['update_frequency']) ??
+          asString(json['frequency']) ??
+          asString(json['period']) ??
+          '',
     );
   }
 }
