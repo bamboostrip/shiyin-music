@@ -9,6 +9,7 @@ import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
+import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
@@ -1022,19 +1023,22 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
           ),
           child: SizedBox(
             height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.zero,
-              itemCount: categories.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 4),
-              itemBuilder: (context, index) {
-                final active = index == page;
-                return _CategoryTab(
-                  label: categories[index].name,
-                  active: active,
-                  onTap: () => _goToPage(index, categories.length),
-                );
-              },
+            child: HorizontalWheelScroll(
+              builder: (context, controller) => ListView.separated(
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: categories.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 4),
+                itemBuilder: (context, index) {
+                  final active = index == page;
+                  return _CategoryTab(
+                    label: categories[index].name,
+                    active: active,
+                    onTap: () => _goToPage(index, categories.length),
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -1045,16 +1049,19 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
         // 用户感知不到切换。现在用真 PageView：横滑跟手 + 松手吸附。
         SizedBox(
           height: 360,
-          child: PageView.builder(
+          child: HorizontalWheelPageScroll(
             controller: _pageController,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              return _CategoryKeywordList(
-                keywords: categories[index].keywords,
-                onTap: widget.onTap,
-              );
-            },
+            child: PageView.builder(
+              controller: _pageController,
+              onPageChanged: (i) => setState(() => _page = i),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                return _CategoryKeywordList(
+                  keywords: categories[index].keywords,
+                  onTap: widget.onTap,
+                );
+              },
+            ),
           ),
         ),
       ],

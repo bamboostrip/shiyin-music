@@ -8,7 +8,10 @@ import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../../services/network_monitor.dart';
+import '../adaptive_layout.dart';
+import '../form_factor.dart';
 import '../widgets/artwork.dart';
+import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
 import 'artist_detail_page.dart';
@@ -297,22 +300,57 @@ class _NewSongsSection extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 142,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: songs.length > 10 ? 10 : songs.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final song = songs[index];
-                    return _NewSongCard(
-                      song: song,
-                      onTap: () => player.playSong(song, queue: songs),
-                      isPlaying: player.currentSong?.hash == song.hash &&
-                          song.hash.isNotEmpty,
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final showCount = songs.length > 10 ? 10 : songs.length;
+                  // 桌面宽窗：横轨转网格（项宽 ~120、行高 142），不再横向滚动。
+                  if (isDesktopFormFactor &&
+                      constraints.maxWidth >= AdaptiveLayout.kGridStartWidth) {
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      itemCount: showCount,
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 120,
+                        mainAxisExtent: 142,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                      ),
+                      itemBuilder: (context, index) {
+                        final song = songs[index];
+                        return _NewSongCard(
+                          song: song,
+                          onTap: () => player.playSong(song, queue: songs),
+                          isPlaying: player.currentSong?.hash == song.hash &&
+                              song.hash.isNotEmpty,
+                        );
+                      },
                     );
-                  },
-                ),
+                  }
+                  // 非桌面 / 窄窗：保持原横轨，仅接入滚轮横滚。
+                  return SizedBox(
+                    height: 142,
+                    child: HorizontalWheelScroll(
+                      builder: (context, controller) => ListView.separated(
+                        controller: controller,
+                        scrollDirection: Axis.horizontal,
+                        itemCount: showCount,
+                        separatorBuilder: (_, _) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          final song = songs[index];
+                          return _NewSongCard(
+                            song: song,
+                            onTap: () => player.playSong(song, queue: songs),
+                            isPlaying: player.currentSong?.hash == song.hash &&
+                                song.hash.isNotEmpty,
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),

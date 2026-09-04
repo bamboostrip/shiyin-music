@@ -16,6 +16,7 @@ import '../../services/lyric_converter.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/artwork.dart';
+import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -288,34 +289,37 @@ class _PlayerBodyState extends State<_PlayerBody> {
                               onArtistTap: _openArtist,
                             ),
                           )
-                        : NotificationListener<ScrollNotification>(
-                            onNotification: _handlePageScrollNotification,
-                            child: PageView(
-                              controller: _pageController,
-                              allowImplicitScrolling: true,
-                              onPageChanged: (value) =>
-                                  _setPageState(page: value),
-                              children: [
-                                _PosterPlayerPage(
-                                  key: const PageStorageKey(
-                                    'poster-player-page',
+                        : HorizontalWheelPageScroll(
+                            controller: _pageController,
+                            child: NotificationListener<ScrollNotification>(
+                              onNotification: _handlePageScrollNotification,
+                              child: PageView(
+                                controller: _pageController,
+                                allowImplicitScrolling: true,
+                                onPageChanged: (value) =>
+                                    _setPageState(page: value),
+                                children: [
+                                  _PosterPlayerPage(
+                                    key: const PageStorageKey(
+                                      'poster-player-page',
+                                    ),
+                                    player: widget.player,
+                                    song: widget.song,
+                                    onQueue: widget.onQueue,
                                   ),
-                                  player: widget.player,
-                                  song: widget.song,
-                                  onQueue: widget.onQueue,
-                                ),
-                                _LyricPlayerPage(
-                                  key: const PageStorageKey(
-                                    'lyric-player-page',
+                                  _LyricPlayerPage(
+                                    key: const PageStorageKey(
+                                      'lyric-player-page',
+                                    ),
+                                    player: widget.player,
+                                    song: widget.song,
+                                    focusRequest: _lyricFocusRequest,
+                                    isPageActive: _lyricPageActive,
+                                    isPageVisible: _lyricPageVisible,
+                                    isPageTransitioning: _pageScrolling,
                                   ),
-                                  player: widget.player,
-                                  song: widget.song,
-                                  focusRequest: _lyricFocusRequest,
-                                  isPageActive: _lyricPageActive,
-                                  isPageVisible: _lyricPageVisible,
-                                  isPageTransitioning: _pageScrolling,
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                   ),
