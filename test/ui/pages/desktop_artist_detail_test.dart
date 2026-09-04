@@ -8,7 +8,7 @@ import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/artist_detail_page.dart';
-import 'package:shiyin_music/ui/pages/playlist_detail_page.dart';
+import 'package:shiyin_music/ui/widgets/desktop_song_table_row.dart';
 import 'package:shiyin_music/ui/widgets/album_grid.dart';
 import 'package:shiyin_music/ui/widgets/horizontal_wheel_scroll.dart';
 import 'package:shiyin_music/ui/widgets/mini_player.dart';

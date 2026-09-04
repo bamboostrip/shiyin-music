@@ -7,7 +7,7 @@ import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
-import 'package:shiyin_music/ui/pages/playlist_detail_page.dart';
+import 'package:shiyin_music/ui/widgets/desktop_song_table_row.dart';
 import 'package:shiyin_music/ui/pages/rank_page.dart';
 
 class _FakeMusicApi implements MusicApi {

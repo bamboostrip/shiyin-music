@@ -1,0 +1,317 @@
+import 'package:flutter/material.dart';
+
+import '../../controllers/auth_controller.dart';
+import '../../controllers/player_controller.dart';
+import '../../models/music_models.dart';
+import '../form_factor.dart';
+import '../widgets/artwork.dart';
+import '../widgets/desktop_anchored_menu.dart';
+import '../widgets/desktop_song_table_row.dart';
+import '../widgets/now_playing_badge.dart';
+import '../widgets/song_action_sheets.dart';
+
+/// 搜索结果（歌曲）列表。
+///
+/// 桌面端：复用 [DesktopSongTableRow] 表格（歌曲/歌手/专辑/时长），
+/// 单击选中占位、双击播放、右键 anchored 操作菜单（对齐 PC 惯例）；
+/// 移动端/车机端：保持原有卡片行（单击即播）逐字节不变。
+class SearchSongResults extends StatelessWidget {
+  const SearchSongResults({
+    super.key,
+    required this.songs,
+    required this.onPlay,
+    required this.isLiked,
+    required this.onLikeTap,
+    required this.auth,
+    required this.player,
+    required this.onViewArtist,
+  });
+
+  final List<Song> songs;
+  final void Function(Song song) onPlay;
+  final bool Function(Song song) isLiked;
+  final void Function(Song song) onLikeTap;
+  final AuthController auth;
+  final PlayerController player;
+  final void Function(Song song) onViewArtist;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isDesktopFormFactor) {
+      return _buildDesktopTable(context);
+    }
+
+    final colorScheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: auth,
+      builder: (context, _) {
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(18, 4, 18, 160),
+          itemCount: songs.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 2),
+          itemBuilder: (context, index) {
+            final song = songs[index];
+            final liked = isLiked(song);
+            // 其他平台歌曲（如网易云）仅支持播放，不支持收藏等操作
+            final isExternal = song.source != SongSource.kugou;
+            return AnimatedBuilder(
+              animation: player,
+              builder: (context, _) {
+                final active = player.currentSong?.hash == song.hash;
+                final activeColor = colorScheme.primary;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => onPlay(song),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 9,
+                      horizontal: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? activeColor.withValues(alpha: .08)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Stack(
+                          children: [
+                            Artwork(
+                              url: song.coverUrl,
+                              size: 58,
+                              borderRadius: 8,
+                            ),
+                            if (active)
+                              Positioned(
+                                right: 5,
+                                bottom: 5,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.surface
+                                        .withValues(alpha: .88),
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(3),
+                                    child: NowPlayingBadge(
+                                      active: active,
+                                      playing: player.isPlaying,
+                                      color: activeColor,
+                                      size: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      color: active ? activeColor : null,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                song.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: active
+                                          ? activeColor.withValues(alpha: .72)
+                                          : colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        if (!isExternal)
+                          IconButton(
+                            onPressed: () => onLikeTap(song),
+                            icon: Icon(
+                              liked
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              color: liked
+                                  ? Colors.redAccent
+                                  : colorScheme.outline,
+                              size: 27,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        if (!isExternal)
+                          Builder(
+                            builder: (moreButtonContext) {
+                              return IconButton(
+                                tooltip: '更多',
+                                onPressed: () => _showSongMenu(
+                                  moreButtonContext,
+                                  song,
+                                  anchor: anchorBelow(moreButtonContext),
+                                ),
+                                icon: const Icon(Icons.more_horiz_rounded),
+                                visualDensity: VisualDensity.compact,
+                              );
+                            },
+                          ),
+                        if (isExternal)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colorScheme.outlineVariant.withValues(
+                                  alpha: .5,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                song.source == SongSource.netease
+                                    ? '网易云'
+                                    : '外部',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 歌曲操作菜单：桌面端右键 / `...` 按钮共用；[anchor] 为空时由
+  /// showSongActionSheet 自行定位。外部平台歌曲仅保留播放类操作。
+  void _showSongMenu(BuildContext context, Song song, {Offset? anchor}) {
+    final isExternal = song.source != SongSource.kugou;
+    showSongActionSheet(
+      context: context,
+      song: song,
+      anchor: anchor,
+      actions: [
+        SongSheetAction(
+          icon: Icons.queue_music_rounded,
+          title: '下一首播放',
+          onTap: () => addSongToQueueWithFeedback(
+            context: context,
+            player: player,
+            song: song,
+          ),
+        ),
+        if (!isExternal) ...[
+          SongSheetAction(
+            icon: Icons.playlist_add_rounded,
+            title: '添加到歌单',
+            onTap: () => showAddToPlaylistSheet(
+              context: context,
+              auth: auth,
+              song: song,
+            ),
+          ),
+          SongSheetAction(
+            icon: Icons.person_rounded,
+            title: '查看歌手',
+            onTap: () => onViewArtist(song),
+          ),
+          if (player.downloadController != null)
+            SongSheetAction(
+              icon: player.downloadController!.isDownloaded(song)
+                  ? Icons.download_done_rounded
+                  : Icons.download_rounded,
+              title: player.downloadController!.isDownloaded(song)
+                  ? '已下载'
+                  : '下载',
+              onTap: () => player.downloadController!.download(
+                song,
+                player.audioQuality,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  /// 桌面端表格：粘性表头（36px）+ 固定行高 44px 数据行，
+  /// 几何契约与排行/歌手页完全一致。
+  Widget _buildDesktopTable(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return CustomScrollView(
+      slivers: [
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: DesktopSongTableStickyHeaderDelegate(
+            child: Container(
+              color: colorScheme.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: const DesktopSongTableHeader(
+                selecting: false,
+                allSelected: false,
+                onToggleSelectAll: null,
+              ),
+            ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          sliver: SliverFixedExtentList(
+            itemExtent: 44.0,
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final song = songs[index];
+              final isExternal = song.source != SongSource.kugou;
+              return DesktopSongTableRow(
+                song: song,
+                index: index + 1,
+                player: player,
+                auth: auth,
+                canDelete: false,
+                selecting: false,
+                selected: false,
+                isFocused: false,
+                showHoverActions: !isExternal,
+                onTap: () {},
+                onDoubleTap: () => onPlay(song),
+                onPlay: () => onPlay(song),
+                onAddToPlaylist: () => showAddToPlaylistSheet(
+                  context: context,
+                  auth: auth,
+                  song: song,
+                ),
+                onDelete: () {},
+                onViewArtist: () => onViewArtist(song),
+                onMore: () => _showSongMenu(context, song),
+                onSecondaryMore: (position) =>
+                    _showSongMenu(context, song, anchor: position),
+              );
+            }, childCount: songs.length),
+          ),
+        ),
+      ],
+    );
+  }
+}

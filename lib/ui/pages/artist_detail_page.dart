@@ -11,6 +11,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/album_grid.dart';
+import '../widgets/desktop_song_table_row.dart';
 import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import 'playlist_detail_page.dart';

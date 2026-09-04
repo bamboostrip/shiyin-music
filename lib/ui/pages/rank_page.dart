@@ -14,9 +14,9 @@ import '../widgets/artwork.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
-import 'artist_detail_page.dart';
-import 'playlist_detail_page.dart'
+import '../widgets/desktop_song_table_row.dart'
     show DesktopSongTableHeader, DesktopSongTableRow;
+import 'artist_detail_page.dart';
 
 /// 排行榜页面 —— 展示酷狗各类榜单，点击榜单查看歌曲列表。
 class RankPage extends StatefulWidget {

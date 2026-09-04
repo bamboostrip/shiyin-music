@@ -9,8 +9,12 @@ import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
+import '../form_factor.dart';
 import '../widgets/artwork.dart';
+import '../widgets/desktop_song_table_row.dart';
+import '../widgets/song_action_sheets.dart';
 import '../adaptive_layout.dart';
+import 'artist_detail_page.dart';
 
 /// 已下载歌曲与播放缓存管理页。
 class DownloadedSongsPage extends StatefulWidget {
@@ -112,6 +116,17 @@ class _DownloadedList extends StatelessWidget {
           return _emptyState(context, '还没有已下载歌曲', '下载歌曲后可离线播放');
         }
 
+        // PC 桌面端：已完成列表表格化（歌曲/歌手/专辑/时长），
+        // 删除/打开文件夹/查看路径操作接进行内 `...` 与右键 anchored 菜单。
+        if (isDesktopFormFactor) {
+          return _buildDesktopResults(
+            context,
+            completed: completed,
+            downloading: downloading,
+            failed: failed,
+          );
+        }
+
         return ListView(
           children: [
             if (completed.isNotEmpty) ...[
@@ -172,6 +187,187 @@ class _DownloadedList extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+
+  /// PC 桌面端表格化布局：粘性表头（36px）+ 固定行高 44px 数据行，
+  /// 与排行/歌手/搜索页的表格几何契约一致；下载中/失败分区沿用原行组件。
+  Widget _buildDesktopResults(
+    BuildContext context, {
+    required List<DownloadEntry> completed,
+    required List<DownloadEntry> downloading,
+    required List<DownloadEntry> failed,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
+            child: Row(
+              children: [
+                Text(
+                  '已下载 ${completed.length} 首',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => _confirmClearAll(context),
+                  child: const Text('清空全部'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: DesktopSongTableStickyHeaderDelegate(
+            child: Container(
+              color: colorScheme.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: const DesktopSongTableHeader(
+                selecting: false,
+                allSelected: false,
+                onToggleSelectAll: null,
+              ),
+            ),
+          ),
+        ),
+        SliverFixedExtentList(
+          itemExtent: 44.0,
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final entry = completed[index];
+            return DesktopSongTableRow(
+              song: entry.song,
+              index: index + 1,
+              player: player,
+              auth: auth,
+              canDelete: false,
+              selecting: false,
+              selected: false,
+              isFocused: false,
+              onTap: () {},
+              onDoubleTap: () => player.playSong(entry.song),
+              onPlay: () => player.playSong(entry.song),
+              onAddToPlaylist: () => showAddToPlaylistSheet(
+                context: context,
+                auth: auth,
+                song: entry.song,
+              ),
+              onDelete: () {},
+              onViewArtist: () => _openArtistPage(context, entry.song),
+              onMore: () => _showDesktopEntryMenu(context, entry),
+              onSecondaryMore: (position) =>
+                  _showDesktopEntryMenu(context, entry, anchor: position),
+            );
+          }, childCount: completed.length),
+        ),
+        if (downloading.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
+              child: Text(
+                '下载中 ${downloading.length} 首',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Column(
+              children: downloading
+                  .map((entry) => _DownloadingRow(entry: entry))
+                  .toList(),
+            ),
+          ),
+        ],
+        if (failed.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
+              child: Text(
+                '下载失败 ${failed.length} 首',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Column(
+              children: failed
+                  .map(
+                    (entry) => _FailedRow(entry: entry, downloads: downloads),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 桌面端行内 `...` / 右键菜单：保留删除下载、打开文件夹、查看文件路径。
+  void _showDesktopEntryMenu(
+    BuildContext context,
+    DownloadEntry entry, {
+    Offset? anchor,
+  }) {
+    final song = entry.song;
+    final filePath = entry.filePath;
+    showSongActionSheet(
+      context: context,
+      song: song,
+      anchor: anchor,
+      actions: [
+        SongSheetAction(
+          icon: Icons.delete_outline_rounded,
+          title: '删除下载',
+          danger: true,
+          onTap: () => downloads.deleteDownload(song),
+        ),
+        if (filePath != null && filePath.isNotEmpty) ...[
+          SongSheetAction(
+            icon: Icons.folder_open_rounded,
+            title: '打开文件夹',
+            onTap: () => _openContainingFolder(filePath),
+          ),
+          SongSheetAction(
+            icon: Icons.info_outline_rounded,
+            title: '查看文件路径',
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: filePath));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('路径已复制到剪贴板'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _openArtistPage(BuildContext context, Song song) {
+    final artist = song.artists.firstWhere(
+      (a) => a.name.isNotEmpty,
+      orElse: () => const ArtistRef(id: '', name: ''),
+    );
+    if (artist.name.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ArtistDetailPage(
+          api: api,
+          auth: auth,
+          artist: artist,
+          player: player,
+        ),
+      ),
     );
   }
 
@@ -309,27 +505,28 @@ class _DownloadedSongRow extends StatelessWidget {
       ),
     );
   }
+}
 
-  Future<void> _openContainingFolder(String filePath) async {
-    final file = File(filePath);
-    final dir = file.parent.path;
+/// 用系统文件管理器打开歌曲文件所在目录（移动端弹层与桌面菜单共用）。
+Future<void> _openContainingFolder(String filePath) async {
+  final file = File(filePath);
+  final dir = file.parent.path;
 
-    if (Platform.isWindows) {
-      await Process.run('explorer', [dir]);
-    } else if (Platform.isMacOS) {
-      await Process.run('open', [dir]);
-    } else if (Platform.isLinux) {
-      await Process.run('xdg-open', [dir]);
-    } else if (Platform.isAndroid) {
-      // Android 无法直接打开文件管理器到指定目录，尝试用 file:// URI
-      final uri = Uri.parse('file://$dir');
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        // 回退：尝试 content URI 方式
-        final contentUri = Uri.parse(
-          'content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}',
-        );
-        await launchUrl(contentUri, mode: LaunchMode.externalApplication);
-      }
+  if (Platform.isWindows) {
+    await Process.run('explorer', [dir]);
+  } else if (Platform.isMacOS) {
+    await Process.run('open', [dir]);
+  } else if (Platform.isLinux) {
+    await Process.run('xdg-open', [dir]);
+  } else if (Platform.isAndroid) {
+    // Android 无法直接打开文件管理器到指定目录，尝试用 file:// URI
+    final uri = Uri.parse('file://$dir');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      // 回退：尝试 content URI 方式
+      final contentUri = Uri.parse(
+        'content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}',
+      );
+      await launchUrl(contentUri, mode: LaunchMode.externalApplication);
     }
   }
 }

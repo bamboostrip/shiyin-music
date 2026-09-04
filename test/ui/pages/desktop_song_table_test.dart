@@ -5,7 +5,7 @@ import 'package:shiyin_music/controllers/auth_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
-import 'package:shiyin_music/ui/pages/playlist_detail_page.dart';
+import 'package:shiyin_music/ui/widgets/desktop_song_table_row.dart';
 import 'package:shiyin_music/ui/widgets/now_playing_badge.dart';
 
 class _FakePlayerController extends ChangeNotifier
@@ -366,6 +366,142 @@ void main() {
       await tester.tap(find.text('周杰伦'));
       await tester.pumpAndSettle();
       expect(artistViewed, isTrue);
+    });
+
+    testWidgets('右键整行触发 onSecondaryMore 并携带全局坐标', (tester) async {
+      final fakePlayer = _FakePlayerController();
+      final fakeAuth = _FakeAuthController();
+      Offset? captured;
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+            onSecondaryMore: (position) => captured = position,
+          ),
+        ),
+      );
+
+      final rowTopLeft = tester.getTopLeft(find.byType(DesktopSongTableRow));
+      final pressPoint = rowTopLeft + const Offset(100, 22);
+      await tester.tapAt(pressPoint, buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      expect(captured, isNotNull);
+      expect(captured, pressPoint);
+    });
+
+    testWidgets('截断的歌名悬停显示完整提示，未截断不显示', (tester) async {
+      final fakePlayer = _FakePlayerController();
+      final fakeAuth = _FakeAuthController();
+      final longTitle = '这是一首特别特别特别长的歌曲名称用来验证省略号截断提示' * 4;
+
+      Widget buildRow(String title) {
+        return DesktopSongTableRow(
+          song: Song(
+            id: '1',
+            title: title,
+            artist: '周杰伦',
+            hash: 'hash_$title',
+            albumName: '叶惠美',
+            duration: const Duration(minutes: 4),
+          ),
+          index: 1,
+          player: fakePlayer,
+          auth: fakeAuth,
+          canDelete: false,
+          selecting: false,
+          selected: false,
+          isFocused: false,
+          onTap: () {},
+          onDoubleTap: () {},
+          onPlay: () {},
+          onAddToPlaylist: () {},
+          onDelete: () {},
+          onViewArtist: () {},
+          onMore: () {},
+        );
+      }
+
+      // 长歌名：悬停后出现包含完整文本的提示层
+      await tester.pumpWidget(wrap(buildRow(longTitle)));
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.text(longTitle).first));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text(longTitle), findsNWidgets(2));
+
+      // 移开鼠标后提示消失
+      await gesture.moveTo(Offset.zero);
+      await tester.pumpAndSettle();
+      expect(find.text(longTitle), findsOneWidget);
+      await gesture.removePointer();
+
+      // 短歌名：悬停不出现提示层
+      await tester.pumpWidget(wrap(buildRow('晴天')));
+      final gesture2 =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture2.addPointer(location: Offset.zero);
+      await gesture2.moveTo(tester.getCenter(find.text('晴天')));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('晴天'), findsOneWidget);
+      await gesture2.removePointer();
+    });
+
+    testWidgets('showHoverActions=false 时悬停只显示时长（外部平台歌曲）',
+        (tester) async {
+      final fakePlayer = _FakePlayerController();
+      final fakeAuth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            showHoverActions: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
+      await tester.pumpAndSettle();
+
+      // 悬停时仍显示时长文本，操作图标全部隐藏
+      expect(find.text('04:29'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+      expect(find.byIcon(Icons.favorite_border_rounded), findsNothing);
+      expect(find.byIcon(Icons.playlist_add_rounded), findsNothing);
+      expect(find.byIcon(Icons.more_horiz_rounded), findsNothing);
+      await gesture.removePointer();
     });
   });
 }
