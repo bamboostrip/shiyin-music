@@ -1457,9 +1457,6 @@ class PlayerController extends ChangeNotifier {
         await _desktopLyrics.requestPermission();
         return;
       }
-      debugPrint(
-        '[时音][桌面歌词] 已开启 hasSong=${currentSong != null} isDesktop=$isDesktopFormFactor',
-      );
       final song = currentSong;
       if (song != null) {
         await _syncDesktopLyricsVisibility();
@@ -1490,7 +1487,6 @@ class PlayerController extends ChangeNotifier {
       title: song.title,
       artist: song.artist,
     );
-    debugPrint('[时音][桌面歌词] show=${song.title} result=$shown');
     if (!shown) {
       debugPrint('[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限');
     } else {

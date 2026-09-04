@@ -126,30 +126,8 @@ class MusicApi {
     final json = asMap(
       await _client.get('/user/playlist', {'page': page, 'pagesize': pageSize}),
     );
-    _debugPlaylistLogObject('raw response', json);
     final currentUserId = asString(json['userid']);
     final rawItems = asList(json['info']).whereType<Map<String, dynamic>>();
-    _debugPlaylistLogObject(
-      'raw item fields',
-      rawItems
-          .map(
-            (item) => {
-              'name': item['name'],
-              'listid': item['listid'],
-              'global_collection_id': item['global_collection_id'],
-              'count': item['count'],
-              'is_def': item['is_def'],
-              'is_default': item['is_default'],
-              'type': item['type'],
-              'userid': item['userid'],
-              'list_create_username': item['list_create_username'],
-              'list_create_userid': item['list_create_userid'],
-              'list_create_gid': item['list_create_gid'],
-              'list_create_listid': item['list_create_listid'],
-            },
-          )
-          .toList(),
-    );
     final playlists = rawItems
         .map(
           (item) =>
@@ -157,31 +135,7 @@ class MusicApi {
         )
         .where((item) => item.id.isNotEmpty)
         .toList();
-    final orderedPlaylists = _orderUserPlaylistsForDisplay(playlists);
-    _debugPlaylistLogObject(
-      'parsed item fields',
-      orderedPlaylists
-          .map(
-            (item) => {
-              'title': item.title,
-              'id': item.id,
-              'songCount': item.songCount,
-              'isDefault': item.isDefault,
-              'type': item.type,
-              'source': item.source,
-              'isLikedPlaylist': item.isLikedPlaylist,
-              'isCreatedPlaylist': item.isCreatedPlaylist,
-              'creatorName': item.creatorName,
-              'creatorUserId': item.creatorUserId,
-              'currentUserId': item.currentUserId,
-              'sourceGlobalId': item.sourceGlobalId,
-              'sourceListId': item.sourceListId,
-              'hasCollectionSource': item.hasCollectionSource,
-            },
-          )
-          .toList(),
-    );
-    return orderedPlaylists;
+    return _orderUserPlaylistsForDisplay(playlists);
   }
 
   Future<List<PlaylistSummary>> recommendedPlaylists({
@@ -450,7 +404,6 @@ class MusicApi {
       'pagesize': pageSize,
       'sort': sort,
     });
-    _debugArtistLogObject('/artist/audios raw', raw);
 
     final json = asMap(raw);
     final items = raw is List
@@ -1728,32 +1681,4 @@ void _debugLyricContent(String label, String content) {
     debugPrint(content.substring(start, end));
   }
   debugPrint('[时音][lyrics] ==== end $label ====');
-}
-
-void _debugPlaylistLogObject(String label, Object? value) {
-  if (!kDebugMode) {
-    return;
-  }
-  final text = const JsonEncoder.withIndent('  ').convert(value);
-  debugPrint('[时音][playlists] ==== $label ====');
-  const chunkSize = 1800;
-  for (var start = 0; start < text.length; start += chunkSize) {
-    final end = (start + chunkSize).clamp(0, text.length);
-    debugPrint(text.substring(start, end));
-  }
-  debugPrint('[时音][playlists] ==== end $label ====');
-}
-
-void _debugArtistLogObject(String label, Object? value) {
-  if (!kDebugMode) {
-    return;
-  }
-  final text = const JsonEncoder.withIndent('  ').convert(value);
-  debugPrint('[时音][artist] ==== $label ====');
-  const chunkSize = 1800;
-  for (var start = 0; start < text.length; start += chunkSize) {
-    final end = (start + chunkSize).clamp(0, text.length);
-    debugPrint(text.substring(start, end));
-  }
-  debugPrint('[时音][artist] ==== end $label ====');
 }

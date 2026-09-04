@@ -79,15 +79,9 @@ class WindowsDesktopLyricsBridge {
       await _pushLyric();
       return true;
     }
-    debugPrint('[桌面歌词主窗] show 开始 title=$title artist=$artist');
-    debugPrint(
-      '[桌面歌词主窗] 生效设置 opacity=${_settings.opacity} '
-      'fontSize=${_settings.fontSize}',
-    );
     try {
       // 懒注册主窗侧消息处理（先于子窗可能的 windowClosed 上报）。
       _ensureMethodHandler();
-      debugPrint('[桌面歌词主窗] createWindow 开始');
       final window = await DesktopMultiWindow.createWindow(
         jsonEncode(<String, dynamic>{
           'settings': _settings.toMap(),
@@ -98,7 +92,6 @@ class WindowsDesktopLyricsBridge {
           'artist': artist,
         }),
       );
-      debugPrint('[桌面歌词主窗] createWindow ok id=${window.windowId}，setFrame 开始');
       try {
         // 子引擎就绪需数百毫秒，且悬浮窗入口在完成无标题栏样式/尺寸/位置
         // 恢复后会自行 show()（见 lyrics_overlay_window.dart 入口末尾）。
@@ -106,7 +99,6 @@ class WindowsDesktopLyricsBridge {
         // 此处仅预置默认位置（首次展示无记忆位置时兜底，后续由悬浮窗自行
         // 覆盖为记忆位置）。
         await window.setFrame(await _defaultFrame());
-        debugPrint('[桌面歌词主窗] setFrame ok');
       } on Exception catch (e) {
         debugPrint('[桌面歌词主窗] setFrame 失败: $e，关闭已创建窗口');
         // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
@@ -120,7 +112,6 @@ class WindowsDesktopLyricsBridge {
       }
       _window = window;
       _visible = true;
-      debugPrint('[桌面歌词主窗] show 成功，等待子引擎启动');
       return true;
     } on Exception catch (e) {
       debugPrint('[桌面歌词主窗] show 失败: $e');
@@ -211,7 +202,6 @@ class WindowsDesktopLyricsBridge {
         _onVisibilityChanged?.call(visible: false, userClosed: true);
       } else if (call.method == 'overlayReady') {
         // 子引擎通道就绪：补发启动窗口期内可能丢失的歌词与设置。
-        debugPrint('[桌面歌词主窗] 子引擎就绪，补发缓存内容');
         await _pushLyric();
         try {
           await _invokeSub('updateSettings', _settings.toMap());
@@ -229,7 +219,6 @@ class WindowsDesktopLyricsBridge {
     try {
       final display = await screenRetriever.getPrimaryDisplay();
       final size = display.size;
-      debugPrint('[桌面歌词主窗] 主显示器尺寸 ${size.width}x${size.height}');
       origin = Offset(
         (size.width - overlayWidth) / 2,
         size.height - overlayHeight - 80,
