@@ -149,6 +149,31 @@ class DesktopPlayerBar extends StatelessWidget {
               const SizedBox(width: 8),
               _VolumeControl(player: player),
               const SizedBox(width: 8),
+              // 桌面歌词开关（仅支持桌面歌词的平台渲染）
+              if (player.isDesktopLyricsSupported) ...[
+                AnimatedBuilder(
+                  animation: player,
+                  builder: (context, _) {
+                    final enabled = player.desktopLyricsEnabled;
+                    return IconButton(
+                      tooltip: enabled ? '关闭桌面歌词' : '开启桌面歌词',
+                      onPressed: song == null
+                          ? null
+                          : () => player.setDesktopLyricsEnabled(!enabled),
+                      icon: Icon(
+                        enabled
+                            ? Icons.lyrics_rounded
+                            : Icons.lyrics_outlined,
+                        size: 26,
+                      ),
+                      color: enabled
+                          ? colorScheme.primary
+                          : colorScheme.onSurface,
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
+              ],
               // 队列
               IconButton(
                 tooltip: '播放队列',
