@@ -6,6 +6,19 @@ import 'package:flutter/services.dart';
 /// PC 锚定菜单与屏幕四周保留的最小边距（逻辑像素）。
 const double kAnchoredMenuMinScreenMargin = 8;
 
+/// PC 面板类锚定弹层（如播放队列面板）与屏幕四周保留的最小边距（逻辑像素）。
+const double kAnchoredPanelMinScreenMargin = 12;
+
+/// 锚定弹层定位函数：输入锚点、内容实测尺寸与窗口尺寸，返回内容最终矩形。
+///
+/// `placeAnchoredMenu` 与 `placeAnchoredPanelAbove` 均符合此签名，
+/// 供 [DesktopAnchoredPopupRoute] 首帧测量后调用。
+typedef AnchoredPlacement = Rect Function(
+  Offset anchor,
+  Size menuSize,
+  Size screenSize,
+);
+
 /// 计算锚定菜单在屏幕（窗口）内的最终位置。
 ///
 /// 纯函数，便于单测：
@@ -63,6 +76,60 @@ Rect placeAnchoredMenu({
   return Rect.fromLTWH(left, top, menuWidth, menuHeight);
 }
 
+/// 计算底边锚定面板（如播放队列面板）在屏幕（窗口）内的最终位置。
+///
+/// 纯函数，便于单测：
+/// - [anchor] 是面板底边参考点（如播放条队列按钮「顶边-右缘」交点）；
+/// - 面板右缘贴 anchor.dx、底缘贴 anchor.dy（即出现在锚点上方、与锚点右对齐）；
+/// - 不做翻转（触发点在窗口底栏，上方恒有空间），越界时整体向窗口内钳制；
+/// - 与屏幕四周保留 ≥ [margin] 的边距；
+/// - 面板比可用区域还大时，先收缩到可用区域再定位。
+Rect placeAnchoredPanelAbove({
+  required Offset anchor,
+  required Size panelSize,
+  required Size screenSize,
+  double margin = kAnchoredPanelMinScreenMargin,
+}) {
+  final double safeMargin = margin < 0 ? 0 : margin;
+
+  final double screenWidth =
+      screenSize.width.isFinite && screenSize.width > 0 ? screenSize.width : 0;
+  final double screenHeight =
+      screenSize.height.isFinite && screenSize.height > 0
+          ? screenSize.height
+          : 0;
+
+  final double availableWidth = math.max(0.0, screenWidth - safeMargin * 2);
+  final double availableHeight = math.max(0.0, screenHeight - safeMargin * 2);
+
+  final double rawWidth =
+      panelSize.width.isFinite && panelSize.width > 0 ? panelSize.width : 0.0;
+  final double rawHeight =
+      panelSize.height.isFinite && panelSize.height > 0 ? panelSize.height : 0.0;
+  final double panelWidth = math.min(math.max(0.0, rawWidth), availableWidth);
+  final double panelHeight =
+      math.min(math.max(0.0, rawHeight), availableHeight);
+
+  // 右缘贴锚点右对齐；不越过屏幕右缘-边距，也不把面板推出左缘之外。
+  final double maxRight = math.max(safeMargin, screenWidth - safeMargin);
+  final double minRight = math.min(safeMargin + panelWidth, maxRight);
+  final double rightRaw = anchor.dx.isFinite ? anchor.dx : maxRight;
+  final double right = rightRaw.clamp(minRight, maxRight);
+
+  // 底缘贴锚点上方；锚点太靠顶时向下收进屏幕（保证上边距）。
+  final double maxBottom = math.max(safeMargin, screenHeight - safeMargin);
+  final double minBottom = math.min(safeMargin + panelHeight, maxBottom);
+  final double bottomRaw = anchor.dy.isFinite ? anchor.dy : maxBottom;
+  final double bottom = bottomRaw.clamp(minBottom, maxBottom);
+
+  return Rect.fromLTWH(
+    right - panelWidth,
+    bottom - panelHeight,
+    panelWidth,
+    panelHeight,
+  );
+}
+
 /// 取 [context] 对应 RenderBox 底边中点的全局（窗口）坐标，
 /// 供 `...` 按钮等触发点把菜单锚定在自己的下方。
 Offset anchorBelow(BuildContext context) {
@@ -72,6 +139,18 @@ Offset anchorBelow(BuildContext context) {
   }
   return renderObject.localToGlobal(
     Offset(renderObject.size.width / 2, renderObject.size.height),
+  );
+}
+
+/// 取 [context] 对应 RenderBox「顶边-右缘」交点的全局（窗口）坐标，
+/// 供底栏按钮等触发点把面板锚定在自己的上方（面板底缘贴按钮顶边、右对齐按钮）。
+Offset anchorAboveRight(BuildContext context) {
+  final RenderObject? renderObject = context.findRenderObject();
+  if (renderObject is! RenderBox || !renderObject.hasSize) {
+    return Offset.zero;
+  }
+  return renderObject.localToGlobal(
+    Offset(renderObject.size.width, 0),
   );
 }
 
@@ -92,9 +171,14 @@ Future<T?> showDesktopAnchoredMenu<T>({
   RouteSettings? settings,
 }) {
   return Navigator.of(context, rootNavigator: useRootNavigator).push(
-    _DesktopAnchoredMenuRoute<T>(
+    DesktopAnchoredPopupRoute<T>(
       anchor: anchor,
       menuBuilder: builder,
+      placement: (anchor, menuSize, screenSize) => placeAnchoredMenu(
+        anchor: anchor,
+        menuSize: menuSize,
+        screenSize: screenSize,
+      ),
       scrimColor: barrierColor ?? Colors.black.withValues(alpha: 0.12),
       barrierLabel: barrierLabel ?? '关闭菜单',
       settings: settings,
@@ -102,19 +186,28 @@ Future<T?> showDesktopAnchoredMenu<T>({
   );
 }
 
-class _DesktopAnchoredMenuRoute<T> extends PopupRoute<T> {
-  _DesktopAnchoredMenuRoute({
+/// PC 锚定弹层通用路由：全屏半透明 barrier（点击关闭）+ Esc 关闭 +
+/// 首帧以 Offstage 测量内容尺寸后经 [placement] 纯函数定位。
+///
+/// 上下文菜单（`showDesktopAnchoredMenu`）与播放队列面板
+/// （`showDesktopQueuePanel`）共用本路由，barrier/Esc/测量逻辑只此一份。
+class DesktopAnchoredPopupRoute<T> extends PopupRoute<T> {
+  DesktopAnchoredPopupRoute({
     required Offset anchor,
     required WidgetBuilder menuBuilder,
-    required this.scrimColor,
+    required this.placement,
+    this.scrimColor = _defaultScrimColor,
     String? barrierLabel,
     super.settings,
   }) : _anchor = anchor,
        _menuBuilder = menuBuilder,
        _barrierLabel = barrierLabel ?? '关闭菜单';
 
+  static const Color _defaultScrimColor = Color(0x1F000000); // black 12%
+
   final Offset _anchor;
   final WidgetBuilder _menuBuilder;
+  final AnchoredPlacement placement;
   final Color scrimColor;
   final String _barrierLabel;
 
@@ -139,9 +232,10 @@ class _DesktopAnchoredMenuRoute<T> extends PopupRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
-    return _AnchoredMenuPosition(
+    return _AnchoredPopupPosition(
       anchor: _anchor,
       menuBuilder: _menuBuilder,
+      placement: placement,
     );
   }
 
@@ -163,18 +257,23 @@ class _DesktopAnchoredMenuRoute<T> extends PopupRoute<T> {
   }
 }
 
-/// 首帧以 Offstage 测量菜单实际尺寸，再用 [placeAnchoredMenu] 计算位置并显示。
-class _AnchoredMenuPosition extends StatefulWidget {
-  const _AnchoredMenuPosition({required this.anchor, required this.menuBuilder});
+/// 首帧以 Offstage 测量内容实际尺寸，再用 [placement] 计算位置并显示。
+class _AnchoredPopupPosition extends StatefulWidget {
+  const _AnchoredPopupPosition({
+    required this.anchor,
+    required this.menuBuilder,
+    required this.placement,
+  });
 
   final Offset anchor;
   final WidgetBuilder menuBuilder;
+  final AnchoredPlacement placement;
 
   @override
-  State<_AnchoredMenuPosition> createState() => _AnchoredMenuPositionState();
+  State<_AnchoredPopupPosition> createState() => _AnchoredPopupPositionState();
 }
 
-class _AnchoredMenuPositionState extends State<_AnchoredMenuPosition> {
+class _AnchoredPopupPositionState extends State<_AnchoredPopupPosition> {
   final GlobalKey _measureKey = GlobalKey();
   Rect? _menuRect;
 
@@ -195,10 +294,10 @@ class _AnchoredMenuPositionState extends State<_AnchoredMenuPosition> {
       return;
     }
     setState(() {
-      _menuRect = placeAnchoredMenu(
-        anchor: widget.anchor,
-        menuSize: renderObject.size,
-        screenSize: MediaQuery.sizeOf(context),
+      _menuRect = widget.placement(
+        widget.anchor,
+        renderObject.size,
+        MediaQuery.sizeOf(context),
       );
     });
   }

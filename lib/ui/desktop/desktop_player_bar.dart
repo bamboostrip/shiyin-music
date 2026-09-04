@@ -5,7 +5,7 @@ import '../../controllers/player_controller.dart';
 import '../pages/player_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/climax_slider_track.dart';
-import '../widgets/queue_sheet.dart';
+import '../widgets/desktop_queue_panel.dart';
 import 'player_bar_widgets.dart';
 
 /// 秒数 → `mm:ss`（≥1h 时 `h:mm:ss`）。
@@ -179,14 +179,16 @@ class DesktopPlayerBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
               ],
-              // 队列
-              IconButton(
-                tooltip: '播放队列',
-                onPressed: song == null
-                    ? null
-                    : () => showQueueSheet(context, player),
-                icon: const Icon(Icons.queue_music_rounded, size: 26),
-                color: colorScheme.onSurface,
+              // 队列（PC：锚定在按钮上方的面板，替代移动端底部弹层）
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  tooltip: '播放队列',
+                  onPressed: song == null
+                      ? null
+                      : () => showDesktopQueuePanel(buttonContext, player),
+                  icon: const Icon(Icons.queue_music_rounded, size: 26),
+                  color: colorScheme.onSurface,
+                ),
               ),
               const SizedBox(width: 12),
             ],
