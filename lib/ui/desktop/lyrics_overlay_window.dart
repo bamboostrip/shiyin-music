@@ -83,36 +83,52 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     }
   }
 
+  debugPrint(
+      '[桌面歌词悬浮窗] 参数解析完成 current=${current.length}字 '
+      'next=${next.length}字 isPlaying=$isPlaying');
+
   // 每个原生窗口调用独立 try/catch：此前任何一步抛异常都会中断整个
   // 子引擎启动，且无法从日志定位是哪一步。分步日志、互不干扰。
+  // 注意：debugPrint 是诊断用——原生崩溃会直接杀进程，
+  // 日志停在哪一步，崩溃点就在下一步。
   // 子引擎内 window_manager 作用于本悬浮窗自身（ensureInitialized 将
   // native_window 绑定为当前引擎根 HWND，见 window_manager 源码）。
+  debugPrint('[桌面歌词悬浮窗] [1/9] ensureInitialized 开始');
   try {
     await windowManager.ensureInitialized();
-    debugPrint('[桌面歌词悬浮窗] windowManager 初始化 ok');
+    debugPrint('[桌面歌词悬浮窗] [1/9] ensureInitialized ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] windowManager 初始化失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [1/9] ensureInitialized 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [2/9] setTitleBarStyle 开始');
   try {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+    debugPrint('[桌面歌词悬浮窗] [2/9] setTitleBarStyle ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] setTitleBarStyle 失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [2/9] setTitleBarStyle 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [3/9] setAlwaysOnTop 开始');
   try {
     await windowManager.setAlwaysOnTop(true);
+    debugPrint('[桌面歌词悬浮窗] [3/9] setAlwaysOnTop ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] setAlwaysOnTop 失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [3/9] setAlwaysOnTop 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar 开始');
   try {
     await windowManager.setSkipTaskbar(true);
+    debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] setSkipTaskbar 失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [4/9] setSkipTaskbar 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [5/9] setTitle 开始');
   try {
     await windowManager.setTitle('桌面歌词');
+    debugPrint('[桌面歌词悬浮窗] [5/9] setTitle ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] setTitle 失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [5/9] setTitle 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [6/9] setSize 开始');
   try {
     await windowManager.setSize(
       const Size(
@@ -120,21 +136,26 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
         WindowsDesktopLyricsBridge.overlayHeight,
       ),
     );
+    debugPrint('[桌面歌词悬浮窗] [6/9] setSize ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] setSize 失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [6/9] setSize 失败: $e');
   }
+  debugPrint('[桌面歌词悬浮窗] [7/9] 位置恢复/消息注册开始');
   await _applyPassthrough(settings);
 
   // 恢复上次拖动位置（失败不影响展示）。
   try {
+    debugPrint('[桌面歌词悬浮窗] [7/9] SharedPreferences 开始');
     final prefs = await SharedPreferences.getInstance();
     final left = prefs.getDouble(_kWindowLeftKey);
     final top = prefs.getDouble(_kWindowTopKey);
+    debugPrint('[桌面歌词悬浮窗] [7/9] SharedPreferences ok left=$left top=$top');
     if (left != null && top != null) {
       await windowManager.setPosition(Offset(left, top));
+      debugPrint('[桌面歌词悬浮窗] [7/9] setPosition ok');
     }
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] 恢复窗口位置失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [7/9] 恢复窗口位置失败: $e');
   }
 
   final model = _OverlayModel(
@@ -146,6 +167,7 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
 
   // 尽早注册消息处理，缩短主窗早期消息的丢失窗口期
   // （主窗 createWindow 后立即推送初始内容）。
+  debugPrint('[桌面歌词悬浮窗] [8/9] setMethodHandler 开始');
   try {
     DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
       switch (call.method) {
@@ -166,21 +188,30 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
       }
       return null;
     });
+    debugPrint('[桌面歌词悬浮窗] [8/9] setMethodHandler ok');
   } catch (e) {
-    debugPrint('[桌面歌词悬浮窗] 注册消息处理失败: $e');
+    debugPrint('[桌面歌词悬浮窗] [8/9] 注册消息处理失败: $e');
   }
 
-  runApp(_LyricsOverlayApp(model: model));
-  // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)）。首帧渲染完成
-  // 后再显示：此前 show() 在 runApp 之前调用，空窗口先行贴屏，
-  // 既闪现白底默认窗，也可能与引擎首帧初始化竞态。
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    try {
-      await shownController.show();
-      debugPrint('[桌面歌词悬浮窗] show ok');
-    } catch (e) {
-      debugPrint('[桌面歌词悬浮窗] show 失败: $e');
-    }
+  debugPrint('[桌面歌词悬浮窗] [9/9] runApp 开始');
+  // 子引擎未捕获的 Dart 异常也打印出来，避免静默。
+  runZonedGuarded(() {
+    runApp(_LyricsOverlayApp(model: model));
+    debugPrint('[桌面歌词悬浮窗] [9/9] runApp 已调用，等待首帧');
+    // 插件创建的窗口初始隐藏（源码 ShowWindow(SW_HIDE)）。首帧渲染完成
+    // 后再显示：此前 show() 在 runApp 之前调用，空窗口先行贴屏，
+    // 既闪现白底默认窗，也可能与引擎首帧初始化竞态。
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      debugPrint('[桌面歌词悬浮窗] 首帧回调触发，show 开始');
+      try {
+        await shownController.show();
+        debugPrint('[桌面歌词悬浮窗] show ok');
+      } catch (e) {
+        debugPrint('[桌面歌词悬浮窗] show 失败: $e');
+      }
+    });
+  }, (error, stack) {
+    debugPrint('[桌面歌词悬浮窗] 未捕获异常: $error\n$stack');
   });
 }
 

@@ -22,6 +22,7 @@ import 'dart:convert';
 import 'dart:ui' show Offset, Rect, Size;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show MethodCall;
 import 'package:screen_retriever/screen_retriever.dart';
 
@@ -60,9 +61,11 @@ class WindowsDesktopLyricsBridge {
       await _pushLyric();
       return true;
     }
+    debugPrint('[桌面歌词主窗] show 开始 title=$title artist=$artist');
     try {
       // 懒注册主窗侧消息处理（先于子窗可能的 windowClosed 上报）。
       _ensureMethodHandler();
+      debugPrint('[桌面歌词主窗] createWindow 开始');
       final window = await DesktopMultiWindow.createWindow(
         jsonEncode(<String, dynamic>{
           'settings': _settings.toMap(),
@@ -73,6 +76,7 @@ class WindowsDesktopLyricsBridge {
           'artist': artist,
         }),
       );
+      debugPrint('[桌面歌词主窗] createWindow ok id=${window.windowId}，setFrame 开始');
       try {
         // 子引擎就绪需数百毫秒，且悬浮窗入口在完成无标题栏样式/尺寸/位置
         // 恢复后会自行 show()（见 lyrics_overlay_window.dart 入口末尾）。
@@ -80,7 +84,9 @@ class WindowsDesktopLyricsBridge {
         // 此处仅预置默认位置（首次展示无记忆位置时兜底，后续由悬浮窗自行
         // 覆盖为记忆位置）。
         await window.setFrame(await _defaultFrame());
-      } on Exception {
+        debugPrint('[桌面歌词主窗] setFrame ok');
+      } on Exception catch (e) {
+        debugPrint('[桌面歌词主窗] setFrame 失败: $e，关闭已创建窗口');
         // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
         // 原生窗口游离残留；再按创建失败路径统一处理。
         try {
@@ -92,8 +98,10 @@ class WindowsDesktopLyricsBridge {
       }
       _window = window;
       _visible = true;
+      debugPrint('[桌面歌词主窗] show 成功，等待子引擎启动');
       return true;
-    } on Exception {
+    } on Exception catch (e) {
+      debugPrint('[桌面歌词主窗] show 失败: $e');
       _visible = false;
       _window = null;
       return false;
@@ -159,8 +167,9 @@ class WindowsDesktopLyricsBridge {
         'next': _next,
         'isPlaying': _isPlaying,
       });
-    } on Exception {
+    } on Exception catch (e) {
       // 子窗未就绪（引擎启动窗口期）或已退出：缓存待下次补发。
+      debugPrint('[桌面歌词主窗] updateLyric 推送失败（子窗未就绪可能）: $e');
     }
   }
 
@@ -189,11 +198,13 @@ class WindowsDesktopLyricsBridge {
     try {
       final display = await screenRetriever.getPrimaryDisplay();
       final size = display.size;
+      debugPrint('[桌面歌词主窗] 主显示器尺寸 ${size.width}x${size.height}');
       origin = Offset(
         (size.width - overlayWidth) / 2,
         size.height - overlayHeight - 80,
       );
-    } on Exception {
+    } on Exception catch (e) {
+      debugPrint('[桌面歌词主窗] 获取主显示器失败，用固定位置: $e');
       // 拿不到显示器信息时退回固定位置。
     }
     return origin & const Size(WindowsDesktopLyricsBridge.overlayWidth,
