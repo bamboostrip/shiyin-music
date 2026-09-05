@@ -1,0 +1,132 @@
+name: Build Windows Desktop
+
+# 打 tag（v*）或手动触发时构建 Windows 便携包 + 安装包并附加到 Release，
+# 与 build-android.yml 互不干扰（不同文件名并发上传同一 Release 安全）。
+# Linux/macOS 暂不打包：linux 缺 Rust kugou_engine 集成与 just_audio 平台实现，
+# macOS 缺 Xcode Rust 链接配置，详见 docs/release-process.md。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 附加附件到 GitHub Release 需要写权限。
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.44.8'
+
+jobs:
+  build-windows:
+    name: Build portable.zip + setup.exe (x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # windows/CMakeLists.txt 的 rust_engine_build 目标会调用 cargo；
+      # runner 自带 VS2022，MSVC 目标为默认工具链。
+      - name: Setup Rust toolchain (MSVC x64)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: windows-x64
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Windows release bundle
+        run: flutter build windows --release
+
+      # 统一产物名：tag 去非法字符；非 tag 触发（手动/分支）时版本回退 0.0.0。
+      - name: Compute artifact names
+        id: names
+        shell: pwsh
+        run: |
+          $raw = '${{ github.ref_name }}'
+          $tag = $raw -replace '[^A-Za-z0-9._-]', '_'
+          $ver = '0.0.0'
+          $fileVer = '0.0.0.0'
+          if ($tag -match '^v(\d+\.\d+(\.\d+)?)') {
+            $ver = $Matches[1]
+            $parts = $ver.Split('.').Count
+            $fileVer = $ver + ('.0' * (4 - $parts))
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          "filever=$fileVer" >> $env:GITHUB_OUTPUT
+
+      # portable.zip 与 setup.exe 共用同一份暂存负载（exe 改名为 ShiYinMusic.exe）。
+      # 产物统一放 build/dist/（Flutter 约定，build/ 已在 .gitignore 且 flutter clean 会清理）。
+      - name: Stage portable directory
+        shell: pwsh
+        run: |
+          $src = 'build\windows\x64\runner\Release'
+          if (-not (Test-Path "$src\kgka_music_hl.exe")) {
+            throw "未找到构建产物：$src\kgka_music_hl.exe"
+          }
+          New-Item -ItemType Directory -Force -Path build\dist\portable | Out-Null
+          Copy-Item "$src\*" build\dist\portable -Recurse -Force
+          Rename-Item build\dist\portable\kgka_music_hl.exe ShiYinMusic.exe
+          Get-ChildItem build\dist\portable | Select-Object Name, Length
+
+      # 附件在 zip 根目录（解压即可覆盖旧目录）。
+      - name: Pack portable zip
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.names.outputs.tag }}'
+          7z a -tzip "build\dist\shiyin-$tag-windows-x64-portable.zip" ".\build\dist\portable\*"
+          if ($LASTEXITCODE -ne 0) { throw "7z 打包失败" }
+          Get-Item "build\dist\shiyin-$tag-windows-x64-portable.zip" | Select-Object Name, Length
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build setup.exe
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "未找到 ISCC.exe：$iscc" }
+          $tag = '${{ steps.names.outputs.tag }}'
+          $src = (Resolve-Path 'build\dist\portable').Path
+          & $iscc `
+            "/DAppVersion=${{ steps.names.outputs.ver }}" `
+            "/DFileVersion=${{ steps.names.outputs.filever }}" `
+            "/DSourceDir=$src" `
+            /Obuild\dist `
+            installer\shiyin.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败" }
+          Rename-Item "build\dist\shiyin-windows-x64-setup.exe" "shiyin-$tag-windows-x64-setup.exe"
+          Get-Item "build\dist\shiyin-$tag-windows-x64-setup.exe" | Select-Object Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-${{ steps.names.outputs.tag }}
+          path: |
+            build/dist/shiyin-*-windows-x64-portable.zip
+            build/dist/shiyin-*-windows-x64-setup.exe
+          if-no-files-found: error
+
+      # 仅附加附件，不创建/覆盖 Release 笔记（笔记由 gh release create 手写）。
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/dist/shiyin-*-windows-x64-portable.zip
+            build/dist/shiyin-*-windows-x64-setup.exe
+          fail_on_unmatched_files: true

@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/app_version.dart';
@@ -99,7 +101,7 @@ Future<void> checkAppUpdateManually({
     if (!context.mounted) {
       return;
     }
-    Toast.error('检测更新失败：$error');
+    Toast.error('检测更新失败：${error is StateError ? error.message : error}');
   }
 }
 
@@ -109,6 +111,19 @@ Future<void> showAppUpdateDialog({
   required AppVersionInfo version,
   required bool force,
 }) {
+  // Windows 走分形态流程弹窗（便携版跳浏览器 / 安装版应用内下载安装）。
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: !force,
+      builder: (dialogContext) => _WindowsUpdateDialog(
+        service: service,
+        version: version,
+        force: force,
+      ),
+    );
+  }
+
   return showDialog<void>(
     context: context,
     barrierDismissible: !force,
@@ -162,6 +177,316 @@ Future<void> showAppUpdateDialog({
       );
     },
   );
+}
+
+/// Windows 更新流程弹窗：按分发形态分轨。
+///
+/// - 便携版：主按钮「去下载」跳浏览器打开 zip 直链（用户自行解压覆盖）；
+/// - 安装版：主按钮「下载更新」进入应用内下载 setup.exe（进度 + 取消），
+///   完成后「退出并安装」拉起向导退出本应用；同时始终保留「浏览器下载」
+///   次级入口（网络不佳或应用内下载失败时改走浏览器）。
+class _WindowsUpdateDialog extends StatefulWidget {
+  const _WindowsUpdateDialog({
+    required this.service,
+    required this.version,
+    required this.force,
+  });
+
+  final AppUpdateService service;
+  final AppVersionInfo version;
+  final bool force;
+
+  @override
+  State<_WindowsUpdateDialog> createState() => _WindowsUpdateDialogState();
+}
+
+enum _UpdatePhase { idle, downloading, ready }
+
+class _WindowsUpdateDialogState extends State<_WindowsUpdateDialog> {
+  _UpdatePhase _phase = _UpdatePhase.idle;
+  CancelToken? _cancelToken;
+  int _received = 0;
+  int _total = 0;
+  String? _setupPath;
+
+  bool get _installed => AppUpdateService.isWindowsInstalledBuild;
+
+  /// 下载地址是否为附件直链（非直链时按钮退化为打开发布页）。
+  bool get _hasDirectAsset {
+    final url = widget.version.downloadUrl.toLowerCase();
+    return url.endsWith('.zip') || url.endsWith('.exe');
+  }
+
+  Future<void> _openInBrowser() async {
+    try {
+      await widget.service.downloadAndInstall(widget.version);
+      if (!mounted) {
+        return;
+      }
+      Toast.info(
+        _hasDirectAsset && !_installed
+            ? '已在浏览器开始下载，解压覆盖旧目录即可完成更新'
+            : '已打开下载页面，请在浏览器中完成下载',
+      );
+      if (!widget.force) {
+        Navigator.of(context).pop();
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      Toast.error('打开下载链接失败：${_cleanError(error)}');
+    }
+  }
+
+  Future<void> _startDownload() async {
+    setState(() {
+      _phase = _UpdatePhase.downloading;
+      _received = 0;
+      _total = 0;
+    });
+    _cancelToken = CancelToken();
+    try {
+      final path = await widget.service.downloadWindowsSetup(
+        widget.version,
+        cancelToken: _cancelToken,
+        onProgress: (received, total) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _received = received;
+            _total = total;
+          });
+        },
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _phase = _UpdatePhase.ready;
+        _setupPath = path;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _phase = _UpdatePhase.idle);
+      Toast.error('下载失败：${_cleanError(error)}');
+    }
+  }
+
+  void _cancelDownload() {
+    _cancelToken?.cancel('用户取消下载');
+  }
+
+  Future<void> _quitAndInstall() async {
+    final path = _setupPath;
+    if (path == null) {
+      return;
+    }
+    try {
+      // 成功路径不再返回：拉起向导后 exit(0) 退出本应用。
+      await widget.service.launchWindowsInstallerAndExit(path);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      Toast.error('启动安装程序失败：${_cleanError(error)}');
+    }
+  }
+
+  /// 提取可读错误文案（StateError 去 "Bad state:" 前缀，DioException 映射常见网络错误）。
+  String _cleanError(Object error) {
+    if (error is StateError) {
+      return error.message;
+    }
+    if (error is DioException) {
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout => '网络超时，请稍后重试',
+        DioExceptionType.connectionError => '网络连接失败',
+        DioExceptionType.badResponse =>
+          '服务器响应异常（${error.response?.statusCode ?? ''}）',
+        DioExceptionType.cancel => '已取消',
+        _ => '网络错误（${error.type.name}）',
+      };
+    }
+    return '$error';
+  }
+
+  String get _fileName =>
+      'ShiyinMusic-Setup-v${widget.version.versionName}.exe';
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return PopScope(
+      canPop: !widget.force,
+      child: AlertDialog(
+        icon: const Icon(Icons.system_update_alt_rounded),
+        title: Text(
+          widget.force ? '发现重要更新' : '发现新版本 ${widget.version.versionName}',
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440, maxHeight: 380),
+          child: switch (_phase) {
+            _UpdatePhase.downloading => _buildDownloading(colorScheme),
+            _UpdatePhase.ready => _buildReady(colorScheme),
+            _UpdatePhase.idle => SingleChildScrollView(
+              child: _MarkdownContent(
+                data: widget.version.updateContent.trim().isEmpty
+                    ? '暂无更新说明'
+                    : widget.version.updateContent,
+              ),
+            ),
+          },
+        ),
+        actions: switch (_phase) {
+          _UpdatePhase.downloading => [
+            TextButton.icon(
+              onPressed: _cancelDownload,
+              icon: const Icon(Icons.close_rounded),
+              label: const Text('取消'),
+            ),
+          ],
+          _UpdatePhase.ready => [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('稍后再装'),
+            ),
+            FilledButton.icon(
+              onPressed: _quitAndInstall,
+              icon: const Icon(Icons.install_desktop_rounded),
+              label: const Text('退出并安装'),
+            ),
+          ],
+          _UpdatePhase.idle => _buildIdleActions(),
+        },
+      ),
+    );
+  }
+
+  List<Widget> _buildIdleActions() {
+    final directAsset = _hasDirectAsset;
+    // 安装版保留浏览器下载次级入口；便携版主路径就是浏览器，
+    // 无直链时主按钮已退化为"打开发布页"，均不再重复放。
+    final showBrowserEntry = _installed && directAsset;
+    return [
+      if (!widget.force)
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('以后再说'),
+        ),
+      if (showBrowserEntry)
+        TextButton.icon(
+          onPressed: _openInBrowser,
+          icon: const Icon(Icons.open_in_browser_rounded),
+          label: const Text('浏览器下载'),
+        ),
+      FilledButton.icon(
+        onPressed: () {
+          if (!directAsset) {
+            // 无附件直链：按钮退化为打开发布页（同浏览器路径）。
+            _openInBrowser();
+            return;
+          }
+          if (_installed) {
+            _startDownload();
+          } else {
+            _openInBrowser();
+          }
+        },
+        icon: Icon(
+          directAsset && _installed
+              ? Icons.download_rounded
+              : Icons.open_in_new_rounded,
+        ),
+        label: Text(
+          !directAsset
+              ? '打开发布页'
+              : _installed
+              ? '下载更新'
+              : '去下载（浏览器）',
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildDownloading(ColorScheme colorScheme) {
+    final hasTotal = _total > 0;
+    final percent = hasTotal ? _received / _total : null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '正在下载 $_fileName',
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '下载到系统"下载"文件夹，完成后可退出并安装',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 16),
+        LinearProgressIndicator(value: percent, minHeight: 8),
+        const SizedBox(height: 10),
+        Text(
+          hasTotal
+              ? '${(percent! * 100).toStringAsFixed(0)}% · ${_mb(_received)} / ${_mb(_total)} MB'
+              : '正在连接…',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReady(ColorScheme colorScheme) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.check_circle_rounded,
+              color: colorScheme.primary,
+              size: 28,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '安装包已就绪',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$_fileName 已保存到"下载"文件夹。点击"退出并安装"将关闭本应用并打开安装向导，按提示完成安装即可。',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
 }
 
 class _MarkdownContent extends StatelessWidget {
