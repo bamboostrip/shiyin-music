@@ -32,6 +32,8 @@ class _FakePlayerController extends ChangeNotifier
     Song song, {
     List<Song>? queue,
     bool isRetry = false,
+    Duration? initialPosition,
+    bool preserveClimax = false,
   }) async {
     playCalls.add(song);
     playQueueArgs.add(queue);

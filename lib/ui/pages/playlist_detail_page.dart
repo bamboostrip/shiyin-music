@@ -542,6 +542,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           'songs': songs.map((s) => s.toCache()).toList(),
         });
       }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _hasMore && !_allSongsLoaded) {
+          _loadAllSongs(silent: true);
+        }
+      });
     } catch (error) {
       if (!mounted) return;
       if (cached == null) {

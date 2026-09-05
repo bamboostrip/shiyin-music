@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../models/music_models.dart';
 import '../pages/player_page.dart';
 import '../widgets/artwork.dart';
+import '../widgets/audio_quality_sheet.dart';
 import '../widgets/climax_slider_track.dart';
 import '../widgets/desktop_queue_panel.dart';
+import '../widgets/toast.dart';
 import 'player_bar_widgets.dart';
 
 /// 秒数 → `mm:ss`（≥1h 时 `h:mm:ss`）。
@@ -150,8 +153,13 @@ class DesktopPlayerBar extends StatelessWidget {
                 _ProgressBar(player: player),
                 const SizedBox(width: 16),
               ],
-              // 音量
+              // 音质切换
+              _AudioQualityButton(
+                key: const ValueKey('desktop_audio_quality_button'),
+                player: player,
+              ),
               const SizedBox(width: 8),
+              // 音量
               _VolumeControl(player: player),
               const SizedBox(width: 8),
               // 桌面歌词开关（仅支持桌面歌词的平台渲染）
@@ -364,6 +372,123 @@ class _VolumeControlState extends State<_VolumeControl> {
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+class _AudioQualityButton extends StatelessWidget {
+  const _AudioQualityButton({super.key, required this.player});
+
+  final PlayerController player;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final song = player.currentSong;
+        final quality = player.audioQuality;
+        final enabled = song != null;
+        final colorScheme = Theme.of(context).colorScheme;
+        final isLossless = quality == AudioQuality.lossless;
+        final label = switch (quality) {
+          AudioQuality.standard => '标准',
+          AudioQuality.high => '高品',
+          AudioQuality.lossless => '无损',
+        };
+        final tooltip = '音质：${quality.label} (${quality.badge}) - 点击切换';
+
+        final Color foregroundColor;
+        final Color borderColor;
+        if (!enabled) {
+          foregroundColor = colorScheme.onSurface.withValues(alpha: .38);
+          borderColor = colorScheme.outlineVariant.withValues(alpha: .38);
+        } else if (isLossless) {
+          foregroundColor = colorScheme.primary;
+          borderColor = colorScheme.primary.withValues(alpha: .6);
+        } else {
+          foregroundColor = colorScheme.onSurfaceVariant;
+          borderColor = colorScheme.outlineVariant;
+        }
+
+        return Tooltip(
+          message: tooltip,
+          child: Material(
+            color: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: borderColor, width: 1),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              mouseCursor: enabled
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              hoverColor:
+                  (isLossless ? colorScheme.primary : colorScheme.onSurface)
+                      .withValues(alpha: 0.08),
+              onTap: enabled
+                  ? () async {
+                      final picked = await showAudioQualitySheet(
+                        context: context,
+                        selected: player.audioQuality,
+                        title: '切换音质',
+                        subtitle: '会重新加载当前歌曲并尽量保持播放进度',
+                      );
+                      if (picked != null) {
+                        await player.setAudioQuality(
+                          picked,
+                          reloadCurrent: true,
+                        );
+                        Toast.success('已切换到 ${picked.label}');
+                      }
+                    }
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isLossless) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 3,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: foregroundColor.withValues(alpha: .15),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(
+                          'SQ',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            color: foregroundColor,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: foregroundColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         );
       },
     );

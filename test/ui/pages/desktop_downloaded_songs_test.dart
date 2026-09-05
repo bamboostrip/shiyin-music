@@ -28,8 +28,13 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   Song? lastPlayedSong;
 
   @override
-  Future<void> playSong(Song song, {List<Song>? queue, bool isRetry = false}) //
-  async {
+  Future<void> playSong(
+    Song song, {
+    List<Song>? queue,
+    bool isRetry = false,
+    Duration? initialPosition,
+    bool preserveClimax = false,
+  }) async {
     lastPlayedSong = song;
     currentSong = song;
     isPlaying = true;

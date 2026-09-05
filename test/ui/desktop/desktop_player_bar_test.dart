@@ -30,6 +30,24 @@ class _FakePlayerController extends ChangeNotifier
   bool desktopLyricsLocked = false;
   int unlockDesktopLyricsCalls = 0;
   int setDesktopLyricsEnabledCalls = 0;
+
+  @override
+  AudioQuality audioQuality = AudioQuality.standard;
+  int setAudioQualityCalls = 0;
+  AudioQuality? lastSetAudioQuality;
+  bool? lastReloadCurrent;
+
+  @override
+  Future<void> setAudioQuality(
+    AudioQuality quality, {
+    bool reloadCurrent = false,
+  }) async {
+    setAudioQualityCalls++;
+    lastSetAudioQuality = quality;
+    lastReloadCurrent = reloadCurrent;
+    audioQuality = quality;
+    notifyListeners();
+  }
   @override
   Future<void> unlockDesktopLyrics() async {
     unlockDesktopLyricsCalls++;
@@ -330,5 +348,86 @@ void main() {
       expect(find.byTooltip('桌面歌词已锁定，点击一键解锁'), findsNothing);
     });
   });
+
+  group('音质切换按钮', () {
+    testWidgets(
+      '有歌曲时渲染音质按钮，tooltip 包含音质切换提示且显示当前音质短标签',
+      (tester) async {
+        final player = _FakePlayerController()
+          ..currentSong = _song
+          ..audioQuality = AudioQuality.standard;
+        await _pumpBar(tester, player);
+
+        // 默认标准音质：短标签展示“标准”，tooltip 包含“音质”
+        expect(find.text('标准'), findsOneWidget);
+        final tooltipFinder = find.byWidgetPredicate(
+          (w) => w is Tooltip && ((w.message?.contains('音质') ?? false) || (w.message?.contains('切换音质') ?? false)),
+        );
+        expect(tooltipFinder, findsOneWidget);
+
+        // 高品音质
+        player.audioQuality = AudioQuality.high;
+        player.notifyListeners();
+        await tester.pump();
+        expect(find.text('高品'), findsOneWidget);
+
+        // 无损音质，显示无损与 SQ 标识
+        player.audioQuality = AudioQuality.lossless;
+        player.notifyListeners();
+        await tester.pump();
+        expect(find.text('无损'), findsOneWidget);
+        expect(find.text('SQ'), findsOneWidget);
+      },
+    );
+
+    testWidgets('无歌曲时音质按钮禁用', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = null
+        ..audioQuality = AudioQuality.standard;
+      await _pumpBar(tester, player);
+
+      final buttonFinder = find.byKey(
+        const ValueKey('desktop_audio_quality_button'),
+      );
+      expect(buttonFinder, findsOneWidget);
+
+      final inkWell = tester.widget<InkWell>(
+        find.descendant(of: buttonFinder, matching: find.byType(InkWell)),
+      );
+      expect(inkWell.onTap, isNull);
+
+      // 点击禁用按钮不弹出对话框
+      await tester.tap(buttonFinder);
+      await tester.pump();
+      expect(find.text('切换音质'), findsNothing);
+      expect(player.setAudioQualityCalls, 0);
+    });
+
+    testWidgets('点击音质按钮弹出音质切换对话框并支持选择', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..audioQuality = AudioQuality.standard;
+      await _pumpBar(tester, player);
+
+      final buttonFinder = find.byKey(
+        const ValueKey('desktop_audio_quality_button'),
+      );
+      await tester.tap(buttonFinder);
+      await tester.pumpAndSettle();
+
+      // 弹出对话框
+      expect(find.text('切换音质'), findsOneWidget);
+      expect(find.text('高品音质'), findsOneWidget);
+
+      // 点击高品音质
+      await tester.tap(find.text('高品音质'));
+      await tester.pumpAndSettle();
+
+      expect(player.setAudioQualityCalls, 1);
+      expect(player.lastSetAudioQuality, AudioQuality.high);
+      expect(player.lastReloadCurrent, isTrue);
+    });
+  });
 }
+
 

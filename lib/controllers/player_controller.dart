@@ -245,6 +245,8 @@ class PlayerController extends ChangeNotifier {
   /// 高潮试听结束时间（播放到该时间自动暂停）。
   Duration? _climaxEndTime;
 
+  Duration? get climaxEndTime => _climaxEndTime;
+
   /// 当前歌曲的高潮片段时间（用于进度条标记），可能为 null。
   SongClimax? climax;
   Timer? _completionFallbackTimer;
@@ -444,10 +446,14 @@ class PlayerController extends ChangeNotifier {
     Song song, {
     List<Song>? queue,
     bool isRetry = false,
+    Duration? initialPosition,
+    bool preserveClimax = false,
   }) async {
     final isSameSong = currentSong?.hash == song.hash;
-    _climaxEndTime = null;
-    climax = null;
+    if (!preserveClimax) {
+      _climaxEndTime = null;
+      climax = null;
+    }
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
     _lastSmoothPosition = Duration.zero;
@@ -537,6 +543,9 @@ class PlayerController extends ChangeNotifier {
         queueSongs: this.queue,
         queueIndex: currentIndex,
       );
+      if (initialPosition != null && initialPosition > Duration.zero) {
+        await seek(initialPosition);
+      }
       isPreparing = false;
       notifyListeners();
       unawaited(loadLyrics(song));
@@ -564,7 +573,13 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
         await Future<void>.delayed(const Duration(seconds: 2));
         debugPrint('[时音][player] 播放失败，自动重试: ${song.title} ($error)');
-        await playSong(song, queue: queue, isRetry: true);
+        await playSong(
+          song,
+          queue: queue,
+          isRetry: true,
+          initialPosition: initialPosition,
+          preserveClimax: preserveClimax,
+        );
         return;
       }
       errorMessage = error.toString();
@@ -1217,13 +1232,21 @@ class PlayerController extends ChangeNotifier {
       // 等待网络期间可能已切歌，避免把旧歌的高潮定位到新歌上。
       if (currentSong?.hash != song.hash) return false;
       this.climax = climax;
-      await seek(climax.startTime);
-      if (currentSong?.hash != song.hash) return false;
-      // seek 完成后再设置结束时间，避免 seek 期间旧位置触发提前暂停。
-      _climaxEndTime = climax.endTime;
-      if (!audioPlayer.playing) {
-        await togglePlay();
+      if (audioPlayer.processingState == ProcessingState.idle) {
+        await playSong(
+          song,
+          queue: queue,
+          initialPosition: climax.startTime,
+          preserveClimax: true,
+        );
+      } else {
+        await seek(climax.startTime);
+        if (!audioPlayer.playing) {
+          await togglePlay();
+        }
       }
+      if (currentSong?.hash != song.hash) return false;
+      _climaxEndTime = climax.endTime;
       return true;
     } catch (_) {
       return false;

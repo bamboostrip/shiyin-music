@@ -34,6 +34,8 @@ class ArtistDetailPage extends StatefulWidget {
   State<ArtistDetailPage> createState() => _ArtistDetailPageState();
 }
 
+enum _ArtistTab { songs, albums }
+
 class _ArtistDetailPageState extends State<ArtistDetailPage> {
   static const _pageSize = 30;
 
@@ -46,6 +48,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   final _scrollController = ScrollController();
   final _songs = <Song>[];
   final _albums = <ArtistAlbum>[];
+
+  _ArtistTab _selectedTab = _ArtistTab.songs;
+  bool _isProgressiveLoading = false;
+  int _progressiveEpoch = 0;
 
   ArtistDetail? _detail;
   String? _resolvedArtistId;
@@ -67,6 +73,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
   @override
   void dispose() {
+    _progressiveEpoch++;
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -76,6 +83,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   }
 
   Future<void> _loadInitial() async {
+    _progressiveEpoch++;
     setState(() {
       _detail = null;
       _songs.clear();
@@ -84,6 +92,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       _hasMore = true;
       _isInitialLoading = true;
       _isLoadingMore = false;
+      _isProgressiveLoading = false;
       _isHeaderCollapsed = false;
       _errorMessage = null;
       _loadMoreError = null;
@@ -146,12 +155,61 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         _hasMore = songs.length == _pageSize;
         _isInitialLoading = false;
       });
+      if (_hasMore) {
+        _startProgressiveLoading();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _errorMessage = error.toString();
         _isInitialLoading = false;
       });
+    }
+  }
+
+  Future<void> _startProgressiveLoading() async {
+    if (_isProgressiveLoading || !_hasMore) return;
+    _isProgressiveLoading = true;
+    final epoch = _progressiveEpoch;
+
+    try {
+      while (_hasMore && mounted && epoch == _progressiveEpoch) {
+        await Future.delayed(const Duration(milliseconds: 250));
+        if (!mounted || !_hasMore || epoch != _progressiveEpoch) break;
+
+        final songs = await widget.api.artistAudios(
+          _resolvedArtistId ?? widget.artist.id,
+          page: _nextPage,
+          pageSize: _pageSize,
+          sort: 'hot',
+        );
+        if (!mounted || epoch != _progressiveEpoch) break;
+
+        if (songs.isEmpty) {
+          setState(() {
+            _hasMore = false;
+          });
+          break;
+        }
+
+        setState(() {
+          _songs.addAll(songs);
+          _nextPage++;
+          _hasMore = songs.length == _pageSize;
+        });
+      }
+    } catch (_) {
+      // 静默加载失败忽略，由用户触底手动重试
+    } finally {
+      if (epoch == _progressiveEpoch) {
+        if (mounted) {
+          setState(() {
+            _isProgressiveLoading = false;
+          });
+        } else {
+          _isProgressiveLoading = false;
+        }
+      }
     }
   }
 
@@ -173,7 +231,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   }
 
   void _maybeLoadMore() {
-    if (!_scrollController.hasClients || !_hasMore || _isLoadingMore) {
+    if (!_scrollController.hasClients ||
+        !_hasMore ||
+        _isLoadingMore ||
+        _isProgressiveLoading) {
       return;
     }
 
@@ -184,7 +245,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   }
 
   Future<void> _loadMore() async {
-    if (_isLoadingMore || !_hasMore) return;
+    if (_isLoadingMore || !_hasMore || _isProgressiveLoading) return;
 
     setState(() {
       _isLoadingMore = true;
@@ -393,6 +454,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           fallback: widget.artist,
           songsCount: _songs.length,
           albumsCount: _albums.length,
+          hasMore: _hasMore,
           onPlayAll: _songs.isEmpty
               ? null
               : () => widget.player.playSong(
@@ -434,143 +496,174 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       ),
                     )
                   else ...[
-                    if (_albums.isNotEmpty)
-                      isDesktopFormFactor
-                          // PC：QQ 音乐风格响应式网格（sliver，随宽度自适应列数）。
-                          ? AlbumSliverGridSection(
-                              albums: _albums,
-                              onTap: _openAlbum,
-                            )
-                          // 移动端 / 车机端：保持原横轨。
-                          : SliverToBoxAdapter(
-                              child: _ArtistAlbumSection(
-                                albums: _albums,
-                                onTap: _openAlbum,
-                              ),
-                            ),
-                    SliverToBoxAdapter(
-                      child: _SongSectionHeader(
-                        count: _songs.length,
-                        onPlayAll: _songs.isEmpty
-                            ? null
-                            : () => widget.player.playSong(
-                                _songs.first,
-                                queue: List<Song>.of(_songs),
-                              ),
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _ArtistTabHeaderDelegate(
+                        selectedTab: _selectedTab,
+                        songsCount: _songs.length,
+                        albumsCount: _albums.length,
+                        onTabSelected: (tab) {
+                          if (_selectedTab != tab) {
+                            setState(() => _selectedTab = tab);
+                          }
+                        },
                       ),
                     ),
-                    if (_songs.isEmpty)
-                      const SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: _EmptyArtistSongs(),
-                      )
-                    else ...[
-                      if (isDesktopFormFactor) ...[
-                        SliverPersistentHeader(
-                          pinned: true,
-                          delegate: _ArtistTableStickyHeaderDelegate(
-                            child: Container(
-                              color: theme.colorScheme.surface,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: const DesktopSongTableHeader(
-                                selecting: false,
-                                allSelected: false,
-                                onToggleSelectAll: null,
+                    if (_selectedTab == _ArtistTab.songs) ...[
+                      SliverToBoxAdapter(
+                        child: _SongSectionHeader(
+                          count: _songs.length,
+                          onPlayAll: _songs.isEmpty
+                              ? null
+                              : () => widget.player.playSong(
+                                  _songs.first,
+                                  queue: List<Song>.of(_songs),
+                                ),
+                        ),
+                      ),
+                      if (_songs.isEmpty)
+                        const SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _EmptyArtistSongs(),
+                        )
+                      else ...[
+                        if (isDesktopFormFactor) ...[
+                          SliverPersistentHeader(
+                            pinned: true,
+                            delegate: _ArtistTableStickyHeaderDelegate(
+                              child: Container(
+                                color: theme.colorScheme.surface,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: const DesktopSongTableHeader(
+                                  selecting: false,
+                                  allSelected: false,
+                                  onToggleSelectAll: null,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                          sliver: SliverFixedExtentList(
-                            itemExtent: 44.0,
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) {
-                                final song = _songs[index];
-                                return DesktopSongTableRow(
-                                  song: song,
-                                  index: index + 1,
-                                  player: widget.player,
-                                  auth: widget.auth,
-                                  canDelete: false,
-                                  selecting: false,
-                                  selected: false,
-                                  isFocused: _focusedSongKey == _songKey(song),
-                                  onTap: () {
-                                    setState(() => _focusedSongKey = _songKey(song));
-                                  },
-                                  onDoubleTap: () {
-                                    widget.player.playSong(
-                                      song,
-                                      queue: List<Song>.of(_songs),
-                                    );
-                                  },
-                                  onPlay: () {
-                                    widget.player.playSong(
-                                      song,
-                                      queue: List<Song>.of(_songs),
-                                    );
-                                  },
-                                  onAddToPlaylist: () => showAddToPlaylistSheet(
-                                    context: context,
-                                    auth: widget.auth,
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                            sliver: SliverFixedExtentList(
+                              itemExtent: 44.0,
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final song = _songs[index];
+                                  return DesktopSongTableRow(
                                     song: song,
-                                  ),
-                                  onDelete: () {},
-                                  onViewArtist: () => _openArtist(song),
-                                  onMore: () => _showSongMenu(song),
-                                  onSecondaryMore: (position) =>
-                                      _showSongMenu(song, anchor: position),
-                                );
-                              },
-                              childCount: _songs.length,
+                                    index: index + 1,
+                                    player: widget.player,
+                                    auth: widget.auth,
+                                    canDelete: false,
+                                    selecting: false,
+                                    selected: false,
+                                    isFocused: _focusedSongKey == _songKey(song),
+                                    onTap: () {
+                                      setState(() => _focusedSongKey = _songKey(song));
+                                    },
+                                    onDoubleTap: () {
+                                      widget.player.playSong(
+                                        song,
+                                        queue: List<Song>.of(_songs),
+                                      );
+                                    },
+                                    onPlay: () {
+                                      widget.player.playSong(
+                                        song,
+                                        queue: List<Song>.of(_songs),
+                                      );
+                                    },
+                                    onAddToPlaylist: () => showAddToPlaylistSheet(
+                                      context: context,
+                                      auth: widget.auth,
+                                      song: song,
+                                    ),
+                                    onDelete: () {},
+                                    onViewArtist: () => _openArtist(song),
+                                    onMore: () => _showSongMenu(song),
+                                    onSecondaryMore: (position) =>
+                                        _showSongMenu(song, anchor: position),
+                                  );
+                                },
+                                childCount: _songs.length,
+                              ),
                             ),
                           ),
-                        ),
-                      ] else ...[
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                          sliver: SliverList.separated(
-                            itemCount: _songs.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 2),
-                            itemBuilder: (context, index) {
-                              final song = _songs[index];
-                              return _ArtistSongRow(
-                                song: song,
-                                auth: widget.auth,
-                                player: widget.player,
-                                onTap: () => widget.player.playSong(
-                                  song,
-                                  queue: List<Song>.of(_songs),
-                                ),
-                              );
-                            },
+                        ] else ...[
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            sliver: SliverList.separated(
+                              itemCount: _songs.length,
+                              separatorBuilder: (_, _) => const SizedBox(height: 2),
+                              itemBuilder: (context, index) {
+                                final song = _songs[index];
+                                return _ArtistSongRow(
+                                  song: song,
+                                  auth: widget.auth,
+                                  player: widget.player,
+                                  onTap: () => widget.player.playSong(
+                                    song,
+                                    queue: List<Song>.of(_songs),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                        SliverToBoxAdapter(
+                          child: _ArtistLoadMoreFooter(
+                            hasMore: _hasMore,
+                            isLoading: _isLoadingMore || _isProgressiveLoading,
+                            errorMessage: _loadMoreError,
+                            onRetry: _loadMore,
                           ),
                         ),
                       ],
+                    ] else if (_selectedTab == _ArtistTab.albums) ...[
+                      if (_albums.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Text(
+                                '暂无专辑',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        isDesktopFormFactor
+                            // PC：QQ 音乐风格响应式网格（sliver，随宽度自适应列数）。
+                            ? AlbumSliverGridSection(
+                                albums: _albums,
+                                onTap: _openAlbum,
+                              )
+                            // 移动端 / 车机端：保持原横轨。
+                            : SliverToBoxAdapter(
+                                child: _ArtistAlbumSection(
+                                  albums: _albums,
+                                  onTap: _openAlbum,
+                                ),
+                              ),
+                    ],
+                    // 底部留白：移动端播放中时为 MiniPlayer 预留空间，
+                    // 防止卡片遮挡导致用户点不到最底部的几首歌。
+                    if (!isDesktopFormFactor)
                       SliverToBoxAdapter(
-                        child: _ArtistLoadMoreFooter(
-                          hasMore: _hasMore,
-                          isLoading: _isLoadingMore,
-                          errorMessage: _loadMoreError,
-                          onRetry: _loadMore,
+                        child: AnimatedBuilder(
+                          animation: widget.player,
+                          builder: (context, _) {
+                            final hasSong = widget.player.currentSong != null;
+                            return SizedBox(
+                              height: hasSong ? miniPlayerSpace : 0,
+                            );
+                          },
                         ),
                       ),
-                      // 底部留白：移动端播放中时为 MiniPlayer 预留空间，
-                      // 防止卡片遮挡导致用户点不到最底部的几首歌。
-                      if (!isDesktopFormFactor)
-                        SliverToBoxAdapter(
-                          child: AnimatedBuilder(
-                            animation: widget.player,
-                            builder: (context, _) {
-                              final hasSong = widget.player.currentSong != null;
-                              return SizedBox(
-                                height: hasSong ? miniPlayerSpace : 0,
-                              );
-                            },
-                          ),
-                        ),
-                    ],
                   ],
                 ],
               ),
@@ -1153,6 +1246,7 @@ class _DesktopArtistHeroHeader extends StatelessWidget {
     required this.songsCount,
     required this.albumsCount,
     required this.onPlayAll,
+    this.hasMore = false,
   });
 
   final ArtistDetail? detail;
@@ -1160,6 +1254,7 @@ class _DesktopArtistHeroHeader extends StatelessWidget {
   final int songsCount;
   final int albumsCount;
   final VoidCallback? onPlayAll;
+  final bool hasMore;
 
   @override
   Widget build(BuildContext context) {
@@ -1168,8 +1263,9 @@ class _DesktopArtistHeroHeader extends StatelessWidget {
     final avatar = detail?.avatarUrl ?? fallback.avatarUrl;
     final artistName = detail?.name ?? fallback.name;
 
-    final statText =
-        '$songsCount 首热门单曲${albumsCount > 0 ? ' · $albumsCount 张专辑' : ''}';
+    final statText = hasMore
+        ? '已加载 $songsCount 首热门单曲${albumsCount > 0 ? ' · $albumsCount 张专辑' : ''}'
+        : '共 $songsCount 首热门单曲${albumsCount > 0 ? ' · $albumsCount 张专辑' : ''}';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1304,5 +1400,177 @@ class _ArtistTableStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _ArtistTableStickyHeaderDelegate oldDelegate) =>
       child != oldDelegate.child;
+}
+
+/// 歌手页 Tab 吸顶代理。
+class _ArtistTabHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _ArtistTabHeaderDelegate({
+    required this.selectedTab,
+    required this.songsCount,
+    required this.albumsCount,
+    required this.onTabSelected,
+  });
+
+  final _ArtistTab selectedTab;
+  final int songsCount;
+  final int albumsCount;
+  final ValueChanged<_ArtistTab> onTabSelected;
+
+  @override
+  double get minExtent => 48.0;
+
+  @override
+  double get maxExtent => 48.0;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      height: 48.0,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: isDark ? .20 : .40),
+            width: 1,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          _ArtistTabItem(
+            label: '精选单曲',
+            count: songsCount,
+            isSelected: selectedTab == _ArtistTab.songs,
+            onTap: () => onTabSelected(_ArtistTab.songs),
+          ),
+          const SizedBox(width: 8),
+          _ArtistTabItem(
+            label: '所有专辑',
+            count: albumsCount,
+            isSelected: selectedTab == _ArtistTab.albums,
+            onTap: () => onTabSelected(_ArtistTab.albums),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _ArtistTabHeaderDelegate oldDelegate) {
+    return oldDelegate.selectedTab != selectedTab ||
+        oldDelegate.songsCount != songsCount ||
+        oldDelegate.albumsCount != albumsCount;
+  }
+}
+
+class _ArtistTabItem extends StatefulWidget {
+  const _ArtistTabItem({
+    required this.label,
+    required this.count,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  State<_ArtistTabItem> createState() => _ArtistTabItemState();
+}
+
+class _ArtistTabItemState extends State<_ArtistTabItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    Color textColor;
+    FontWeight fontWeight;
+    if (widget.isSelected) {
+      textColor = colorScheme.primary;
+      fontWeight = FontWeight.w800;
+    } else if (_isHovered) {
+      textColor = colorScheme.onSurface;
+      fontWeight = FontWeight.w600;
+    } else {
+      textColor = colorScheme.onSurfaceVariant;
+      fontWeight = FontWeight.w600;
+    }
+
+    final badgeBgColor = widget.isSelected
+        ? colorScheme.primary.withValues(alpha: isDark ? .24 : .12)
+        : (_isHovered
+            ? colorScheme.onSurfaceVariant.withValues(alpha: isDark ? .18 : .08)
+            : colorScheme.onSurfaceVariant.withValues(alpha: isDark ? .12 : .06));
+
+    final badgeTextColor = widget.isSelected
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: colorScheme.primary.withValues(alpha: .06),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: widget.isSelected
+                ? colorScheme.primary.withValues(alpha: isDark ? .16 : .08)
+                : (_isHovered
+                    ? colorScheme.onSurface.withValues(alpha: .04)
+                    : Colors.transparent),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: textColor,
+                  fontWeight: fontWeight,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: badgeBgColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${widget.count}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: badgeTextColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 

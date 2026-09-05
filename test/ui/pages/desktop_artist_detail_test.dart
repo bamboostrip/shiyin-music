@@ -87,6 +87,8 @@ class _FakePlayerController extends ChangeNotifier
     Song song, {
     List<Song>? queue,
     bool isRetry = false,
+    Duration? initialPosition,
+    bool preserveClimax = false,
   }) async {
     lastPlayedSong = song;
     lastQueue = queue;
@@ -198,14 +200,8 @@ void main() {
 
       // 歌手名与统计信息
       expect(find.text('周杰伦'), findsWidgets);
-      expect(find.text('2 首热门单曲 · 1 张专辑'), findsOneWidget);
+      expect(find.text('共 2 首热门单曲 · 1 张专辑'), findsOneWidget);
       expect(find.text('播放热门单曲'), findsOneWidget);
-
-      // 专辑区为 PC 响应式网格（不再使用横向滚轮轨道）
-      expect(find.text('专辑 1'), findsOneWidget);
-      expect(find.text('范特西'), findsOneWidget);
-      expect(find.byType(AlbumSliverGridSection), findsOneWidget);
-      expect(find.byType(HorizontalWheelScroll), findsNothing);
 
       // 表格表头存在
       expect(find.byType(DesktopSongTableHeader), findsOneWidget);
@@ -220,6 +216,14 @@ void main() {
       expect(find.text('晴天'), findsOneWidget);
       expect(find.text('叶惠美'), findsOneWidget);
       expect(find.text('七里香'), findsWidgets);
+
+      // 切换到【所有专辑】Tab，专辑区为 PC 响应式网格（不再使用横向滚轮轨道）
+      await tester.tap(find.text('所有专辑'));
+      await tester.pumpAndSettle();
+      expect(find.text('专辑 1'), findsOneWidget);
+      expect(find.text('范特西'), findsOneWidget);
+      expect(find.byType(AlbumSliverGridSection), findsOneWidget);
+      expect(find.byType(HorizontalWheelScroll), findsNothing);
     });
 
     testWidgets('双击表格行直接播放歌曲，单击设置聚焦', (tester) async {

@@ -752,6 +752,11 @@ class _LandscapeHeader extends StatelessWidget {
               ],
             ),
           ),
+          _PlayerAudioQualityPill(
+            player: player,
+            compact: compact,
+          ),
+          SizedBox(width: compact ? 6 : 8),
           Builder(
             builder: (moreButtonContext) => _LandscapeHeaderButton(
               tooltip: '更多',
@@ -889,6 +894,98 @@ class _LandscapeHeaderButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PlayerAudioQualityPill extends StatelessWidget {
+  const _PlayerAudioQualityPill({
+    required this.player,
+    this.compact = false,
+  });
+
+  final PlayerController player;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final quality = player.audioQuality;
+        final isLossless = quality == AudioQuality.lossless;
+        final label = switch (quality) {
+          AudioQuality.standard => '标准',
+          AudioQuality.high => '高品',
+          AudioQuality.lossless => '无损',
+        };
+        final tooltip = '音质：${quality.label} (${quality.badge}) - 点击切换';
+
+        return Tooltip(
+          message: tooltip,
+          child: Material(
+            color: Colors.white.withValues(alpha: .14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: isLossless
+                    ? Theme.of(context).colorScheme.primary.withValues(alpha: .6)
+                    : Colors.white.withValues(alpha: .18),
+                width: 0.8,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              mouseCursor: SystemMouseCursors.click,
+              onTap: () => _showAudioQualityPicker(context, player),
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 8 : 10,
+                  vertical: compact ? 4 : 6,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isLossless) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 3,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: .28),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(
+                          'SQ',
+                          style: TextStyle(
+                            fontSize: compact ? 8 : 9,
+                            fontWeight: FontWeight.w900,
+                            color: Theme.of(context).colorScheme.primary,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: compact ? 11 : 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white.withValues(alpha: .92),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1337,6 +1434,8 @@ class _TopBar extends StatelessWidget {
                     ? Icons.favorite_rounded
                     : Icons.favorite_border_rounded,
               ),
+              const SizedBox(width: 8),
+              _PlayerAudioQualityPill(player: player),
               const SizedBox(width: 8),
               Builder(
                 builder: (moreButtonContext) => _GlassIconButton(
