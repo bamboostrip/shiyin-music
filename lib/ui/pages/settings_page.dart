@@ -57,110 +57,158 @@ class SettingsPage extends StatelessWidget {
     BuildContext context,
     ThemeController theme,
   ) async {
-    final selected = await showModalBottomSheet<double>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (sheetContext) {
-        final colorScheme = Theme.of(sheetContext).colorScheme;
-        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '字体大小',
-                  style: Theme.of(
-                    sheetContext,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: .10)
-                          : Colors.white.withValues(alpha: .92),
-                      width: 1.1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
+    Widget buildOptions(BuildContext ctx) {
+      final colorScheme = Theme.of(ctx).colorScheme;
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      return Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .92),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final scale in ThemeController.fontScaleOptions) ...[
+                InkWell(
+                  onTap: () => Navigator.of(ctx).pop(scale),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: Row(
                       children: [
-                        for (final scale in ThemeController.fontScaleOptions) ...[
-                          InkWell(
-                            onTap: () => Navigator.of(sheetContext).pop(scale),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    scale == theme.fontScale
-                                        ? Icons.radio_button_checked_rounded
-                                        : Icons.radio_button_off_rounded,
-                                    color: scale == theme.fontScale
-                                        ? colorScheme.primary
-                                        : colorScheme.onSurfaceVariant.withValues(alpha: .6),
-                                    size: 22,
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _fontScaleLabel(scale),
-                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                                        ),
-                                        Text(
-                                          scale == 1.0
-                                              ? '默认大小'
-                                              : scale == 1.1
-                                              ? '整体放大 10%'
-                                              : '整体放大 20%',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                        Icon(
+                          scale == theme.fontScale
+                              ? Icons.radio_button_checked_rounded
+                              : Icons.radio_button_off_rounded,
+                          color: scale == theme.fontScale
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant.withValues(alpha: .6),
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _fontScaleLabel(scale),
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                               ),
-                            ),
+                              Text(
+                                scale == 1.0
+                                    ? '默认大小'
+                                    : scale == 1.1
+                                    ? '整体放大 10%'
+                                    : '整体放大 20%',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
-                          if (scale != ThemeController.fontScaleOptions.last)
-                            Divider(
-                              height: 1,
-                              indent: 52,
-                              color: colorScheme.outlineVariant.withValues(alpha: .24),
-                            ),
-                        ],
+                        ),
                       ],
                     ),
                   ),
                 ),
+                if (scale != ThemeController.fontScaleOptions.last)
+                  Divider(
+                    height: 1,
+                    indent: 52,
+                    color: colorScheme.outlineVariant.withValues(alpha: .24),
+                  ),
               ],
-            ),
+            ],
           ),
-        );
-      },
-    );
+        ),
+      );
+    }
+
+    final double? selected;
+    if (isDesktopFormFactor) {
+      selected = await showDialog<double>(
+        context: context,
+        builder: (dialogContext) {
+          return Dialog(
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '字体大小',
+                          style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    buildOptions(dialogContext),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      selected = await showModalBottomSheet<double>(
+        context: context,
+        showDragHandle: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        builder: (sheetContext) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '字体大小',
+                    style: Theme.of(
+                      sheetContext,
+                    ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  buildOptions(sheetContext),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     if (selected != null) {
       await theme.setFontScale(selected);
     }
@@ -560,10 +608,35 @@ class SettingsPage extends StatelessWidget {
     await player.setAudioQuality(quality);
   }
 
-  /// 打开缓存管理 BottomSheet。
+  /// 打开缓存管理弹窗（桌面端居中 Dialog，移动端 BottomSheet）。
   Future<void> _showCacheManagement(BuildContext context) async {
     final cache = this.cache;
     final downloads = this.downloads;
+
+    if (isDesktopFormFactor) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return Dialog(
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: _CacheManagementSheet(
+                  cache: cache,
+                  downloads: downloads,
+                  player: player,
+                  isDialog: true,
+                ),
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -995,11 +1068,17 @@ class _AutoStartSwitchState extends State<_AutoStartSwitch> {
 
 /// 缓存管理 BottomSheet。
 class _CacheManagementSheet extends StatefulWidget {
-  const _CacheManagementSheet({this.cache, this.downloads, this.player});
+  const _CacheManagementSheet({
+    this.cache,
+    this.downloads,
+    this.player,
+    this.isDialog = false,
+  });
 
   final CacheService? cache;
   final DownloadController? downloads;
   final PlayerController? player;
+  final bool isDialog;
 
   @override
   State<_CacheManagementSheet> createState() => _CacheManagementSheetState();
@@ -1130,17 +1209,31 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              '缓存管理',
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
+    final header = widget.isDialog
+        ? Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '缓存管理',
+                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded),
+                tooltip: '关闭',
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
+        : Text(
+            '缓存管理',
+            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          );
+
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header,
             const SizedBox(height: 16),
             _CacheItem(
               icon: Icons.storage_rounded,
@@ -1296,7 +1389,16 @@ class _CacheManagementSheetState extends State<_CacheManagementSheet> {
             const SizedBox(height: 20),
             if (_clearing) const Center(child: CircularProgressIndicator()),
           ],
-        ),
+        );
+
+    if (widget.isDialog) {
+      return content;
+    }
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+        child: content,
       ),
     );
   }

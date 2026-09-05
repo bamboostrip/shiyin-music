@@ -18,6 +18,7 @@ import '../keyboard_focus_guard.dart';
 import '../widgets/lazy_indexed_stack.dart';
 import 'desktop_player_bar.dart';
 import 'desktop_sidebar.dart';
+import 'desktop_title_bar.dart';
 
 /// 桌面骨架的内容分区。home 分区对应 HomePage 的三个子 tab
 /// （推荐/排行榜/电台），由侧栏直接切换。
@@ -207,86 +208,94 @@ class _DesktopShellState extends State<DesktopShell> {
           ),
         },
         child: Scaffold(
-      body: Row(
-        children: [
-          DesktopSidebar(
-            items: const [
-              DesktopNavItem(
-                icon: Icons.explore_outlined,
-                activeIcon: Icons.explore_rounded,
-                label: '推荐',
-              ),
-              DesktopNavItem(
-                icon: Icons.leaderboard_outlined,
-                activeIcon: Icons.leaderboard_rounded,
-                label: '排行榜',
-              ),
-              DesktopNavItem(
-                icon: Icons.radio_rounded,
-                activeIcon: Icons.radio_rounded,
-                label: '电台',
-              ),
-              DesktopNavItem(
-                icon: Icons.library_music_outlined,
-                activeIcon: Icons.library_music_rounded,
-                label: '我的音乐',
-              ),
-              DesktopNavItem(
-                icon: Icons.download_outlined,
-                activeIcon: Icons.download_rounded,
-                label: '已下载',
-              ),
-              DesktopNavItem(
-                icon: Icons.settings_outlined,
-                activeIcon: Icons.settings_rounded,
-                label: '设置',
-                showDividerAbove: true,
+          body: Column(
+            children: [
+              DesktopTitleBar(player: widget.player),
+              const Divider(height: 1, thickness: 1),
+              Expanded(
+                child: Row(
+                  children: [
+                    DesktopSidebar(
+                      items: const [
+                        DesktopNavItem(
+                          icon: Icons.explore_outlined,
+                          activeIcon: Icons.explore_rounded,
+                          label: '推荐',
+                        ),
+                        DesktopNavItem(
+                          icon: Icons.leaderboard_outlined,
+                          activeIcon: Icons.leaderboard_rounded,
+                          label: '排行榜',
+                        ),
+                        DesktopNavItem(
+                          icon: Icons.radio_rounded,
+                          activeIcon: Icons.radio_rounded,
+                          label: '电台',
+                        ),
+                        DesktopNavItem(
+                          icon: Icons.library_music_outlined,
+                          activeIcon: Icons.library_music_rounded,
+                          label: '我的音乐',
+                        ),
+                        DesktopNavItem(
+                          icon: Icons.download_outlined,
+                          activeIcon: Icons.download_rounded,
+                          label: '已下载',
+                        ),
+                        DesktopNavItem(
+                          icon: Icons.settings_outlined,
+                          activeIcon: Icons.settings_rounded,
+                          label: '设置',
+                          showDividerAbove: true,
+                        ),
+                      ],
+                      selectedIndex: _sidebarIndex,
+                      onSelect: _selectSection,
+                      onSearch: () => _openSearch(context),
+                    ),
+                    const VerticalDivider(width: 1, thickness: 1),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Expanded(
+                            // 内容区内嵌导航：`/` 为分区内容（侧栏切换），push 的
+                            // 歌单/搜索/歌手详情只覆盖本区域，侧栏与底栏常驻。
+                            child: Navigator(
+                              key: _contentNavKey,
+                              initialRoute: '/',
+                              onGenerateRoute: (settings) {
+                                if (settings.name == '/') {
+                                  return MaterialPageRoute(
+                                    settings: settings,
+                                    builder: (_) => _DesktopContent(
+                                      revision: _tabsRevision,
+                                      sectionProvider: () => _section,
+                                      homeTabProvider: () => _homeTab,
+                                      contentIndexProvider: () => _contentIndex,
+                                      api: widget.api,
+                                      auth: widget.auth,
+                                      player: widget.player,
+                                      cache: widget.cache,
+                                      downloads: widget.downloads,
+                                      theme: widget.theme,
+                                      localMusic: widget.localMusic,
+                                      onHomeTabSwitch: _handleHomeTabSwitch,
+                                    ),
+                                  );
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          DesktopPlayerBar(player: widget.player, auth: widget.auth),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-            selectedIndex: _sidebarIndex,
-            onSelect: _selectSection,
-            onSearch: () => _openSearch(context),
           ),
-          const VerticalDivider(width: 1, thickness: 1),
-          Expanded(
-            child: Column(
-              children: [
-                Expanded(
-                  // 内容区内嵌导航：`/` 为分区内容（侧栏切换），push 的
-                  // 歌单/搜索/歌手详情只覆盖本区域，侧栏与底栏常驻。
-                  child: Navigator(
-                    key: _contentNavKey,
-                    initialRoute: '/',
-                    onGenerateRoute: (settings) {
-                      if (settings.name == '/') {
-                        return MaterialPageRoute(
-                          settings: settings,
-                          builder: (_) => _DesktopContent(
-                            revision: _tabsRevision,
-                            sectionProvider: () => _section,
-                            homeTabProvider: () => _homeTab,
-                            contentIndexProvider: () => _contentIndex,
-                            api: widget.api,
-                            auth: widget.auth,
-                            player: widget.player,
-                            cache: widget.cache,
-                            downloads: widget.downloads,
-                            theme: widget.theme,
-                            localMusic: widget.localMusic,
-                            onHomeTabSwitch: _handleHomeTabSwitch,
-                          ),
-                        );
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-                DesktopPlayerBar(player: widget.player, auth: widget.auth),
-              ],
-            ),
-          ),
-        ],
-      ),
         ),
       ),
     );

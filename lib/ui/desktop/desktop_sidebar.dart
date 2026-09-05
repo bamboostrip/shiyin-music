@@ -16,7 +16,7 @@ class DesktopNavItem {
   final bool showDividerAbove;
 }
 
-/// 桌面侧栏：顶部品牌 + 搜索胶囊 + 导航条目。
+/// 桌面侧栏：搜索胶囊 + 导航条目。
 ///
 /// 纯展示组件：选中态与回调全部由父级（DesktopShell）持有。
 class DesktopSidebar extends StatelessWidget {
@@ -44,31 +44,7 @@ class DesktopSidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Image.asset(
-                    'lib/assets/logo.png',
-                    width: 26,
-                    height: 26,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  '时音',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w900),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
             child: _SearchPill(
               isDark: isDark,
               colorScheme: colorScheme,

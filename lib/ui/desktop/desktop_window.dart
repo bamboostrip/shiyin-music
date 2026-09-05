@@ -31,6 +31,7 @@ class DesktopWindow {
       size: geometry?.size ?? kDefaultSize,
       minimumSize: kMinSize,
       title: kWindowTitle,
+      titleBarStyle: TitleBarStyle.hidden,
     );
     await windowManager.waitUntilReadyToShow(options, () async {
       // window_manager 0.4.x 的 WindowOptions 无 position 参数，
