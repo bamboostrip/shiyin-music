@@ -2301,31 +2301,66 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
   // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3.5s 恢复自动跟随。
   static const _resumeDelay = Duration(milliseconds: 3500);
 
-  final _scrollController = ScrollController();
+  late final ScrollController _scrollController;
   final _rowKeys = <int, GlobalKey>{};
   Timer? _resumeTimer;
   var _userHolding = false;
-  var _lastActive = -1;
+  late int _activeLyricIndex;
   int? _focusedIndex;
 
   @override
   void initState() {
     super.initState();
-    _lastActive = widget.activeIndex;
+    _activeLyricIndex = widget.player.lyrics.isEmpty
+        ? -1
+        : widget.player.activeLyricIndex;
+    if (_activeLyricIndex < 0 && widget.activeIndex >= 0) {
+      _activeLyricIndex = widget.activeIndex;
+    }
+
+    final initialOffset = _estimateOffsetForIndex(_activeLyricIndex);
+    _scrollController = ScrollController(initialScrollOffset: initialOffset);
+
+    widget.player.positionListenable.addListener(_onPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scrollToActive(animate: false);
     });
   }
 
+  void _onPositionChanged() {
+    if (!mounted) return;
+    final newIndex = widget.player.activeLyricIndex;
+    if (widget.player.isPreparing && newIndex <= 0 && _activeLyricIndex > 0) {
+      return;
+    }
+    if (newIndex != _activeLyricIndex) {
+      setState(() {
+        _activeLyricIndex = newIndex;
+      });
+      if (!_userHolding) {
+        _scrollToActive(animate: true);
+      }
+    }
+  }
+
   @override
   void didUpdateWidget(covariant _DesktopLyricList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.player != widget.player) {
+      oldWidget.player.positionListenable.removeListener(_onPositionChanged);
+      widget.player.positionListenable.addListener(_onPositionChanged);
+    }
     if (oldWidget.songHash != widget.songHash) {
       _rowKeys.clear();
       _resumeTimer?.cancel();
       _userHolding = false;
       _focusedIndex = null;
-      _lastActive = widget.activeIndex;
+      _activeLyricIndex = widget.player.lyrics.isEmpty
+          ? -1
+          : widget.player.activeLyricIndex;
+      if (_activeLyricIndex < 0 && widget.activeIndex >= 0) {
+        _activeLyricIndex = widget.activeIndex;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToActive(animate: false);
       });
@@ -2334,14 +2369,24 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
     // 歌词异步加载完成（空 -> 有）时补一次定位；首帧行 key 尚未创建，
     // 放到 postFrame 等行构建完再滚。
     if (oldWidget.lyrics.length != widget.lyrics.length) {
-      _lastActive = widget.activeIndex;
+      _activeLyricIndex = widget.player.lyrics.isEmpty
+          ? -1
+          : widget.player.activeLyricIndex;
+      if (_activeLyricIndex < 0 && widget.activeIndex >= 0) {
+        _activeLyricIndex = widget.activeIndex;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_userHolding) _scrollToActive(animate: false);
       });
       return;
     }
-    if (widget.activeIndex != _lastActive) {
-      _lastActive = widget.activeIndex;
+    if (widget.activeIndex != _activeLyricIndex) {
+      if (widget.player.isPreparing &&
+          widget.activeIndex <= 0 &&
+          _activeLyricIndex > 0) {
+        return;
+      }
+      _activeLyricIndex = widget.activeIndex;
       if (!_userHolding) {
         _scrollToActive(animate: true);
       }
@@ -2350,28 +2395,59 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
 
   @override
   void dispose() {
+    widget.player.positionListenable.removeListener(_onPositionChanged);
     _resumeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
 
+  double _estimateOffsetForIndex(int index) {
+    if (index <= 0 || widget.lyrics.isEmpty) return 0.0;
+    final clamped = index.clamp(0, widget.lyrics.length - 1);
+    final hasAnySecondary = widget.lyrics.any((l) => _secondaryText(l) != null);
+    final rowHeight = (hasAnySecondary ? 70.0 : 48.0) * widget.lyricScale;
+    return clamped * rowHeight;
+  }
+
   void _scrollToActive({required bool animate}) {
-    if (!mounted || widget.activeIndex < 0) return;
-    final key = _rowKeys[widget.activeIndex];
+    if (!mounted || _activeLyricIndex < 0 || widget.lyrics.isEmpty) return;
+    final key = _rowKeys[_activeLyricIndex];
     final rowContext = key?.currentContext;
-    if (rowContext == null) return;
-    Scrollable.ensureVisible(
-      rowContext,
-      alignment: 0.38,
-      duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
-      curve: Curves.easeOutCubic,
-    );
+    if (rowContext != null && rowContext.mounted) {
+      Scrollable.ensureVisible(
+        rowContext,
+        alignment: 0.38,
+        duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
+        curve: Curves.easeOutCubic,
+      );
+      return;
+    }
+
+    // 若目标行尚未挂载（例如直接跳转较远距离），先估算跳到目标行附近以触发 ListView 构建
+    if (_scrollController.hasClients) {
+      final approxOffset = _estimateOffsetForIndex(_activeLyricIndex);
+      _scrollController.jumpTo(
+        approxOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final retryContext = _rowKeys[_activeLyricIndex]?.currentContext;
+        if (retryContext != null && retryContext.mounted) {
+          Scrollable.ensureVisible(
+            retryContext,
+            alignment: 0.38,
+            duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
+    }
   }
 
   void _updateFocusedIndex(double viewportHeight) {
     if (widget.lyrics.isEmpty) return;
     final targetY = viewportHeight * 0.38;
-    int bestIndex = widget.activeIndex.clamp(0, widget.lyrics.length - 1);
+    int bestIndex = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
     double minDiff = double.infinity;
 
     final stackRender = context.findRenderObject() as RenderBox?;
@@ -2405,7 +2481,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
     _resumeTimer?.cancel();
     if (!_userHolding) {
       _userHolding = true;
-      _focusedIndex ??= widget.activeIndex;
+      _focusedIndex ??= _activeLyricIndex;
       setState(() {});
     }
     _updateFocusedIndex(viewportHeight);
@@ -2477,7 +2553,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
         final viewportHeight = constraints.maxHeight;
         final targetY = viewportHeight * 0.38;
         final defaultIdx =
-            widget.activeIndex.clamp(0, widget.lyrics.length - 1);
+            _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
         final currentFocusIdx = _focusedIndex ?? defaultIdx;
         final focusedLine = (_userHolding &&
                 currentFocusIdx >= 0 &&
@@ -2510,7 +2586,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                 itemCount: widget.lyrics.length,
                 itemBuilder: (context, index) {
                   final line = widget.lyrics[index];
-                  final isPlaying = index == widget.activeIndex;
+                  final isPlaying = index == _activeLyricIndex;
                   final isFocused = _userHolding && index == _focusedIndex;
                   final isHighlighted = _userHolding ? isFocused : isPlaying;
                   final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
@@ -2530,6 +2606,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                     behavior: HitTestBehavior.opaque,
                     onTap: () {
                       widget.player.seekToAndPlay(line.time);
+                      _activeLyricIndex = index;
                       _resumeNow();
                     },
                     child: MouseRegion(
@@ -2614,6 +2691,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                       timeText: formatDuration(focusedLine.time),
                       onTap: () {
                         widget.player.seekToAndPlay(focusedLine.time);
+                        _activeLyricIndex = currentFocusIdx;
                         _resumeNow();
                       },
                     ),

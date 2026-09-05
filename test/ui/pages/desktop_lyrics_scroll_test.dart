@@ -65,6 +65,7 @@ class _FakePlayerController extends ChangeNotifier
   final List<Duration> seekCalls = [];
   final List<Duration> seekToAndPlayCalls = [];
   int playCalls = 0;
+  Future<void> Function(Duration pos)? onSeekToAndPlay;
 
   @override
   Future<void> seek(Duration pos) async {
@@ -77,6 +78,10 @@ class _FakePlayerController extends ChangeNotifier
   @override
   Future<void> seekToAndPlay(Duration pos) async {
     seekToAndPlayCalls.add(pos);
+    if (onSeekToAndPlay != null) {
+      await onSeekToAndPlay!(pos);
+      return;
+    }
     await seek(pos);
     if (!isPlaying) {
       await togglePlay();
@@ -311,6 +316,245 @@ void main() {
 
       // 验证存在“回到当前”快捷入口
       expect(find.text('回到当前'), findsOneWidget);
+    });
+
+    testWidgets('进入播放页时若当前播放已在后半段（如第 20 句），能正确定位到当前播放行',
+        (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+      player.activeLyricIndex = 20;
+      player.position = const Duration(seconds: 100);
+      player.positionListenable.value = const Duration(seconds: 100);
+
+      await pumpPlayerPage(tester, player: player, auth: auth);
+
+      // 验证第 20 句歌词在视口中被找到并可见
+      expect(find.text('这是第 21 句歌词，为你弹奏萧邦的夜曲'), findsOneWidget);
+    });
+
+    testWidgets('播放进度向前推进时，歌词高亮行与列表自动跟随滚动', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+      player.activeLyricIndex = 3;
+      player.position = const Duration(seconds: 15);
+      player.positionListenable.value = const Duration(seconds: 15);
+
+      await pumpPlayerPage(tester, player: player, auth: auth);
+
+      expect(find.text('这是第 4 句歌词，为你弹奏萧邦的夜曲'), findsOneWidget);
+
+      // 模拟播放时间推进到第 5 句（25秒）
+      player.activeLyricIndex = 4;
+      player.position = const Duration(seconds: 25);
+      player.positionListenable.value = const Duration(seconds: 25);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      Finder lyricLineStyleFinder(String text) => find.ancestor(
+            of: find.text(text),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is AnimatedDefaultTextStyle &&
+                  w.duration == const Duration(milliseconds: 180),
+            ),
+          );
+
+      // 第 5 句应成为纯白高亮行
+      final line5Finder =
+          lyricLineStyleFinder('这是第 5 句歌词，为你弹奏萧邦的夜曲');
+      expect(line5Finder, findsOneWidget);
+      final line5Style =
+          (tester.widget(line5Finder) as AnimatedDefaultTextStyle).style;
+      expect(line5Style.color, equals(Colors.white));
+      expect(line5Style.fontSize, equals(30.0));
+    });
+
+    testWidgets(
+        '用户在滚动浏览状态下直接退出播放页（未复位未跳转），重新进入后歌词恢复对齐当前播放并持续跟随',
+        (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+      player.activeLyricIndex = 3;
+      player.position = const Duration(seconds: 15);
+      player.positionListenable.value = const Duration(seconds: 15);
+
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      // 宿主页面：包含打开播放页的入口
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () => Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => PlayerPage(player: player, auth: auth),
+                  ),
+                ),
+                child: const Text('OpenPlayer'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // 打开播放页
+      await tester.tap(find.text('OpenPlayer'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // 1. 用户手动滚动歌词
+      final listFinder = find.byType(ListView);
+      final center = tester.getCenter(listFinder);
+      final pointer = TestPointer(4, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(center));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 150)));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 验证处于用户浏览状态（有回到当前入口）
+      expect(find.text('回到当前'), findsOneWidget);
+
+      // 2. 用户未点击回到当前、未跳转，而是直接点击退出返回（Navigator.pop）
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
+
+      // 播放页已退出，回到宿主页
+      expect(find.text('回到当前'), findsNothing);
+      expect(find.text('OpenPlayer'), findsOneWidget);
+
+      // 3. 歌曲继续在后台播放，进度推进到第 5 句（25秒）
+      player.activeLyricIndex = 4;
+      player.position = const Duration(seconds: 25);
+      player.positionListenable.value = const Duration(seconds: 25);
+
+      // 4. 用户重新进入播放页
+      await tester.tap(find.text('OpenPlayer'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      Finder lyricLineStyleFinder(String text) => find.ancestor(
+            of: find.text(text),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is AnimatedDefaultTextStyle &&
+                  w.duration == const Duration(milliseconds: 180),
+            ),
+          );
+
+      // 重新进入后，当前正在播放的第 5 句应当高亮，且不处于用户浏览拦截状态
+      expect(find.text('回到当前'), findsNothing);
+      final line5Finder =
+          lyricLineStyleFinder('这是第 5 句歌词，为你弹奏萧邦的夜曲');
+      expect(line5Finder, findsOneWidget);
+      final line5Style =
+          (tester.widget(line5Finder) as AnimatedDefaultTextStyle).style;
+      expect(line5Style.color, equals(Colors.white));
+      expect(line5Style.fontSize, equals(30.0));
+
+      // 5. 随着播放进一步推进到第 6 句（30秒），歌词必须能正常动、继续跟随，绝不卡死
+      player.activeLyricIndex = 5;
+      player.position = const Duration(seconds: 30);
+      player.positionListenable.value = const Duration(seconds: 30);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      final line6Finder =
+          lyricLineStyleFinder('这是第 6 句歌词，为你弹奏萧邦的夜曲');
+      expect(line6Finder, findsOneWidget);
+      final line6Style =
+          (tester.widget(line6Finder) as AnimatedDefaultTextStyle).style;
+      expect(line6Style.color, equals(Colors.white));
+      expect(line6Style.fontSize, equals(30.0));
+    });
+
+    testWidgets(
+        '冷启动未播放状态下进入播放页，滚动歌词并点击定位指针起播，不会先闪回第0句再跳到目标句',
+        (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+      player.activeLyricIndex = 0;
+      player.position = Duration.zero;
+      player.positionListenable.value = Duration.zero;
+      player.isPlaying = false;
+
+      Finder lyricLineStyleFinder(String text) => find.ancestor(
+            of: find.text(text),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is AnimatedDefaultTextStyle &&
+                  w.duration == const Duration(milliseconds: 180),
+            ),
+          );
+
+      player.onSeekToAndPlay = (pos) async {
+        // 模拟起播前准备阶段：isPreparing = true，通知监听器
+        player.isPreparing = true;
+        player.notifyListeners();
+      };
+
+      await pumpPlayerPage(tester, player: player, auth: auth);
+
+      // 1. 用户滚动歌词
+      final listFinder = find.byType(ListView);
+      final center = tester.getCenter(listFinder);
+      final pointer = TestPointer(5, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(center));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 180)));
+      await tester.pump();
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 180)));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      final seekBtn = find.byKey(const ValueKey('lyric_seek_pointer_button'));
+      expect(seekBtn, findsOneWidget);
+
+      // 2. 点击定位播放指针起播
+      await tester.tap(seekBtn);
+      // 触发起播后准备中帧，等待行文字过渡动画 (180ms)
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(player.seekToAndPlayCalls, contains(const Duration(seconds: 15)));
+
+      // 此时第 4 句应当直接保持高亮，绝不能被闪退至第 1 句
+      final line4Finder =
+          lyricLineStyleFinder('这是第 4 句歌词，为你弹奏萧邦的夜曲');
+      expect(line4Finder, findsOneWidget);
+      final line4Style =
+          (tester.widget(line4Finder) as AnimatedDefaultTextStyle).style;
+      expect(line4Style.color, equals(Colors.white));
+      expect(line4Style.fontSize, equals(30.0));
+
+      // 验证第 1 句此时绝未作为当前播放句高亮呈现（列表保持在第 4 句，不会闪回第 1 句）
+      final line1TextFinder = find.text('这是第 1 句歌词，为你弹奏萧邦的夜曲');
+      if (line1TextFinder.evaluate().isNotEmpty) {
+        final line1Style =
+            (tester.widget(lyricLineStyleFinder('这是第 1 句歌词，为你弹奏萧邦的夜曲'))
+                    as AnimatedDefaultTextStyle)
+                .style;
+        expect(line1Style.color, isNot(Colors.white));
+      }
+
+      // 3. 底层准备就绪，正式播放目标位置
+      player.isPreparing = false;
+      player.isPlaying = true;
+      player.activeLyricIndex = 3;
+      player.position = const Duration(seconds: 15);
+      player.positionListenable.value = const Duration(seconds: 15);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // 歌词稳定停留在第 4 句
+      final line4StyleAfter =
+          (tester.widget(line4Finder) as AnimatedDefaultTextStyle).style;
+      expect(line4StyleAfter.color, equals(Colors.white));
+      expect(line4StyleAfter.fontSize, equals(30.0));
     });
   });
 }

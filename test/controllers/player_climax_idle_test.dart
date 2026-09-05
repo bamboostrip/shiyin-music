@@ -90,6 +90,7 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   final AudioPlayer _audioPlayer;
   final List<String> callLogs = [];
   final List<Duration> seekPositions = [];
+  Future<void> Function()? onLoadSong;
 
   @override
   AudioPlayer get audioPlayer => _audioPlayer;
@@ -117,6 +118,9 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
     required int queueIndex,
   }) async {
     callLogs.add('loadSong');
+    if (onLoadSong != null) {
+      await onLoadSong!();
+    }
   }
 
   @override
@@ -296,6 +300,61 @@ void main() {
         expect(seekIndex, isNot(-1));
         expect(playIndex, isNot(-1));
         expect(seekIndex > loadIndex && seekIndex < playIndex, isTrue);
+      },
+    );
+
+    test(
+      '当底层处于 idle 状态时调用 seekToAndPlay(target)，在音频加载期间底层 positionStream 发出 0 秒事件时，position 与 positionListenable 不会闪退回 0 秒',
+      () async {
+        expect(fakeAudioPlayer.processingState, ProcessingState.idle);
+
+        const targetPos = Duration(seconds: 83);
+        final recordedPositions = <Duration>[];
+        controller.positionListenable.addListener(() {
+          recordedPositions.add(controller.positionListenable.value);
+        });
+
+        // 启动 seekToAndPlay，并在加载中途模拟底层 audioPlayer 发射 0 秒位置
+        final playFuture = controller.seekToAndPlay(targetPos);
+        fakeAudioPlayer.setPosition(Duration.zero);
+        await playFuture;
+
+        expect(controller.position, equals(targetPos));
+        expect(
+          recordedPositions.contains(Duration.zero),
+          isFalse,
+          reason: 'positionListenable 不应在加载过程中回弹为 0 秒导致界面闪烁',
+        );
+      },
+    );
+
+    test(
+      'seekToAndPlay 加载期间底层 playerStateStream 发射加载态（引擎 position 归 0）时，position 与 positionListenable 不闪回 0 秒',
+      () async {
+        expect(fakeAudioPlayer.processingState, ProcessingState.idle);
+
+        const targetPos = Duration(seconds: 83);
+        final recordedPositions = <Duration>[];
+        controller.positionListenable.addListener(() {
+          recordedPositions.add(controller.positionListenable.value);
+        });
+
+        // 模拟真实 just_audio 行为：loadSong 加载新音频源时引擎 position 归 0，
+        // 且 playerStateStream 发射 (playing=false, 加载中) 状态事件
+        recordingAudioHandler.onLoadSong = () async {
+          fakeAudioPlayer.setPosition(Duration.zero);
+          fakeAudioPlayer.setPlaying(false);
+        };
+
+        await controller.seekToAndPlay(targetPos);
+
+        expect(controller.position, equals(targetPos));
+        expect(
+          recordedPositions.contains(Duration.zero),
+          isFalse,
+          reason: 'playerStateStream 在加载期间用引擎 0 秒位置重建平滑基线，'
+              '会让歌词列表与进度条先闪回开头、加载完成后再跳回目标位置',
+        );
       },
     );
 

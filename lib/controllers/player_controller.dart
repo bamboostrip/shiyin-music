@@ -129,6 +129,11 @@ class PlayerController extends ChangeNotifier {
     _desktopLyrics.setPlaybackActionHandler(_handleDesktopLyricsPlaybackAction);
     _desktopLyrics.setLockChangedHandler(_handleDesktopLyricsLockChanged);
     _positionSub = audioPlayer.positionStream.listen((value) {
+      if (_pendingInitialPosition != null) {
+        // 音频正在加载且指定了起播偏移量，忽略底层引擎加载音频源时的初始 0 秒回调，
+        // 防止进度条与歌词闪回 0 秒
+        return;
+      }
       if (!_isSeeking) {
         _setPositionBase(value, playing: isPlaying);
       }
@@ -163,7 +168,9 @@ class PlayerController extends ChangeNotifier {
       isBuffering =
           value.processingState == ProcessingState.loading ||
           value.processingState == ProcessingState.buffering;
-      if (!_isSeeking) {
+      // 与 positionStream 同理：指定起播偏移量的加载过程中，引擎 position 归 0，
+      // 此时不能用引擎位置重建平滑基线，否则歌词与进度条先闪回开头再跳回目标。
+      if (!_isSeeking && _pendingInitialPosition == null) {
         _setPositionBase(audioPlayer.position, playing: isPlaying);
       }
       _syncListeningTimeTracker();
@@ -264,6 +271,7 @@ class PlayerController extends ChangeNotifier {
   bool _isAppForeground = true;
   bool _desktopLyricsPreviewVisible = false;
   Duration? _pendingIdlePosition;
+  Duration? _pendingInitialPosition;
 
   Song? currentSong;
   List<Song> queue = const [];
@@ -457,9 +465,20 @@ class PlayerController extends ChangeNotifier {
     }
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
-    _lastSmoothPosition = Duration.zero;
     _precachedForSongHash = null;
     _pendingIdlePosition = null;
+
+    if (initialPosition != null && initialPosition > Duration.zero) {
+      _pendingInitialPosition = initialPosition;
+      _setPositionBase(initialPosition, playing: false);
+      _lastSmoothPosition = initialPosition;
+      _emitPosition();
+    } else {
+      _pendingInitialPosition = null;
+      _setPositionBase(Duration.zero, playing: false);
+      _lastSmoothPosition = Duration.zero;
+      _emitPosition();
+    }
 
     // 检查是否有本地音频缓存（已下载/播放缓存）或本地音频文件
     var local = downloadController?.localPathFor(song, audioQuality);
@@ -548,6 +567,7 @@ class PlayerController extends ChangeNotifier {
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
       }
+      _pendingInitialPosition = null;
       isPreparing = false;
       notifyListeners();
       unawaited(loadLyrics(song));
@@ -562,6 +582,7 @@ class PlayerController extends ChangeNotifier {
         );
       }
     } catch (error) {
+      _pendingInitialPosition = null;
       // VIP 过期：自动领取后重试一次
       if (error is VipRequiredException && vipClaim != null) {
         final claimed = await _tryClaimVipAndRetry(song);
@@ -588,6 +609,7 @@ class PlayerController extends ChangeNotifier {
       isPreparing = false;
       notifyListeners();
     } finally {
+      _pendingInitialPosition = null;
       _isChangingSource = false;
       if (isPreparing) {
         isPreparing = false;
