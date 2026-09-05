@@ -2497,10 +2497,20 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                 itemCount: widget.lyrics.length,
                 itemBuilder: (context, index) {
                   final line = widget.lyrics[index];
-                  final active = index == widget.activeIndex;
+                  final isPlaying = index == widget.activeIndex;
                   final isFocused = _userHolding && index == _focusedIndex;
+                  final isHighlighted = _userHolding ? isFocused : isPlaying;
                   final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
                   final secondary = _secondaryText(line);
+
+                  final Color textColor;
+                  if (isHighlighted) {
+                    textColor = Colors.white;
+                  } else if (_userHolding && isPlaying) {
+                    textColor = Colors.white.withValues(alpha: .52);
+                  } else {
+                    textColor = Colors.white.withValues(alpha: .32);
+                  }
 
                   return GestureDetector(
                     key: key,
@@ -2525,17 +2535,13 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                                   .textTheme
                                   .headlineMedium!
                                   .copyWith(
-                                    color: active
-                                        ? Colors.white
-                                        : (isFocused
-                                            ? Colors.white.withValues(alpha: .88)
-                                            : Colors.white.withValues(alpha: .34)),
-                                    fontSize: (active ? 30.0 : 24.0) *
+                                    color: textColor,
+                                    fontSize: (isHighlighted ? 30.0 : 24.0) *
                                         widget.lyricScale,
                                     height: 1.3,
-                                    fontWeight: (active || isFocused)
+                                    fontWeight: isHighlighted
                                         ? FontWeight.w900
-                                        : FontWeight.w800,
+                                        : FontWeight.w700,
                                   ),
                               child: Text(line.text),
                             ),
@@ -2548,7 +2554,9 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                                     .titleMedium
                                     ?.copyWith(
                                       color: Colors.white.withValues(
-                                        alpha: active ? .72 : (isFocused ? .65 : .44),
+                                        alpha: isHighlighted
+                                            ? .75
+                                            : (_userHolding && isPlaying ? .45 : .28),
                                       ),
                                       fontSize: 15.0 * widget.lyricScale,
                                       height: 1.3,
@@ -2566,50 +2574,45 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
             ),
           ),
             // 居中准星参考线与定位跳转播放按钮 [ ▶ mm:ss ]
-            if (_userHolding && focusedLine != null) ...[
+            if (_userHolding && focusedLine != null)
               Positioned(
                 left: 0,
-                right: 0,
-                top: targetY + 12,
-                child: IgnorePointer(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          height: 1,
-                          margin: const EdgeInsets.only(right: 96),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.white.withValues(alpha: 0.0),
-                                Colors.white.withValues(alpha: 0.12),
-                                Colors.white.withValues(alpha: 0.32),
-                                Colors.white.withValues(alpha: 0.12),
-                              ],
-                            ),
+                right: 12,
+                top: targetY - 14,
+                height: 28,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 1,
+                        margin: const EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.0),
+                              Colors.white.withValues(alpha: 0.10),
+                              Colors.white.withValues(alpha: 0.32),
+                              Colors.white.withValues(alpha: 0.16),
+                            ],
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    _SeekPointerButton(
+                      key: const ValueKey('lyric_seek_pointer_button'),
+                      timeText: formatDuration(focusedLine.time),
+                      onTap: () {
+                        widget.player.seek(focusedLine.time);
+                        if (!widget.player.isPlaying) {
+                          widget.player.togglePlay();
+                        }
+                        _resumeNow();
+                      },
+                    ),
+                  ],
                 ),
               ),
-              Positioned(
-                right: 12,
-                top: targetY,
-                child: _SeekPointerButton(
-                  key: const ValueKey('lyric_seek_pointer_button'),
-                  timeText: formatDuration(focusedLine.time),
-                  onTap: () {
-                    widget.player.seek(focusedLine.time);
-                    if (!widget.player.isPlaying) {
-                      widget.player.togglePlay();
-                    }
-                    _resumeNow();
-                  },
-                ),
-              ),
-            ],
             // 手动滚动期间的“回到当前”快捷入口（网易云/QQ 音乐 PC 同款逻辑，
             // 自动恢复前给用户手动立即跟随的出口）。
             if (_userHolding)

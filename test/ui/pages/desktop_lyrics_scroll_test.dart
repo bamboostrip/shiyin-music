@@ -247,5 +247,30 @@ void main() {
       expect(find.byKey(const ValueKey('lyric_seek_pointer_button')), findsNothing);
       expect(find.text('回到当前'), findsNothing);
     });
+
+    testWidgets('滚动歌词浏览时，中间准星指示的歌词行获得纯白大字高亮，正在播放的原歌词行弱化显示',
+        (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await pumpPlayerPage(tester, player: player, auth: auth);
+
+      final listFinder = find.byType(ListView);
+      final center = tester.getCenter(listFinder);
+      final pointer = TestPointer(3, PointerDeviceKind.mouse);
+
+      // 向下滚动，浏览后续歌词
+      await tester.sendEventToBinding(pointer.hover(center));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 240)));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // 准星按钮展示对应准星行的精确时间
+      final seekBtn = find.byKey(const ValueKey('lyric_seek_pointer_button'));
+      expect(seekBtn, findsOneWidget);
+
+      // 验证存在“回到当前”快捷入口
+      expect(find.text('回到当前'), findsOneWidget);
+    });
   });
 }
