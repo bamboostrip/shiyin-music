@@ -442,12 +442,26 @@ class PlayerController extends ChangeNotifier {
     List<Song>? queue,
     bool isRetry = false,
   }) async {
+    final isSameSong = currentSong?.hash == song.hash;
     _climaxEndTime = null;
     climax = null;
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
     _lastSmoothPosition = Duration.zero;
-    isPreparing = true;
+
+    // 检查是否有本地音频缓存（已下载/播放缓存）或本地音频文件
+    final local = downloadController?.localPathFor(song, audioQuality);
+    final hasLocalAudio = local != null || song.source == SongSource.local;
+
+    // 切新歌必须清空歌词并重置歌词行；同一首歌重播/从冷启动恢复播放时保留已有歌词防闪烁
+    if (!isSameSong) {
+      lyrics = const [];
+      _lastDesktopLyricIndex = -1;
+    }
+
+    // 切新歌或无本地缓存需走网络解析时标记 isPreparing；
+    // 同一首歌且有本地缓存时毫秒级即播，无需展示加载态，实现无感体验。
+    isPreparing = !isSameSong || !hasLocalAudio;
     _isChangingSource = true;
     errorMessage = null;
     currentSong = song;
@@ -468,8 +482,6 @@ class PlayerController extends ChangeNotifier {
         _shuffleQueue.syncCurrentIndex(this.queue.length, songIndex);
       }
     }
-    lyrics = const [];
-    _lastDesktopLyricIndex = -1;
     notifyListeners();
     // 预缓存封面图，避免打开播放页时出现纯色背景闪烁
     _precacheCover(song);
@@ -483,7 +495,6 @@ class PlayerController extends ChangeNotifier {
     try {
       String url;
       String? networkUrl;
-      final local = downloadController?.localPathFor(song, audioQuality);
       if (local != null) {
         url = local;
       } else if (song.source == SongSource.local) {

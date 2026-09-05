@@ -528,5 +528,16 @@ void main() {
       );
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('锁定态歌词文字无双黄下划线（decoration 为 none 且具备 Material 祖先）',
+        (tester) async {
+      await pumpOverlay(
+        tester,
+        settings: const DesktopLyricsSettings(locked: true),
+      );
+      final textWidget = tester.widget<Text>(find.text('当前句歌词内容'));
+      expect(textWidget.style?.decoration, TextDecoration.none);
+      expect(find.byType(Material), findsWidgets);
+    });
   });
 }

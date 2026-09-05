@@ -626,27 +626,26 @@ class _DesktopSongActionMenuPanel extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.08)
         : colorScheme.outlineVariant.withValues(alpha: 0.6);
 
-    return Material(
-      color: bgColor,
-      borderRadius: BorderRadius.circular(14),
-      elevation: 0,
-      child: Container(
-        width: width,
-        constraints: const BoxConstraints(maxHeight: 460),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(maxHeight: 460),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Material(
+        type: MaterialType.transparency,
         child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: Column(
+          borderRadius: BorderRadius.circular(13),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

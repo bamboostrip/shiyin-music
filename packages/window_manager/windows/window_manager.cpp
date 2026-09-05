@@ -173,7 +173,12 @@ class WindowManager {
 
 WindowManager::WindowManager() {}
 
-WindowManager::~WindowManager() {}
+WindowManager::~WindowManager() {
+  if (taskbar_ != nullptr) {
+    taskbar_->Release();
+    taskbar_ = nullptr;
+  }
+}
 
 HWND WindowManager::GetMainWindow() {
   return native_window;
@@ -933,15 +938,22 @@ void WindowManager::SetSkipTaskbar(const flutter::EncodableMap& args) {
       std::get<bool>(args.at(flutter::EncodableValue("isSkipTaskbar")));
 
   HWND hWnd = GetMainWindow();
+  if (!hWnd) return;
 
-  LPVOID lp = NULL;
-  CoInitialize(lp);
+  CoInitialize(NULL);
 
-  taskbar_->HrInit();
-  if (!is_skip_taskbar_)
-    taskbar_->AddTab(hWnd);
-  else
-    taskbar_->DeleteTab(hWnd);
+  if (taskbar_ == nullptr) {
+    ::CoCreateInstance(CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER,
+                       IID_PPV_ARGS(&taskbar_));
+  }
+
+  if (taskbar_ != nullptr) {
+    taskbar_->HrInit();
+    if (!is_skip_taskbar_)
+      taskbar_->AddTab(hWnd);
+    else
+      taskbar_->DeleteTab(hWnd);
+  }
 }
 
 void WindowManager::SetProgressBar(const flutter::EncodableMap& args) {
@@ -949,22 +961,31 @@ void WindowManager::SetProgressBar(const flutter::EncodableMap& args) {
       std::get<double>(args.at(flutter::EncodableValue("progress")));
 
   HWND hWnd = GetMainWindow();
-  taskbar_->SetProgressState(hWnd, TBPF_INDETERMINATE);
-  taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(progress * 100),
-                             static_cast<int32_t>(100));
+  if (!hWnd) return;
 
-  if (progress < 0) {
-    taskbar_->SetProgressState(hWnd, TBPF_NOPROGRESS);
-    taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(0),
-                               static_cast<int32_t>(0));
-  } else if (progress > 1) {
-    taskbar_->SetProgressState(hWnd, TBPF_INDETERMINATE);
-    taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(100),
-                               static_cast<int32_t>(100));
-  } else {
+  if (taskbar_ == nullptr) {
+    ::CoCreateInstance(CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER,
+                       IID_PPV_ARGS(&taskbar_));
+  }
+
+  if (taskbar_ != nullptr) {
     taskbar_->SetProgressState(hWnd, TBPF_INDETERMINATE);
     taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(progress * 100),
                                static_cast<int32_t>(100));
+
+    if (progress < 0) {
+      taskbar_->SetProgressState(hWnd, TBPF_NOPROGRESS);
+      taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(0),
+                                 static_cast<int32_t>(0));
+    } else if (progress > 1) {
+      taskbar_->SetProgressState(hWnd, TBPF_INDETERMINATE);
+      taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(100),
+                                 static_cast<int32_t>(100));
+    } else {
+      taskbar_->SetProgressState(hWnd, TBPF_INDETERMINATE);
+      taskbar_->SetProgressValue(hWnd, static_cast<int32_t>(progress * 100),
+                                 static_cast<int32_t>(100));
+    }
   }
 }
 

@@ -125,10 +125,12 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] setAlwaysOnTop 失败: $e');
   }
-  // setSkipTaskbar 已跳过：真机日志定位其原生调用直接杀进程
-  // （日志停在“setSkipTaskbar 开始”，Dart 层 try/catch 收不到任何异常）。
-  // 在 window_manager 修复/找到安全替代方案前，悬浮窗会暂时在任务栏
-  // 占一个“桌面歌词”图标，不影响歌词展示与拖动。
+  // 桌面歌词属于纯悬浮组件，不应在系统任务栏占据独立图标。
+  try {
+    await windowManager.setSkipTaskbar(true);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setSkipTaskbar 失败: $e');
+  }
   try {
     await windowManager.setTitle('桌面歌词');
   } catch (e) {
@@ -229,6 +231,10 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
       // 永久空白），并补施显示前登记的锁定穿透。
       _overlayPassthroughScheduler?.markShown();
       await _overlayPassthroughScheduler?.flushPending();
+      // 窗口显示后确认跳过任务栏（防 Windows Shell 在 ShowWindow 阶段补加 Tab）
+      try {
+        await windowManager.setSkipTaskbar(true);
+      } catch (_) {}
     } catch (e) {
       debugPrint('[桌面歌词悬浮窗] show 失败: $e');
     }
@@ -502,21 +508,24 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (settings.locked) {
-      return _LockedLyricsBody(
-        settings: settings,
-        current: current,
-        next: next,
-      );
-    }
-    return _HoverableOverlay(
-      settings: settings,
-      current: current,
-      next: next,
-      isPlaying: isPlaying,
-      onControlPlayback: onControlPlayback,
-      onToggleLock: onToggleLock,
-      onClose: onClose,
+    final Widget child = settings.locked
+        ? _LockedLyricsBody(
+            settings: settings,
+            current: current,
+            next: next,
+          )
+        : _HoverableOverlay(
+            settings: settings,
+            current: current,
+            next: next,
+            isPlaying: isPlaying,
+            onControlPlayback: onControlPlayback,
+            onToggleLock: onToggleLock,
+            onClose: onClose,
+          );
+    return Material(
+      type: MaterialType.transparency,
+      child: child,
     );
   }
 }
@@ -788,6 +797,7 @@ Widget _lyricLine({
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.center,
       style: TextStyle(
+        decoration: TextDecoration.none,
         fontSize: fontSize,
         color: color,
         fontWeight: fontWeight,
