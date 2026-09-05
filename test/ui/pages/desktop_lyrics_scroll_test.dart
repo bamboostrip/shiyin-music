@@ -270,14 +270,44 @@ void main() {
       final center = tester.getCenter(listFinder);
       final pointer = TestPointer(3, PointerDeviceKind.mouse);
 
-      // 向下滚动，浏览后续歌词
+      // 向下轻微滚动，浏览后续歌词（原播放行仍在视口内弱化）
       await tester.sendEventToBinding(pointer.hover(center));
-      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 240)));
+      await tester.pump();
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 100)));
+      await tester.pump();
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 50)));
       await tester.pump(const Duration(milliseconds: 300));
 
       // 准星按钮展示对应准星行的精确时间
       final seekBtn = find.byKey(const ValueKey('lyric_seek_pointer_button'));
       expect(seekBtn, findsOneWidget);
+
+      // 原播放行（第4句）弱化，不再是纯白 100% 30px
+      Finder lyricLineStyleFinder(String text) => find.ancestor(
+            of: find.text(text),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is AnimatedDefaultTextStyle &&
+                  w.duration == const Duration(milliseconds: 180),
+            ),
+          );
+
+      final playingLineFinder =
+          lyricLineStyleFinder('这是第 4 句歌词，为你弹奏萧邦的夜曲');
+      expect(playingLineFinder, findsOneWidget);
+      final playingStyle =
+          (tester.widget(playingLineFinder) as AnimatedDefaultTextStyle).style;
+      expect(playingStyle.color, isNot(Colors.white));
+      expect(playingStyle.fontSize, equals(24.0));
+
+      // 准星指示的当前聚焦行（第6句）获得纯白 30px 高亮
+      final focusedLineFinder =
+          lyricLineStyleFinder('这是第 6 句歌词，为你弹奏萧邦的夜曲');
+      expect(focusedLineFinder, findsOneWidget);
+      final focusedStyle =
+          (tester.widget(focusedLineFinder) as AnimatedDefaultTextStyle).style;
+      expect(focusedStyle.color, equals(Colors.white));
+      expect(focusedStyle.fontSize, equals(30.0));
 
       // 验证存在“回到当前”快捷入口
       expect(find.text('回到当前'), findsOneWidget);

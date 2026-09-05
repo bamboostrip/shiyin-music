@@ -2404,9 +2404,16 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
   void _startUserHolding(double viewportHeight) {
     _resumeTimer?.cancel();
     if (!_userHolding) {
-      setState(() => _userHolding = true);
+      _userHolding = true;
+      _focusedIndex ??= widget.activeIndex;
+      setState(() {});
     }
     _updateFocusedIndex(viewportHeight);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _userHolding) {
+        _updateFocusedIndex(viewportHeight);
+      }
+    });
     _resumeTimer = Timer(_resumeDelay, () {
       if (!mounted) return;
       _resumeNow();
@@ -2417,18 +2424,24 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
     ScrollNotification notification,
     double viewportHeight,
   ) {
+    if (notification is ScrollStartNotification) {
+      if (notification.dragDetails != null && !_userHolding) {
+        _startUserHolding(viewportHeight);
+      }
+      return false;
+    }
+
     if (!_userHolding) return false;
 
-    if (notification is ScrollUpdateNotification) {
+    if (notification is ScrollUpdateNotification ||
+        notification is ScrollEndNotification) {
       _resumeTimer?.cancel();
       _updateFocusedIndex(viewportHeight);
-      _resumeTimer = Timer(_resumeDelay, () {
-        if (!mounted) return;
-        _resumeNow();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _userHolding) {
+          _updateFocusedIndex(viewportHeight);
+        }
       });
-    } else if (notification is ScrollEndNotification) {
-      _resumeTimer?.cancel();
-      _updateFocusedIndex(viewportHeight);
       _resumeTimer = Timer(_resumeDelay, () {
         if (!mounted) return;
         _resumeNow();
