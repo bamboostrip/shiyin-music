@@ -412,12 +412,121 @@ void main() {
       await applyDesktopLyricsPassthrough(
         const DesktopLyricsSettings(locked: true, passthrough: true),
       );
-      // 解锁恢复接收鼠标。
+      // 解锁恢复鼠标事件。
       await applyDesktopLyricsPassthrough(
         const DesktopLyricsSettings(locked: false),
       );
 
       expect(ignoreCalls, [true, true, false]);
+    });
+  });
+
+  group('OverlayPassthroughScheduler（穿透延迟到窗口显示后）', () {
+    test('显示前只登记不施加，markShown 后 flushPending 施加最后一笔', () async {
+      final applied = <bool>[];
+      final scheduler = OverlayPassthroughScheduler(
+        onApply: (settings) async => applied.add(settings.locked),
+      );
+
+      // 窗口隐藏期间（插件创建子窗后默认 SW_HIDE）到达的设置：
+      // 只登记，绝不触碰原生层（隐藏期加 WS_EX_LAYERED 会让内容面
+      // 永久空白——锁定重开后歌词消失的根因）。
+      await scheduler.apply(const DesktopLyricsSettings(locked: true));
+      await scheduler.apply(const DesktopLyricsSettings(locked: false));
+      await scheduler.apply(const DesktopLyricsSettings(locked: true));
+      expect(applied, isEmpty);
+
+      scheduler.markShown();
+      await scheduler.flushPending();
+      expect(applied, [true]);
+    });
+
+    test('markShown 之后的 apply 立即施加（工具栏解锁/重锁路径）', () async {
+      final applied = <bool>[];
+      final scheduler = OverlayPassthroughScheduler(
+        onApply: (settings) async => applied.add(settings.locked),
+      );
+      scheduler.markShown();
+
+      await scheduler.apply(const DesktopLyricsSettings(locked: true));
+      await scheduler.apply(const DesktopLyricsSettings(locked: false));
+      expect(applied, [true, false]);
+
+      // 无遗留 pending。
+      await scheduler.flushPending();
+      expect(applied, [true, false]);
+    });
+  });
+
+  group('歌词主体高度自适应（防溢出黄黑条纹）', () {
+    // 悬浮窗固定 780x88：系统字体缩放（make text bigger）或设置页大字号
+    // （上限 48sp）下两行总高可能超过窗高。修复前 Column 直接溢出，
+    // 窗口底部常驻 RenderFlex 黄黑条纹。
+    Future<void> pumpOverlay(
+      WidgetTester tester, {
+      required DesktopLyricsSettings settings,
+      double textScale = 1.0,
+    }) async {
+      tester.view.physicalSize = const Size(
+        WindowsDesktopLyricsBridge.overlayWidth,
+        WindowsDesktopLyricsBridge.overlayHeight,
+      );
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData(
+            size: const Size(
+              WindowsDesktopLyricsBridge.overlayWidth,
+              WindowsDesktopLyricsBridge.overlayHeight,
+            ),
+            textScaler: TextScaler.linear(textScale),
+          ),
+          child: MaterialApp(
+            home: DesktopLyricsOverlayContent(
+              settings: settings,
+              current: '当前句歌词内容',
+              next: '下一句歌词内容',
+              isPlaying: true,
+              onControlPlayback: (_) {},
+              onToggleLock: (_) {},
+              onClose: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    for (final scale in [1.0, 1.5, 2.0]) {
+      testWidgets('锁定态 textScale=$scale 不溢出', (tester) async {
+        await pumpOverlay(
+          tester,
+          settings: const DesktopLyricsSettings(locked: true),
+          textScale: scale,
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('锁定态设置页最大字号 48sp 不溢出', (tester) async {
+      await pumpOverlay(
+        tester,
+        settings: const DesktopLyricsSettings(locked: true, fontSize: 48),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('当前句歌词内容'), findsOneWidget);
+    });
+
+    testWidgets('未锁定态悬停卡片内同样不溢出（48sp + 1.5 倍缩放）',
+        (tester) async {
+      await pumpOverlay(
+        tester,
+        settings: const DesktopLyricsSettings(locked: false, fontSize: 48),
+        textScale: 1.5,
+      );
+      expect(tester.takeException(), isNull);
     });
   });
 }

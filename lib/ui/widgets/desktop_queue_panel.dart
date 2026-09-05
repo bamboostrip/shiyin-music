@@ -17,8 +17,9 @@ const double _kRowStride = _kRowHeight + _kRowSpacing;
 
 /// 弹出 PC 播放队列面板：锚定在 [context]（播放条队列按钮）上方、右对齐按钮。
 ///
-/// - 全屏半透明 barrier 点击关闭 + Esc 关闭，复用 desktop_anchored_menu 的
-///   通用锚定路由（barrier/测量逻辑只此一份）；
+/// - 全屏 barrier **视觉透明**，仅用于点击面板外任意处关闭（light dismiss，
+///   QQ 音乐/网易云 PC 一致：右下队列是锚定小面板，不压暗背景，可继续看列表）；
+/// - Esc 关闭，复用 desktop_anchored_menu 的通用锚定路由；
 /// - 定位经 [placeAnchoredPanelAbove]：底缘贴按钮上方、右对齐，
 ///   四周保留 ≥12px 边距，窗口太小时收缩面板；
 /// - 点击行切到该首，行为与移动端 queue_sheet 一致（同一 PlayerController API）。
@@ -35,7 +36,7 @@ Future<void> showDesktopQueuePanel(
         screenSize: screenSize,
       ),
       menuBuilder: (_) => DesktopQueuePanel(player: player),
-      scrimColor: Colors.black.withValues(alpha: 0.24),
+      scrimColor: Colors.transparent,
       barrierLabel: '关闭播放队列',
     ),
   );

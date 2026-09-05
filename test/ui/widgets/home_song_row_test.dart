@@ -1,6 +1,8 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/auth_controller.dart';
+import 'package:shiyin_music/controllers/download_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
@@ -12,6 +14,10 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
 
   @override
   bool isPlaying = false;
+
+  // 右键菜单构建条目时读取（null = 无下载入口）。
+  @override
+  DownloadController? get downloadController => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -99,6 +105,37 @@ void main() {
       expect(playedQueues, [
         [_song],
       ]);
+    });
+
+    testWidgets('右键弹出锚定上下文菜单（下一首播放/添加到歌单/查看歌手）',
+        (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(wrap(buildRow(onPlay: (_, _) {})));
+
+      // 行内右键（次级按钮按下）。
+      final center = tester.getCenter(find.text('海阔天空'));
+      final gesture = await tester.startGesture(
+        center,
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryButton,
+      );
+      await gesture.up();
+      await gesture.removePointer();
+      await tester.pumpAndSettle();
+
+      // 与 `...` 按钮同一份桌面菜单内容，锚定在点击处弹出。
+      expect(find.text('下一首播放'), findsOneWidget);
+      expect(find.text('添加到歌单'), findsOneWidget);
+      expect(find.text('查看歌手'), findsOneWidget);
+      expect(find.byIcon(Icons.person_rounded), findsOneWidget);
+
+      // 点击菜单项关闭菜单。
+      await tester.tap(find.text('查看歌手'));
+      await tester.pumpAndSettle();
+      expect(find.text('下一首播放'), findsNothing);
     });
   });
 

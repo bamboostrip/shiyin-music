@@ -298,6 +298,46 @@ void main() {
       expect(find.text('01'), findsNothing);
     });
 
+    testWidgets('空 hash 行不因「空 == 空」被误判为正在播放高亮', (tester) async {
+      // 本地/占位歌曲可能没有 hash：currentSong.hash 与行 hash 均为空时
+      // 不应命中高亮（否则整列表加粗高亮的假象）。
+      const emptyHashSong = Song(
+        id: 'local-1',
+        title: '本地占位歌曲',
+        artist: '未知艺人',
+        duration: Duration(minutes: 3),
+        hash: '',
+      );
+      final fakePlayer = _FakePlayerController()..currentSong = emptyHashSong;
+      final fakeAuth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: emptyHashSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+
+      // 未高亮：序号仍显示（而非 NowPlayingBadge）。
+      expect(find.byType(NowPlayingBadge), findsNothing);
+      expect(find.text('01'), findsOneWidget);
+    });
+
     testWidgets('多选模式下序号列转为勾选框', (tester) async {
       final fakePlayer = _FakePlayerController();
       final fakeAuth = _FakeAuthController();

@@ -1932,9 +1932,11 @@ class PlayerController extends ChangeNotifier {
       );
     }
     unawaited(audioPlayer.setSpeed(playbackSpeed));
-    if (desktopLyricsEnabled) {
-      unawaited(_desktopLyrics.updateSettings(desktopLyricsSettings));
-    }
+    // 无论当前是否开启都同步设置到桥接：桥接的 settings 缓存是创建
+    // 悬浮窗时随 createWindow 参数下发的内容源，若仅在已开启时同步，
+    // 「上次锁定 → 本次启动后才开启」会以默认设置（未锁定）建窗，
+    // 丢失用户的锁定/字号偏好。
+    unawaited(_desktopLyrics.updateSettings(desktopLyricsSettings));
     _syncListeningTimeTracker();
     unawaited(_refreshEqualizerConfig());
     unawaited(_applyEqualizer());

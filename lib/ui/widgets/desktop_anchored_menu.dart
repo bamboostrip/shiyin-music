@@ -156,7 +156,8 @@ Offset anchorAboveRight(BuildContext context) {
 
 /// 以 PC 上下文菜单的形式，在 [anchor]（全局/窗口坐标）附近弹出锚定菜单。
 ///
-/// - 全屏 barrier：点击空白处关闭；
+/// - 全屏 barrier：**视觉透明**，仅用于点击菜单外任意处关闭（light dismiss，
+///   Windows/macOS 桌面惯例：右键菜单不压暗背景；QQ 音乐/网易云同）；
 /// - Esc 关闭；
 /// - 菜单尺寸在首帧测量后经 [placeAnchoredMenu] 定位（窗口尺寸变化不跟随，
 ///   关闭重开即可，符合任务要求）；
@@ -179,7 +180,7 @@ Future<T?> showDesktopAnchoredMenu<T>({
         menuSize: menuSize,
         screenSize: screenSize,
       ),
-      scrimColor: barrierColor ?? Colors.black.withValues(alpha: 0.12),
+      scrimColor: barrierColor ?? Colors.transparent,
       barrierLabel: barrierLabel ?? '关闭菜单',
       settings: settings,
     ),
@@ -304,9 +305,12 @@ class _AnchoredPopupPositionState extends State<_AnchoredPopupPosition> {
 
   @override
   Widget build(BuildContext context) {
-    final Widget menu = KeyedSubtree(
-      key: _measureKey,
-      child: widget.menuBuilder(context),
+    final Widget menu = Material(
+      type: MaterialType.transparency,
+      child: KeyedSubtree(
+        key: _measureKey,
+        child: widget.menuBuilder(context),
+      ),
     );
 
     return FocusScope(

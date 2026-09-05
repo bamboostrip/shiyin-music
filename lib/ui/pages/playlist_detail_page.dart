@@ -1511,6 +1511,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                       SizedBox(
                                         height: _stickyHeaderHeight,
                                         child: _ListStickyBar(
+                                          flatTop: true,
                                           selecting: _isSelecting,
                                           selectedCount: _selectedCount,
                                           allSelected: _isAllSelected,
@@ -2626,9 +2627,14 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-/// 参考图4的粘性歌曲条：顶部大圆角面板头，左侧蓝色播放 pill，
+/// 参考图4的粘性歌曲条：左侧蓝色播放 pill，
 /// 中间两行计数（标题+副标题各自省略，窄屏不再挤没「已加载」），
 /// 右侧搜索/排序/多选三个幽灵图标。多选模式下切换为已选计数+全选。
+///
+/// 圆角契约（PC+移动统一收敛到设计 Token）：
+/// - 移动端：顶部圆角 16（AppRadius.lg 标准卡片），置顶时与背景自然衔接；
+/// - 桌面端：[flatTop]=true 时顶部直角、无上浮阴影（QQ 音乐 PC 式扁平表头，
+///   置顶时与 AppBar 无缝，不再出现 22px 大圆角置顶后的两侧缺口）。
 class _ListStickyBar extends StatelessWidget {
   const _ListStickyBar({
     required this.selecting,
@@ -2644,6 +2650,7 @@ class _ListStickyBar extends StatelessWidget {
     required this.onSort,
     required this.selectEnabled,
     required this.onSelect,
+    this.flatTop = false,
   });
 
   final bool selecting;
@@ -2659,6 +2666,7 @@ class _ListStickyBar extends StatelessWidget {
   final VoidCallback onSort;
   final bool selectEnabled;
   final VoidCallback onSelect;
+  final bool flatTop;
 
   @override
   Widget build(BuildContext context) {
@@ -2668,14 +2676,20 @@ class _ListStickyBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? .25 : .07),
-            blurRadius: 12,
-            offset: const Offset(0, -4),
-          ),
-        ],
+        borderRadius: flatTop
+            ? BorderRadius.zero
+            : const BorderRadius.vertical(
+                top: Radius.circular(AppRadius.lg),
+              ),
+        boxShadow: flatTop
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? .25 : .07),
+                  blurRadius: 12,
+                  offset: const Offset(0, -4),
+                ),
+              ],
       ),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       // 选择模式（参考图2）：复选框+全选+已选计数+右侧蓝色完成，

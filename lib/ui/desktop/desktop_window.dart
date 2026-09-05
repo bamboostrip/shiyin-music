@@ -267,11 +267,22 @@ class _WindowGeometrySaver extends WindowListener {
   }
 
   Future<void> _handleWindowClose() async {
-    await flush();
-    if (DesktopWindow.closeToTrayEnabled(_prefs)) {
-      await windowManager.hide();
-    } else {
-      await windowManager.destroy();
+    try {
+      await flush();
+    } catch (error) {
+      debugPrint('DesktopWindow: 窗口关闭时保存几何失败（不阻止关闭）: $error');
+    }
+    try {
+      if (DesktopWindow.closeToTrayEnabled(_prefs)) {
+        await windowManager.hide();
+      } else {
+        await windowManager.destroy();
+      }
+    } catch (error) {
+      debugPrint('DesktopWindow: 窗口关闭处理失败，降级强制销毁: $error');
+      try {
+        await windowManager.destroy();
+      } catch (_) {}
     }
   }
 
@@ -290,12 +301,20 @@ class _WindowGeometrySaver extends WindowListener {
   }
 
   Future<void> _saveNow() async {
-    final bounds = await windowManager.getBounds();
-    await DesktopWindowGeometry(
-      left: bounds.left,
-      top: bounds.top,
-      width: bounds.width,
-      height: bounds.height,
-    ).save(_prefs);
+    // 处于最大化状态时不落盘常规几何，避免最大化全屏尺寸覆盖用户常规窗口尺寸
+    if (DesktopWindow.maximizedPreferred(_prefs)) {
+      return;
+    }
+    try {
+      final bounds = await windowManager.getBounds();
+      await DesktopWindowGeometry(
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      ).save(_prefs);
+    } catch (error) {
+      debugPrint('DesktopWindow: 保存窗口几何失败: $error');
+    }
   }
 }

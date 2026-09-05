@@ -626,30 +626,34 @@ class _DesktopSongActionMenuPanel extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.08)
         : colorScheme.outlineVariant.withValues(alpha: 0.6);
 
-    return Container(
-      width: width,
-      constraints: const BoxConstraints(maxHeight: 460),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: ClipRRect(
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 0,
+      child: Container(
+        width: width,
+        constraints: const BoxConstraints(maxHeight: 460),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: ClipRRect(
         borderRadius: BorderRadius.circular(13),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 顶部紧凑歌曲信息
+            // 顶部紧凑歌曲信息（PC 上下文菜单规范：无关闭按钮，
+            // 点击菜单外任意处/Esc 即关闭，见 showDesktopAnchoredMenu）
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               child: Row(
                 children: [
                   Artwork(url: song.coverUrl, size: 32, borderRadius: 6),
@@ -683,15 +687,6 @@ class _DesktopSongActionMenuPanel extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                    iconSize: 16,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                    splashRadius: 14,
-                    tooltip: '关闭',
-                  ),
                 ],
               ),
             ),
@@ -715,6 +710,7 @@ class _DesktopSongActionMenuPanel extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -760,9 +756,12 @@ class _DesktopSongActionItemState extends State<_DesktopSongActionItem> {
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            height: 38,
+            // 最小高度而非固定高度：系统字体缩放（make text bigger）
+            // 放大文字行高时行随内容长高，避免固定 38px 下 RenderFlex
+            // 垂直溢出（黄黑条纹）。
+            constraints: const BoxConstraints(minHeight: 38),
             margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: _hovering ? hoverColor : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
@@ -780,10 +779,11 @@ class _DesktopSongActionItemState extends State<_DesktopSongActionItem> {
                     widget.action.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: theme.textTheme.bodyMedium?.copyWith(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
                       color: color,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ),
@@ -793,9 +793,10 @@ class _DesktopSongActionItemState extends State<_DesktopSongActionItem> {
                     widget.action.subtitle!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: theme.textTheme.bodySmall?.copyWith(
                       fontSize: 11,
                       color: colorScheme.onSurfaceVariant,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ],

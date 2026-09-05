@@ -984,10 +984,9 @@ packages:
   window_manager:
     dependency: "direct main"
     description:
-      name: window_manager
-      sha256: "732896e1416297c63c9e3fb95aea72d0355f61390263982a47fd519169dc5059"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/window_manager"
+      relative: true
+    source: path
     version: "0.4.3"
   xdg_directories:
     dependency: transitive

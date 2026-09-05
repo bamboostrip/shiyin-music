@@ -36,6 +36,54 @@ class HomeSongRow extends StatelessWidget {
   final PlayerController player;
   final VoidCallback onViewArtist;
 
+  /// 弹出歌曲操作菜单（PC 与移动端共用条目）。
+  ///
+  /// [anchor] 为空走移动端底部弹窗；非空（PC `...` 按钮下方或行右键位置）
+  /// 锚定为桌面上下文菜单。
+  void _showActionMenu(BuildContext context, {Offset? anchor}) {
+    showSongActionSheet(
+      context: context,
+      song: song,
+      anchor: anchor,
+      actions: [
+        SongSheetAction(
+          icon: Icons.queue_music_rounded,
+          title: '下一首播放',
+          onTap: () => addSongToQueueWithFeedback(
+            context: context,
+            player: player,
+            song: song,
+          ),
+        ),
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          onTap: () => showAddToPlaylistSheet(
+            context: context,
+            auth: auth,
+            song: song,
+          ),
+        ),
+        SongSheetAction(
+          icon: Icons.person_rounded,
+          title: '查看歌手',
+          onTap: onViewArtist,
+        ),
+        if (player.downloadController != null)
+          SongSheetAction(
+            icon: player.downloadController!.isDownloaded(song)
+                ? Icons.download_done_rounded
+                : Icons.download_rounded,
+            title: player.downloadController!.isDownloaded(song)
+                ? '已下载'
+                : '下载',
+            onTap: () => player.downloadController!
+                .download(song, player.audioQuality),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -58,6 +106,12 @@ class HomeSongRow extends StatelessWidget {
               // 桌面端：单击不播（双击播放）；移动端/车机端：单击即播。
               onTap: isDesktop ? null : () => onPlay(song, queue),
               onDoubleTap: isDesktop ? () => onPlay(song, queue) : null,
+              // PC 右键：与 `...` 按钮同一份菜单，锚定到点击处
+              //（搜索结果/歌单等表格行已支持，首页行对齐）。
+              onSecondaryTapDown: isDesktop
+                  ? (details) =>
+                      _showActionMenu(context, anchor: details.globalPosition)
+                  : null,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
@@ -142,55 +196,10 @@ class HomeSongRow extends StatelessWidget {
                       builder: (moreButtonContext) {
                         return IconButton(
                           tooltip: '更多',
-                          onPressed: () {
-                            showSongActionSheet(
-                              context: moreButtonContext,
-                              anchor: anchorBelow(moreButtonContext),
-                              song: song,
-                              actions: [
-                                SongSheetAction(
-                                  icon: Icons.queue_music_rounded,
-                                  title: '下一首播放',
-                                  onTap: () => addSongToQueueWithFeedback(
-                                    context: context,
-                                    player: player,
-                                    song: song,
-                                  ),
-                                ),
-                                SongSheetAction(
-                                  icon: Icons.playlist_add_rounded,
-                                  title: '添加到歌单',
-                                  onTap: () => showAddToPlaylistSheet(
-                                    context: context,
-                                    auth: auth,
-                                    song: song,
-                                  ),
-                                ),
-                                SongSheetAction(
-                                  icon: Icons.person_rounded,
-                                  title: '查看歌手',
-                                  onTap: onViewArtist,
-                                ),
-                                if (player.downloadController != null)
-                                  SongSheetAction(
-                                    icon:
-                                        player.downloadController!.isDownloaded(
-                                          song,
-                                        )
-                                        ? Icons.download_done_rounded
-                                        : Icons.download_rounded,
-                                    title:
-                                        player.downloadController!.isDownloaded(
-                                          song,
-                                        )
-                                        ? '已下载'
-                                        : '下载',
-                                    onTap: () => player.downloadController!
-                                        .download(song, player.audioQuality),
-                                  ),
-                              ],
-                            );
-                          },
+                          onPressed: () => _showActionMenu(
+                            moreButtonContext,
+                            anchor: anchorBelow(moreButtonContext),
+                          ),
                           icon: const Icon(Icons.more_horiz_rounded),
                           visualDensity: VisualDensity.compact,
                         );

@@ -2170,11 +2170,14 @@ class _LyricViewportState extends State<_LyricViewport>
   }
 }
 
-/// 桌面端歌词列表（PC 软件逻辑）。
+/// 桌面端歌词列表（PC 软件逻辑，对齐 QQ 音乐/网易云 PC）。
 ///
-/// flutter_lyric 的自绘视图不消费 [PointerScrollEvent]，滚轮无法滚动；
-/// 这里用原生 [ListView] 实现：滚轮/拖动均可滚动，点击行跳转播放，
-/// 用户滚动时暂停自动跟随，空闲 [resumeDelay] 后恢复跟随当前行。
+/// - 滚轮/触摸均可自由滚动歌词（flutter_lyric 自绘视图不消费滚轮，故用原生
+///   ListView 实现）；点击行跳转播放；
+/// - 用户滚动时暂停自动跟随（高亮仍随播放更新），停止滚动 3s 后平滑恢复
+///   跟随当前行（主流 PC 播放器一致：QQ/网易云均为“手动查看 + 空闲恢复”，
+///   本实现 3s 与业界常用值一致）；
+/// - 手动滚动期间右下角出现“回到当前”快捷入口，点按立即恢复跟随。
 class _DesktopLyricList extends StatefulWidget {
   const _DesktopLyricList({
     required this.player,
@@ -2197,7 +2200,8 @@ class _DesktopLyricList extends StatefulWidget {
 }
 
 class _DesktopLyricListState extends State<_DesktopLyricList> {
-  static const _resumeDelay = Duration(milliseconds: 2500);
+  // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3s 恢复自动跟随。
+  static const _resumeDelay = Duration(milliseconds: 3000);
 
   final _scrollController = ScrollController();
   final _rowKeys = <int, GlobalKey>{};
@@ -2279,6 +2283,13 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
     return false;
   }
 
+  void _resumeNow() {
+    _resumeTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _userHolding = false);
+    _scrollToActive(animate: true);
+  }
+
   String? _secondaryText(LyricLine line) {
     return switch (widget.displayMode) {
       _LyricDisplayMode.lyricsWithTranslation =>
@@ -2291,61 +2302,103 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: _handleScrollNotification,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(20, 140, 20, 180),
-        itemCount: widget.lyrics.length,
-        itemBuilder: (context, index) {
-          final line = widget.lyrics[index];
-          final active = index == widget.activeIndex;
-          final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
-          final secondary = _secondaryText(line);
-          return GestureDetector(
-            key: key,
-            behavior: HitTestBehavior.opaque,
-            onTap: () => widget.player.seek(line.time),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 180),
-                      style: Theme.of(context).textTheme.headlineMedium!.copyWith(
-                        color: active
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: .34),
-                        fontSize: (active ? 30.0 : 24.0) * widget.lyricScale,
-                        height: 1.3,
-                        fontWeight: active ? FontWeight.w900 : FontWeight.w800,
-                      ),
-                      child: Text(line.text),
-                    ),
-                    if (secondary != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        secondary,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Colors.white.withValues(
-                            alpha: active ? .72 : .44,
+    return Stack(
+      children: [
+        NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.fromLTRB(20, 140, 20, 180),
+            itemCount: widget.lyrics.length,
+            itemBuilder: (context, index) {
+              final line = widget.lyrics[index];
+              final active = index == widget.activeIndex;
+              final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
+              final secondary = _secondaryText(line);
+              return GestureDetector(
+                key: key,
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.player.seek(line.time),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 180),
+                          style: Theme.of(context).textTheme.headlineMedium!.copyWith(
+                            color: active
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: .34),
+                            fontSize: (active ? 30.0 : 24.0) * widget.lyricScale,
+                            height: 1.3,
+                            fontWeight: active ? FontWeight.w900 : FontWeight.w800,
                           ),
-                          fontSize: 15.0 * widget.lyricScale,
-                          height: 1.3,
-                          fontWeight: FontWeight.w600,
+                          child: Text(line.text),
+                        ),
+                        if (secondary != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            secondary,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Colors.white.withValues(
+                                alpha: active ? .72 : .44,
+                              ),
+                              fontSize: 15.0 * widget.lyricScale,
+                              height: 1.3,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        // 手动滚动期间的“回到当前”快捷入口（网易云/QQ 音乐 PC 同款逻辑，
+        // 自动恢复前给用户手动立即跟随的出口）。
+        if (_userHolding)
+          Positioned(
+            right: 12,
+            bottom: 24,
+            child: Material(
+              color: Colors.white.withValues(alpha: .14),
+              borderRadius: BorderRadius.circular(20),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _resumeNow,
+                borderRadius: BorderRadius.circular(20),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.my_location_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        '回到当前',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
-          );
-        },
-      ),
+          ),
+      ],
     );
   }
 }

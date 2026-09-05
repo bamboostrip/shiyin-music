@@ -65,6 +65,10 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   }
   _overlayWindowController = windowController;
   final shownController = windowController;
+  // 穿透调度器：显示前登记、显示后施加（防隐藏期 WS_EX_LAYERED 空白窗）。
+  _overlayPassthroughScheduler = OverlayPassthroughScheduler(
+    onApply: applyDesktopLyricsPassthrough,
+  );
 
   var settings = const DesktopLyricsSettings();
   var current = '';
@@ -140,9 +144,13 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] setSize 失败: $e');
   }
-  // 启动即按应用设置设置穿透（锁定=全穿透；主窗缓存的 settings 随
+  // 启动即按应用设置准备穿透（锁定=全穿透；主窗缓存的 settings 随
   // createWindow 参数传入，重建路径上穿透状态与应用设置一致）。
-  await applyDesktopLyricsPassthrough(settings);
+  // 注意：穿透样式必须延迟到窗口 show() 之后再施加——
+  // windowManager.setIgnoreMouseEvents 会给窗口加 WS_EX_LAYERED，
+  // 若在窗口仍隐藏时设置，Flutter 的 DComp 内容面将永久无法呈现
+  // （表现为锁定状态下重开/重启后歌词窗口空白），故此处只登记待应用。
+  schedulePassthroughAfterShown(settings);
 
   // 恢复上次拖动位置（失败不影响展示）。
   try {
@@ -180,7 +188,9 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
           final message = (call.arguments as Map?)?.cast<String, dynamic>();
           if (message != null) {
             model.settings = DesktopLyricsSettings.fromMap(message);
-            await applyDesktopLyricsPassthrough(model.settings);
+            // 同样经调度器：显示前只登记，避免隐藏期加 WS_EX_LAYERED
+            // 导致的空白窗（见 OverlayPassthroughScheduler 注释）。
+            await schedulePassthroughAfterShown(model.settings);
           }
       }
       return null;
@@ -215,6 +225,10 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
       await shownController.show();
+      // 窗口已可见：现在施加穿透样式才安全（隐藏期设置会导致内容面
+      // 永久空白），并补施显示前登记的锁定穿透。
+      _overlayPassthroughScheduler?.markShown();
+      await _overlayPassthroughScheduler?.flushPending();
     } catch (e) {
       debugPrint('[桌面歌词悬浮窗] show 失败: $e');
     }
@@ -226,12 +240,64 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
 /// 旧持久化字段 passthrough 仅保留兼容解析，不再参与穿透判定
 /// （"触摸穿透"开关的语义已被锁定吸收）。
 /// 公开为顶层函数以便单测固定锁定/解锁的穿透行为。
+///
+/// ⚠️ 只允许在窗口已经显示后调用（见 [schedulePassthroughAfterShown]）。
 Future<void> applyDesktopLyricsPassthrough(DesktopLyricsSettings settings) async {
   try {
     await windowManager.setIgnoreMouseEvents(settings.locked);
   } on Exception {
     // setIgnoreMouseEvents 失败不影响歌词展示。
   }
+}
+
+/// 穿透调度器：窗口显示前只登记最新设置，显示后再真正施加。
+///
+/// 根因：windowManager.setIgnoreMouseEvents 在 Windows 原生层给窗口加
+/// WS_EX_TRANSPARENT | WS_EX_LAYERED。若在窗口仍处于隐藏状态（插件创建
+/// 子窗后默认 SW_HIDE）时加 WS_EX_LAYERED，Flutter 子窗的 DComp 内容面
+/// 将永久无法呈现——锁定状态下关闭后重开/随应用重启重建的歌词窗口一片
+/// 空白即由此而来。窗口可见后增删该样式则安全（工具栏锁定/解锁已验证）。
+/// 公开为类以便单测固定「显示前登记、显示后补施」的行为。
+class OverlayPassthroughScheduler {
+  OverlayPassthroughScheduler({required this.onApply});
+
+  /// 实际施加函数（注入 windowManager 版本；单测注入记录桩）。
+  final Future<void> Function(DesktopLyricsSettings settings) onApply;
+
+  bool _shown = false;
+  DesktopLyricsSettings? _pending;
+
+  /// 窗口已显示：此后每次调用立即施加。
+  void markShown() {
+    _shown = true;
+  }
+
+  /// 请求施加穿透；窗口尚未显示时仅登记，待 markShown 后补施。
+  Future<void> apply(DesktopLyricsSettings settings) async {
+    if (!_shown) {
+      _pending = settings;
+      return;
+    }
+    _pending = null;
+    await onApply(settings);
+  }
+
+  /// markShown 后补施显示前登记的最后一笔设置（可能为 null = 无需施加）。
+  Future<void> flushPending() async {
+    final pending = _pending;
+    _pending = null;
+    if (pending != null) {
+      await onApply(pending);
+    }
+  }
+}
+
+/// 本子窗口的穿透调度器（入口函数创建，updateSettings 与 show 流程共用）。
+OverlayPassthroughScheduler? _overlayPassthroughScheduler;
+
+/// 窗口显示前的穿透登记入口（供启动流程与 updateSettings 消息复用）。
+Future<void> schedulePassthroughAfterShown(DesktopLyricsSettings settings) async {
+  await _overlayPassthroughScheduler?.apply(settings);
 }
 
 /// 关闭悬浮窗：先通知主窗（触发 enabled=false 持久化），再销毁自身。
@@ -656,6 +722,13 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 }
 
 /// 歌词主体（锁定/未锁定两套子树共用）：当前句 + 下一句，含文字阴影。
+///
+/// 布局契约：紧约束 SizedBox(780x88) + 水平 32 Padding + FittedBox(scaleDown)
+/// + 固定宽度（悬浮窗宽 - 64）的 Column。紧约束是关键：FittedBox 在松约束
+/// （Center 直接包裹）下会按子项原尺寸布局、不触发缩小，子项超高时 Center
+/// 直接溢出（锁定态无 Stack 紧约束故必现，未锁定态靠 Stack 偶然收敛）。
+/// 紧约束保证两行总高超过 88px 窗高（系统字体缩放/48sp 大字号）时整体等比
+/// 缩小，而不是 RenderFlex 垂直溢出（溢出黄黑条纹会常驻窗口底部）。
 Widget buildOverlayLyricsBody({
   required DesktopLyricsSettings settings,
   required String current,
@@ -663,28 +736,38 @@ Widget buildOverlayLyricsBody({
 }) {
   final textColor = Color(settings.textColor);
   final hasNext = next.trim().isNotEmpty;
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 32),
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _lyricLine(
-            text: current.isEmpty ? '暂无歌词' : current,
-            fontSize: settings.fontSize,
-            color: textColor,
-            fontWeight: FontWeight.bold,
-          ),
-          if (hasNext) ...[
-            const SizedBox(height: 3),
-            _lyricLine(
-              text: next,
-              fontSize: settings.fontSize * 0.58,
-              color: textColor.withValues(alpha: 0.60),
-              fontWeight: FontWeight.normal,
+  return SizedBox(
+    width: WindowsDesktopLyricsBridge.overlayWidth,
+    height: WindowsDesktopLyricsBridge.overlayHeight,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Center(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: SizedBox(
+            width: WindowsDesktopLyricsBridge.overlayWidth - 64,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _lyricLine(
+                  text: current.isEmpty ? '暂无歌词' : current,
+                  fontSize: settings.fontSize,
+                  color: textColor,
+                  fontWeight: FontWeight.bold,
+                ),
+                if (hasNext) ...[
+                  const SizedBox(height: 3),
+                  _lyricLine(
+                    text: next,
+                    fontSize: settings.fontSize * 0.58,
+                    color: textColor.withValues(alpha: 0.60),
+                    fontWeight: FontWeight.normal,
+                  ),
+                ],
+              ],
             ),
-          ],
-        ],
+          ),
+        ),
       ),
     ),
   );

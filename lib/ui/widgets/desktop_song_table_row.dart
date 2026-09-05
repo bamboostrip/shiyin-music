@@ -273,7 +273,11 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
         child: AnimatedBuilder(
           animation: Listenable.merge([player, auth]),
           builder: (context, _) {
-            final active = !selecting && player.currentSong?.hash == song.hash;
+            // hash 非空守卫：本地/占位歌曲可能 hash 为空，空 == 空 会把
+            // 所有空 hash 行误判为正在播放（整列表“加粗高亮”假象）。
+            final active = !selecting &&
+                song.hash.isNotEmpty &&
+                player.currentSong?.hash == song.hash;
             final activeColor = colorScheme.primary;
 
             Color bgColor;
@@ -315,9 +319,13 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                 ? song.albumName!
                 : '-';
             final titleStyle = TextStyle(
+              // 非播放行用 w400 Regular（系统字体原生字重）：w500 在
+              // Windows 微软雅黑等仅有 Regular/Bold 的字体上按字形回退合成，
+              // 不同汉字合成路径不同，肉眼即“有的细浅、有的粗黑”。
+              // 播放行用 w700 Bold（原生粗体）+ 主色高亮，区分明确且渲染一致。
               color: active ? activeColor : colorScheme.onSurface,
               fontSize: 13.5,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w400,
             );
             final albumStyle = TextStyle(
               color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
@@ -503,7 +511,7 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                             ? activeColor.withValues(alpha: 0.8)
                                             : colorScheme.onSurfaceVariant,
                                         fontSize: 13,
-                                        fontWeight: FontWeight.w500,
+                                        fontWeight: FontWeight.w400,
                                       ),
                                     ),
                                   ),
@@ -676,7 +684,8 @@ class _ArtistLinkTextState extends State<_ArtistLinkText> {
           ? colorScheme.primary
           : colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
       fontSize: 13,
-      fontWeight: FontWeight.w500,
+      // 与标题列同理：用原生 Regular，避免 w500 合成导致深浅不一。
+      fontWeight: FontWeight.w400,
       decoration: _hovering ? TextDecoration.underline : TextDecoration.none,
       decorationColor: colorScheme.primary,
     );

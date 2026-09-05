@@ -36,6 +36,10 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+dependency_overrides:
+  window_manager:
+    path: packages/window_manager
+
 flutter:
   uses-material-design: true
   assets:

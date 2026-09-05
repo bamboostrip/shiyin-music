@@ -58,7 +58,7 @@ void main() {
   }
 
   group('PC 桌面级紧凑菜单 (isDesktopFormFactor = true)', () {
-    testWidgets('展示桌面级上下文弹窗且宽度约 236px，包含歌曲信息与关闭按钮', (tester) async {
+    testWidgets('展示桌面级上下文弹窗且宽度约 236px，包含歌曲信息（无关闭按钮）', (tester) async {
       debugDesktopFormFactorOverride = true;
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -97,10 +97,11 @@ void main() {
       );
       expect(containerFinder, findsOneWidget);
 
-      // 验证顶部歌曲简要信息（标题、歌手、关闭按钮）
+      // 验证顶部歌曲简要信息（标题、歌手）。
       expect(find.text('晴天'), findsOneWidget);
       expect(find.text('周杰伦'), findsOneWidget);
-      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+      // PC 上下文菜单规范：无 X 关闭按钮（点击菜单外/Esc 关闭）。
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
 
       // 验证操作项内容
       expect(find.text('下一首播放'), findsOneWidget);
@@ -168,7 +169,7 @@ void main() {
       await gesture.removePointer();
     });
 
-    testWidgets('点击右上角关闭按钮仅关闭弹窗不触发任何 action', (tester) async {
+    testWidgets('点击菜单外空白处关闭（light dismiss）且不触发任何 action', (tester) async {
       debugDesktopFormFactorOverride = true;
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1.0;
@@ -192,7 +193,8 @@ void main() {
 
       expect(find.byType(Dialog), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.close_rounded));
+      // 点击弹窗外的空白处（右上角）：仅关闭，不触发 action。
+      await tester.tapAt(const Offset(1260, 40));
       await tester.pumpAndSettle();
 
       expect(find.byType(Dialog), findsNothing);
@@ -249,6 +251,136 @@ void main() {
       await tester.tap(find.text('下一首播放'));
       await tester.pumpAndSettle();
       expect(find.text('下一首播放'), findsNothing);
+    });
+
+    testWidgets('锚定菜单 barrier 视觉透明（light dismiss 不压暗背景）', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        buildHostWidget(
+          size: const Size(1280, 800),
+          actions: [
+            SongSheetAction(
+              icon: Icons.queue_music_rounded,
+              title: '下一首播放',
+              onTap: () {},
+            ),
+          ],
+          anchor: const Offset(400, 300),
+        ),
+      );
+
+      await tester.tap(find.text('Open Menu'));
+      await tester.pumpAndSettle();
+
+      // PC 桌面惯例：右键菜单不出现半透明遮罩（QQ 音乐/网易云/系统
+      // 右键菜单均无压暗效果），仅以透明 barrier 承接点击外部关闭。
+      final route = ModalRoute.of(
+        tester.element(find.text('下一首播放')),
+      );
+      expect(route?.barrierColor, Colors.transparent);
+      expect(route?.barrierDismissible, isTrue);
+    });
+
+    for (final scale in [1.0, 1.5, 2.0]) {
+      testWidgets('锚定菜单 textScale=$scale 条目不溢出（行高随字体缩放）',
+          (tester) async {
+        debugDesktopFormFactorOverride = true;
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(size: Size(1280, 800)).copyWith(
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        showSongActionSheet(
+                          context: context,
+                          song: testSong,
+                          anchor: const Offset(400, 300),
+                          actions: [
+                            SongSheetAction(
+                              icon: Icons.queue_music_rounded,
+                              title: '下一首播放',
+                              onTap: () {},
+                            ),
+                            SongSheetAction(
+                              icon: Icons.playlist_add_rounded,
+                              title: '添加到歌单',
+                              onTap: () {},
+                            ),
+                            SongSheetAction(
+                              icon: Icons.person_rounded,
+                              title: '查看歌手',
+                              onTap: () {},
+                            ),
+                          ],
+                        );
+                      },
+                      child: const Text('Open Menu'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open Menu'));
+        await tester.pumpAndSettle(const Duration(seconds: 1));
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('下一首播放'), findsOneWidget);
+      });
+    }
+
+    testWidgets('桌面菜单文字无黄色下划线（decoration 为 none）', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        buildHostWidget(
+          size: const Size(1280, 800),
+          actions: [
+            SongSheetAction(
+              icon: Icons.queue_music_rounded,
+              title: '下一首播放',
+              onTap: () {},
+            ),
+            SongSheetAction(
+              icon: Icons.playlist_add_rounded,
+              title: '添加到歌单',
+              onTap: () {},
+            ),
+          ],
+          anchor: const Offset(400, 300),
+        ),
+      );
+
+      await tester.tap(find.text('Open Menu'));
+      await tester.pumpAndSettle();
+
+      for (final element in tester.elementList(find.byType(RichText))) {
+        final richText = element.widget as RichText;
+        final style = richText.text.style;
+        expect(
+          style?.decoration,
+          isNot(TextDecoration.underline),
+          reason: '菜单文本不应包含下划线（避免无 Material 时出现黄色双下划线）',
+        );
+      }
     });
   });
 
