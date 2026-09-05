@@ -1242,7 +1242,7 @@ class _LandscapeLyricPanelState extends State<_LandscapeLyricPanel> {
     super.initState();
     _lyricController = LyricController();
     _lyricController.setOnTapLineCallback((position) {
-      widget.player.seek(position);
+      widget.player.seekToAndPlay(position);
     });
     _lyricController.isSelectingNotifier.addListener(_onSelectingChanged);
     _syncLyrics();
@@ -2112,7 +2112,7 @@ class _LyricViewportState extends State<_LyricViewport>
     super.initState();
     _lyricController = LyricController();
     _lyricController.setOnTapLineCallback((position) {
-      widget.player.seek(position);
+      widget.player.seekToAndPlay(position);
     });
     _lyricController.isSelectingNotifier.addListener(_onSelectingChanged);
     _syncLyrics();
@@ -2516,10 +2516,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                     key: key,
                     behavior: HitTestBehavior.opaque,
                     onTap: () {
-                      widget.player.seek(line.time);
-                      if (!widget.player.isPlaying) {
-                        widget.player.togglePlay();
-                      }
+                      widget.player.seekToAndPlay(line.time);
                       _resumeNow();
                     },
                     child: MouseRegion(
@@ -2603,10 +2600,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
                       key: const ValueKey('lyric_seek_pointer_button'),
                       timeText: formatDuration(focusedLine.time),
                       onTap: () {
-                        widget.player.seek(focusedLine.time);
-                        if (!widget.player.isPlaying) {
-                          widget.player.togglePlay();
-                        }
+                        widget.player.seekToAndPlay(focusedLine.time);
                         _resumeNow();
                       },
                     ),

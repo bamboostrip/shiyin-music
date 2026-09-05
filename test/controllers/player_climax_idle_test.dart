@@ -278,6 +278,50 @@ void main() {
       expect(controller.climaxEndTime, isNull);
       expect(recordingAudioHandler.callLogs, isEmpty);
     });
+
+    test(
+      '当底层处于 idle 状态时调用 seekToAndPlay(target) 直接从 target 起播，不跳回 0 秒',
+      () async {
+        expect(fakeAudioPlayer.processingState, ProcessingState.idle);
+
+        const targetPos = Duration(seconds: 83);
+        await controller.seekToAndPlay(targetPos);
+
+        expect(controller.position, equals(targetPos));
+        final loadIndex = recordingAudioHandler.callLogs.indexOf('loadSong');
+        final seekIndex = recordingAudioHandler.callLogs.lastIndexOf('seek:83');
+        final playIndex = recordingAudioHandler.callLogs.indexOf('play');
+
+        expect(loadIndex, isNot(-1));
+        expect(seekIndex, isNot(-1));
+        expect(playIndex, isNot(-1));
+        expect(seekIndex > loadIndex && seekIndex < playIndex, isTrue);
+      },
+    );
+
+    test(
+      '当底层处于 idle 状态时先调用 seek(target) 后调用 togglePlay()，应保留目标位置并在起播时 seek 到 target',
+      () async {
+        expect(fakeAudioPlayer.processingState, ProcessingState.idle);
+
+        const targetPos = Duration(seconds: 131);
+        await controller.seek(targetPos);
+        expect(controller.position, equals(targetPos));
+
+        // 点击播放
+        await controller.togglePlay();
+
+        expect(controller.position, equals(targetPos));
+        final loadIndex = recordingAudioHandler.callLogs.indexOf('loadSong');
+        final seekIndex = recordingAudioHandler.callLogs.lastIndexOf('seek:131');
+        final playIndex = recordingAudioHandler.callLogs.indexOf('play');
+
+        expect(loadIndex, isNot(-1));
+        expect(seekIndex, isNot(-1));
+        expect(playIndex, isNot(-1));
+        expect(seekIndex > loadIndex && seekIndex < playIndex, isTrue);
+      },
+    );
   });
 }
 

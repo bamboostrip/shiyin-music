@@ -63,6 +63,7 @@ class _FakePlayerController extends ChangeNotifier
   String get playbackModeLabel => '列表循环';
 
   final List<Duration> seekCalls = [];
+  final List<Duration> seekToAndPlayCalls = [];
   int playCalls = 0;
 
   @override
@@ -71,6 +72,15 @@ class _FakePlayerController extends ChangeNotifier
     position = pos;
     positionListenable.value = pos;
     notifyListeners();
+  }
+
+  @override
+  Future<void> seekToAndPlay(Duration pos) async {
+    seekToAndPlayCalls.add(pos);
+    await seek(pos);
+    if (!isPlaying) {
+      await togglePlay();
+    }
   }
 
   int togglePlayCalls = 0;

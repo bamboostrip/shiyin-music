@@ -263,6 +263,7 @@ class PlayerController extends ChangeNotifier {
   bool _isPrecaching = false;
   bool _isAppForeground = true;
   bool _desktopLyricsPreviewVisible = false;
+  Duration? _pendingIdlePosition;
 
   Song? currentSong;
   List<Song> queue = const [];
@@ -458,6 +459,7 @@ class PlayerController extends ChangeNotifier {
     _completedSongHash = null;
     _lastSmoothPosition = Duration.zero;
     _precachedForSongHash = null;
+    _pendingIdlePosition = null;
 
     // 检查是否有本地音频缓存（已下载/播放缓存）或本地音频文件
     var local = downloadController?.localPathFor(song, audioQuality);
@@ -1074,7 +1076,10 @@ class PlayerController extends ChangeNotifier {
       if (audioPlayer.processingState == ProcessingState.idle) {
         final song = currentSong;
         if (song != null) {
-          await playSong(song, queue: queue);
+          final initPos = _pendingIdlePosition ??
+              (position > Duration.zero ? position : null);
+          _pendingIdlePosition = null;
+          await playSong(song, queue: queue, initialPosition: initPos);
           return;
         }
       }
@@ -1104,6 +1109,12 @@ class PlayerController extends ChangeNotifier {
     _setPositionBase(target, playing: isPlaying);
     _emitPosition();
 
+    // 当底层音频引擎处于 idle 状态（如冷启动恢复歌曲但尚未起播）时，
+    // 底层尚未加载音频源。此时暂存目标位置，等后续起播时作为 initialPosition 传入，杜绝弹回 0 秒。
+    if (audioPlayer.processingState == ProcessingState.idle) {
+      _pendingIdlePosition = target;
+    }
+
     try {
       await _audioHandler.seek(target);
       if (serial != _seekSerial) {
@@ -1111,10 +1122,34 @@ class PlayerController extends ChangeNotifier {
       }
       _setPositionBase(target, playing: isPlaying);
       _emitPosition();
+    } catch (_) {
+      // idle 状态下底层播放器可能无音频源而抛出异常，此时已由 _pendingIdlePosition 兜底
     } finally {
       if (serial == _seekSerial) {
         _isSeeking = false;
         _isScrubbing = false;
+      }
+    }
+  }
+
+  /// 跳转到指定位置并起播（常用于歌词点击、准星跳转等场景）。
+  /// 兼容冷启动/未播放 (idle) 状态，确保直接从指定位置加载并播放，绝不弹回 0 秒。
+  Future<void> seekToAndPlay(Duration position) async {
+    final song = currentSong;
+    if (song == null) return;
+    final target = _clampPosition(position);
+
+    if (audioPlayer.processingState == ProcessingState.idle) {
+      _pendingIdlePosition = null;
+      await playSong(
+        song,
+        queue: queue,
+        initialPosition: target,
+      );
+    } else {
+      await seek(target);
+      if (!audioPlayer.playing) {
+        await togglePlay();
       }
     }
   }
