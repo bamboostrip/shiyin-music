@@ -210,13 +210,15 @@ class _PlayerBody extends StatefulWidget {
 
 Future<void> _showAudioQualityPicker(
   BuildContext context,
-  PlayerController player,
-) async {
+  PlayerController player, {
+  Offset? anchor,
+}) async {
   final quality = await showAudioQualitySheet(
     context: context,
     selected: player.audioQuality,
     title: '切换音质',
     subtitle: '会重新加载当前歌曲并尽量保持播放进度',
+    anchor: anchor,
   );
   if (quality == null) {
     return;
@@ -935,10 +937,16 @@ class _PlayerAudioQualityPill extends StatelessWidget {
               ),
             ),
             clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              mouseCursor: SystemMouseCursors.click,
-              onTap: () => _showAudioQualityPicker(context, player),
-              child: Padding(
+            child: Builder(
+              builder: (pillContext) => InkWell(
+                mouseCursor: SystemMouseCursors.click,
+                onTap: () {
+                  final anchor = isDesktopFormFactor
+                      ? anchorBelow(pillContext)
+                      : null;
+                  _showAudioQualityPicker(pillContext, player, anchor: anchor);
+                },
+                child: Padding(
                 padding: EdgeInsets.symmetric(
                   horizontal: compact ? 8 : 10,
                   vertical: compact ? 4 : 6,
@@ -984,7 +992,8 @@ class _PlayerAudioQualityPill extends StatelessWidget {
               ),
             ),
           ),
-        );
+        ),
+      );
       },
     );
   }

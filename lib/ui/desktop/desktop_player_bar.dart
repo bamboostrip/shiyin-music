@@ -7,6 +7,7 @@ import '../pages/player_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/climax_slider_track.dart';
+import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/desktop_queue_panel.dart';
 import '../widgets/toast.dart';
 import 'player_bar_widgets.dart';
@@ -431,11 +432,13 @@ class _AudioQualityButton extends StatelessWidget {
                       .withValues(alpha: 0.08),
               onTap: enabled
                   ? () async {
+                      final anchor = anchorAboveRight(context);
                       final picked = await showAudioQualitySheet(
                         context: context,
                         selected: player.audioQuality,
                         title: '切换音质',
                         subtitle: '会重新加载当前歌曲并尽量保持播放进度',
+                        anchor: anchor,
                       );
                       if (picked != null) {
                         await player.setAudioQuality(
