@@ -1,9 +1,8 @@
 name: Build Windows Desktop
 
 # 打 tag（v*）或手动触发时构建 Windows 便携包 + 安装包并附加到 Release，
-# 与 build-android.yml 互不干扰（不同文件名并发上传同一 Release 安全）。
-# Linux/macOS 暂不打包：linux 缺 Rust kugou_engine 集成与 just_audio 平台实现，
-# macOS 缺 Xcode Rust 链接配置，详见 docs/release-process.md。
+# 与 build-android.yml / build-linux.yml 互不干扰（不同文件名并发上传同一 Release 安全）。
+# macOS 暂不打包：缺 Xcode Rust 链接配置，详见 docs/release-process.md。
 on:
   push:
     tags:

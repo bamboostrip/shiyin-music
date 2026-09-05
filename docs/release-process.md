@@ -193,16 +193,31 @@ Windows：
   全部失败才报错；一般等待即可恢复
 - 手动复现：`curl -H "User-Agent: x" https://api.github.com/rate_limit` 查看余量
 
-### 为什么暂时没有 Linux / macOS 包
+### Linux 包（build-linux.yml）
 
-- **Linux**：`linux/CMakeLists.txt` 尚未集成 Rust `kugou_engine` 构建
-  （编出的应用缺原生库，搜索等核心功能不可用）；且 `just_audio` 在 Linux
-  无平台实现（无法播放）。前置工作：Linux 端 Rust 集成 + Linux 音频方案选型。
+- **形态**：`shiyin-<tag>-linux-x64-portable.tar.gz`（解压即用）+
+  `shiyin-<tag>-linux-x64.deb`（/opt/shiyin-music，带 .desktop 与图标）。
+- **运行期依赖**：音频后端是 media_kit(libmpv)——deb 经 `Depends: libmpv2`
+  自动安装；便携包需用户自行 `sudo apt install libmpv2
+  libayatana-appindicator3-1`（包内 README-LINUX.txt 有说明）。
+- **实现要点**：`linux/CMakeLists.txt` 的 `rust_engine_build` 目标在构建期
+  `cargo build` 并把 `libkugou_engine.so` 安装进 `bundle/lib`（frb 经
+  RPATH `$ORIGIN/lib` 加载）；just_audio 的 Linux 后端由
+  `just_audio_media_kit` 提供，`main.dart` 在 `Platform.isLinux` 分支注册，
+  Windows 仍走 `just_audio_windows`（windows 侧 generated_plugins 不受影响）。
+- **runner 注意**：`build-linux.yml` 用 `ubuntu-22.04`（glibc 2.35 基线，
+  覆盖 22.04/24.04 双 LTS）。官方镜像 2026-09-17 起弃用告警、2027-04-17 移除
+  （actions/runner-images#14254），届时改 `runs-on: ubuntu-24.04`，但 glibc
+  基线将升至 2.39（22.04 用户无法运行），需在 Release 说明中注明。
+- 本地验证可在 WSL2 内执行 `scripts/build_linux_wsl.sh`（自动引导
+  ninja/rustup/Flutter SDK 与用户态 appindicator staging，无需 sudo）。
+
+### 为什么暂时没有 macOS 包
+
 - **macOS**：`Runner.xcodeproj` 缺 Rust 库链接配置；音频可用（just_audio darwin）
   但盲改工程无法在 Windows 上验证。前置工作：Xcode 添加 libkugou_engine
-  构建阶段 + macOS 实机验证。
-- 两者就绪后再在 CI 矩阵中加入对应平台（附件命名沿用
-  `shiyin-vX.Y.Z-{platform}-{arch}-…` 约定）。
+  构建阶段 + macOS 实机验证。就绪后在 CI 矩阵中加入
+  （附件命名沿用 `shiyin-vX.Y.Z-{platform}-{arch}-…` 约定）。
 
 ### 需要撤回已发布的版本
 

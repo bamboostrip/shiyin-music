@@ -29,7 +29,15 @@ class NetworkMonitor {
   Future<void> start() async {
     if (_sub != null) return;
     _hasNetwork = await _checkNow();
-    _sub = _connectivity.onConnectivityChanged.listen(_onChanged);
+    _sub = _connectivity.onConnectivityChanged.listen(
+      _onChanged,
+      // 个别 Linux 桌面/极简环境没有 NetworkManager，connectivity_plus
+      // 的事件流会持续报错（Unhandled Exception）。这里吞掉错误保持降级：
+      // 仅损失断网恢复自动重播事件，不影响其余功能。
+      onError: (Object error) {
+        debugPrint('NetworkMonitor: 连接状态流错误（已降级忽略）: $error');
+      },
+    );
   }
 
   Future<void> stop() async {

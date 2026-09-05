@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,7 +65,10 @@ class DesktopTray {
       // system_tray 在 Windows 上把该路径解析为
       // <exe 目录>/data/flutter_assets/lib/assets/app_icon.ico，
       // 即打包后的资源路径（见包源码 Utils.getIcon）。
-      iconPath: 'lib/assets/app_icon.ico',
+      // Linux 端走 StatusNotifier/AppIndicator，对 .ico 兼容性差，
+      // 改用打包内的 png 图标。
+      iconPath:
+          Platform.isLinux ? 'lib/assets/logo.png' : 'lib/assets/app_icon.ico',
       toolTip: DesktopWindow.kWindowTitle,
     );
     if (!ok) {

@@ -48,9 +48,10 @@ class DownloadService {
   /// 持久下载目录。
   ///
   /// Android 优先使用系统公共下载目录（/storage/emulated/0/Download），
+  /// Linux 桌面优先使用 XDG 下载目录（~/Downloads，path_provider_linux），
   /// 其他平台或获取失败时回退到应用文档目录。
   Future<Directory> downloadDir() async {
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isLinux) {
       final downloadsDir = await getDownloadsDirectory();
       if (downloadsDir != null) {
         final dir = Directory('${downloadsDir.path}/${AppConfig.downloadDirName}');

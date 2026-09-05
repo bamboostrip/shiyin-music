@@ -1,0 +1,182 @@
+name: Build Linux Desktop
+
+# 打 tag（v*）或手动触发时构建 Linux 便携包 + deb 包并附加到 Release，
+# 与 build-windows.yml / build-android.yml 互不干扰（不同文件名并发上传同一 Release 安全）。
+#
+# runner 选型 ubuntu-22.04：产物 glibc 基线 2.35，可同时覆盖 Ubuntu 22.04/24.04
+# 双 LTS 与 Debian 12。注意：官方镜像 2026-09-17 起进入弃用告警期、2027-04-17 移除
+# （actions/runner-images#14254）；届时改 runs-on 为 ubuntu-24.04 即可，
+# 但产物 glibc 基线将升至 2.39（放弃 22.04 用户），详见 docs/release-process.md。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 附加附件到 GitHub Release 需要写权限。
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.44.8'
+
+jobs:
+  build-linux:
+    name: Build portable.tar.gz + deb (x64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # linux/CMakeLists.txt 的 rust_engine_build 目标会调用 cargo（PATH 解析）；
+      # runner 的 gcc 即默认 GNU 工具链。
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: linux-x64
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Flutter Linux 构建工具链（ninja/libgtk-3）+ system_tray 托盘插件的
+      # 硬依赖（appindicator，缺失时其 CMake 直接 FATAL_ERROR）。
+      # media_kit 的 libmpv 是运行期 dlopen 依赖，构建期不需要。
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Linux release bundle
+        run: flutter build linux --release
+
+      # 统一产物名：tag 去非法字符；非 tag 触发（手动/分支）时版本回退 0.0.0。
+      - name: Compute artifact names
+        id: names
+        run: |
+          tag=$(printf '%s' "${{ github.ref_name }}" | tr -c 'A-Za-z0-9._-' '_')
+          ver=0.0.0
+          if [[ "$tag" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
+            ver="${BASH_REMATCH[1]}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+
+      # 构建完整性检查：Rust 引擎库必须已入 bundle/lib（frb 运行时按
+      # libkugou_engine.so 经 RPATH $ORIGIN/lib 加载），且无未解析动态依赖。
+      - name: Verify bundle
+        run: |
+          bundle=build/linux/x64/release/bundle
+          test -x "$bundle/kgka_music_hl" || { echo "缺主程序"; exit 1; }
+          test -f "$bundle/lib/libkugou_engine.so" || { echo "缺 libkugou_engine.so"; exit 1; }
+          if find "$bundle" -maxdepth 2 \( -name '*.so*' -o -name kgka_music_hl \) \
+              -exec ldd {} \; 2>/dev/null | grep -q 'not found'; then
+            echo "::error::bundle 存在未解析的动态依赖"
+            find "$bundle" -maxdepth 2 \( -name '*.so*' -o -name kgka_music_hl \) \
+              -exec ldd {} \; 2>/dev/null | grep 'not found'
+            exit 1
+          fi
+
+      # 便携包：bundle 原样 + 使用说明（解压即可运行，主程序改名与 Windows 形态一致）。
+      - name: Stage portable directory
+        run: |
+          mkdir -p build/dist/portable
+          cp -a build/linux/x64/release/bundle/. build/dist/portable/
+          mv build/dist/portable/kgka_music_hl build/dist/portable/ShiYinMusic
+          cat > build/dist/portable/README-LINUX.txt <<'EOF'
+          视听（ShiYin Music）Linux x64 便携版
+          ====================================
+
+          运行前请安装一次运行期依赖（音频后端 libmpv 与托盘 AppIndicator）：
+
+            Debian / Ubuntu :  sudo apt install libmpv2 libayatana-appindicator3-1
+            Fedora / RHEL   :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3
+
+          启动：./ShiYinMusic
+          （可选）在桌面环境中创建 .desktop 文件指向本目录的 ShiYinMusic。
+          EOF
+
+      - name: Pack portable tar.gz
+        run: |
+          tag="${{ steps.names.outputs.tag }}"
+          tar -C build/dist/portable -czf "build/dist/shiyin-$tag-linux-x64-portable.tar.gz" .
+          ls -la "build/dist/shiyin-$tag-linux-x64-portable.tar.gz"
+
+      # deb 包：bundle 入 /opt/shiyin-music，带 .desktop 与 hicolor 图标，
+      # 运行期依赖经 Depends 声明（libmpv2 即音频后端）。
+      - name: Build deb package
+        run: |
+          tag="${{ steps.names.outputs.tag }}"
+          ver="${{ steps.names.outputs.ver }}"
+          root=build/dist/deb-root
+          install -d "$root/DEBIAN" "$root/opt/shiyin-music" \
+            "$root/usr/share/applications"
+          for size in 16 32 64 128 256; do
+            install -d "$root/usr/share/icons/hicolor/${size}x${size}/apps"
+            install -m 644 "linux/runner/resources/app_icon_${size}.png" \
+              "$root/usr/share/icons/hicolor/${size}x${size}/apps/com.hoilai.mm.music.png"
+          done
+          cp -a build/dist/portable/. "$root/opt/shiyin-music/"
+          rm -f "$root/opt/shiyin-music/README-LINUX.txt"
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: shiyin-music
+          Version: $ver
+          Section: sound
+          Priority: optional
+          Architecture: amd64
+          Maintainer: bamboostrip <bamboostrip@users.noreply.github.com>
+          Depends: libgtk-3-0, libmpv2, libayatana-appindicator3-1
+          Recommends: xdg-user-dirs
+          Homepage: https://github.com/bamboostrip/shiyin-music
+          Description: 视听音乐播放器 (ShiYin Music)
+           基于 Flutter 的跨平台音乐播放器：酷狗曲库搜索与播放、逐行/桌面歌词、
+           下载与本地音乐管理。本包面向 x64 Linux 桌面（Ubuntu 22.04+/Debian 12+）。
+          EOF
+          cat > "$root/usr/share/applications/com.hoilai.mm.music.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=ShiYin Music
+          Name[zh_CN]=视听
+          Comment=ShiYin Music Player
+          Exec=/opt/shiyin-music/ShiYinMusic
+          Icon=com.hoilai.mm.music
+          Terminal=false
+          Categories=Audio;Music;AudioVideo;Player;
+          StartupWMClass=com.hoilai.mm.music
+          EOF
+          dpkg-deb --build --root-owner-group "$root" \
+            "build/dist/shiyin-$tag-linux-x64.deb"
+          dpkg-deb --info "build/dist/shiyin-$tag-linux-x64.deb" | head -20
+          ls -la "build/dist/shiyin-$tag-linux-x64.deb"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop-${{ steps.names.outputs.tag }}
+          path: |
+            build/dist/shiyin-*-linux-x64-portable.tar.gz
+            build/dist/shiyin-*-linux-x64.deb
+          if-no-files-found: error
+
+      # 仅附加附件，不创建/覆盖 Release 笔记（笔记由 gh release create 手写）。
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/dist/shiyin-*-linux-x64-portable.tar.gz
+            build/dist/shiyin-*-linux-x64.deb
+          fail_on_unmatched_files: true

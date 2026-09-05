@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:local_notifier/local_notifier.dart';
 
 import 'config/app_config.dart';
@@ -63,6 +64,17 @@ Future<void> main(List<String> args) async {
     isCarMode: themeController.carModeEnabled,
     isAutomotiveDevice: themeController.isAutomotiveDevice,
   );
+
+  // Linux 桌面：just_audio 无官方 Linux 平台实现，注册社区 media_kit(libmpv)
+  // 后端（见 pubspec.yaml 依赖注释）。必须在创建首个 AudioPlayer
+  // （AudioService.init → MusicAudioHandler 字段初始化）之前调用；
+  // 仅在 Linux 分支注册，避免覆盖 Windows 的 just_audio_windows 后端。
+  // audio_service 在 Linux 走 platform interface 的 NoOpAudioService（与
+  // Windows 现状一致），无需分支；media 键/系统媒体会话后续可按需接入
+  // audio_service_mpris。
+  if (Platform.isLinux) {
+    JustAudioMediaKit.ensureInitialized();
+  }
 
   final audioHandler = await AudioService.init(
     builder: MusicAudioHandler.new,

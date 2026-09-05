@@ -54,6 +54,16 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
 
+# Bundle layout. Must be defined BEFORE add_subdirectory(runner): the runner
+# target's install() rules (app icons) reference these variables at configure
+# time; defining them after the subdirectory would resolve to "/app_icon".
+set(BUILD_BUNDLE_DIR "${PROJECT_BINARY_DIR}/bundle")
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
+endif()
+set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
+set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
@@ -74,22 +84,38 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# === Rust library build (kugou_engine) ===
+# 与 windows/CMakeLists.txt 的 rust_engine_build 保持同一模式：
+# 每次构建都调用 cargo，由 cargo 自身增量编译判断是否需要重编。
+# 产物 libkugou_engine.so 安装到 bundle/lib，运行时由 flutter_rust_bridge
+# 的加载器按 "libkugou_engine.so" 经 RPATH($ORIGIN/lib，见文件头) 命中。
+# cargo 依赖构建环境 PATH（CI 由 rust-toolchain step 提供）。
+set(RUST_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rust")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(RUST_BUILD_TYPE "debug")
+  set(RUST_BUILD_FLAG "")
+else()
+  set(RUST_BUILD_TYPE "release")
+  set(RUST_BUILD_FLAG "--release")
+endif()
+set(RUST_TARGET_DIR "${RUST_LIB_DIR}/target/${RUST_BUILD_TYPE}")
+
+add_custom_target(rust_engine_build ALL
+  COMMAND cargo build ${RUST_BUILD_FLAG}
+  WORKING_DIRECTORY "${RUST_LIB_DIR}"
+  BYPRODUCTS "${RUST_TARGET_DIR}/libkugou_engine.so"
+  COMMENT "Building Rust kugou_engine library"
+  VERBATIM
+)
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
-# directory.
-set(BUILD_BUNDLE_DIR "${PROJECT_BINARY_DIR}/bundle")
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
-endif()
-
+# directory. Bundle dirs are defined above (before add_subdirectory(runner)).
 # Start with a clean build bundle directory every time.
 install(CODE "
   file(REMOVE_RECURSE \"${BUILD_BUNDLE_DIR}/\")
   " COMPONENT Runtime)
-
-set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
-set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
@@ -126,3 +152,8 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Install the Rust kugou_engine shared library (bundle/lib，RPATH 可达)。
+install(FILES "${RUST_TARGET_DIR}/libkugou_engine.so"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)

@@ -14,6 +14,11 @@ dependencies:
   http: ^1.5.0
   just_audio: ^0.10.4
   just_audio_windows: ^0.2.3
+  # Linux 桌面音频后端：just_audio 官方不出 Linux 实现，社区方案为
+  # media_kit(libmpv) 适配。仅在 main.dart 的 Platform.isLinux 分支注册，
+  # 不影响 Windows 的 just_audio_windows。运行期依赖系统 libmpv2。
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_linux: ^1.2.1
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
   window_manager: ^0.4.3
