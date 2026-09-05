@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -256,116 +257,92 @@ class _PlayerBodyState extends State<_PlayerBody> {
     }
     final landscape = size.width > size.height;
     _syncSystemUi(landscape);
-    // 横屏分栏布局是车机专属，普通横屏仍用竖屏的翻页布局。
-    final isCarLayout = landscape && ThemeController.instance.carModeEnabled;
+    // PC 桌面端（宽屏）与开启车机模式的横屏场景，均采用双拼分栏大屏布局（左侧封面/操作，右侧全高度歌词面板）
+    final useSplitLayout = isDesktopFormFactor ||
+        (landscape && ThemeController.instance.carModeEnabled);
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
-        statusBarIconBrightness: Brightness.light,
-        statusBarBrightness: Brightness.light,
-      ),
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            _ArtworkBackground(song: widget.song),
-            SafeArea(
-              // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
-              // 竖屏已由外层 Scaffold 处理，这里对所有方向统一保留 SafeArea。
-              child: Column(
-                children: [
-                  if (!isCarLayout)
-                    _TopBar(
-                      player: widget.player,
-                      auth: widget.auth,
-                      song: widget.song,
-                      onClose: widget.onClose,
-                      onArtistTap: _openArtist,
-                    ),
-                  Expanded(
-                    child: isCarLayout
-                        ? ExcludeSemantics(
-                            child: _LandscapePlayerContent(
-                              player: widget.player,
-                              auth: widget.auth,
-                              song: widget.song,
-                              onClose: widget.onClose,
-                              onQueue: widget.onQueue,
-                              onArtistTap: _openArtist,
-                            ),
-                          )
-                        // 桌面端：纵向滚轮留给歌词列表，不劫持为左右翻页。
-                        // 封面/歌词仍可拖动或点圆点切换。
-                        : isDesktopFormFactor
-                            ? NotificationListener<ScrollNotification>(
-                                onNotification: _handlePageScrollNotification,
-                                child: PageView(
-                                  controller: _pageController,
-                                  allowImplicitScrolling: true,
-                                  onPageChanged: (value) =>
-                                      _setPageState(page: value),
-                                  children: [
-                                    _PosterPlayerPage(
-                                      key: const PageStorageKey(
-                                        'poster-player-page',
-                                      ),
-                                      player: widget.player,
-                                      song: widget.song,
-                                      onQueue: widget.onQueue,
-                                    ),
-                                    _LyricPlayerPage(
-                                      key: const PageStorageKey(
-                                        'lyric-player-page',
-                                      ),
-                                      player: widget.player,
-                                      song: widget.song,
-                                      focusRequest: _lyricFocusRequest,
-                                      isPageActive: _lyricPageActive,
-                                      isPageVisible: _lyricPageVisible,
-                                      isPageTransitioning: _pageScrolling,
-                                    ),
-                                  ],
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+      },
+      child: Focus(
+        autofocus: true,
+        child: AnnotatedRegion<SystemUiOverlayStyle>(
+          value: const SystemUiOverlayStyle(
+            statusBarIconBrightness: Brightness.light,
+            statusBarBrightness: Brightness.light,
+          ),
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(
+              children: [
+                _ArtworkBackground(song: widget.song),
+                SafeArea(
+                  // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
+                  // 竖屏已由外层 Scaffold 处理，这里对所有方向统一保留 SafeArea。
+                  child: Column(
+                    children: [
+                      if (!useSplitLayout)
+                        _TopBar(
+                          player: widget.player,
+                          auth: widget.auth,
+                          song: widget.song,
+                          onClose: widget.onClose,
+                          onArtistTap: _openArtist,
+                        ),
+                      Expanded(
+                        child: useSplitLayout
+                            ? ExcludeSemantics(
+                                child: _LandscapePlayerContent(
+                                  player: widget.player,
+                                  auth: widget.auth,
+                                  song: widget.song,
+                                  onClose: widget.onClose,
+                                  onQueue: widget.onQueue,
+                                  onArtistTap: _openArtist,
                                 ),
                               )
                             : HorizontalWheelPageScroll(
-                            controller: _pageController,
-                            child: NotificationListener<ScrollNotification>(
-                              onNotification: _handlePageScrollNotification,
-                              child: PageView(
                                 controller: _pageController,
-                                allowImplicitScrolling: true,
-                                onPageChanged: (value) =>
-                                    _setPageState(page: value),
-                                children: [
-                                  _PosterPlayerPage(
-                                    key: const PageStorageKey(
-                                      'poster-player-page',
-                                    ),
-                                    player: widget.player,
-                                    song: widget.song,
-                                    onQueue: widget.onQueue,
+                                child: NotificationListener<ScrollNotification>(
+                                  onNotification: _handlePageScrollNotification,
+                                  child: PageView(
+                                    controller: _pageController,
+                                    allowImplicitScrolling: true,
+                                    onPageChanged: (value) =>
+                                        _setPageState(page: value),
+                                    children: [
+                                      _PosterPlayerPage(
+                                        key: const PageStorageKey(
+                                          'poster-player-page',
+                                        ),
+                                        player: widget.player,
+                                        song: widget.song,
+                                        onQueue: widget.onQueue,
+                                      ),
+                                      _LyricPlayerPage(
+                                        key: const PageStorageKey(
+                                          'lyric-player-page',
+                                        ),
+                                        player: widget.player,
+                                        song: widget.song,
+                                        focusRequest: _lyricFocusRequest,
+                                        isPageActive: _lyricPageActive,
+                                        isPageVisible: _lyricPageVisible,
+                                        isPageTransitioning: _pageScrolling,
+                                      ),
+                                    ],
                                   ),
-                                  _LyricPlayerPage(
-                                    key: const PageStorageKey(
-                                      'lyric-player-page',
-                                    ),
-                                    player: widget.player,
-                                    song: widget.song,
-                                    focusRequest: _lyricFocusRequest,
-                                    isPageActive: _lyricPageActive,
-                                    isPageVisible: _lyricPageVisible,
-                                    isPageTransitioning: _pageScrolling,
-                                  ),
-                                ],
+                                ),
                               ),
-                            ),
-                          ),
+                      ),
+                      if (!useSplitLayout) _PageDots(page: _page),
+                    ],
                   ),
-                  if (!isCarLayout) _PageDots(page: _page),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1341,6 +1318,19 @@ class _LandscapeLyricPanelState extends State<_LandscapeLyricPanel> {
       );
     }
 
+    if (isDesktopFormFactor) {
+      return ExcludeSemantics(
+        child: _DesktopLyricList(
+          player: player,
+          songHash: widget.songHash,
+          lyrics: lyrics,
+          activeIndex: player.activeLyricIndex,
+          displayMode: _LyricDisplayMode.lyricsOnly,
+          lyricScale: widget.compact ? 0.85 : 1.0,
+        ),
+      );
+    }
+
     final fontSize = widget.compact ? 26.0 : 34.0;
     final inactiveFontSize = widget.compact ? 18.0 : 24.0;
 
@@ -2308,14 +2298,15 @@ class _DesktopLyricList extends StatefulWidget {
 }
 
 class _DesktopLyricListState extends State<_DesktopLyricList> {
-  // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3s 恢复自动跟随。
-  static const _resumeDelay = Duration(milliseconds: 3000);
+  // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3.5s 恢复自动跟随。
+  static const _resumeDelay = Duration(milliseconds: 3500);
 
   final _scrollController = ScrollController();
   final _rowKeys = <int, GlobalKey>{};
   Timer? _resumeTimer;
   var _userHolding = false;
   var _lastActive = -1;
+  int? _focusedIndex;
 
   @override
   void initState() {
@@ -2333,6 +2324,7 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
       _rowKeys.clear();
       _resumeTimer?.cancel();
       _userHolding = false;
+      _focusedIndex = null;
       _lastActive = widget.activeIndex;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToActive(animate: false);
@@ -2370,22 +2362,76 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
     if (rowContext == null) return;
     Scrollable.ensureVisible(
       rowContext,
-      alignment: 0.34,
+      alignment: 0.38,
       duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
       curve: Curves.easeOutCubic,
     );
   }
 
-  bool _handleScrollNotification(ScrollNotification notification) {
-    if (notification is ScrollStartNotification) {
+  void _updateFocusedIndex(double viewportHeight) {
+    if (widget.lyrics.isEmpty) return;
+    final targetY = viewportHeight * 0.38;
+    int bestIndex = widget.activeIndex.clamp(0, widget.lyrics.length - 1);
+    double minDiff = double.infinity;
+
+    final stackRender = context.findRenderObject() as RenderBox?;
+    if (stackRender == null || !stackRender.hasSize) return;
+
+    for (final entry in _rowKeys.entries) {
+      final key = entry.value;
+      final ctx = key.currentContext;
+      if (ctx == null) continue;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      final localCenter = box.localToGlobal(
+        Offset(0, box.size.height / 2),
+        ancestor: stackRender,
+      );
+      final diff = (localCenter.dy - targetY).abs();
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestIndex = entry.key;
+      }
+    }
+
+    if (_focusedIndex != bestIndex) {
+      setState(() {
+        _focusedIndex = bestIndex;
+      });
+    }
+  }
+
+  void _startUserHolding(double viewportHeight) {
+    _resumeTimer?.cancel();
+    if (!_userHolding) {
+      setState(() => _userHolding = true);
+    }
+    _updateFocusedIndex(viewportHeight);
+    _resumeTimer = Timer(_resumeDelay, () {
+      if (!mounted) return;
+      _resumeNow();
+    });
+  }
+
+  bool _handleScrollNotification(
+    ScrollNotification notification,
+    double viewportHeight,
+  ) {
+    if (!_userHolding) return false;
+
+    if (notification is ScrollUpdateNotification) {
       _resumeTimer?.cancel();
-      if (!_userHolding) setState(() => _userHolding = true);
-    } else if (notification is ScrollEndNotification) {
-      _resumeTimer?.cancel();
+      _updateFocusedIndex(viewportHeight);
       _resumeTimer = Timer(_resumeDelay, () {
         if (!mounted) return;
-        setState(() => _userHolding = false);
-        _scrollToActive(animate: true);
+        _resumeNow();
+      });
+    } else if (notification is ScrollEndNotification) {
+      _resumeTimer?.cancel();
+      _updateFocusedIndex(viewportHeight);
+      _resumeTimer = Timer(_resumeDelay, () {
+        if (!mounted) return;
+        _resumeNow();
       });
     }
     return false;
@@ -2394,7 +2440,10 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
   void _resumeNow() {
     _resumeTimer?.cancel();
     if (!mounted) return;
-    setState(() => _userHolding = false);
+    setState(() {
+      _userHolding = false;
+      _focusedIndex = null;
+    });
     _scrollToActive(animate: true);
   }
 
@@ -2410,103 +2459,281 @@ class _DesktopLyricListState extends State<_DesktopLyricList> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        NotificationListener<ScrollNotification>(
-          onNotification: _handleScrollNotification,
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(20, 140, 20, 180),
-            itemCount: widget.lyrics.length,
-            itemBuilder: (context, index) {
-              final line = widget.lyrics[index];
-              final active = index == widget.activeIndex;
-              final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
-              final secondary = _secondaryText(line);
-              return GestureDetector(
-                key: key,
-                behavior: HitTestBehavior.opaque,
-                onTap: () => widget.player.seek(line.time),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 180),
-                          style: Theme.of(context).textTheme.headlineMedium!.copyWith(
-                            color: active
-                                ? Colors.white
-                                : Colors.white.withValues(alpha: .34),
-                            fontSize: (active ? 30.0 : 24.0) * widget.lyricScale,
-                            height: 1.3,
-                            fontWeight: active ? FontWeight.w900 : FontWeight.w800,
-                          ),
-                          child: Text(line.text),
-                        ),
-                        if (secondary != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            secondary,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: Colors.white.withValues(
-                                alpha: active ? .72 : .44,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportHeight = constraints.maxHeight;
+        final targetY = viewportHeight * 0.38;
+        final defaultIdx =
+            widget.activeIndex.clamp(0, widget.lyrics.length - 1);
+        final currentFocusIdx = _focusedIndex ?? defaultIdx;
+        final focusedLine = (_userHolding &&
+                currentFocusIdx >= 0 &&
+                currentFocusIdx < widget.lyrics.length)
+            ? widget.lyrics[currentFocusIdx]
+            : null;
+
+        return Stack(
+          children: [
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) => _startUserHolding(viewportHeight),
+              onPointerSignal: (signal) {
+                if (signal is PointerScrollEvent) {
+                  _startUserHolding(viewportHeight);
+                }
+              },
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) =>
+                    _handleScrollNotification(notification, viewportHeight),
+                child: ListView.builder(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  targetY > 0 ? targetY : 120,
+                  20,
+                  viewportHeight * 0.48,
+                ),
+                itemCount: widget.lyrics.length,
+                itemBuilder: (context, index) {
+                  final line = widget.lyrics[index];
+                  final active = index == widget.activeIndex;
+                  final isFocused = _userHolding && index == _focusedIndex;
+                  final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
+                  final secondary = _secondaryText(line);
+
+                  return GestureDetector(
+                    key: key,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      widget.player.seek(line.time);
+                      if (!widget.player.isPlaying) {
+                        widget.player.togglePlay();
+                      }
+                      _resumeNow();
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 180),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium!
+                                  .copyWith(
+                                    color: active
+                                        ? Colors.white
+                                        : (isFocused
+                                            ? Colors.white.withValues(alpha: .88)
+                                            : Colors.white.withValues(alpha: .34)),
+                                    fontSize: (active ? 30.0 : 24.0) *
+                                        widget.lyricScale,
+                                    height: 1.3,
+                                    fontWeight: (active || isFocused)
+                                        ? FontWeight.w900
+                                        : FontWeight.w800,
+                                  ),
+                              child: Text(line.text),
+                            ),
+                            if (secondary != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                secondary,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white.withValues(
+                                        alpha: active ? .72 : (isFocused ? .65 : .44),
+                                      ),
+                                      fontSize: 15.0 * widget.lyricScale,
+                                      height: 1.3,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                               ),
-                              fontSize: 15.0 * widget.lyricScale,
-                              height: 1.3,
-                              fontWeight: FontWeight.w600,
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+            // 居中准星参考线与定位跳转播放按钮 [ ▶ mm:ss ]
+            if (_userHolding && focusedLine != null) ...[
+              Positioned(
+                left: 0,
+                right: 0,
+                top: targetY + 12,
+                child: IgnorePointer(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          height: 1,
+                          margin: const EdgeInsets.only(right: 96),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.white.withValues(alpha: 0.0),
+                                Colors.white.withValues(alpha: 0.12),
+                                Colors.white.withValues(alpha: 0.32),
+                                Colors.white.withValues(alpha: 0.12),
+                              ],
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        // 手动滚动期间的“回到当前”快捷入口（网易云/QQ 音乐 PC 同款逻辑，
-        // 自动恢复前给用户手动立即跟随的出口）。
-        if (_userHolding)
-          Positioned(
-            right: 12,
-            bottom: 24,
-            child: Material(
-              color: Colors.white.withValues(alpha: .14),
-              borderRadius: BorderRadius.circular(20),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: _resumeNow,
-                borderRadius: BorderRadius.circular(20),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.my_location_rounded,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        '回到当前',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
+              Positioned(
+                right: 12,
+                top: targetY,
+                child: _SeekPointerButton(
+                  key: const ValueKey('lyric_seek_pointer_button'),
+                  timeText: formatDuration(focusedLine.time),
+                  onTap: () {
+                    widget.player.seek(focusedLine.time);
+                    if (!widget.player.isPlaying) {
+                      widget.player.togglePlay();
+                    }
+                    _resumeNow();
+                  },
+                ),
+              ),
+            ],
+            // 手动滚动期间的“回到当前”快捷入口（网易云/QQ 音乐 PC 同款逻辑，
+            // 自动恢复前给用户手动立即跟随的出口）。
+            if (_userHolding)
+              Positioned(
+                right: 12,
+                bottom: 24,
+                child: Material(
+                  color: Colors.white.withValues(alpha: .14),
+                  borderRadius: BorderRadius.circular(20),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: _resumeNow,
+                    borderRadius: BorderRadius.circular(20),
+                    child: const Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.my_location_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            '回到当前',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// PC 端歌词定位播放准星按钮 [ ▶ mm:ss ]
+class _SeekPointerButton extends StatefulWidget {
+  const _SeekPointerButton({
+    super.key,
+    required this.timeText,
+    required this.onTap,
+  });
+
+  final String timeText;
+  final VoidCallback onTap;
+
+  @override
+  State<_SeekPointerButton> createState() => _SeekPointerButtonState();
+}
+
+class _SeekPointerButtonState extends State<_SeekPointerButton> {
+  bool _isHovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovering = true),
+      onExit: (_) => setState(() => _isHovering = false),
+      child: Tooltip(
+        message: '从 ${widget.timeText} 开始播放',
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: _isHovering
+                  ? primary
+                  : const Color(0xFF1E212B).withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isHovering
+                    ? primary
+                    : Colors.white.withValues(alpha: 0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color:
+                      Colors.black.withValues(alpha: _isHovering ? 0.4 : 0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.play_arrow_rounded,
+                  size: 16,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  widget.timeText,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
             ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }

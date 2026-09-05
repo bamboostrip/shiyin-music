@@ -21,7 +21,7 @@ class ThemeController extends ChangeNotifier {
   }
 
   static ThemeController? _instance;
-  static ThemeController get instance => _instance!;
+  static ThemeController get instance => _instance ??= ThemeController();
 
   // ===== SharedPreferences keys =====
   static const _seedColorKey = 'theme.seed_color';
