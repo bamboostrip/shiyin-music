@@ -255,6 +255,29 @@ class DownloadController extends ChangeNotifier {
     return null;
   }
 
+  /// 返回本地文件路径：优先首选音质（已下载 > 播放缓存）；
+  /// 若未命中首选音质，降级检索该歌曲已下载或播放缓存中的任意有效文件。无则 null。
+  String? localPathForAnyQuality(Song song, {AudioQuality? preferredQuality}) {
+    if (preferredQuality != null) {
+      final exact = localPathFor(song, preferredQuality);
+      if (exact != null) return exact;
+    }
+    // 降级1：遍历同 hash 的已下载文件（不限音质）
+    final download = _downloads[song.hash];
+    if (download?.status == DownloadStatus.downloaded &&
+        download?.filePath != null &&
+        File(download!.filePath!).existsSync()) {
+      return download.filePath;
+    }
+    // 降级2：遍历播放缓存中的任意条目（不限音质）
+    for (final entry in _playCache.values) {
+      if (entry.song.hash == song.hash && File(entry.filePath).existsSync()) {
+        return entry.filePath;
+      }
+    }
+    return null;
+  }
+
   bool isDownloaded(Song song) =>
       _downloads[song.hash]?.status == DownloadStatus.downloaded;
 

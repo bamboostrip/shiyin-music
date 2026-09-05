@@ -107,6 +107,23 @@ class ShuffleQueue {
     return _indices[_cursor];
   }
 
+  /// 查看下一首在原队列中的索引（不移动游标）。
+  int peekNext(int queueLength) {
+    if (queueLength <= 0) return -1;
+    if (queueLength == 1) return 0;
+
+    if (_indices.length != queueLength || _cursor < 0) {
+      reset(queueLength);
+    }
+
+    final nextCursor = _cursor + 1;
+    if (nextCursor < _indices.length) {
+      return _indices[nextCursor];
+    }
+
+    return _indices.isNotEmpty ? _indices.first : 0;
+  }
+
   /// 获取上一首在原队列中的索引。
   ///
   /// 精确回退到刚才播放的乱序前序歌曲；若已在第 0 首，回绕到打乱列表末尾。

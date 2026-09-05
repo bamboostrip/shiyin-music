@@ -27,6 +27,24 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool desktopLyricsEnabled = false;
   @override
+  bool desktopLyricsLocked = false;
+  int unlockDesktopLyricsCalls = 0;
+  int setDesktopLyricsEnabledCalls = 0;
+  @override
+  Future<void> unlockDesktopLyrics() async {
+    unlockDesktopLyricsCalls++;
+    desktopLyricsLocked = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setDesktopLyricsEnabled(bool enabled) async {
+    setDesktopLyricsEnabledCalls++;
+    desktopLyricsEnabled = enabled;
+    notifyListeners();
+  }
+
+  @override
   final ValueNotifier<Duration> positionListenable =
       ValueNotifier<Duration>(Duration.zero);
 
@@ -230,4 +248,87 @@ void main() {
       expect(bubble, findsNothing);
     });
   });
+
+  group('桌面歌词按钮', () {
+    testWidgets('桌面歌词开启且锁定时展示锁定图标与一键解锁 tooltip，点击触发解锁', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isDesktopLyricsSupported = true
+        ..desktopLyricsEnabled = true
+        ..desktopLyricsLocked = true;
+      await _pumpBar(tester, player);
+
+      expect(find.byIcon(Icons.lock_rounded), findsOneWidget);
+      expect(find.byTooltip('桌面歌词已锁定，点击一键解锁'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('桌面歌词已锁定，点击一键解锁'));
+      await tester.pump();
+
+      expect(player.unlockDesktopLyricsCalls, 1);
+      expect(player.desktopLyricsLocked, isFalse);
+      expect(find.byIcon(Icons.lyrics_rounded), findsOneWidget);
+      expect(find.byTooltip('关闭桌面歌词'), findsOneWidget);
+    });
+
+    testWidgets('桌面歌词未开启时展示空心图标，点击开启', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isDesktopLyricsSupported = true
+        ..desktopLyricsEnabled = false;
+      await _pumpBar(tester, player);
+
+      expect(find.byIcon(Icons.lyrics_outlined), findsOneWidget);
+      expect(find.byTooltip('开启桌面歌词'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('开启桌面歌词'));
+      await tester.pump();
+
+      expect(player.setDesktopLyricsEnabledCalls, 1);
+      expect(player.desktopLyricsEnabled, isTrue);
+    });
+
+    testWidgets('桌面歌词开启且未锁定时展示实心图标，点击关闭', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isDesktopLyricsSupported = true
+        ..desktopLyricsEnabled = true
+        ..desktopLyricsLocked = false;
+      await _pumpBar(tester, player);
+
+      expect(find.byIcon(Icons.lyrics_rounded), findsOneWidget);
+      expect(find.byTooltip('关闭桌面歌词'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('关闭桌面歌词'));
+      await tester.pump();
+
+      expect(player.setDesktopLyricsEnabledCalls, 1);
+      expect(player.desktopLyricsEnabled, isFalse);
+    });
+
+    testWidgets('无歌曲时按钮禁用', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = null
+        ..isDesktopLyricsSupported = true
+        ..desktopLyricsEnabled = true
+        ..desktopLyricsLocked = true;
+      await _pumpBar(tester, player);
+
+      final button = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.lock_rounded),
+      );
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('平台不支持时不渲染桌面歌词按钮', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isDesktopLyricsSupported = false;
+      await _pumpBar(tester, player);
+
+      expect(find.byTooltip('开启桌面歌词'), findsNothing);
+      expect(find.byTooltip('关闭桌面歌词'), findsNothing);
+      expect(find.byTooltip('桌面歌词已锁定，点击一键解锁'), findsNothing);
+    });
+  });
 }
+

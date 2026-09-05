@@ -160,20 +160,40 @@ class DesktopPlayerBar extends StatelessWidget {
                   animation: player,
                   builder: (context, _) {
                     final enabled = player.desktopLyricsEnabled;
-                    return IconButton(
-                      tooltip: enabled ? '关闭桌面歌词' : '开启桌面歌词',
-                      onPressed: song == null
+                    final locked = player.desktopLyricsLocked;
+                    final String tooltip;
+                    final IconData iconData;
+                    final Color color;
+                    final VoidCallback? onPressed;
+
+                    if (enabled && locked) {
+                      tooltip = '桌面歌词已锁定，点击一键解锁';
+                      iconData = Icons.lock_rounded;
+                      color = colorScheme.primary;
+                      onPressed = song == null
                           ? null
-                          : () => player.setDesktopLyricsEnabled(!enabled),
-                      icon: Icon(
-                        enabled
-                            ? Icons.lyrics_rounded
-                            : Icons.lyrics_outlined,
-                        size: 26,
-                      ),
-                      color: enabled
-                          ? colorScheme.primary
-                          : colorScheme.onSurface,
+                          : () => player.unlockDesktopLyrics();
+                    } else if (enabled) {
+                      tooltip = '关闭桌面歌词';
+                      iconData = Icons.lyrics_rounded;
+                      color = colorScheme.primary;
+                      onPressed = song == null
+                          ? null
+                          : () => player.setDesktopLyricsEnabled(false);
+                    } else {
+                      tooltip = '开启桌面歌词';
+                      iconData = Icons.lyrics_outlined;
+                      color = colorScheme.onSurface;
+                      onPressed = song == null
+                          ? null
+                          : () => player.setDesktopLyricsEnabled(true);
+                    }
+
+                    return IconButton(
+                      tooltip: tooltip,
+                      onPressed: onPressed,
+                      icon: Icon(iconData, size: 26),
+                      color: color,
                     );
                   },
                 ),

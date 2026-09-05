@@ -87,5 +87,22 @@ void main() {
       expect(nextSong, isNot(equals(8)));
       expect(shuffle.indices[shuffle.cursor], nextSong);
     });
+
+    test('peekNext 查看下一首且绝不推进游标', () {
+      final shuffle = ShuffleQueue();
+      const length = 10;
+      shuffle.reset(length, currentIndex: 3);
+
+      final initialCursor = shuffle.cursor;
+      final peeked = shuffle.peekNext(length);
+
+      // 游标未变
+      expect(shuffle.cursor, initialCursor);
+
+      // 实际调用 next 获得的对象与 peekNext 一致
+      final next = shuffle.next(length);
+      expect(next, peeked);
+      expect(shuffle.cursor, initialCursor + 1);
+    });
   });
 }

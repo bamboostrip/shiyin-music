@@ -134,6 +134,7 @@ class PlayerController extends ChangeNotifier {
       }
       _maybeCompleteFromPosition(value);
       _maybeStopClimaxPreview(value);
+      _maybePrecacheNext(value);
       _maybeSyncDesktopLyricFromPosition();
       _syncSuperLyricFromPosition();
       _syncBluetoothLyricsFromPosition();
@@ -256,6 +257,8 @@ class PlayerController extends ChangeNotifier {
   bool _isScrubbing = false;
   bool _isHandlingCompletion = false;
   String? _completedSongHash;
+  String? _precachedForSongHash;
+  bool _isPrecaching = false;
   bool _isAppForeground = true;
   bool _desktopLyricsPreviewVisible = false;
 
@@ -448,9 +451,15 @@ class PlayerController extends ChangeNotifier {
     _completionFallbackTimer?.cancel();
     _completedSongHash = null;
     _lastSmoothPosition = Duration.zero;
+    _precachedForSongHash = null;
 
     // 检查是否有本地音频缓存（已下载/播放缓存）或本地音频文件
-    final local = downloadController?.localPathFor(song, audioQuality);
+    var local = downloadController?.localPathFor(song, audioQuality);
+    // 离线/跨音质降级检索：若当前音质无缓存，查找是否有任意可用本地音质文件
+    local ??= downloadController?.localPathForAnyQuality(
+      song,
+      preferredQuality: audioQuality,
+    );
     final hasLocalAudio = local != null || song.source == SongSource.local;
 
     // 切新歌必须清空歌词并重置歌词行；同一首歌重播/从冷启动恢复播放时保留已有歌词防闪烁
@@ -1008,8 +1017,7 @@ class PlayerController extends ChangeNotifier {
     // 2. 后台静默刷新
     try {
       final fresh = await _api.lyrics(song);
-      if (currentSong?.hash != song.hash) return; // 已切歌，丢弃
-      if (!listEquals(lyrics, fresh)) {
+      if (currentSong?.hash == song.hash && !listEquals(lyrics, fresh)) {
         lyrics = fresh;
         notifyListeners();
       }
@@ -1771,16 +1779,23 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  bool get desktopLyricsLocked => desktopLyricsSettings.locked;
+
+  Future<void> setDesktopLyricsLocked(bool locked) async {
+    if (desktopLyricsSettings.locked == locked) return;
+    await updateDesktopLyricsSettings(
+      desktopLyricsSettings.copyWith(locked: locked),
+    );
+  }
+
+  Future<void> unlockDesktopLyrics() => setDesktopLyricsLocked(false);
+
   /// 子窗工具栏请求切换锁定：统一走 updateDesktopLyricsSettings（落盘 +
   /// notifyListeners 通知设置页 + 回推子窗后子窗重建并重设穿透）。
   /// 锁定语义 = QQ 音乐式全穿透；解锁入口为托盘/设置页。
   void _handleDesktopLyricsLockChanged(bool locked) {
     if (desktopLyricsSettings.locked == locked) return;
-    unawaited(
-      updateDesktopLyricsSettings(
-        desktopLyricsSettings.copyWith(locked: locked),
-      ),
-    );
+    unawaited(setDesktopLyricsLocked(locked));
   }
 
   Future<bool> checkDesktopLyricsPermission() =>
@@ -2356,7 +2371,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Song? _nextSong() {
+  Song? _nextSong({bool peek = false}) {
     if (queue.isEmpty) {
       return currentSong;
     }
@@ -2364,7 +2379,9 @@ class PlayerController extends ChangeNotifier {
     final index = currentIndex;
     if (playbackMode == PlaybackMode.shuffle) {
       if (queue.length == 1) return queue.first;
-      final nextIndex = _shuffleQueue.next(queue.length);
+      final nextIndex = peek
+          ? _shuffleQueue.peekNext(queue.length)
+          : _shuffleQueue.next(queue.length);
       if (nextIndex >= 0 && nextIndex < queue.length) {
         return queue[nextIndex];
       }
@@ -2377,6 +2394,70 @@ class PlayerController extends ChangeNotifier {
 
     return queue.first;
   }
+
+  void _maybePrecacheNext(Duration position) {
+    final song = currentSong;
+    if (song == null || duration <= Duration.zero) return;
+    if (_precachedForSongHash == song.hash || _isPrecaching) return;
+
+    final totalMs = duration.inMilliseconds;
+    final currentMs = position.inMilliseconds;
+    // 至少播放 15 秒（防快切）
+    if (currentMs < 15000) return;
+    final progress = totalMs > 0 ? currentMs / totalMs : 0.0;
+    final remainMs = totalMs - currentMs;
+
+    if (progress >= 0.70 || remainMs <= 25000) {
+      _precachedForSongHash = song.hash;
+      final next = _nextSong(peek: true);
+      if (next != null && next.hash != song.hash) {
+        unawaited(_precacheTrack(next));
+      }
+    }
+  }
+
+  Future<void> _precacheTrack(Song song) async {
+    _isPrecaching = true;
+    try {
+      // 1. 预拉取歌词并缓存
+      unawaited(loadLyrics(song));
+
+      // 2. 检查音频是否已有本地文件（已下载或播放缓存）
+      final local = downloadController?.localPathFor(song, audioQuality);
+      if (local != null || song.source == SongSource.local) {
+        return;
+      }
+
+      // 3. 异步解析音频 URL 并后台下载落盘到 PlayCache
+      final playUrl = await _resolvePlayUrl(song);
+      if (playUrl.url.isNotEmpty) {
+        await downloadController?.cacheForPlayback(
+          song,
+          audioQuality,
+          playUrl.url,
+        );
+      }
+    } catch (e) {
+      debugPrint('[时音][player] 预缓存失败静默忽略: ${song.title} ($e)');
+    } finally {
+      _isPrecaching = false;
+    }
+  }
+
+  @visibleForTesting
+  String? get precachedForSongHash => _precachedForSongHash;
+
+  @visibleForTesting
+  bool get isPrecaching => _isPrecaching;
+
+  @visibleForTesting
+  void maybePrecacheNext(Duration position) => _maybePrecacheNext(position);
+
+  @visibleForTesting
+  Future<void> precacheTrack(Song song) => _precacheTrack(song);
+
+  @visibleForTesting
+  Song? nextSong({bool peek = false}) => _nextSong(peek: peek);
 
   @override
   void dispose() {
