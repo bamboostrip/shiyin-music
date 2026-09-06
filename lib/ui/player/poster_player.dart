@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
@@ -25,6 +26,8 @@ class PosterPlayerPage extends StatefulWidget {
     required this.auth,
     required this.onArtistTap,
     this.onLyricTap,
+    this.onCoverTap,
+    this.onDismiss,
   });
 
   final PlayerController player;
@@ -33,56 +36,158 @@ class PosterPlayerPage extends StatefulWidget {
   final AuthController auth;
   final ValueChanged<Song> onArtistTap;
   final VoidCallback? onLyricTap;
+  final VoidCallback? onCoverTap;
+  final VoidCallback? onDismiss;
 
   @override
   State<PosterPlayerPage> createState() => _PosterPlayerPageState();
 }
 
 class _PosterPlayerPageState extends State<PosterPlayerPage>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
+  double _dragDownY = 0.0;
+  double _dragDistance = 0.0;
+  late final AnimationController _resetController;
+  late Animation<double> _resetAnimation;
+
   @override
   bool get wantKeepAlive => true;
 
   @override
+  void initState() {
+    super.initState();
+    _resetController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    )..addListener(() {
+        setState(() {
+          _dragDistance = _resetAnimation.value;
+        });
+      });
+  }
+
+  @override
+  void dispose() {
+    _resetController.dispose();
+    super.dispose();
+  }
+
+  void _onVerticalDragDown(DragDownDetails details) {
+    _dragDownY = details.globalPosition.dy;
+  }
+
+  void _onVerticalDragStart(DragStartDetails details) {
+    if (widget.onDismiss == null) return;
+    if (_resetController.isAnimating) {
+      _resetController.stop();
+    }
+    final slop = details.globalPosition.dy - _dragDownY;
+    if (slop > 0) {
+      _dragDistance = slop;
+    }
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    if (widget.onDismiss == null) return;
+    final delta = details.primaryDelta ?? 0.0;
+    // 阻尼处理：超过 80 之后位移系数降低
+    final factor = _dragDistance > 80.0 ? 0.6 : 1.0;
+    final newDistance = math.max(0.0, _dragDistance + delta * factor);
+    if (newDistance != _dragDistance) {
+      setState(() {
+        _dragDistance = newDistance;
+      });
+    }
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    if (widget.onDismiss == null) return;
+    final velocity = details.primaryVelocity ?? 0.0;
+    if (_dragDistance > 80.0 || velocity > 800.0) {
+      widget.onDismiss?.call();
+    } else {
+      _animateReset();
+    }
+  }
+
+  void _onVerticalDragCancel() {
+    if (widget.onDismiss == null) return;
+    if (_dragDistance > 0) {
+      _animateReset();
+    }
+  }
+
+  void _animateReset() {
+    _resetAnimation = Tween<double>(
+      begin: _dragDistance,
+      end: 0.0,
+    ).animate(CurvedAnimation(
+      parent: _resetController,
+      curve: Curves.easeOutCubic,
+    ));
+    _resetController.forward(from: 0.0);
+  }
+
+  @override
   Widget build(BuildContext context) {
     super.build(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxHeight < 650;
-        final horizontalPadding = compact ? 20.0 : 28.0;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragDown: widget.onDismiss != null ? _onVerticalDragDown : null,
+      onVerticalDragStart:
+          widget.onDismiss != null ? _onVerticalDragStart : null,
+      onVerticalDragUpdate:
+          widget.onDismiss != null ? _onVerticalDragUpdate : null,
+      onVerticalDragEnd: widget.onDismiss != null ? _onVerticalDragEnd : null,
+      onVerticalDragCancel:
+          widget.onDismiss != null ? _onVerticalDragCancel : null,
+      child: Transform.translate(
+        key: const Key('poster_player_dismiss_transform'),
+        offset: Offset(0, _dragDistance),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxHeight < 650;
+            final horizontalPadding = compact ? 20.0 : 28.0;
 
-        final maxArtworkHeight =
-            (constraints.maxHeight * (compact ? 0.34 : 0.42))
-                .clamp(130.0, 330.0);
-        final artworkMaxWidth = math.min(
-          constraints.maxWidth - horizontalPadding * 2,
-          maxArtworkHeight,
-        );
+            final maxArtworkHeight =
+                (constraints.maxHeight * (compact ? 0.34 : 0.42))
+                    .clamp(130.0, 330.0);
+            final artworkMaxWidth = math.min(
+              constraints.maxWidth - horizontalPadding * 2,
+              maxArtworkHeight,
+            );
 
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            compact ? 4 : 8,
-            horizontalPadding,
-            compact ? 10 : 16,
-          ),
-          child: Column(
-            children: [
-              const Spacer(),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: artworkMaxWidth),
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: Hero(
-                    tag: 'player_cover',
-                    child: Artwork(
-                      url: widget.song.coverUrl,
-                      size: double.infinity,
-                      borderRadius: 8,
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                compact ? 4 : 8,
+                horizontalPadding,
+                compact ? 10 : 16,
+              ),
+              child: Column(
+                children: [
+                  const Spacer(),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: artworkMaxWidth),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          widget.onCoverTap?.call();
+                        },
+                        child: Hero(
+                          tag: 'player_cover',
+                          child: Artwork(
+                            url: widget.song.coverUrl,
+                            size: double.infinity,
+                            borderRadius: 8,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
               SizedBox(height: compact ? 12 : 20),
               PosterSongInfoRow(
                 song: widget.song,
@@ -114,7 +219,9 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
           ),
         );
       },
-    );
+    ),
+  ),
+);
   }
 }
 

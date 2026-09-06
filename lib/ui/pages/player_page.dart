@@ -305,6 +305,8 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                         onQueue: widget.onQueue,
                                         auth: widget.auth,
                                         onArtistTap: _openArtist,
+                                        onCoverTap: () => _showMoreSheet(context),
+                                        onDismiss: widget.onClose,
                                         onLyricTap: () {
                                           if (_pageController.hasClients) {
                                             _pageController.animateToPage(
@@ -438,6 +440,15 @@ class _PlayerBodyState extends State<_PlayerBody> {
           player: widget.player,
         ),
       ),
+    );
+  }
+
+  void _showMoreSheet(BuildContext context) {
+    showPlayerMoreSheet(
+      context: context,
+      player: widget.player,
+      auth: widget.auth,
+      song: widget.song,
     );
   }
 }

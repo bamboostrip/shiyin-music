@@ -176,99 +176,114 @@ class TopBar extends StatelessWidget {
   }
 
   void _showMoreSheet(BuildContext context) {
-    showSongActionSheet(
+    showPlayerMoreSheet(
       context: context,
+      player: player,
+      auth: auth,
       song: song,
-      // PC：锚定到"更多"按钮下方（context 已由调用点传入按钮级 context）。
       anchor: anchorBelow(context),
-      actions: [
-        // Grid actions
+    );
+  }
+}
+
+void showPlayerMoreSheet({
+  required BuildContext context,
+  required PlayerController player,
+  required AuthController auth,
+  required Song song,
+  Offset? anchor,
+}) {
+  showSongActionSheet(
+    context: context,
+    song: song,
+    anchor: anchor,
+    actions: [
+      // Grid actions
+      SongSheetAction(
+        icon: Icons.speed_rounded,
+        title: '倍速',
+        subtitle: player.playbackSpeedLabel,
+        isGrid: true,
+        onTap: () => showPlaybackSpeedSheet(context: context, player: player),
+      ),
+      SongSheetAction(
+        icon: Icons.high_quality_rounded,
+        title: '音质',
+        subtitle: player.audioQuality.badge,
+        isGrid: true,
+        onTap: () => showAudioQualityPicker(context, player),
+      ),
+      if (player.isAudioEffectsSupported)
         SongSheetAction(
-          icon: Icons.speed_rounded,
-          title: '倍速',
-          subtitle: player.playbackSpeedLabel,
+          icon: Icons.graphic_eq_rounded,
+          title: '音效',
           isGrid: true,
-          onTap: () => showPlaybackSpeedSheet(context: context, player: player),
+          onTap: () =>
+              showAudioEffectsSheet(context: context, player: player),
         ),
+      SongSheetAction(
+        icon: Icons.auto_awesome_rounded,
+        title: '高潮',
+        isGrid: true,
+        onTap: () async {
+          final ok = await player.playClimaxPreview();
+          if (!ok) Toast.error('暂无高潮片段');
+        },
+      ),
+      SongSheetAction(
+        icon: Icons.bedtime_rounded,
+        title: '定时',
+        isGrid: true,
+        onTap: () => showSleepTimerSheet(context: context, player: player),
+      ),
+
+      if (player.isDesktopLyricsSupported) ...[
         SongSheetAction(
-          icon: Icons.high_quality_rounded,
-          title: '音质',
-          subtitle: player.audioQuality.badge,
-          isGrid: true,
-          onTap: () => showAudioQualityPicker(context, player),
-        ),
-        if (player.isAudioEffectsSupported)
-          SongSheetAction(
-            icon: Icons.graphic_eq_rounded,
-            title: '音效',
-            isGrid: true,
-            onTap: () =>
-                showAudioEffectsSheet(context: context, player: player),
-          ),
-        SongSheetAction(
-          icon: Icons.auto_awesome_rounded,
-          title: '高潮',
+          icon: player.desktopLyricsEnabled
+              ? Icons.lyrics_rounded
+              : Icons.lyrics_outlined,
+          title: '桌面歌词',
           isGrid: true,
           onTap: () async {
-            final ok = await player.playClimaxPreview();
-            if (!ok) Toast.error('暂无高潮片段');
+            Navigator.of(context).pop();
+            await player.setDesktopLyricsEnabled(
+              !player.desktopLyricsEnabled,
+            );
           },
         ),
-        SongSheetAction(
-          icon: Icons.bedtime_rounded,
-          title: '定时',
-          isGrid: true,
-          onTap: () => showSleepTimerSheet(context: context, player: player),
-        ),
-
-        if (player.isDesktopLyricsSupported) ...[
+        if (player.desktopLyricsEnabled)
           SongSheetAction(
-            icon: player.desktopLyricsEnabled
-                ? Icons.lyrics_rounded
-                : Icons.lyrics_outlined,
-            title: '桌面歌词',
+            icon: Icons.tune_rounded,
+            title: '歌词设置',
             isGrid: true,
-            onTap: () async {
-              Navigator.of(context).pop();
-              await player.setDesktopLyricsEnabled(
-                !player.desktopLyricsEnabled,
-              );
-            },
-          ),
-          if (player.desktopLyricsEnabled)
-            SongSheetAction(
-              icon: Icons.tune_rounded,
-              title: '歌词设置',
-              isGrid: true,
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DesktopLyricsSettingsPage(player: player),
-                ),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => DesktopLyricsSettingsPage(player: player),
               ),
-            ),
-        ],
-        SongSheetAction(
-          icon: Icons.queue_music_rounded,
-          title: '下一首',
-          isGrid: true,
-          onTap: () => addSongToQueueWithFeedback(
-            context: context,
-            player: player,
-            song: song,
-          ),
-        ),
-        // List actions
-        if (song.source == SongSource.kugou)
-          SongSheetAction(
-            icon: Icons.playlist_add_rounded,
-            title: '添加到歌单',
-            onTap: () => showAddToPlaylistSheet(
-              context: context,
-              auth: auth,
-              song: song,
             ),
           ),
       ],
-    );
-  }
+      SongSheetAction(
+        icon: Icons.queue_music_rounded,
+        title: '下一首',
+        isGrid: true,
+        onTap: () => addSongToQueueWithFeedback(
+          context: context,
+          player: player,
+          song: song,
+        ),
+      ),
+      // List actions
+      if (song.source == SongSource.kugou)
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          onTap: () => showAddToPlaylistSheet(
+            context: context,
+            auth: auth,
+            song: song,
+          ),
+        ),
+    ],
+  );
 }
