@@ -145,18 +145,32 @@ class DownloadController extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_downloadsIndexKey);
     if (raw == null || raw.isEmpty) return;
+    late final List decoded;
     try {
-      final list = jsonDecode(raw);
-      if (list is! List) return;
-      for (final item in list.whereType<Map<String, dynamic>>()) {
-        final song = Song.fromCache(
-          (item['song'] as Map).cast<String, dynamic>(),
-        );
+      decoded = jsonDecode(raw) as List;
+    } catch (_) {
+      return;
+    }
+    // 逐条容错：单条损坏只跳过该条，避免一条坏数据吃掉全表；
+    // 有裁剪则回写，把坏条/失联文件一次性清理，下次启动不再重复 IO
+    var dropped = 0;
+    for (final item in decoded) {
+      if (item is! Map<String, dynamic>) {
+        dropped++;
+        continue;
+      }
+      try {
+        final songMap = item['song'];
+        if (songMap is! Map) throw const FormatException('bad song');
+        final song = Song.fromCache(songMap.cast<String, dynamic>());
         final quality = AudioQuality.fromApiValue(item['quality'] as String?);
         final filePath = item['filePath'] as String?;
-        if (filePath == null) continue;
+        if (filePath == null) throw const FormatException('no path');
         // 校验文件存在性
-        if (!await _service.fileSize(filePath).then((s) => s > 0)) continue;
+        if (!await _service.fileSize(filePath).then((s) => s > 0)) {
+          dropped++;
+          continue;
+        }
         final downloadedAtStr = item['downloadedAt'] as String?;
         _downloads[song.hash] = DownloadEntry(
           song: song,
@@ -167,27 +181,45 @@ class DownloadController extends ChangeNotifier {
               ? DateTime.tryParse(downloadedAtStr)
               : null,
         );
+      } catch (_) {
+        dropped++;
       }
-    } catch (_) {}
+    }
+    if (dropped > 0) {
+      debugPrint('[时音][download] 索引裁剪 $dropped 条坏数据并回写');
+      await _persistDownloads();
+    }
   }
 
   Future<void> _loadPlayCache() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_playCacheIndexKey);
     if (raw == null || raw.isEmpty) return;
+    late final List decoded;
     try {
-      final list = jsonDecode(raw);
-      if (list is! List) return;
-      for (final item in list.whereType<Map<String, dynamic>>()) {
+      decoded = jsonDecode(raw) as List;
+    } catch (_) {
+      return;
+    }
+    var dropped = 0;
+    for (final item in decoded) {
+      if (item is! Map<String, dynamic>) {
+        dropped++;
+        continue;
+      }
+      try {
         final cacheKey = item['cacheKey'] as String? ?? '';
         final filePath = item['filePath'] as String?;
-        if (filePath == null) continue;
+        if (filePath == null) throw const FormatException('no path');
         // 校验文件存在性
         final size = await _service.fileSize(filePath);
-        if (size == 0) continue;
-        final song = Song.fromCache(
-          (item['song'] as Map).cast<String, dynamic>(),
-        );
+        if (size == 0) {
+          dropped++;
+          continue;
+        }
+        final songMap = item['song'];
+        if (songMap is! Map) throw const FormatException('bad song');
+        final song = Song.fromCache(songMap.cast<String, dynamic>());
         final quality = AudioQuality.fromApiValue(item['quality'] as String?);
         final cachedAtStr = item['cachedAt'] as String?;
         final entry = PlayCacheEntry(
@@ -202,8 +234,14 @@ class DownloadController extends ChangeNotifier {
         );
         _playCache[cacheKey] = entry;
         _indexPlayCacheEntry(entry);
+      } catch (_) {
+        dropped++;
       }
-    } catch (_) {}
+    }
+    if (dropped > 0) {
+      debugPrint('[时音][download] 播放缓存裁剪 $dropped 条坏数据并回写');
+      await _persistPlayCache();
+    }
   }
 
   void _indexPlayCacheEntry(PlayCacheEntry entry) {

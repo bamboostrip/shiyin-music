@@ -464,6 +464,58 @@ void main() {
     });
   });
 
+  group('DownloadController 索引逐条容错', () {
+    test('单条损坏不拖垮全表，坏条被裁剪并回写', () async {
+      final goodFile = File('${tempDir.path}/good_index.mp3')
+        ..writeAsStringSync('audio-data');
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'ka_music_downloads_index',
+        jsonEncode([
+          {
+            'song': testSong.toCache(),
+            'quality': AudioQuality.standard.apiValue,
+            'filePath': goodFile.path,
+            'downloadedAt': DateTime.now().toIso8601String(),
+          },
+          // 坏条1：song 不是 map
+          {
+            'song': 'corrupt',
+            'quality': 'x',
+            'filePath': '${tempDir.path}/nope.mp3',
+          },
+          // 坏条2：根本不是对象
+          'just-a-string',
+          // 坏条3：文件已不存在
+          {
+            'song': testSong.toCache(),
+            'quality': AudioQuality.high.apiValue,
+            'filePath': '${tempDir.path}/gone.mp3',
+          },
+        ]),
+      );
+
+      final controller = DownloadController(fakeService, fakeApi);
+      await controller.initialize();
+
+      // 好条存活
+      expect(controller.downloadedSongs.length, 1);
+      expect(
+        controller.localPathFor(
+          testSong,
+          AudioQuality.standard,
+        ),
+        goodFile.path,
+      );
+
+      // 回写后坏条消失，下次启动不再重复 IO
+      final rewritten = prefs.getString('ka_music_downloads_index');
+      final list = jsonDecode(rewritten!) as List;
+      expect(list.length, 1);
+    });
+  });
+
   group('PlayerController 智能预缓存流水线 (Player Precache)', () {
     late _FakeAudioPlayer fakePlayer;
     late _FakeMusicAudioHandler fakeAudioHandler;
