@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -160,6 +161,45 @@ void main() {
 
       expect(find.text('横屏模式'), findsOneWidget);
       expect(find.text('车机模式'), findsOneWidget);
+    });
+
+    testWidgets('移动端形态下即使运行在 Windows 上也不显示 Windows 限制提示', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        tester.view.physicalSize = const Size(400, 20000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pump(tester);
+
+        expect(find.text('响度均衡'), findsOneWidget);
+        expect(
+          find.text('基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Windows 仅支持压低偏响歌曲'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  });
+
+  group('桌面形态响度提示', () {
+    testWidgets('桌面形态在 Windows 平台上展示 Windows 限制提示', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester);
+
+        expect(find.text('响度均衡'), findsOneWidget);
+        expect(
+          find.text('基于 EBU R128 LUFS 标准化；Windows 仅支持压低偏响歌曲'),
+          findsOneWidget,
+        );
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
   });
 }

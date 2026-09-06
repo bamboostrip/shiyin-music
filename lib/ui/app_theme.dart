@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'design_tokens.dart';
@@ -62,6 +63,9 @@ class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: defaultTargetPlatform == TargetPlatform.windows
+          ? 'Microsoft YaHei UI'
+          : null,
       colorScheme: scheme,
       scaffoldBackgroundColor: transparentBackground
           ? Colors.transparent
@@ -81,10 +85,19 @@ class AppTheme {
         displaySmall: TextStyle(fontSize: 22, height: 1.4, fontWeight: FontWeight.w700),
       ),
       fontFamilyFallback: const [
+        'Microsoft YaHei UI',
+        'Microsoft YaHei',
+        'PingFang SC',
+        'Hiragino Sans GB',
+        'Noto Sans CJK SC',
+        'Noto Sans SC',
+        'Source Han Sans SC',
+        'Segoe UI',
         'SF Pro Display',
         'SF Pro Text',
         'Roboto',
         'Arial',
+        'sans-serif',
       ],
       appBarTheme: AppBarTheme(
         centerTitle: false,

@@ -108,12 +108,15 @@ class PlaybackSettingsSection extends StatelessWidget {
               // 平台差异如实标注：Windows(WinRT 音量 0..1)无法放大
               // 偏轻歌曲、只能压低偏响歌曲；macOS 无分析通道
               // （Rust 引擎未接入，见 form_factor.dart 清单）。
-              subtitle: switch (defaultTargetPlatform) {
-                TargetPlatform.windows =>
-                  '基于 EBU R128 LUFS 标准化；Windows 仅支持压低偏响歌曲',
-                TargetPlatform.macOS => 'macOS 暂不支持响度分析',
-                _ => '基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异',
-              },
+              // 移动端无需显示桌面平台专属限制提示。
+              subtitle: !isDesktopFormFactor
+                  ? '基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异'
+                  : switch (defaultTargetPlatform) {
+                      TargetPlatform.windows =>
+                        '基于 EBU R128 LUFS 标准化；Windows 仅支持压低偏响歌曲',
+                      TargetPlatform.macOS => 'macOS 暂不支持响度分析',
+                      _ => '基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异',
+                    },
               value: player.loudnessEnabled,
               onChanged: player.setLoudnessEnabled,
             ),
