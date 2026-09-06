@@ -15,8 +15,8 @@ import '../player/lyric_views.dart';
 import '../player/player_backdrops.dart';
 import '../player/player_top_bar.dart';
 import '../player/poster_player.dart';
-import '../widgets/artwork.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
+import '../widgets/queue_sheet.dart';
 import '../widgets/toast.dart';
 import 'artist_detail_page.dart';
 
@@ -61,9 +61,11 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 整页排除语义树：Windows 桌面 pop 动画期间 AnimatedBuilder 仍会
-    // 响应 player notifyListeners 重建子树，导致 AXTree 竞态原生崩溃。
+    // 整页排除语义树：仅桌面 Windows 需要——pop 动画期间 AnimatedBuilder
+    // 仍会响应 player notifyListeners 重建子树，导致 AXTree 竞态原生崩溃。
+    // 移动端/车机必须保留语义（TalkBack），故按平台门控。
     return ExcludeSemantics(
+      excluding: isDesktopPlatform,
       child: AnimatedBuilder(
         animation: widget.player,
         builder: (context, _) {
@@ -133,52 +135,14 @@ class _PlayerPageState extends State<PlayerPage> {
             auth: widget.auth,
             song: song,
             onClose: () => Navigator.of(context).pop(),
-            onQueue: () => _showQueue(context),
+            // 与底栏共用同一队列面板：点当前行只关面板不重播、删歌不重载
+            onQueue: () => showQueueSheet(context, widget.player),
           );
         },
       ),
     );
   }
 
-  void _showQueue(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (context) {
-        return AnimatedBuilder(
-          animation: widget.player,
-          builder: (context, _) {
-            return ListView.builder(
-              itemCount: widget.player.queue.length,
-              itemBuilder: (context, index) {
-                final song = widget.player.queue[index];
-                final active = widget.player.currentSong?.hash == song.hash;
-                return ListTile(
-                  selected: active,
-                  leading: Artwork(url: song.coverUrl, size: 44),
-                  title: Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    widget.player.playSong(song, queue: widget.player.queue);
-                  },
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
 }
 
 class _PlayerBody extends StatefulWidget {
@@ -367,6 +331,7 @@ class _PlayerBodyState extends State<_PlayerBody>
                           Expanded(
                             child: useSplitLayout
                                 ? ExcludeSemantics(
+                                    excluding: isDesktopPlatform,
                                     child: LandscapePlayerContent(
                                       player: widget.player,
                                       auth: widget.auth,

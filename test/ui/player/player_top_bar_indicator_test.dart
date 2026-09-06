@@ -136,14 +136,14 @@ void main() {
 
       expect(containers.length, 2);
 
-      // 左侧对应 Page 0（歌词页）：未激活状态（圆点）
+      // 左侧对应 Page 0（封面页）：未激活状态（圆点）
       final leftContainer = containers[0];
       expect(leftContainer.constraints?.maxWidth, 4.0);
       expect(leftContainer.constraints?.maxHeight, 3.5);
       final leftDecoration = leftContainer.decoration as BoxDecoration;
       expect(leftDecoration.color, Colors.white.withValues(alpha: 0.4));
 
-      // 右侧对应 Page 1（封面页）：激活状态（长条胶囊）
+      // 右侧对应 Page 1（歌词页）：激活状态（长条胶囊）
       final rightContainer = containers[1];
       expect(rightContainer.constraints?.maxWidth, 14.0);
       expect(rightContainer.constraints?.maxHeight, 3.5);
@@ -171,14 +171,14 @@ void main() {
 
       expect(containers.length, 2);
 
-      // 左侧对应 Page 0（歌词页）：激活状态（长条胶囊）
+      // 左侧对应 Page 0（封面页）：激活状态（长条胶囊）
       final leftContainer = containers[0];
       expect(leftContainer.constraints?.maxWidth, 14.0);
       expect(leftContainer.constraints?.maxHeight, 3.5);
       final leftDecoration = leftContainer.decoration as BoxDecoration;
       expect(leftDecoration.color, Colors.white);
 
-      // 右侧对应 Page 1（封面页）：未激活状态（圆点）
+      // 右侧对应 Page 1（歌词页）：未激活状态（圆点）
       final rightContainer = containers[1];
       expect(rightContainer.constraints?.maxWidth, 4.0);
       expect(rightContainer.constraints?.maxHeight, 3.5);
@@ -206,12 +206,12 @@ void main() {
         matching: find.byType(AnimatedContainer),
       );
 
-      // 点击左侧（歌词页，index 0）
+      // 点击左侧（封面页，index 0）
       await tester.tap(containers.first);
       await tester.pump();
       expect(selectedPage, 0);
 
-      // 点击右侧（封面页，index 1）
+      // 点击右侧（歌词页，index 1）
       await tester.tap(containers.last);
       await tester.pump();
       expect(selectedPage, 1);

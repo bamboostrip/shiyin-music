@@ -122,9 +122,11 @@ class _AppShellState extends State<AppShell> {
           child: Scaffold(
             body: Row(
               children: [
-                // ExcludeSemantics 规避 CarLeftPlayerPanel 频繁响应 player 更新
-                // 导致的 Windows AXTree 竞态崩溃（Flutter Windows 引擎 bug）
+                // ExcludeSemantics 规避频繁响应 player 更新导致的
+                // Windows AXTree 竞态崩溃（Flutter Windows 引擎 bug）。
+                // 仅桌面平台排除；车机分支跑在 Android 上，必须保留语义。
                 ExcludeSemantics(
+                  excluding: isDesktopPlatform,
                   child: CarLeftPlayerPanel(
                     player: widget.player,
                     auth: widget.auth,

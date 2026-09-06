@@ -4,6 +4,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../form_factor.dart';
 import '../player/player_route.dart';
 import 'artwork.dart';
 import 'queue_sheet.dart';
@@ -23,7 +24,10 @@ class MiniPlayer extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    // 迷你栏高频响应 player 更新，仅桌面 Windows 排除语义树
+    // （AXTree 竞态）；移动端保留 TalkBack 可读
     return ExcludeSemantics(
+      excluding: isDesktopPlatform,
       child: AnimatedBuilder(
         animation: player,
         builder: (context, _) {

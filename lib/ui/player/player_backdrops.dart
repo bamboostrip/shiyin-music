@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../models/music_models.dart';
+import '../form_factor.dart';
 
 class ArtworkBackground extends StatefulWidget {
   const ArtworkBackground({super.key, required this.song});
@@ -40,8 +41,9 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
     final maxDim = math.max(size.width, size.height);
     final squareSize = maxDim * 1.2;
 
-    // 旋转动画背景是纯装饰性的，排除语义树防止 Windows AXTree 竞态崩溃
+    // 旋转动画背景是纯装饰性的，仅桌面 Windows 排除语义树（AXTree 竞态）
     return ExcludeSemantics(
+      excluding: isDesktopPlatform,
       child: Stack(
         fit: StackFit.expand,
         children: [

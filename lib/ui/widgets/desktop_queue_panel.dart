@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import '../player/song_tap_handler.dart';
 import 'desktop_anchored_menu.dart';
 
 /// PC 播放队列面板首选尺寸（逻辑像素）。
@@ -70,9 +71,10 @@ class _DesktopQueuePanelState extends State<DesktopQueuePanel> {
   }
 
   int _indexOfCurrent() {
-    final hash = widget.player.currentSong?.hash;
-    if (hash == null) return -1;
-    return widget.player.queue.indexWhere((song) => song.hash == hash);
+    final current = widget.player.currentSong;
+    if (current == null) return -1;
+    // 空 hash 本地歌用 id 回退，避免空串全等误伤首行
+    return widget.player.queue.indexWhere((song) => isSameSong(current, song));
   }
 
   void _scrollToActive() {
@@ -170,7 +172,7 @@ class _DesktopQueuePanelState extends State<DesktopQueuePanel> {
         ),
       );
     }
-    final currentHash = player.currentSong?.hash;
+    final current = player.currentSong;
     return ListView.separated(
       controller: _scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -178,13 +180,18 @@ class _DesktopQueuePanelState extends State<DesktopQueuePanel> {
       separatorBuilder: (_, _) => const SizedBox(height: _kRowSpacing),
       itemBuilder: (context, index) {
         final song = player.queue[index];
-        final active = currentHash != null && song.hash == currentHash;
+        final active = isSameSong(current, song);
         return _DesktopQueueRow(
           song: song,
           index: index + 1,
           active: active,
           isPlaying: active && player.isPlaying,
           onTap: () {
+            // 点当前行只关面板（桌面单击选中语义下也不重头播）
+            if (isSameSong(player.currentSong, song)) {
+              Navigator.of(context).pop();
+              return;
+            }
             Navigator.of(context).pop();
             player.playSong(song, queue: player.queue);
           },

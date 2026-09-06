@@ -8,6 +8,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import '../form_factor.dart';
 import '../pages/comment_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
@@ -212,6 +213,9 @@ class PosterSongInfoRow extends StatelessWidget {
           listenable: auth,
           builder: (context, _) {
             final liked = auth.isLiked(song);
+            // 与顶栏/车机面板统一：仅酷狗源可喜欢，非酷狗禁用
+            // （喜欢走歌单 fileId 体系，非酷狗无稳定映射）
+            final likeEnabled = song.source == SongSource.kugou;
             return SizedBox(
               width: 44,
               height: 44,
@@ -219,14 +223,15 @@ class PosterSongInfoRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 iconSize: 26,
                 tooltip: liked ? '取消喜欢' : '喜欢',
-                onPressed: () => auth.toggleLike(song),
+                onPressed:
+                    likeEnabled ? () => auth.toggleLike(song) : null,
                 icon: Icon(
                   liked
                       ? Icons.favorite_rounded
                       : Icons.favorite_border_rounded,
                   color: liked
                       ? Colors.redAccent
-                      : Colors.white.withValues(alpha: .7),
+                      : Colors.white.withValues(alpha: likeEnabled ? .7 : .3),
                 ),
               ),
             );
@@ -490,11 +495,12 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
       fontWeight: FontWeight.w700,
     );
 
-    // 歌词预览每帧更新位置，用 ExcludeSemantics 防止 Windows AXTree 竞态崩溃
+    // 歌词预览每帧更新位置，仅桌面 Windows 排除语义树（AXTree 竞态）
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onLyricTap,
       child: ExcludeSemantics(
+        excluding: isDesktopPlatform,
         child: SizedBox(
           height: previewHeight,
           child: AnimatedSwitcher(

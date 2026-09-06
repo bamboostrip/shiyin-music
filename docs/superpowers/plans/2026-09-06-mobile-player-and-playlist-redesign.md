@@ -1,5 +1,9 @@
 # 移动端歌单吸顶与播放页 QQ 音乐布局重构实现计划
 
+> **实现偏差注记（2026-09-07）：** Task 2 实际落地为 PageView `[0: 封面主页, 1: 歌词页]` + `initialPage: 0`
+> （首屏封面，左滑看歌词；左指示点=封面、右指示点=歌词），与下文 Task 2 的 `[歌词, 封面]/initialPage: 1`
+> 不一致。保留实现（首屏封面更符合 QQ 习惯且省一次 lyric 构建），文档中 Task 2 的顺序描述以本注记为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 优化歌单页面移动端吸顶圆角动态消除缺口，重构移动端播放页面为 QQ 音乐主流布局（顶栏指示器、右侧封面/左侧歌词滑动、大标题+爱心拇指区、横向功能栏、封面点击弹菜单、下拉退出手势）。
@@ -101,7 +105,7 @@
 - `PosterActionRail`:
   - 水平排列：`[➕ 收藏到歌单]`, `[🎵 音效 / ⏰ 定时]`, `[⬇ 下载]`, `[💬 评论]`。
 - `PosterLyricPreview`:
-  - 简化为单行/双行清晰预览，点击触发 `onLyricTap`（调用 `pageController.animateToPage(0, ...)`）。
+  - 简化为单行/双行清晰预览，点击触发 `onLyricTap`（调用 `pageController.animateToPage(1, ...)`）。
 
 - [ ] **Step 1: 编写失败测试**
 创建 `test/ui/player/poster_player_layout_test.dart`，验证 `PosterPlayerPage` 下方存在歌曲标题、歌手、音质 tag、爱心按钮以及 4 个功能图标。
@@ -113,7 +117,7 @@
 在 `poster_player.dart` 中：
 1. 组合 `PosterSongInfoRow`（大字号标题 + 歌手 + 音质小 pill + 右侧爱心按钮）；
 2. 组合 `PosterActionRail`（包含加歌单、音效/定时、下载、评论）；
-3. 歌词预览行增加点击跳转到第 0 页（歌词页）的回调；
+3. 歌词预览行增加点击跳转到第 1 页（歌词页）的回调；
 4. 整体弹性排布，确保在不同手机屏幕高宽下自适应不溢出。
 
 - [ ] **Step 4: 运行测试验证通过**

@@ -1,9 +1,12 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../player/player_route.dart';
+import '../player/song_tap_handler.dart';
 import 'artwork.dart';
 import 'toast.dart';
 
@@ -390,7 +393,8 @@ class CarLeftPlayerPanel extends StatelessWidget {
                                 final current = player.currentSong;
                                 if (current == null) return;
                                 Navigator.of(sheetContext).pop();
-                                player.playSong(current, queue: [current]);
+                                // 与移动端队列语义对齐：静默换队不重载，驾驶时不断流
+                                unawaited(player.replaceQueue([current]));
                                 Toast.success('已清空播放队列');
                               }
                             : null,
@@ -428,7 +432,8 @@ class CarLeftPlayerPanel extends StatelessWidget {
                         separatorBuilder: (_, _) => const SizedBox(height: 2),
                         itemBuilder: (context, index) {
                           final song = player.queue[index];
-                          final active = player.currentSong?.hash == song.hash;
+                          final active =
+                              isSameSong(player.currentSong, song);
                           return ListTile(
                             selected: active,
                             leading: Artwork(url: song.coverUrl, size: 40, borderRadius: 8),
@@ -449,6 +454,11 @@ class CarLeftPlayerPanel extends StatelessWidget {
                                   )
                                 : null,
                             onTap: () {
+                              // 点当前行只关面板不重头播（与队列面板一致）
+                              if (isSameSong(player.currentSong, song)) {
+                                Navigator.of(sheetContext).pop();
+                                return;
+                              }
                               Navigator.of(sheetContext).pop();
                               player.playSong(song, queue: player.queue);
                             },

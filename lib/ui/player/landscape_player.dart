@@ -375,8 +375,10 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
           final coverSize = discSize * (widget.compact ? .58 : .70);
 
           return Center(
-            // 旋转唱片是纯装饰动画，排除语义树防止 Windows AXTree 竞态崩溃
+            // 旋转唱片是纯装饰动画，仅桌面 Windows 排除语义树
+            // （AXTree 竞态），移动端保留
             child: ExcludeSemantics(
+              excluding: isDesktopPlatform,
               child: SizedBox.square(
                 dimension: discSize,
                 child: AnimatedBuilder(
@@ -667,6 +669,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
 
     if (isDesktopFormFactor) {
       return ExcludeSemantics(
+        excluding: isDesktopPlatform,
         child: DesktopLyricList(
           player: player,
           songHash: widget.songHash,
@@ -682,7 +685,8 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     final inactiveFontSize = widget.compact ? 18.0 : 24.0;
 
     return ExcludeSemantics(
-      // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
+      // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，仅桌面排除
+      excluding: isDesktopPlatform,
       child: LyricView(
         controller: _lyricController,
         style: LyricStyles.default1.copyWith(

@@ -367,6 +367,7 @@ class _LyricViewportState extends State<LyricViewport>
     // 滚轮/触摸均可滚动，点击切歌，空闲自动跟随。
     if (isDesktopFormFactor) {
       return ExcludeSemantics(
+        excluding: isDesktopPlatform,
         child: DesktopLyricList(
           player: widget.player,
           songHash: widget.songHash,
@@ -412,7 +413,8 @@ class _LyricViewportState extends State<LyricViewport>
     );
 
     return ExcludeSemantics(
-      // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，排除语义树
+      // 歌词视图高频更新会触发 Windows AXTree 竞态，仅桌面排除
+      excluding: isDesktopPlatform,
       child: LyricView(controller: _lyricController, style: lyricStyle),
     );
   }
