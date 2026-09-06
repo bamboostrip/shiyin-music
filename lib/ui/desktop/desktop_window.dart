@@ -23,7 +23,25 @@ class DesktopWindow {
   /// 初始化窗口：恢复上次几何 → 应用最小尺寸 → 显示窗口。
   /// 必须在 runApp 之前 await 调用。
   static Future<void> ensureInitialized() async {
-    if (!isDesktopFormFactor) return;
+    if (!isDesktopFormFactor) {
+      // 桌面宿主（Windows 等）在调试移动端形态时，调整窗口为手机竖屏比例便于预览
+      if (isDesktopPlatform) {
+        try {
+          await windowManager.ensureInitialized();
+          const options = WindowOptions(
+            size: Size(420, 860),
+            minimumSize: Size(360, 520),
+            title: '时音 (移动端调试)',
+            titleBarStyle: TitleBarStyle.normal,
+          );
+          await windowManager.waitUntilReadyToShow(options, () async {
+            await windowManager.show();
+            await windowManager.focus();
+          });
+        } catch (_) {}
+      }
+      return;
+    }
     await windowManager.ensureInitialized();
     // 关闭拦截尽早打开：恢复链（读取几何/钳制/最大化）耗时期间用户点 X
     // 也必须走 [_WindowGeometrySaver.onWindowClose]，否则窗口被原生直接

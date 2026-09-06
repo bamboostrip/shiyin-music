@@ -22,4 +22,11 @@ void main() {
     debugDesktopFormFactorOverride = true;
     expect(isDesktopFormFactor, isTrue);
   });
+
+  test('isDesktopPlatform 真实反映宿主平台', () {
+    expect(isDesktopPlatform, isTrue);
+    debugDesktopFormFactorOverride = false;
+    // isDesktopPlatform 不受 debugDesktopFormFactorOverride 影响
+    expect(isDesktopPlatform, isTrue);
+  });
 }

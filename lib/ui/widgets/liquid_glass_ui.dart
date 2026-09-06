@@ -190,7 +190,7 @@ class LiquidGlassSheetContainer extends StatelessWidget {
   const LiquidGlassSheetContainer({
     super.key,
     required this.child,
-    this.borderRadius = AppRadius.xxl,
+    this.borderRadius = AppRadius.lg,
     this.padding,
     this.constraints,
   });
