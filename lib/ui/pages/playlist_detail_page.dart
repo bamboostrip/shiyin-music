@@ -84,6 +84,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   // 避免列表被替换导致滚动位置丢失）。
   bool _isExpandingQueue = false;
   bool _allSongsLoaded = false;
+  // 全量加载代际：页面退出/重新加载时 +1，使在途的 _loadAllSongs
+  // 在下一个 await 后自行放弃（逻辑 CancelToken，MusicApi 的 Rust
+  // 通道不支持 dio CancelToken，只能靠代际丢弃结果，避免退出后
+  // 仍写缓存/ setState 浪费流量与内存）。
+  int _loadGeneration = 0;
+  bool _disposed = false;
+  // 大歌单分片粒度：toCache/fromCache 的同步循环每 500 条让出一帧，
+  // 避免千首大单一次性阻塞 UI（5000 条约 10 片，每片 <8ms）。
+  static const int _cacheChunkSize = 500;
   bool _isSelecting = false;
   bool _selectAllMode = false;
   final Set<String> _selectedKeys = {};
@@ -198,6 +207,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   @override
   void dispose() {
+    _disposed = true;
+    // 代际 +1：在途全量加载在下一个 await 后自行放弃，不再 setState/写缓存
+    _loadGeneration++;
     if (widget.playlist.isLikedPlaylist) {
       widget.auth.removeListener(_onLikedChanged);
     }
@@ -267,8 +279,14 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   /// [silent] 为 true 时为点歌后的后台静默补全：不置位
   /// [_isLoadingAllSongs]，不把列表替换成全屏 loading，
   /// 从而保留滚动位置；仅在结束时增量追加。
+  ///
+  /// 取消语义：调用时捕获 [_loadGeneration]，每个 await 后检查代际；
+  /// 页面退出/重新加载导致代际变化时直接放弃，不 setState、不写缓存。
+  /// 不改变触发时机与队列扩展逻辑（上滑仍分页，计数口径不变）。
   Future<void> _loadAllSongs({bool silent = false}) async {
     if (_isLoadingAllSongs || _isExpandingQueue || _allSongsLoaded) return;
+    if (_disposed) return;
+    final gen = _loadGeneration;
     if (silent) {
       _isExpandingQueue = true;
     } else {
@@ -292,25 +310,53 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           ttl: AppConfig.playlistDetailTtl,
         );
       } catch (_) {}
+      if (_disposed || gen != _loadGeneration) return;
 
       List<Song> allSongs;
       if (fullCached != null) {
-        allSongs = (fullCached.data['songs'] as List? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(Song.fromCache)
-            .where((song) => song.hash.isNotEmpty)
-            .toList();
+        // 分片解析：大单 fromCache 同步循环每片让出一帧，避免卡顿；
+        // 中途代际变化直接放弃。
+        final raw =
+            (fullCached.data['songs'] as List? ?? const [])
+                .whereType<Map<String, dynamic>>()
+                .toList();
+        allSongs = [];
+        for (var i = 0; i < raw.length; i += _cacheChunkSize) {
+          if (_disposed || gen != _loadGeneration) return;
+          final end = (i + _cacheChunkSize).clamp(0, raw.length);
+          for (var j = i; j < end; j++) {
+            final song = Song.fromCache(raw[j]);
+            if (song.hash.isNotEmpty) allSongs.add(song);
+          }
+          // 非末片让出一帧，保持列表可滚动
+          if (end < raw.length) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
       } else {
         allSongs = _isAlbum
             ? await widget.api.albumSongs(id, page: 1, pageSize: 5000)
             : await widget.api.playlistSongs(id, fetchAll: true);
+        if (_disposed || gen != _loadGeneration) return;
+        // 分片写缓存：toCache 同步映射同样分片让帧；取消后不写，
+        // 避免退出后仍做大 JSON 编码浪费电量。
+        final cacheList = <Map<String, dynamic>>[];
+        for (var i = 0; i < allSongs.length; i += _cacheChunkSize) {
+          if (_disposed || gen != _loadGeneration) return;
+          final end = (i + _cacheChunkSize).clamp(0, allSongs.length);
+          for (var j = i; j < end; j++) {
+            cacheList.add(allSongs[j].toCache());
+          }
+          if (end < allSongs.length) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
         // 写入完整歌单缓存，后续播放可直接复用
-        await _cache.write(fullCacheKey, {
-          'songs': allSongs.map((s) => s.toCache()).toList(),
-        });
+        await _cache.write(fullCacheKey, {'songs': cacheList});
+        if (_disposed || gen != _loadGeneration) return;
       }
 
-      if (!mounted) {
+      if (!mounted || _disposed || gen != _loadGeneration) {
         _isExpandingQueue = false;
         return;
       }
@@ -355,7 +401,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     unawaited(() async {
       // 静默补全：不弹全屏 loading、不重置滚动位置。
       await _loadAllSongs(silent: true);
-      if (!mounted || startedKey.isEmpty) return;
+      if (!mounted || _disposed || startedKey.isEmpty) return;
       final current = widget.player.currentSong;
       if (current == null) return;
       final currentKey = current.hash.isNotEmpty ? current.hash : current.id;
@@ -372,6 +418,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   Future<void> _loadInitial() async {
+    // 新一轮初始加载使在途全量补全失效（代际取消），避免旧单结果
+    // 追加到新单列表里。
+    _loadGeneration++;
     setState(() {
       _isInitialLoading = true;
       _isLoadingMore = false;
