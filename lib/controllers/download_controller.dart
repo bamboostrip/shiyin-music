@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -117,6 +118,14 @@ class DownloadController extends ChangeNotifier {
   /// 桌面下载完成通知（仅桌面形态由 main.dart 注入；移动端/车机为 null，
   /// 全部通知逻辑零开销跳过）。
   DesktopDownloadNotifier? desktopNotifier;
+
+  /// 代际：clearAll 时递增，在途传输与批量 worker 凭此丢弃过期结果，
+  /// 避免清空后复活 failed/downloaded 条目。
+  int _generation = 0;
+
+  /// 在播本地路径提供方（main.dart 注入 player 的当前歌曲路径）。
+  /// 清理/裁剪时保护该文件，避免播一半被删导致后续 Range 404。
+  String? Function()? playingPathProvider;
 
   int _playCacheLimit = 300 * 1024 * 1024; // 默认 300MB
   int get playCacheLimit => _playCacheLimit;
@@ -417,6 +426,9 @@ class DownloadController extends ChangeNotifier {
     var skipped = 0;
     var failed = 0;
     var cursor = 0;
+    // 代际快照：中途 clearAll 会递增代际，worker 凭此停掉，
+    // 不再把旧批次结果写回已清空的表
+    final gen = _generation;
 
     // 桌面形态：整个批次结束后一次性通知（[BatchDownloadTracker]），
     // 避免批量下载每曲一弹刷屏；移动端 desktopNotifier 为 null 直接跳过。
@@ -429,7 +441,7 @@ class DownloadController extends ChangeNotifier {
     }
 
     Future<void> worker() async {
-      while (cursor < songs.length) {
+      while (cursor < songs.length && gen == _generation) {
         final song = songs[cursor++];
         final hash = song.hash;
         final existing = _downloads[hash];
@@ -513,6 +525,8 @@ class DownloadController extends ChangeNotifier {
     BatchDownloadTracker? batchTracker,
   }) async {
     final hash = song.hash;
+    // 代际快照：clearAll 后完成的传输直接丢弃，不复活条目
+    final gen = _generation;
     var succeeded = false;
     try {
       final path = await _service.download(
@@ -528,6 +542,10 @@ class DownloadController extends ChangeNotifier {
           }
         },
       );
+      if (gen != _generation) {
+        debugPrint('[时音][download] 代际过期，丢弃传输结果: ${song.title}');
+        return;
+      }
       _downloads[hash] = DownloadEntry(
         song: song,
         quality: quality,
@@ -540,6 +558,16 @@ class DownloadController extends ChangeNotifier {
       await _persistDownloads();
       succeeded = true;
     } catch (error) {
+      if (gen != _generation) {
+        // 清空后落地的过期结果（含取消）：直接丢弃，不复活条目
+        return;
+      }
+      if (error is DioException && error.type == DioExceptionType.cancel) {
+        // 用户主动取消：保持移除状态，不写失败条目（否则“已取消”变“下载失败”）
+        _downloads.remove(hash);
+        notifyListeners();
+        return;
+      }
       _downloads[hash] = DownloadEntry(
         song: song,
         quality: quality,
@@ -625,10 +653,12 @@ class DownloadController extends ChangeNotifier {
   /// 清空所有已下载歌曲。
   ///
   /// 快照后删除：传输协程可能在 await 间隙改 [_downloads]，直接遍历
-  /// values 会抛 ConcurrentModificationError。先取消在途任务再删文件。
+  /// values 会抛 ConcurrentModificationError。先取消在途任务再删文件，
+  /// 并递增代际使在途传输与批量 worker 丢弃过期结果（不复活条目）。
   /// 注意：在播文件如正被代理 openRead serving，删后后续 Range 会 404；
   /// 跨控制器停播/跳过需 player 协作，属大改，另开分支处理，这里只保不崩。
   Future<void> clearAllDownloads() async {
+    _generation++;
     final snapshot = List.of(_downloads.values);
     for (final entry in snapshot) {
       if (entry.status == DownloadStatus.downloading) {
@@ -688,11 +718,25 @@ class DownloadController extends ChangeNotifier {
     }
   }
 
-  /// 清空所有播放缓存。
-  Future<void> clearPlayCache() async {
-    await _service.clearPlayCacheDir();
-    _playCache.clear();
+  /// 清空所有播放缓存（保留在播文件与在途任务条目）。
+  ///
+  /// 在播文件由 [playingPathProvider] 提供保护（删了播一半会 404 中断）；
+  /// 在途任务的索引条目保留，任务结束自己写回；service 层同时跳过
+  /// exclude 与 .part 半成品。
+  Future<void> clearPlayCache({Set<String> excludePaths = const {}}) async {
+    final effective = <String>{...excludePaths};
+    final playing = playingPathProvider?.call();
+    if (playing != null) effective.add(playing);
+    final inFlight = _service.inFlightCacheKeys;
+    await _service.clearPlayCacheDir(excludePaths: effective);
+    _playCache.removeWhere(
+      (key, e) =>
+          !effective.contains(e.filePath) && !inFlight.contains(key),
+    );
     _playCacheByHash.clear();
+    for (final e in _playCache.values) {
+      _indexPlayCacheEntry(e);
+    }
     notifyListeners();
     await _persistPlayCache();
   }
@@ -711,6 +755,11 @@ class DownloadController extends ChangeNotifier {
   }
 
   Future<void> _prunePlayCache({Set<String> excludePaths = const {}}) async {
+    // 在播文件永远不参与 LRU 驱逐（调小上限/启动清理时正在播的最旧文件
+    // 也不能删，否则播一半 404）
+    final playing = playingPathProvider?.call();
+    final effective =
+        playing == null ? excludePaths : {...excludePaths, playing};
     final entries =
         _playCache.values
             .map(
@@ -726,14 +775,14 @@ class DownloadController extends ChangeNotifier {
     await _service.prunePlayCache(
       entries,
       maxBytes: _playCacheLimit,
-      excludePaths: excludePaths,
+      excludePaths: effective,
     );
 
     // 清理后校验索引，移除已删除的条目
     final toRemove = <String>[];
     for (final entry in _playCache.values) {
       final size = await _service.fileSize(entry.filePath);
-      if (size == 0 && !excludePaths.contains(entry.filePath)) {
+      if (size == 0 && !effective.contains(entry.filePath)) {
         toRemove.add(entry.cacheKey);
       }
     }

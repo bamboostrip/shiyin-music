@@ -156,6 +156,13 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
       ..cacheService = _cacheService
       ..localMusic = _localMusic
       ..vipClaim = _auth.vipClaim;
+    // 在播保护：清理/裁剪播放缓存时跳过当前歌曲本地文件（删了播一半 404）。
+    // 闭包惰性求值，_player 已赋值后才会被调用，无 late 空窗。
+    _downloads.playingPathProvider = () {
+      final cur = _player.currentSong;
+      if (cur == null) return null;
+      return _downloads.localPathForAnyQuality(cur);
+    };
     unawaited(NetworkMonitor.instance.start());
     _theme = widget.themeController;
     _auth.restore();

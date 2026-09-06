@@ -42,6 +42,8 @@ class DownloadService {
     receiveTimeout: const Duration(minutes: 10),
   ));
   final Map<String, CancelToken> _cancelTokens = {};
+  // key -> 在途 .part 路径（清理时识别 transient 半成品）
+  final Map<String, String> _partPaths = {};
   final int _maxConcurrent = AppConfig.maxConcurrentDownloads;
   int _running = 0;
   final List<_PendingTask> _queue = [];
@@ -258,6 +260,7 @@ class DownloadService {
     }
     final cancelToken = CancelToken();
     _cancelTokens[key] = cancelToken;
+    _partPaths[key] = partPath;
 
     try {
       try {
@@ -305,6 +308,7 @@ class DownloadService {
       return finalPath;
     } finally {
       _cancelTokens.remove(key);
+      _partPaths.remove(key);
     }
   }
 
@@ -413,6 +417,9 @@ class DownloadService {
     }
   }
 
+  /// 在途任务 key 快照（清理时保留对应索引条目，任务结束会自己写回）。
+  Set<String> get inFlightCacheKeys => Set.of(_cancelTokens.keys);
+
   /// 取消下载/缓存任务。
   Future<void> cancel(String cacheKey) async {
     final token = _cancelTokens[cacheKey];
@@ -473,14 +480,33 @@ class DownloadService {
   }
 
   /// 清空整个播放缓存目录。
-  Future<void> clearPlayCacheDir() async {
+  ///
+  /// [excludePaths] 中的文件跳过（在播文件）；`.part` 半成品默认跳过——
+  /// 在途任务结束会自己 rename，删了必失败；超过 24h 的孤儿 part（崩溃
+  /// 残留）才顺手回收，避免无限堆积。
+  Future<void> clearPlayCacheDir({Set<String> excludePaths = const {}}) async {
     final dir = await playCacheDir();
-    if (dir.existsSync()) {
-      await for (final entity in dir.list()) {
-        if (entity is File) {
-          await entity.delete();
+    if (!dir.existsSync()) return;
+    final inFlightParts = Set.of(_partPaths.values);
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final path = entity.path;
+      if (excludePaths.contains(path)) continue;
+      if (path.endsWith('.part')) {
+        if (inFlightParts.contains(path)) continue;
+        try {
+          final stat = await entity.stat();
+          if (DateTime.now().difference(stat.modified) <
+              const Duration(hours: 24)) {
+            continue;
+          }
+        } catch (_) {
+          continue;
         }
       }
+      try {
+        await entity.delete();
+      } catch (_) {}
     }
   }
 
