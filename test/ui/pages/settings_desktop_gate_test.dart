@@ -129,6 +129,34 @@ void main() {
       expect(find.text('关闭时最小化到托盘'), findsNothing);
       expect(find.text('重置窗口'), findsNothing);
     });
+
+    testWidgets('手机视口也显示横屏/车机开关（残留值可改）', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      // 手机视口：最短边 <600（此前提下旧逻辑会藏起开关）；
+      // 高度拉满使懒加载 ListView 一次性构建全部条目（免滚动断言）。
+      tester.view.physicalSize = const Size(400, 20000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final vipClaim = _FakeVipClaim();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: Toast.navigatorKey,
+          home: Scaffold(
+            body: SettingsPage(
+              api: _FakeApi(),
+              auth: _FakeAuth(vipClaim),
+              player: _FakePlayer(),
+              theme: _FakeTheme(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('横屏模式'), findsOneWidget);
+      expect(find.text('车机模式'), findsOneWidget);
+    });
   });
 }
 
@@ -274,6 +302,9 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
 
   @override
   bool get addListeningTimeEnabled => false;
+
+  @override
+  bool get allowCellularPrecache => false;
 
   @override
   bool get isDesktopLyricsSupported => true;

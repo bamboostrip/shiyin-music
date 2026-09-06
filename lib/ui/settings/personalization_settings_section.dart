@@ -8,8 +8,8 @@ import 'settings_widgets.dart';
 
 /// 设置页「个性化」分节。
 ///
-/// [showOrientationTiles] 由页面按形态计算后传入（横屏/车机只在平板上
-/// 出现）；[onSelectFontScale] 由页面注入（字体大小弹窗保留在
+/// [showOrientationTiles] 由页面按形态计算后传入（移动端手机+平板展示，
+/// 桌面不展示）；[onSelectFontScale] 由页面注入（字体大小弹窗保留在
 /// settings_page）。
 class PersonalizationSettingsSection extends StatelessWidget {
   const PersonalizationSettingsSection({
