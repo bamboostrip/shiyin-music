@@ -1,7 +1,10 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import '../player/song_tap_handler.dart';
 import 'artwork.dart';
 import 'toast.dart';
 
@@ -83,14 +86,18 @@ Future<void> showQueueSheet(
                       separatorBuilder: (_, _) => const SizedBox(height: 2),
                       itemBuilder: (context, index) {
                         final song = player.queue[index];
-                        final active =
-                            player.currentSong?.hash == song.hash;
+                        final active = isSameSong(player.currentSong, song);
                         return QueueTile(
                           song: song,
                           index: index + 1,
                           active: active,
                           isPlaying: active && player.isPlaying,
                           onTap: () {
+                            // 点到当前歌只关面板不重播（对齐列表页 318eea8）
+                            if (isSameSong(player.currentSong, song)) {
+                              Navigator.of(sheetContext).pop();
+                              return;
+                            }
                             Navigator.of(sheetContext).pop();
                             player.playSong(song, queue: player.queue);
                           },
@@ -112,6 +119,9 @@ Future<void> showQueueSheet(
 }
 
 /// 从队列中移除指定项（保留当前播放歌曲）。
+///
+/// 非当前行仅静默换队列（replaceQueue），不重载当前歌，避免删一首
+/// 歌就把正在播的歌回 0 重转；删当前行才切到同位置新歌。
 void removeFromQueue(
   BuildContext sheetContext,
   PlayerController player,
@@ -123,28 +133,28 @@ void removeFromQueue(
   final current = player.currentSong;
   if (current == null) return;
 
-  if (removed.hash == current.hash) {
+  if (isSameSong(current, removed)) {
     // 删除的是当前播放歌曲：切到同位置的新歌
     final nextIndex = index.clamp(0, newQueue.length - 1);
     if (newQueue.isEmpty) {
       Navigator.of(sheetContext).pop();
-      player.playSong(current, queue: [current]);
+      unawaited(player.replaceQueue([current]));
       return;
     }
     Navigator.of(sheetContext).pop();
-    player.playSong(newQueue[nextIndex], queue: newQueue);
+    unawaited(player.playSong(newQueue[nextIndex], queue: newQueue));
   } else {
     // 非当前歌曲：仅更新队列，不打断播放
-    player.playSong(current, queue: newQueue);
+    unawaited(player.replaceQueue(newQueue));
   }
 }
 
-/// 清空队列（仅保留当前播放歌曲）。
+/// 清空队列（仅保留当前播放歌曲，不重载）。
 void clearQueue(BuildContext sheetContext, PlayerController player) {
   final current = player.currentSong;
   if (current == null) return;
   Navigator.of(sheetContext).pop();
-  player.playSong(current, queue: [current]);
+  unawaited(player.replaceQueue([current]));
   Toast.success('已清空播放队列');
 }
 
