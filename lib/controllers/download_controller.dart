@@ -108,6 +108,10 @@ class DownloadController extends ChangeNotifier {
 
   final Map<String, DownloadEntry> _downloads = {}; // key = hash
   final Map<String, PlayCacheEntry> _playCache = {}; // key = hash_quality
+  // 同曲索引：hash -> cacheKey 集合，避免 AnyQuality 查询时 O(n) 全表
+  // 扫描 + 逐条 existsSync。内存增量仅为 key 字符串引用复用
+  // （Song/路径对象本身不复制），千条约几十 KB，车机可忽略。
+  final Map<String, Set<String>> _playCacheByHash = {};
   bool _initialized = false;
 
   /// 桌面下载完成通知（仅桌面形态由 main.dart 注入；移动端/车机为 null，
@@ -186,7 +190,7 @@ class DownloadController extends ChangeNotifier {
         );
         final quality = AudioQuality.fromApiValue(item['quality'] as String?);
         final cachedAtStr = item['cachedAt'] as String?;
-        _playCache[cacheKey] = PlayCacheEntry(
+        final entry = PlayCacheEntry(
           cacheKey: cacheKey,
           song: song,
           quality: quality,
@@ -196,8 +200,25 @@ class DownloadController extends ChangeNotifier {
               ? DateTime.tryParse(cachedAtStr) ?? DateTime.now()
               : DateTime.now(),
         );
+        _playCache[cacheKey] = entry;
+        _indexPlayCacheEntry(entry);
       }
     } catch (_) {}
+  }
+
+  void _indexPlayCacheEntry(PlayCacheEntry entry) {
+    final set = _playCacheByHash.putIfAbsent(
+      entry.song.hash,
+      () => <String>{},
+    );
+    set.add(entry.cacheKey);
+  }
+
+  void _unindexPlayCacheEntry(PlayCacheEntry entry) {
+    final set = _playCacheByHash[entry.song.hash];
+    if (set == null) return;
+    set.remove(entry.cacheKey);
+    if (set.isEmpty) _playCacheByHash.remove(entry.song.hash);
   }
 
   Future<void> _persistDownloads() async {
@@ -257,6 +278,9 @@ class DownloadController extends ChangeNotifier {
 
   /// 返回本地文件路径：优先首选音质（已下载 > 播放缓存）；
   /// 若未命中首选音质，降级检索该歌曲已下载或播放缓存中的任意有效文件。无则 null。
+  ///
+  /// 性能：同曲索引 [_playCacheByHash] 使降级只检查同 hash 的 1~2 条，
+  /// 而非全表 O(n) existsSync。切歌主流程同步 IO 从 n 次降到常数次。
   String? localPathForAnyQuality(Song song, {AudioQuality? preferredQuality}) {
     if (preferredQuality != null) {
       final exact = localPathFor(song, preferredQuality);
@@ -269,10 +293,14 @@ class DownloadController extends ChangeNotifier {
         File(download!.filePath!).existsSync()) {
       return download.filePath;
     }
-    // 降级2：遍历播放缓存中的任意条目（不限音质）
-    for (final entry in _playCache.values) {
-      if (entry.song.hash == song.hash && File(entry.filePath).existsSync()) {
-        return entry.filePath;
+    // 降级2：同曲索引取候选（通常 1 条），只做常数次 existsSync
+    final keys = _playCacheByHash[song.hash];
+    if (keys != null) {
+      for (final key in keys) {
+        final entry = _playCache[key];
+        if (entry != null && File(entry.filePath).existsSync()) {
+          return entry.filePath;
+        }
       }
     }
     return null;
@@ -588,7 +616,7 @@ class DownloadController extends ChangeNotifier {
         url: url,
       );
       final size = await _service.fileSize(path);
-      _playCache[key] = PlayCacheEntry(
+      final entry = PlayCacheEntry(
         cacheKey: key,
         song: song,
         quality: quality,
@@ -596,6 +624,8 @@ class DownloadController extends ChangeNotifier {
         size: size,
         cachedAt: DateTime.now(),
       );
+      _playCache[key] = entry;
+      _indexPlayCacheEntry(entry);
       notifyListeners();
       await _persistPlayCache();
       // LRU 清理
@@ -609,6 +639,7 @@ class DownloadController extends ChangeNotifier {
   Future<void> clearPlayCache() async {
     await _service.clearPlayCacheDir();
     _playCache.clear();
+    _playCacheByHash.clear();
     notifyListeners();
     await _persistPlayCache();
   }
@@ -620,6 +651,7 @@ class DownloadController extends ChangeNotifier {
     if (entry != null) {
       await _service.deleteFile(entry.filePath);
       _playCache.remove(key);
+      _unindexPlayCacheEntry(entry);
       notifyListeners();
       await _persistPlayCache();
     }
@@ -654,7 +686,8 @@ class DownloadController extends ChangeNotifier {
     }
     if (toRemove.isNotEmpty) {
       for (final key in toRemove) {
-        _playCache.remove(key);
+        final removed = _playCache.remove(key);
+        if (removed != null) _unindexPlayCacheEntry(removed);
       }
       notifyListeners();
       await _persistPlayCache();
