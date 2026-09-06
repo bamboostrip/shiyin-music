@@ -8,6 +8,8 @@ import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/player_page.dart';
 
+import 'package:shiyin_music/ui/player/player_controls.dart';
+
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
@@ -193,6 +195,22 @@ void main() {
 
       // 验证不出现手机翻页小圆点 PageView dots
       expect(find.byType(PageView), findsNothing);
+    });
+
+    testWidgets('车机横屏与桌面模式下顶栏保持极简通透，不展示突兀的音质 Capsule Pill',
+        (tester) async {
+      debugDesktopFormFactorOverride = true;
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await pumpPlayerPage(tester, player: player, auth: auth);
+
+      // 验证顶栏包含返回和更多按钮
+      expect(find.byIcon(Icons.keyboard_arrow_left_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
+
+      // 关键验证：顶栏不出现突兀的音质 Pill
+      expect(find.byType(PlayerAudioQualityPill), findsNothing);
     });
 
     testWidgets('鼠标滚轮在歌词区滚动触发准星时间线与定位播放指针 [▶ mm:ss]', (tester) async {

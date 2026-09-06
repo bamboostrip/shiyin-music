@@ -155,8 +155,6 @@ class LandscapeHeader extends StatelessWidget {
               ],
             ),
           ),
-          PlayerAudioQualityPill(player: player, compact: compact),
-          SizedBox(width: compact ? 6 : 8),
           Builder(
             builder: (moreButtonContext) => LandscapeHeaderButton(
               tooltip: '更多',
