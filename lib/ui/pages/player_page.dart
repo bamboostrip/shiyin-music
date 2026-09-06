@@ -303,6 +303,19 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                         player: widget.player,
                                         song: widget.song,
                                         onQueue: widget.onQueue,
+                                        auth: widget.auth,
+                                        onArtistTap: _openArtist,
+                                        onLyricTap: () {
+                                          if (_pageController.hasClients) {
+                                            _pageController.animateToPage(
+                                              0,
+                                              duration: const Duration(
+                                                milliseconds: 250,
+                                              ),
+                                              curve: Curves.easeInOut,
+                                            );
+                                          }
+                                        },
                                       ),
                                     ],
                                   ),

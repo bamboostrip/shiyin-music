@@ -3,10 +3,16 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../controllers/auth_controller.dart';
+import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../pages/comment_page.dart';
 import '../widgets/artwork.dart';
+import '../widgets/audio_effects_sheet.dart';
+import '../widgets/sleep_timer_sheet.dart';
+import '../widgets/song_action_sheets.dart';
+import '../widgets/toast.dart';
 import 'lyric_views.dart';
 import 'player_controls.dart';
 
@@ -16,11 +22,17 @@ class PosterPlayerPage extends StatefulWidget {
     required this.player,
     required this.song,
     required this.onQueue,
+    required this.auth,
+    required this.onArtistTap,
+    this.onLyricTap,
   });
 
   final PlayerController player;
   final Song song;
   final VoidCallback onQueue;
+  final AuthController auth;
+  final ValueChanged<Song> onArtistTap;
+  final VoidCallback? onLyricTap;
 
   @override
   State<PosterPlayerPage> createState() => _PosterPlayerPageState();
@@ -36,11 +48,24 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
     super.build(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 620;
-        final artworkMaxWidth = compact ? 250.0 : 330.0;
+        final compact = constraints.maxHeight < 650;
+        final horizontalPadding = compact ? 20.0 : 28.0;
+
+        final maxArtworkHeight =
+            (constraints.maxHeight * (compact ? 0.34 : 0.42))
+                .clamp(130.0, 330.0);
+        final artworkMaxWidth = math.min(
+          constraints.maxWidth - horizontalPadding * 2,
+          maxArtworkHeight,
+        );
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(28, 12, 28, 18),
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            compact ? 4 : 8,
+            horizontalPadding,
+            compact ? 10 : 16,
+          ),
           child: Column(
             children: [
               const Spacer(),
@@ -58,13 +83,28 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
                   ),
                 ),
               ),
-              SizedBox(height: compact ? 14 : 26),
-              PosterLyricPreview(player: widget.player),
-              if (!compact) const SizedBox(height: 4),
-              CommentEntry(player: widget.player, song: widget.song),
+              SizedBox(height: compact ? 12 : 20),
+              PosterSongInfoRow(
+                song: widget.song,
+                player: widget.player,
+                auth: widget.auth,
+                onArtistTap: widget.onArtistTap,
+              ),
+              SizedBox(height: compact ? 8 : 14),
+              PosterLyricPreview(
+                player: widget.player,
+                onLyricTap: widget.onLyricTap,
+                compact: compact,
+              ),
+              SizedBox(height: compact ? 8 : 12),
+              PosterActionRail(
+                player: widget.player,
+                song: widget.song,
+                auth: widget.auth,
+              ),
               const Spacer(),
               Progress(player: widget.player, bright: true),
-              const SizedBox(height: 10),
+              SizedBox(height: compact ? 6 : 10),
               Controls(
                 player: widget.player,
                 bright: true,
@@ -74,6 +114,234 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
           ),
         );
       },
+    );
+  }
+}
+
+class PosterSongInfoRow extends StatelessWidget {
+  const PosterSongInfoRow({
+    super.key,
+    required this.song,
+    required this.player,
+    required this.auth,
+    required this.onArtistTap,
+  });
+
+  final Song song;
+  final PlayerController player;
+  final AuthController auth;
+  final ValueChanged<Song> onArtistTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onArtistTap(song),
+                      child: Text(
+                        song.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  PlayerAudioQualityPill(player: player, compact: true),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        ListenableBuilder(
+          listenable: auth,
+          builder: (context, _) {
+            final liked = auth.isLiked(song);
+            return SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 26,
+                tooltip: liked ? '取消喜欢' : '喜欢',
+                onPressed: () => auth.toggleLike(song),
+                icon: Icon(
+                  liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: liked
+                      ? Colors.redAccent
+                      : Colors.white.withValues(alpha: .7),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class PosterActionRail extends StatelessWidget {
+  const PosterActionRail({
+    super.key,
+    required this.player,
+    required this.song,
+    required this.auth,
+  });
+
+  final PlayerController player;
+  final Song song;
+  final AuthController auth;
+
+  Widget _buildDownloadButton(BuildContext context) {
+    DownloadController? downloadCtrl;
+    try {
+      downloadCtrl = player.downloadController;
+    } catch (_) {
+      downloadCtrl = null;
+    }
+
+    if (downloadCtrl != null) {
+      final ctrl = downloadCtrl;
+      return ListenableBuilder(
+        listenable: ctrl,
+        builder: (context, _) {
+          final downloaded = ctrl.isDownloaded(song);
+          return IconButton(
+            iconSize: 24,
+            tooltip: downloaded ? '已下载' : '下载',
+            icon: Icon(
+              downloaded
+                  ? Icons.download_done_rounded
+                  : Icons.download_rounded,
+            ),
+            color: downloaded
+                ? Theme.of(context).colorScheme.primary
+                : Colors.white.withValues(alpha: .85),
+            onPressed: () {
+              if (downloaded) {
+                Toast.info('歌曲已下载');
+              } else {
+                ctrl.download(song, player.audioQuality);
+                Toast.success('已加入下载队列');
+              }
+            },
+          );
+        },
+      );
+    }
+
+    return IconButton(
+      iconSize: 24,
+      tooltip: '下载',
+      icon: const Icon(Icons.download_rounded),
+      color: Colors.white.withValues(alpha: .85),
+      onPressed: () {
+        Toast.info('下载功能未就绪');
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isKugou = song.source == SongSource.kugou;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        // 1. 收藏到歌单
+        IconButton(
+          iconSize: 24,
+          tooltip: '添加到歌单',
+          icon: const Icon(Icons.playlist_add_rounded),
+          color: Colors.white.withValues(alpha: .85),
+          onPressed: () => showAddToPlaylistSheet(
+            context: context,
+            auth: auth,
+            song: song,
+          ),
+        ),
+
+        // 2. 音效 / 定时
+        AnimatedBuilder(
+          animation: player,
+          builder: (context, _) {
+            final hasAudioEffects = player.isAudioEffectsSupported;
+            return IconButton(
+              iconSize: 24,
+              tooltip: hasAudioEffects ? '音效' : '定时播放',
+              icon: Icon(
+                hasAudioEffects
+                    ? Icons.graphic_eq_rounded
+                    : Icons.bedtime_rounded,
+              ),
+              color: Colors.white.withValues(alpha: .85),
+              onPressed: () {
+                if (hasAudioEffects) {
+                  showAudioEffectsSheet(context: context, player: player);
+                } else {
+                  showSleepTimerSheet(context: context, player: player);
+                }
+              },
+            );
+          },
+        ),
+
+        // 3. 下载
+        _buildDownloadButton(context),
+
+        // 4. 评论
+        IconButton(
+          iconSize: 24,
+          tooltip: isKugou ? '评论' : '暂无评论',
+          icon: const Icon(Icons.chat_bubble_outline_rounded),
+          color: isKugou
+              ? Colors.white.withValues(alpha: .85)
+              : Colors.white.withValues(alpha: .24),
+          onPressed: isKugou
+              ? () {
+                  final mixsongid = song.albumAudioId ?? song.id;
+                  if (mixsongid.isEmpty) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CommentPage(
+                        api: player.api,
+                        mixsongid: mixsongid,
+                      ),
+                    ),
+                  );
+                }
+              : null,
+        ),
+      ],
     );
   }
 }
@@ -92,9 +360,16 @@ int activeLyricIndexFor(List<LyricLine> lyrics, Duration position) {
 }
 
 class PosterLyricPreview extends StatefulWidget {
-  const PosterLyricPreview({super.key, required this.player});
+  const PosterLyricPreview({
+    super.key,
+    required this.player,
+    this.onLyricTap,
+    this.compact = false,
+  });
 
   final PlayerController player;
+  final VoidCallback? onLyricTap;
+  final bool compact;
 
   @override
   State<PosterLyricPreview> createState() => _PosterLyricPreviewState();
@@ -148,17 +423,23 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
 
   @override
   Widget build(BuildContext context) {
+    final previewHeight = widget.compact ? 56.0 : 72.0;
     final lyrics = widget.player.lyrics;
+
     if (lyrics.isEmpty) {
-      return SizedBox(
-        height: 104,
-        child: Center(
-          child: Text(
-            widget.player.isPreparing ? '歌词加载中...' : '暂无歌词',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: Colors.white.withValues(alpha: .78),
-              fontWeight: FontWeight.w800,
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onLyricTap,
+        child: SizedBox(
+          height: previewHeight,
+          child: Center(
+            child: Text(
+              widget.player.isPreparing ? '歌词加载中...' : '暂无歌词',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.white.withValues(alpha: .78),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
@@ -170,65 +451,70 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
     final next = index + 1 < lyrics.length ? lyrics[index + 1] : null;
     final currentStyle = Theme.of(context).textTheme.titleLarge!.copyWith(
       color: Colors.white,
-      fontSize: 22,
+      fontSize: widget.compact ? 18 : 22,
       height: 1.22,
       fontWeight: FontWeight.w900,
     );
     final nextStyle = Theme.of(context).textTheme.titleMedium!.copyWith(
       color: Colors.white.withValues(alpha: .46),
+      fontSize: widget.compact ? 13 : 15,
       height: 1.18,
       fontWeight: FontWeight.w700,
     );
 
     // 歌词预览每帧更新位置，用 ExcludeSemantics 防止 Windows AXTree 竞态崩溃
-    return ExcludeSemantics(
-      child: SizedBox(
-        height: 96,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 260),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeOutCubic,
-          child: Column(
-            key: ValueKey(current.time.inMilliseconds),
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                height: 36,
-                child: MarqueeSingleLine(
-                  textKey: current.time.inMilliseconds,
-                  child: LyricText(
-                    line: current,
-                    active: true,
-                    position: _position,
-                    styleOverride: currentStyle,
-                    textAlign: TextAlign.center,
-                    singleLine: true,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onLyricTap,
+      child: ExcludeSemantics(
+        child: SizedBox(
+          height: previewHeight,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeOutCubic,
+            child: Column(
+              key: ValueKey(current.time.inMilliseconds),
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  height: widget.compact ? 28 : 34,
+                  child: MarqueeSingleLine(
+                    textKey: current.time.inMilliseconds,
+                    child: LyricText(
+                      line: current,
+                      active: true,
+                      position: _position,
+                      styleOverride: currentStyle,
+                      textAlign: TextAlign.center,
+                      singleLine: true,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 25,
-                child: MarqueeSingleLine(
-                  textKey:
+                SizedBox(height: widget.compact ? 4 : 6),
+                SizedBox(
+                  height: widget.compact ? 20 : 24,
+                  child: MarqueeSingleLine(
+                    textKey:
+                        current.translation != null &&
+                                current.translation!.isNotEmpty
+                            ? current.time.inMilliseconds
+                            : (next?.time.inMilliseconds ?? -1),
+                    child: Text(
                       current.translation != null &&
-                          current.translation!.isNotEmpty
-                      ? current.time.inMilliseconds
-                      : (next?.time.inMilliseconds ?? -1),
-                  child: Text(
-                    current.translation != null &&
-                            current.translation!.isNotEmpty
-                        ? current.translation!
-                        : (next?.text ?? ''),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.visible,
-                    style: nextStyle,
+                              current.translation!.isNotEmpty
+                          ? current.translation!
+                          : (next?.text ?? ''),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                      style: nextStyle,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -340,48 +626,6 @@ class _MarqueeSingleLineState extends State<MarqueeSingleLine>
           ),
         );
       },
-    );
-  }
-}
-
-class CommentEntry extends StatelessWidget {
-  const CommentEntry({super.key, required this.player, required this.song});
-
-  final PlayerController player;
-  final Song song;
-
-  @override
-  Widget build(BuildContext context) {
-    // 其他平台歌曲不支持评论
-    if (song.source != SongSource.kugou) {
-      return const SizedBox.shrink();
-    }
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () {
-            final mixsongid = song.albumAudioId ?? song.id;
-            if (mixsongid.isEmpty) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) =>
-                    CommentPage(api: player.api, mixsongid: mixsongid),
-              ),
-            );
-          },
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Icon(
-              Icons.comment_outlined,
-              size: 20,
-              color: Colors.white54,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
