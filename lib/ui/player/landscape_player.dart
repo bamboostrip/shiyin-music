@@ -558,12 +558,16 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   late final LyricController _lyricController;
   late final Ticker _ticker;
   bool _isUserSelecting = false;
+  // 与竖屏 LyricViewport 同理：记录已下发进度，屏蔽冷启动定位起播加载期的回 0 闪动。
+  Duration _lastSentProgress = Duration.zero;
 
   @override
   void initState() {
     super.initState();
     _lyricController = LyricController();
     _lyricController.setOnTapLineCallback((position) {
+      _lastSentProgress = position;
+      _lyricController.setProgress(position);
       widget.player.seekToAndPlay(position);
     });
     _lyricController.isSelectingNotifier.addListener(_onSelectingChanged);
@@ -576,7 +580,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   void didUpdateWidget(covariant LandscapeLyricPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.songHash != widget.songHash ||
-        oldWidget.lyrics != widget.lyrics) {
+        !_sameLyricContent(oldWidget.lyrics, widget.lyrics)) {
       _syncLyrics();
     }
     _syncTicker();
@@ -600,7 +604,20 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     if (lyrics.isNotEmpty) {
       final model = convertToFlutterLyricModel(lyrics);
       _lyricController.loadLyricModel(model);
+      // 重载后立即用当前播放位置校准，避免用陈旧 progress(0) 闪回开头。
+      final current = widget.player.smoothPosition;
+      _lastSentProgress = current;
+      _lyricController.setProgress(current);
     }
+  }
+
+  bool _sameLyricContent(List<LyricLine> a, List<LyricLine> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   void _syncTicker() {
@@ -620,7 +637,15 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     if (!mounted || widget.player.isScrubbing) {
       return;
     }
-    _lyricController.setProgress(widget.player.smoothPosition);
+    final pos = widget.player.smoothPosition;
+    if (widget.player.isPreparing &&
+        _lastSentProgress > Duration.zero &&
+        (pos <= Duration.zero ||
+            _lastSentProgress - pos > const Duration(milliseconds: 500))) {
+      return;
+    }
+    _lastSentProgress = pos;
+    _lyricController.setProgress(pos);
   }
 
   @override

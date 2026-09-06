@@ -825,6 +825,28 @@ class LyricLine {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is LyricLine &&
+        other.time == time &&
+        other.text == text &&
+        other.duration == duration &&
+        other.translation == translation &&
+        other.romanization == romanization &&
+        _lyricWordsEqual(other.words, words);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    time,
+    text,
+    duration,
+    translation,
+    romanization,
+    Object.hashAll(words),
+  );
+
   int activeWordIndex(Duration position) {
     if (words.isEmpty) {
       return -1;
@@ -876,6 +898,18 @@ class LyricWord {
   final Duration duration;
   final String text;
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is LyricWord &&
+        other.time == time &&
+        other.duration == duration &&
+        other.text == text;
+  }
+
+  @override
+  int get hashCode => Object.hash(time, duration, text);
+
   Map<String, dynamic> toCache() => {
     'timeMs': time.inMilliseconds,
     'durationMs': duration.inMilliseconds,
@@ -889,6 +923,16 @@ class LyricWord {
       text: asString(json['text']) ?? '',
     );
   }
+}
+
+/// 逐字歌词列表的值比较（LyricLine == 的辅助，避免 List == 走同一性）。
+bool _lyricWordsEqual(List<LyricWord> a, List<LyricWord> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// 歌曲高潮片段信息（/song/climax）。

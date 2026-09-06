@@ -216,12 +216,22 @@ class _LyricViewportState extends State<LyricViewport>
   // NotificationListener 无效；改为监听 isSelectingNotifier 控制 ticker，
   // 用户拖动时停止 setProgress，避免与 flutter_lyric 内部 fling/恢复竞态。
   bool _isUserSelecting = false;
+  // 最近一次已下发给 LyricController 的进度：冷启动定位起播（idle → playSong
+  // initialPosition）加载期间引擎位置回调会被控制器层屏蔽，但 LyricController
+  // 自持的 progressNotifier 仍停留在旧值（通常 0）。若此时歌词模型重载
+  // （loadLyricModel 会用陈旧 progress 重算 activeIndex），视图会先闪回第 0 句
+  // 再跳回目标句（桌面端同类问题已用 isPreparing 守卫修复，此处对齐）。
+  Duration _lastSentProgress = Duration.zero;
 
   @override
   void initState() {
     super.initState();
     _lyricController = LyricController();
     _lyricController.setOnTapLineCallback((position) {
+      // 点击即时定位：先让歌词视图跳到目标句，再走引擎 seek/冷启动起播，
+      // 加载期 ticker 停摆（isPlaying 为 false）也不会停留在第 0 句。
+      _lastSentProgress = position;
+      _lyricController.setProgress(position);
       widget.player.seekToAndPlay(position);
     });
     _lyricController.isSelectingNotifier.addListener(_onSelectingChanged);
@@ -243,15 +253,35 @@ class _LyricViewportState extends State<LyricViewport>
         showRomanization: showRomanization,
       );
       _lyricController.loadLyricModel(model);
+      // loadLyricModel 内部用陈旧的 progressNotifier 重算 activeIndex（常为 0）；
+      // 立即用当前播放位置校准，杜绝重载后闪回开头再跳回（桌面端 _scrollToActive
+      // animate:false 直接定位的移动端等价实现）。
+      final current = widget.player.smoothPosition;
+      _lastSentProgress = current;
+      _lyricController.setProgress(current);
     }
+  }
+
+  /// 同一首歌同内容歌词的重复下发（缓存 → 网络刷新）不重建模型，避免无意义闪动。
+  /// LyricLine 已实现值相等，但此处再按内容比对一次，displayMode 切换仍正常重建。
+  bool _sameLyricContent(
+    List<LyricLine> a,
+    List<LyricLine> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   @override
   void didUpdateWidget(covariant LyricViewport oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.songHash != widget.songHash ||
-        oldWidget.lyrics != widget.lyrics ||
-        oldWidget.displayMode != widget.displayMode) {
+        oldWidget.displayMode != widget.displayMode ||
+        !_sameLyricContent(oldWidget.lyrics, widget.lyrics)) {
       _syncLyrics();
     }
     _syncTicker();
@@ -288,7 +318,17 @@ class _LyricViewportState extends State<LyricViewport>
     if (!mounted || widget.player.isScrubbing) {
       return;
     }
-    _lyricController.setProgress(widget.player.smoothPosition);
+    final pos = widget.player.smoothPosition;
+    // 对齐桌面端 DesktopLyricList 的 isPreparing 守卫：
+    // 冷启动定位起播加载期间忽略回 0 的位置，杜绝先闪回开头再跳回目标。
+    if (widget.player.isPreparing &&
+        _lastSentProgress > Duration.zero &&
+        (pos <= Duration.zero ||
+            _lastSentProgress - pos > const Duration(milliseconds: 500))) {
+      return;
+    }
+    _lastSentProgress = pos;
+    _lyricController.setProgress(pos);
   }
 
   @override
