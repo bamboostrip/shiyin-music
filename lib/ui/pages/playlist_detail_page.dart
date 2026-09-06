@@ -1512,7 +1512,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                           scrollController: _scrollController,
                           heroExpandedHeight:
                               _isSearching ? 0.0 : _heroExpandedHeight,
-                          builder: (context, topRadius) {
+                          builder: (context, _) {
                             if (isDesktopFormFactor) {
                               return Container(
                                 color: Theme.of(context).colorScheme.surface,
@@ -1565,7 +1565,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               );
                             }
                             return ListStickyBar(
-                              topRadiusOverride: topRadius,
+                              flatTop: true,
+                              topRadiusOverride: 0.0,
                               selecting: _isSelecting,
                               selectedCount: _selectedCount,
                               allSelected: _isAllSelected,
@@ -2650,24 +2651,10 @@ class StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   double get maxExtent => height;
 
-  double _computeTopRadius(bool overlapsContent) {
-    if (isDesktopFormFactor || overlapsContent) {
-      return 0.0;
-    }
-    if (scrollController != null &&
-        scrollController!.hasClients &&
-        heroExpandedHeight != null) {
-      final delta = heroExpandedHeight! - kToolbarHeight;
-      final offset = scrollController!.offset;
-      if (offset >= delta) {
-        return 0.0;
-      }
-      if (offset <= delta - AppRadius.lg) {
-        return AppRadius.lg;
-      }
-      return (AppRadius.lg * (delta - offset) / AppRadius.lg).clamp(0.0, AppRadius.lg);
-    }
-    return AppRadius.lg;
+  double _computeTopRadius() {
+    // 圆角已取消（移动端默认展开态的顶部左右圆弧不好看）：粘性条恒为直角无阴影，
+    // 与桌面端扁平表头一致，不再随滚动插值。
+    return 0.0;
   }
 
   @override
@@ -2681,12 +2668,12 @@ class StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
         return AnimatedBuilder(
           animation: scrollController!,
           builder: (context, _) {
-            final radius = _computeTopRadius(overlapsContent);
+            final radius = _computeTopRadius();
             return SizedBox.expand(child: builder!(context, radius));
           },
         );
       }
-      final radius = _computeTopRadius(overlapsContent);
+      final radius = _computeTopRadius();
       return SizedBox.expand(child: builder!(context, radius));
     }
     return SizedBox.expand(child: child!);
@@ -2708,10 +2695,10 @@ typedef _StickyHeaderDelegate = StickyHeaderDelegate;
 /// 中间两行计数（标题+副标题各自省略，窄屏不再挤没「已加载」），
 /// 右侧搜索/排序/多选三个幽灵图标。多选模式下切换为已选计数+全选。
 ///
-/// 圆角契约（PC+移动统一收敛到设计 Token）：
-/// - 移动端：顶部圆角 16（AppRadius.lg 标准卡片），未吸顶时为 16，吸顶过程中平滑插值到 0；
-/// - 桌面端：[flatTop]=true 时顶部直角、无上浮阴影（QQ 音乐 PC 式扁平表头，
-///   置顶时与 AppBar 无缝，不再出现 22px 大圆角置顶后的两侧缺口）。
+/// 圆角契约：粘性条恒为顶部直角、无上浮阴影（移动端默认展开态的左右圆弧
+/// 已取消，与桌面端 QQ 音乐 PC 式扁平表头一致，置顶时与 AppBar 无缝）。
+/// [flatTop]/[topRadiusOverride] 参数保留兼容（widget 仍支持圆角），
+/// 页面层统一传入直角。
 @visibleForTesting
 class ListStickyBar extends StatelessWidget {
   const ListStickyBar({

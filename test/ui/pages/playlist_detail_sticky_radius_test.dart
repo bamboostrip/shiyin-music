@@ -242,16 +242,13 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('移动端展开未吸顶时粘性条为 16px 圆角且有阴影', (tester) async {
+    testWidgets('移动端展开未吸顶时粘性条为直角且无阴影（圆角已取消）', (tester) async {
       debugDesktopFormFactorOverride = false;
       await pumpPlaylistPage(tester, const Size(480, 850));
 
       final decoration = _getStickyBarDecoration(tester);
-      expect(
-        decoration.borderRadius,
-        const BorderRadius.vertical(top: Radius.circular(16.0)),
-      );
-      expect(decoration.boxShadow, isNotNull);
+      expect(decoration.borderRadius, BorderRadius.zero);
+      expect(decoration.boxShadow, isNull);
     });
 
     testWidgets('移动端滚动吸顶后 (offset >= delta) 粘性条为直角且无阴影', (tester) async {
@@ -268,7 +265,7 @@ void main() {
       expect(decoration.boxShadow, isNull);
     });
 
-    testWidgets('移动端滚动到过渡区 (delta - 8) 时平滑插值为 8px 圆角', (tester) async {
+    testWidgets('移动端滚动到过渡区时仍为直角（圆角已取消，不再插值）', (tester) async {
       debugDesktopFormFactorOverride = false;
       await pumpPlaylistPage(tester, const Size(480, 850));
 
@@ -278,11 +275,8 @@ void main() {
       await tester.pump();
 
       final decoration = _getStickyBarDecoration(tester);
-      expect(
-        decoration.borderRadius,
-        const BorderRadius.vertical(top: Radius.circular(8.0)),
-      );
-      expect(decoration.boxShadow, isNotNull);
+      expect(decoration.borderRadius, BorderRadius.zero);
+      expect(decoration.boxShadow, isNull);
     });
 
     testWidgets('桌面端 (isDesktopFormFactor == true) 保持直角无阴影', (tester) async {
