@@ -81,7 +81,7 @@ pub fn scan(
                 return None;
             }
             let done = processed.fetch_add(1, Ordering::Relaxed) + 1;
-            if done % 20 == 0 || done == total {
+            if done.is_multiple_of(20) || done == total {
                 if let Ok(mut cb) = progress.lock() {
                     cb(done, total);
                 }
