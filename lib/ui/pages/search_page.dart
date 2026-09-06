@@ -64,6 +64,7 @@ class _SearchPageState extends State<SearchPage> {
   // 搜索历史
   final _historyService = SearchHistoryService();
   List<String> _searchHistory = const [];
+  bool _historyExpanded = false;
 
   @override
   void initState() {
@@ -609,6 +610,20 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (_searchHistory.length > 6) ...[
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _historyExpanded = !_historyExpanded),
+                      child: Icon(
+                        _historyExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   GestureDetector(
                     onTap: () async {
                       await _historyService.clear();
@@ -629,7 +644,10 @@ class _SearchPageState extends State<SearchPage> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _searchHistory.map((keyword) {
+                children: (_historyExpanded
+                        ? _searchHistory
+                        : _searchHistory.take(6))
+                    .map((keyword) {
                   return _HistoryChip(
                     keyword: keyword,
                     onTap: () => _onKeywordTap(keyword),
@@ -715,6 +733,29 @@ class _SearchPageState extends State<SearchPage> {
                               ),
                         ),
                       ),
+                      if (_searchHistory.length > 6) ...[
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => setState(() => _historyExpanded = !_historyExpanded),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: .08)
+                                  : colorScheme.surfaceContainerHighest.withValues(alpha: .9),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _historyExpanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              size: 16,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       GestureDetector(
                         onTap: () async {
                           await _historyService.clear();
@@ -738,7 +779,10 @@ class _SearchPageState extends State<SearchPage> {
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: _searchHistory.map((keyword) {
+                    children: (_historyExpanded
+                            ? _searchHistory
+                            : _searchHistory.take(6))
+                        .map((keyword) {
                       return _HistoryChip(
                         keyword: keyword,
                         onTap: () => _onKeywordTap(keyword),

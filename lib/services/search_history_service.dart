@@ -4,13 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 搜索历史服务。
 ///
-/// 使用 SharedPreferences 持久化最近 20 条搜索词，按时间倒序排列。
+/// 使用 SharedPreferences 持久化最近 10 条搜索词，按时间倒序排列。
 /// 同一关键词再次搜索时会移到最前，超出上限自动截断。
 class SearchHistoryService {
   static const _key = 'search_history';
-  static const _maxRecords = 20;
+  static const _maxRecords = 10;
 
-  /// 读取全部历史记录（最新在前）。
+  /// 读取全部历史记录（最新在前，至多 [_maxRecords] 条）。
   Future<List<String>> getHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
@@ -18,7 +18,11 @@ class SearchHistoryService {
     try {
       final list = jsonDecode(raw);
       if (list is List) {
-        return list.whereType<String>().toList();
+        final items = list.whereType<String>().toList();
+        if (items.length > _maxRecords) {
+          return items.sublist(0, _maxRecords);
+        }
+        return items;
       }
     } catch (_) {}
     return [];
