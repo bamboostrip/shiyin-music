@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
@@ -26,6 +25,7 @@ import '../services/vip_background_task.dart';
 import '../ui/form_factor.dart';
 import 'download_controller.dart';
 import 'local_music_controller.dart';
+import 'player_logic.dart';
 import 'shuffle_queue.dart';
 
 enum PlaybackMode { playlistLoop, shuffle, singleLoop }
@@ -406,20 +406,8 @@ class PlayerController extends ChangeNotifier {
     return queue.indexWhere((item) => item.hash == song.hash);
   }
 
-  int get activeLyricIndex {
-    if (lyrics.isEmpty) {
-      return -1;
-    }
-    var index = 0;
-    for (var i = 0; i < lyrics.length; i++) {
-      if (smoothPosition >= lyrics[i].time) {
-        index = i;
-      } else {
-        break;
-      }
-    }
-    return index;
-  }
+  int get activeLyricIndex =>
+      PlayerLyricLogic.activeIndex(lyrics, smoothPosition);
 
   String get playbackModeLabel {
     return switch (playbackMode) {
@@ -699,13 +687,13 @@ class PlayerController extends ChangeNotifier {
         return playUrl;
       }
       // 返回空地址：按智能音质策略降级重试
-      final fallback = _nextLowerQuality(audioQuality);
+      final fallback = PlayerQualityLogic.nextLowerQuality(audioQuality);
       if (fallback == null) return playUrl;
       return _api.songUrl(song, quality: fallback);
     } catch (error) {
       if (!smartQualityEnabled) rethrow;
       // 网络请求失败：尝试降级重试
-      final fallback = _nextLowerQuality(audioQuality);
+      final fallback = PlayerQualityLogic.nextLowerQuality(audioQuality);
       if (fallback == null) rethrow;
       try {
         final retryUrl = await _api.songUrl(song, quality: fallback);
@@ -742,18 +730,6 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[时音][player] VIP 领取/重试失败: $e');
     }
     return false;
-  }
-
-  /// 返回更低一档的音质；已是最低档时返回 null。
-  AudioQuality? _nextLowerQuality(AudioQuality quality) {
-    switch (quality) {
-      case AudioQuality.lossless:
-        return AudioQuality.high;
-      case AudioQuality.high:
-        return AudioQuality.standard;
-      case AudioQuality.standard:
-        return null;
-    }
   }
 
   Future<bool> addToQueue(Song song) async {
@@ -1000,7 +976,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> applyEqualizerPreset(AudioEffectPreset preset) async {
     equalizerPresetName = preset.name;
-    equalizerLevels = _levelsForBandCount(
+    equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
       preset.levels,
       equalizerLevels.length,
     );
@@ -1137,7 +1113,8 @@ class PlayerController extends ChangeNotifier {
       if (audioPlayer.processingState == ProcessingState.idle) {
         final song = currentSong;
         if (song != null) {
-          final initPos = _pendingIdlePosition ??
+          final initPos =
+              _pendingIdlePosition ??
               (position > Duration.zero ? position : null);
           _pendingIdlePosition = null;
           await playSong(song, queue: queue, initialPosition: initPos);
@@ -1202,11 +1179,7 @@ class PlayerController extends ChangeNotifier {
 
     if (audioPlayer.processingState == ProcessingState.idle) {
       _pendingIdlePosition = null;
-      await playSong(
-        song,
-        queue: queue,
-        initialPosition: target,
-      );
+      await playSong(song, queue: queue, initialPosition: target);
     } else {
       await seek(target);
       if (!audioPlayer.playing) {
@@ -1628,7 +1601,9 @@ class PlayerController extends ChangeNotifier {
       artist: song.artist,
     );
     if (!shown) {
-      debugPrint('[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限');
+      debugPrint(
+        '[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限',
+      );
     } else {
       _syncDesktopLyrics();
       _syncDesktopPlayState();
@@ -1687,8 +1662,11 @@ class PlayerController extends ChangeNotifier {
       _lastSuperLyricPlaying = true;
       final clampedIndex = index.clamp(0, lyrics.length - 1);
       final line = lyrics[clampedIndex];
-      final lineEndTime = line.time +
-          (line.duration ?? _estimatedLineDuration(clampedIndex) ?? Duration.zero);
+      final lineEndTime =
+          line.time +
+          (line.duration ??
+              _estimatedLineDuration(clampedIndex) ??
+              Duration.zero);
       unawaited(
         _superLyric.sendLyric(
           song: currentSong!,
@@ -1810,28 +1788,8 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Duration? _estimatedLineDuration(int index) {
-    if (index < 0 || index >= lyrics.length) {
-      return null;
-    }
-    final explicit = lyrics[index].duration;
-    if (explicit != null && explicit > Duration.zero) {
-      return explicit;
-    }
-    if (index + 1 < lyrics.length) {
-      final nextDuration = lyrics[index + 1].time - lyrics[index].time;
-      if (nextDuration > Duration.zero) {
-        return nextDuration;
-      }
-    }
-    if (duration > lyrics[index].time) {
-      final tailDuration = duration - lyrics[index].time;
-      if (tailDuration > Duration.zero) {
-        return tailDuration;
-      }
-    }
-    return null;
-  }
+  Duration? _estimatedLineDuration(int index) =>
+      PlayerLyricLogic.estimatedLineDuration(lyrics, duration, index);
 
   Future<void> updateDesktopLyricsSettings(
     DesktopLyricsSettings settings,
@@ -2034,8 +1992,9 @@ class PlayerController extends ChangeNotifier {
         prefs.getBool(_equalizerEnabledSettingKey) ?? equalizerEnabled;
     equalizerPresetName =
         prefs.getString(_equalizerPresetSettingKey) ?? equalizerPresetName;
-    equalizerLevels = _restoreEqualizerLevels(
+    equalizerLevels = PlayerEqualizerLogic.restoreLevels(
       prefs.getString(_equalizerLevelsSettingKey),
+      _defaultEqualizerLevels,
     );
     equalizerConfig = EqualizerConfig.fallback(equalizerLevels);
     bassBoostEnabled =
@@ -2057,8 +2016,7 @@ class PlayerController extends ChangeNotifier {
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
     desktopLyricsEnabled =
         prefs.getBool(_desktopLyricsEnabledSettingKey) ?? desktopLyricsEnabled;
-    final dlVersion =
-        prefs.getInt(_desktopLyricsSettingsVersionKey) ?? 0;
+    final dlVersion = prefs.getInt(_desktopLyricsSettingsVersionKey) ?? 0;
     if (dlVersion >= _desktopLyricsSettingsVersion) {
       final dlSettingsRaw = prefs.getString(_desktopLyricsSettingsKey);
       if (dlSettingsRaw != null && dlSettingsRaw.isNotEmpty) {
@@ -2167,25 +2125,6 @@ class PlayerController extends ChangeNotifier {
     return false;
   }
 
-  List<int> _restoreEqualizerLevels(String? raw) {
-    if (raw == null || raw.isEmpty) {
-      return List<int>.of(_defaultEqualizerLevels);
-    }
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is List) {
-        final levels = decoded
-            .whereType<num>()
-            .map((value) => value.round())
-            .toList();
-        if (levels.isNotEmpty) {
-          return _levelsForBandCount(levels, _defaultEqualizerLevels.length);
-        }
-      }
-    } catch (_) {}
-    return List<int>.of(_defaultEqualizerLevels);
-  }
-
   Future<void> _persistEqualizer() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_equalizerEnabledSettingKey, equalizerEnabled);
@@ -2209,7 +2148,7 @@ class PlayerController extends ChangeNotifier {
     }
     equalizerConfig = config;
     if (equalizerLevels.length != config.bands.length) {
-      equalizerLevels = _levelsForBandCount(
+      equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
         equalizerLevels,
         config.bands.length,
       );
@@ -2641,31 +2580,6 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Duration _clampPosition(Duration value) {
-    if (value < Duration.zero) {
-      return Duration.zero;
-    }
-    if (duration > Duration.zero && value > duration) {
-      return duration;
-    }
-    return value;
-  }
-
-  List<int> _levelsForBandCount(List<int> source, int count) {
-    if (count <= 0) {
-      return const [];
-    }
-    if (source.length == count) {
-      return List<int>.of(source);
-    }
-    if (source.length == 1) {
-      return List<int>.filled(count, source.first);
-    }
-
-    return [
-      for (var index = 0; index < count; index++)
-        source[((index / math.max(1, count - 1)) * (source.length - 1))
-            .round()],
-    ];
-  }
+  Duration _clampPosition(Duration value) =>
+      PlayerPositionLogic.clamp(value, duration);
 }
