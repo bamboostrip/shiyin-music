@@ -87,6 +87,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   // 在下一个 await 后自行放弃（逻辑 CancelToken，MusicApi 的 Rust
   // 通道不支持 dio CancelToken，只能靠代际丢弃结果，避免退出后
   // 仍写缓存/ setState 浪费流量与内存）。
+  // Flag 归属规则：guard 标记（_isLoadingAllSongs/_isExpandingQueue）属于
+  // 创建时的代际；新代际在 +1 时同步接管并复位（见 _loadInitial），旧代际
+  // 的取消路径一律不得再碰 flag，否则会把新一轮的标记清掉或把旧标记泄漏
+  // 到新一轮（旧任务取消后新任务被 guard 永久挡住）。
   int _loadGeneration = 0;
   bool _disposed = false;
   // 大歌单分片粒度：toCache/fromCache 的同步循环每 500 条让出一帧，
@@ -275,12 +279,24 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
+  /// 释放全量加载的 guard 标记（仅拥有者可调）。
+  ///
+  /// 调用方传入创建任务时捕获的代际 [gen]：与当前 [_loadGeneration]
+  /// 一致时才复位，否则说明新一轮已接管 flag，旧任务不得触碰。
+  void _releaseAllSongsFlags(int gen, {bool silent = false}) {
+    if (gen != _loadGeneration) return;
+    _isExpandingQueue = false;
+    _isLoadingAllSongs = false;
+    if (!silent && mounted) setState(() {});
+  }
+
   /// [silent] 为 true 时为点歌后的后台静默补全：不置位
   /// [_isLoadingAllSongs]，不把列表替换成全屏 loading，
   /// 从而保留滚动位置；仅在结束时增量追加。
   ///
   /// 取消语义：调用时捕获 [_loadGeneration]，每个 await 后检查代际；
-  /// 页面退出/重新加载导致代际变化时直接放弃，不 setState、不写缓存。
+  /// 页面退出/重新加载导致代际变化时直接放弃，不 setState、不写缓存、
+  /// 不碰 guard flag（flag 已由新代际接管，见 [_releaseAllSongsFlags]）。
   /// 不改变触发时机与队列扩展逻辑（上滑仍分页，计数口径不变）。
   Future<void> _loadAllSongs({bool silent = false}) async {
     if (_isLoadingAllSongs || _isExpandingQueue || _allSongsLoaded) return;
@@ -356,7 +372,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       }
 
       if (!mounted || _disposed || gen != _loadGeneration) {
-        _isExpandingQueue = false;
+        // 拥有者才复位：代际过期说明新一轮已接管 flag，旧任务直接放弃，
+        // 不得清掉新任务的标记（亦不得把 _isLoadingAllSongs 漏掉，之前
+        // 这里只复位了 _isExpandingQueue）。
+        _releaseAllSongsFlags(gen, silent: silent);
         return;
       }
       setState(() {
@@ -378,8 +397,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         _isExpandingQueue = false;
       });
     } catch (_) {
-      _isExpandingQueue = false;
-      if (mounted) setState(() => _isLoadingAllSongs = false);
+      // 异常复位同样只允许拥有者：新代际在途时旧任务的异常不得清新标记。
+      _releaseAllSongsFlags(gen, silent: silent);
     }
   }
 
@@ -418,8 +437,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   Future<void> _loadInitial() async {
     // 新一轮初始加载使在途全量补全失效（代际取消），避免旧单结果
-    // 追加到新单列表里。
+    // 追加到新单列表里。新代际同步接管 guard flag 并复位：在途旧任务
+    // 按代际丢弃且不再碰 flag（见 _releaseAllSongsFlags），复位后新一轮
+    // 的 _loadAllSongs 才不会被旧标记挡在 guard 外。
     _loadGeneration++;
+    _isLoadingAllSongs = false;
+    _isExpandingQueue = false;
     setState(() {
       _isInitialLoading = true;
       _isLoadingMore = false;
