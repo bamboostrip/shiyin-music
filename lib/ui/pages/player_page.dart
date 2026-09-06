@@ -200,12 +200,12 @@ class _PlayerBody extends StatefulWidget {
 }
 
 class _PlayerBodyState extends State<_PlayerBody> {
-  final _pageController = PageController();
-  var _page = 0;
+  final _pageController = PageController(initialPage: 1);
+  var _page = 1;
   var _pageScrolling = false;
   bool? _lastSystemUiLandscape;
 
-  bool get _lyricPageVisible => _page == 1 || _pageScrolling;
+  bool get _lyricPageVisible => _page == 0 || _pageScrolling;
 
   @override
   void dispose() {
@@ -258,6 +258,13 @@ class _PlayerBodyState extends State<_PlayerBody> {
                           song: widget.song,
                           onClose: widget.onClose,
                           onArtistTap: _openArtist,
+                          currentPage: _page,
+                          onPageSelected: (index) =>
+                              _pageController.animateToPage(
+                            index,
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeInOut,
+                          ),
                         ),
                       Expanded(
                         child: useSplitLayout
@@ -281,14 +288,6 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                     onPageChanged: (value) =>
                                         _setPageState(page: value),
                                     children: [
-                                      PosterPlayerPage(
-                                        key: const PageStorageKey(
-                                          'poster-player-page',
-                                        ),
-                                        player: widget.player,
-                                        song: widget.song,
-                                        onQueue: widget.onQueue,
-                                      ),
                                       LyricPlayerPage(
                                         key: const PageStorageKey(
                                           'lyric-player-page',
@@ -297,12 +296,19 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                         song: widget.song,
                                         isPageVisible: _lyricPageVisible,
                                       ),
+                                      PosterPlayerPage(
+                                        key: const PageStorageKey(
+                                          'poster-player-page',
+                                        ),
+                                        player: widget.player,
+                                        song: widget.song,
+                                        onQueue: widget.onQueue,
+                                      ),
                                     ],
                                   ),
                                 ),
                               ),
                       ),
-                      if (!useSplitLayout) _PageDots(page: _page),
                     ],
                   ),
                 ),
@@ -423,31 +429,3 @@ class _PlayerBodyState extends State<_PlayerBody> {
   }
 }
 
-class _PageDots extends StatelessWidget {
-  const _PageDots({required this.page});
-
-  final int page;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(2, (index) {
-          final active = index == page;
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: active ? 18 : 7,
-            height: 7,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: active ? .86 : .32),
-              borderRadius: BorderRadius.circular(99),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}

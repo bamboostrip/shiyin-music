@@ -12,6 +12,49 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import 'player_controls.dart';
 
+class PlayerPageIndicator extends StatelessWidget {
+  const PlayerPageIndicator({
+    super.key,
+    required this.currentPage,
+    this.onPageSelected,
+  });
+
+  final int currentPage;
+  final ValueChanged<int>? onPageSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildDot(0),
+        const SizedBox(width: 4),
+        _buildDot(1),
+      ],
+    );
+  }
+
+  Widget _buildDot(int pageIndex) {
+    final active = currentPage == pageIndex;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onPageSelected?.call(pageIndex),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: active ? 14.0 : 4.0,
+          height: 3.5,
+          decoration: BoxDecoration(
+            color: active ? Colors.white : Colors.white.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(2.0),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class TopBar extends StatelessWidget {
   const TopBar({
     super.key,
@@ -20,6 +63,8 @@ class TopBar extends StatelessWidget {
     required this.song,
     required this.onClose,
     required this.onArtistTap,
+    this.currentPage,
+    this.onPageSelected,
   });
 
   final PlayerController player;
@@ -27,9 +72,42 @@ class TopBar extends StatelessWidget {
   final Song song;
   final VoidCallback onClose;
   final ValueChanged<Song> onArtistTap;
+  final int? currentPage;
+  final ValueChanged<int>? onPageSelected;
 
   @override
   Widget build(BuildContext context) {
+    if (currentPage != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: '返回',
+              color: Colors.white,
+              onPressed: onClose,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+            ),
+            Expanded(
+              child: Center(
+                child: PlayerPageIndicator(
+                  currentPage: currentPage!,
+                  onPageSelected: onPageSelected,
+                ),
+              ),
+            ),
+            Builder(
+              builder: (moreButtonContext) => GlassIconButton(
+                tooltip: '更多',
+                onPressed: () => _showMoreSheet(moreButtonContext),
+                icon: Icons.more_horiz_rounded,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return AnimatedBuilder(
       animation: auth,
       builder: (context, _) {
