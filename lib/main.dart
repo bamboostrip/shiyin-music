@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,7 @@ import 'controllers/theme_controller.dart';
 import 'core/api_client_interface.dart';
 import 'core/rust_api_client.dart';
 import 'services/cache_service.dart';
+import 'services/desktop_lyrics_service.dart';
 import 'services/desktop_system_integration.dart';
 import 'services/device_info_service.dart';
 import 'services/download_service.dart';
@@ -72,7 +74,9 @@ Future<void> main(List<String> args) async {
   // audio_service 在 Linux 走 platform interface 的 NoOpAudioService（与
   // Windows 现状一致），无需分支；media 键/系统媒体会话后续可按需接入
   // audio_service_mpris。
-  if (Platform.isLinux) {
+  // kIsWeb 前置：web 上访问 Platform.isLinux 会直接 throw（当前 web 构建
+  // 因 dart:io 无法编译，此为防御性收敛，保持与 form_factor 判定同构）。
+  if (!kIsWeb && Platform.isLinux) {
     JustAudioMediaKit.ensureInitialized();
   }
 
@@ -151,6 +155,14 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     });
     // Windows 桌面：托盘常驻（左键切换窗口、右键菜单、退出）。
     if (isDesktopFormFactor) {
+      // 退出收口（托盘"退出"/关闭按钮 destroy 分支都会经过）：
+      // destroy 的原生实现是 PostQuitMessage，进程直接退出、Dart 侧没有
+      // 优雅关闭机会——桌面歌词子窗与托盘图标必须在 destroy 之前清理，
+      // 否则子窗被硬杀（拖动位置防抖丢失）、托盘残留幽灵图标。
+      DesktopWindow.onBeforeQuit = () async {
+        await DesktopLyricsService.shutdown();
+        await DesktopTray.dispose();
+      };
       unawaited(DesktopTray.init(player: _player));
       // 桌面系统集成：下载完成通知 + 主窗标题随播放。
       // local_notifier 初始化失败时降级为无通知，不影响其余功能。

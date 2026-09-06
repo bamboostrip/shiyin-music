@@ -197,9 +197,12 @@ Windows：
 
 - **形态**：`shiyin-<tag>-linux-x64-portable.tar.gz`（解压即用）+
   `shiyin-<tag>-linux-x64.deb`（/opt/shiyin-music，带 .desktop 与图标）。
-- **运行期依赖**：音频后端是 media_kit(libmpv)——deb 经 `Depends: libmpv2`
-  自动安装；便携包需用户自行 `sudo apt install libmpv2
-  libayatana-appindicator3-1`（包内 README-LINUX.txt 有说明）。
+- **运行期依赖**：音频后端是 media_kit(libmpv)——deb 经
+  `Depends: libmpv2 | libmpv1` 自动安装（Ubuntu 24.04/Debian 12 装前者，
+  Ubuntu 22.04 只有 libmpv1；media_kit 按 libmpv.so → libmpv.so.2 →
+  libmpv.so.1 顺序探测，两个 soname 均可用）；便携包需用户自行安装
+  `libmpv2`（22.04 为 `libmpv1`）与 `libayatana-appindicator3-1`
+  （包内 README-LINUX.txt 有说明）。
 - **实现要点**：`linux/CMakeLists.txt` 的 `rust_engine_build` 目标在构建期
   `cargo build` 并把 `libkugou_engine.so` 安装进 `bundle/lib`（frb 经
   RPATH `$ORIGIN/lib` 加载）；just_audio 的 Linux 后端由

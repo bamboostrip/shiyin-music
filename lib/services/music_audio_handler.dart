@@ -5,9 +5,24 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../config/app_config.dart';
 import '../models/music_models.dart';
 
-const _kgUserAgent = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
+const _kgUserAgent = AppConfig.kugouUserAgent;
+
+/// 单次 load 的代理路由：远端 URL 或本地文件二选一。
+///
+/// 按 seq（`/play/<seq>`）路由而非共享单槽：两次 loadSong 重叠（快速切歌、
+/// 后端对同一 URL 的延迟 Range 补请求）时，单槽在"请求到达时刻"取值会
+/// 让旧 load 的请求吃到新歌字节（时长/元数据与实际音频不一致，甚至
+/// 标题 A 播出 B 的声音）。按 seq 隔离后每个请求拿到的是它自己的目标。
+class _ProxyRoute {
+  _ProxyRoute({this.url, this.localPath})
+      : assert((url != null) != (localPath != null), 'url 与 localPath 二选一');
+
+  final String? url;
+  final String? localPath;
+}
 
 /// 车机与手机通知渠道解析（车机使用专属静默渠道防弹窗，手机使用标准媒体渠道支持灵动岛与锁屏控制）。
 ///
@@ -41,8 +56,7 @@ class MusicAudioHandler extends BaseAudioHandler
   int _queueIndex = 0;
 
   HttpServer? _proxy;
-  String? _proxyTarget;
-  String? _proxyLocalFile;
+  final Map<int, _ProxyRoute> _proxyRoutes = {};
   int _loadSeq = 0;
 
   void attachTransportControls({
@@ -76,13 +90,9 @@ class MusicAudioHandler extends BaseAudioHandler
     }
     mediaItem.add(currentItem);
 
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      _proxyLocalFile = null;
-      await _loadViaProxy(url);
-    } else {
-      _proxyLocalFile = url;
-      await _loadViaProxy(url);
-    }
+    // 本地文件与远端 URL 统一经代理（Range/UA 处理一致），
+    // 路由按 seq 注册见 [_loadViaProxy]。
+    await _loadViaProxy(url);
   }
 
   Future<void> _ensureProxy() async {
@@ -94,12 +104,21 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   void _onProxyRequest(HttpRequest req) async {
-    final localFile = _proxyLocalFile;
+    // 按 URL 里的 seq 取本请求自己的路由；过期请求（旧 load 的迟到
+    // Range 补发）直接 410，让后端重新走当前源。
+    final seq = int.tryParse(req.uri.path.split('/').last);
+    final route = seq == null ? null : _proxyRoutes[seq];
+    if (route == null) {
+      req.response.statusCode = HttpStatus.gone;
+      await req.response.close();
+      return;
+    }
+    final localFile = route.localPath;
     if (localFile != null) {
       await _serveLocalFile(req, localFile);
       return;
     }
-    final target = _proxyTarget;
+    final target = route.url;
     if (target == null) {
       req.response.statusCode = HttpStatus.serviceUnavailable;
       await req.response.close();
@@ -117,15 +136,25 @@ class MusicAudioHandler extends BaseAudioHandler
       final resp = await upstream.close();
 
       req.response.statusCode = resp.statusCode;
+      String? upstreamContentType;
       resp.headers.forEach((name, values) {
         final lower = name.toLowerCase();
         if (lower == HttpHeaders.contentTypeHeader ||
             lower == HttpHeaders.transferEncodingHeader) {
+          // content-type 单独记录：上游有则透传（flac 等直链会带正确
+          // 类型），没有再兜底 audio/mpeg——写死 mpeg 会把 flac 误标，
+          // 遇到按 Content-Type 选解码器的路径会解码失败。
+          if (lower == HttpHeaders.contentTypeHeader && values.isNotEmpty) {
+            upstreamContentType = values.first;
+          }
           return;
         }
         req.response.headers.set(name, values);
       });
-      req.response.headers.set(HttpHeaders.contentTypeHeader, 'audio/mpeg');
+      req.response.headers.set(
+        HttpHeaders.contentTypeHeader,
+        upstreamContentType ?? 'audio/mpeg',
+      );
       req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
 
       await resp.pipe(req.response);
@@ -136,6 +165,18 @@ class MusicAudioHandler extends BaseAudioHandler
         await req.response.close();
       } catch (_) {}
     }
+  }
+
+  /// 本地文件路径推断音频 Content-Type（默认 audio/mpeg）。
+  @visibleForTesting
+  static String contentTypeForPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.flac')) return 'audio/flac';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
+    if (lower.endsWith('.aac')) return 'audio/aac';
+    return 'audio/mpeg';
   }
 
   Future<void> _serveLocalFile(HttpRequest req, String path) async {
@@ -149,11 +190,25 @@ class MusicAudioHandler extends BaseAudioHandler
       final fileSize = file.lengthSync();
       final range = req.headers.value(HttpHeaders.rangeHeader);
       req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-      req.response.headers.set(HttpHeaders.contentTypeHeader, 'audio/mpeg');
+      req.response.headers.set(
+        HttpHeaders.contentTypeHeader,
+        contentTypeForPath(path),
+      );
 
       if (range != null && range.startsWith('bytes=')) {
         final parts = range.substring(6).split('-');
         final start = int.tryParse(parts[0]) ?? 0;
+        // 起点越界（文件比后端以为的短，如缓存被清理）必须 416：
+        // end<start 会让 contentLength 为负，直接抛异常挂在请求上。
+        if (start >= fileSize) {
+          req.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+          req.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes */$fileSize',
+          );
+          await req.response.close();
+          return;
+        }
         final end = parts.length > 1 && parts[1].isNotEmpty
             ? int.tryParse(parts[1]) ?? fileSize - 1
             : fileSize - 1;
@@ -180,8 +235,15 @@ class MusicAudioHandler extends BaseAudioHandler
 
   Future<void> _loadViaProxy(String url) async {
     await _ensureProxy();
-    _proxyTarget = url;
     final seq = ++_loadSeq;
+    _proxyRoutes[seq] = url.startsWith('http://') || url.startsWith('https://')
+        ? _ProxyRoute(url: url)
+        : _ProxyRoute(localPath: url);
+    // 只保留最近几个路由：后端换源后的旧请求应尽快失效，
+    // 同时给在途的延迟 Range 补发留足窗口。
+    while (_proxyRoutes.length > 3) {
+      _proxyRoutes.remove(_proxyRoutes.keys.first);
+    }
     final proxyUrl = 'http://127.0.0.1:${_proxy!.port}/play/$seq';
     try {
       await audioPlayer.setUrl(proxyUrl).timeout(

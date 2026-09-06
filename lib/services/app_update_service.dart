@@ -241,6 +241,11 @@ class AppUpdateService {
       if (tag == null) {
         throw StateError('重定向探测失败（${response.statusCode}）');
       }
+      // /releases/latest 只指向最新正式版：探测到预发布 tag（仓库最新
+      // Release 是 beta 时）对齐 L1 语义视为"暂无正式版本"，不推 beta。
+      if (!isStableVersionTag(tag)) {
+        throw StateError('暂无正式发布版本');
+      }
       return _assembleFromTag(
         tag: tag,
         updateContent: '更新说明获取失败，请前往发布页查看。',
@@ -348,9 +353,15 @@ class AppUpdateService {
 
     final downloadsDir =
         await getDownloadsDirectory() ?? await getTemporaryDirectory();
+    // versionName 可能来自 L2 的 Atom 标题回退/自由文本，清洗非法字符
+    // 并截长，避免 destPath 成为非法 Windows 路径（下载必失败且报错
+    // 是底层 FileSystemException 文案）。
+    final safeVersion = version.versionName
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_')
+        .trim();
     final destPath =
         '${downloadsDir.path}${Platform.pathSeparator}'
-        'ShiyinMusic-Setup-v${version.versionName}.exe';
+        'ShiyinMusic-Setup-v${safeVersion.isEmpty ? 'unknown' : safeVersion}.exe';
 
     try {
       await _dio.download(
@@ -398,47 +409,61 @@ class AppUpdateService {
   }
 }
 
-/// 解析 Atom 订阅源的第一个（最新的）Release 条目。
+/// 解析 Atom 订阅源中最新一个"正式版" Release 条目。
 ///
 /// 返回 `(tag, release 页链接, 转义状态的正文 HTML)`：tag 优先取
-/// `href="…/releases/tag/<tag>"` 链接，回退 `<title>`；正文取
-/// `<content type="html">`。解析不出返回 null。
+/// `href="…/releases/tag/<tag>"` 链接，回退 `<title>`（仅当标题本身就是
+/// 合法版本 tag——Release 标题是发版者自由填写文本，含 `/ : ? *` 与
+/// 任意长中文，直接当 tag 会污染文件名与版本比较）；正文取
+/// `<content type="html">`。逐条跳过预发布 tag（`v2.6.0-beta` 等），
+/// 对齐 L1（/releases/latest 只返回最新正式版）的语义；全部为预发布或
+/// 解析不出返回 null。
 @visibleForTesting
 (String, String, String)? parseLatestEntryFromAtom(String feedXml) {
-  final entryStart = feedXml.indexOf('<entry>');
-  if (entryStart < 0) {
-    return null;
-  }
-  final entryEndRel = feedXml.indexOf('</entry>', entryStart);
-  final entryEnd = entryEndRel < 0 ? feedXml.length : entryEndRel;
-  final entry = feedXml.substring(entryStart, entryEnd);
-
-  var tag = '';
-  var link = '';
-  final linkMatch = RegExp(
-    r'href="([^"]+/releases/tag/([^"]+))"',
-  ).firstMatch(entry);
-  if (linkMatch != null) {
-    tag = unescapeHtml(linkMatch.group(2) ?? '');
-    link = unescapeHtml(linkMatch.group(1) ?? '');
-  }
-  if (tag.isEmpty) {
-    final titleMatch = RegExp('<title>([^<]+)</title>').firstMatch(entry);
-    if (titleMatch == null) {
+  var cursor = 0;
+  while (true) {
+    final entryStart = feedXml.indexOf('<entry>', cursor);
+    if (entryStart < 0) {
       return null;
     }
-    tag = titleMatch.group(1)?.trim() ?? '';
-  }
-  if (tag.isEmpty) {
-    return null;
-  }
+    final entryEndRel = feedXml.indexOf('</entry>', entryStart);
+    final entryEnd = entryEndRel < 0 ? feedXml.length : entryEndRel;
+    final entry = feedXml.substring(entryStart, entryEnd);
+    cursor = entryEnd;
 
-  final contentMatch = RegExp(
-    r'<content[^>]*>([\s\S]*?)</content>',
-  ).firstMatch(entry);
-  final content = contentMatch?.group(1) ?? '';
+    var tag = '';
+    var link = '';
+    final linkMatch = RegExp(
+      r'href="([^"]+/releases/tag/([^"]+))"',
+    ).firstMatch(entry);
+    if (linkMatch != null) {
+      tag = unescapeHtml(linkMatch.group(2) ?? '');
+      link = unescapeHtml(linkMatch.group(1) ?? '');
+    }
+    if (tag.isEmpty) {
+      final titleMatch = RegExp('<title>([^<]+)</title>').firstMatch(entry);
+      if (titleMatch == null) {
+        continue;
+      }
+      final title = (titleMatch.group(1)?.trim() ?? '');
+      // 标题回退仅在它本身就是合法正式版 tag 时采用，杜绝把发版者
+      // 自由填写的 Release 标题当版本号（非法字符进文件名/版本比较）。
+      if (!isStableVersionTag(title)) {
+        continue;
+      }
+      tag = title;
+    }
+    if (tag.isEmpty || !isStableVersionTag(tag)) {
+      continue;
+    }
 
-  return (tag, link, content);
+    final contentMatch = RegExp(
+      r'<content[^>]*>([\s\S]*?)</content>',
+    ).firstMatch(entry);
+    final content = contentMatch?.group(1) ?? '';
+
+    return (tag, link, content);
+  }
 }
 
 /// 反转义常见 HTML 实体（`&amp;` `&lt;` `&gt;` `&quot;` `&#39;` `&nbsp;`

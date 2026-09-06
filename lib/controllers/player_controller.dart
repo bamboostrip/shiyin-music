@@ -288,7 +288,14 @@ class PlayerController extends ChangeNotifier {
   bool isPlaying = false;
   bool isBuffering = false;
   bool isPreparing = false;
-  bool _isChangingSource = false;
+
+  /// 换源深度计数（并发 playSong 各自持有 +1/-1）。
+  ///
+  /// 曾经是共享 bool：快速连点切歌时，先启动的 playSong 在 await 中被
+  /// 后启动者抢先，其 finally 会把后者仍需的"换源中"状态提前清除，
+  /// completed 守卫失效。计数化后状态只在最后一个在途加载结束时归零。
+  int _changingSourceDepth = 0;
+  bool get _isChangingSource => _changingSourceDepth > 0;
   bool addListeningTimeEnabled = true;
   AudioQuality audioQuality = AudioQuality.standard;
 
@@ -498,7 +505,7 @@ class PlayerController extends ChangeNotifier {
     // 切新歌或无本地缓存需走网络解析时标记 isPreparing；
     // 同一首歌且有本地缓存时毫秒级即播，无需展示加载态，实现无感体验。
     isPreparing = !isSameSong || !hasLocalAudio;
-    _isChangingSource = true;
+    _changingSourceDepth++;
     errorMessage = null;
     currentSong = song;
     final queueChanged = queue != null && !listEquals(this.queue, queue);
@@ -537,6 +544,14 @@ class PlayerController extends ChangeNotifier {
         url = song.id;
       } else {
         final playUrl = await _resolvePlayUrl(song);
+        // URL 解析可挂起数秒（弱网/智能音质降级重试链），期间用户可能
+        // 已切到另一首（currentSong 已被后者覆盖）：旧歌不得再把引擎与
+        // mediaItem 抢回去，歌词/高潮等已有 hash 序号守卫，唯独主播放
+        // 路径此前没有。
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 地址解析期间已切歌，丢弃旧结果: ${song.title}');
+          return;
+        }
         if (playUrl.url.isEmpty) {
           throw Exception(
             song.isCloudDrive
@@ -564,6 +579,13 @@ class PlayerController extends ChangeNotifier {
         queueSongs: this.queue,
         queueIndex: currentIndex,
       );
+      // loadSong（setUrl 等待后端就绪）期间同样可能被更新的切歌抢先：
+      // 旧歌的 seek/play/缓存后置动作全部作废，避免新歌被旧歌的
+      // 播放指令打回。
+      if (currentSong?.hash != song.hash) {
+        debugPrint('[时音][player] 加载期间已切歌，中止旧歌后续动作: ${song.title}');
+        return;
+      }
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
       }
@@ -592,9 +614,18 @@ class PlayerController extends ChangeNotifier {
       // 车机弱网/网络切换瞬间首次请求常失败，重试后即可恢复；
       // 确定性错误（如"没有可播放地址"）重试成本低，统一兜底一次。
       if (!isRetry && error is! VipRequiredException) {
+        // 等待期间用户可能已切歌：旧歌的自动重试不得抢回播放权。
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 重试前歌曲已切换，放弃重试: ${song.title}');
+          return;
+        }
         errorMessage = '播放失败，正在重试...';
         notifyListeners();
         await Future<void>.delayed(const Duration(seconds: 2));
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 重试等待期间歌曲已切换，放弃重试: ${song.title}');
+          return;
+        }
         debugPrint('[时音][player] 播放失败，自动重试: ${song.title} ($error)');
         await playSong(
           song,
@@ -605,12 +636,20 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
+      // 确定性失败落错误态前同样确认仍是当前歌：切歌后的旧错误不得
+      // 覆盖新歌的加载/播放状态。
+      if (currentSong?.hash != song.hash) {
+        debugPrint('[时音][player] 失败落错误态前歌曲已切换，跳过: ${song.title}');
+        return;
+      }
       errorMessage = error.toString();
       isPreparing = false;
       notifyListeners();
     } finally {
       _pendingInitialPosition = null;
-      _isChangingSource = false;
+      if (_changingSourceDepth > 0) {
+        _changingSourceDepth--;
+      }
       if (isPreparing) {
         isPreparing = false;
         notifyListeners();

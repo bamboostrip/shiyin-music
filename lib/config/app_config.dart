@@ -5,6 +5,12 @@ class AppConfig {
   static const appVersion = '2.5.1';
   static const appVersionCode = '251';
 
+  /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
+  /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
+  /// CDN 若校验 UA，缺失会导致"流播放正常但下载/播放缓存 403"。
+  static const kugouUserAgent =
+      'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
+
   /// 当前包的渲染引擎，由构建时 `--dart-define=APP_RENDERER=skia|impeller`
   /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传）。更新检查用它选对应附件；
   /// 本地 `flutter run` 没传时按 Impeller 默认处理。

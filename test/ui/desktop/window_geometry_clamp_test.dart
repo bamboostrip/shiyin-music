@@ -146,5 +146,37 @@ void main() {
       );
       expect(result, geometry);
     });
+
+    test('与区域仅数像素交集（拔副屏/DPI 换算贴边残余）→ 钳回可见区', () {
+      // 窗口右沿只探进主屏 5px：旧语义（任意交集即通过）会留下一个几乎
+      // 不可见、无法拖回的窗口。
+      const geometry = DesktopWindowGeometry(
+        left: 1915,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      expect(result.left, 560);
+      expect(result.top, 200);
+    });
+
+    test('交集足量（≥80px 见方）→ 原样返回', () {
+      // 右沿探进 120px（≥80），正常部分可见窗口不受影响。
+      const geometry = DesktopWindowGeometry(
+        left: 1800,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      expect(result, geometry);
+    });
   });
 }

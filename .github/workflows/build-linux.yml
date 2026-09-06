@@ -102,8 +102,12 @@ jobs:
 
           运行前请安装一次运行期依赖（音频后端 libmpv 与托盘 AppIndicator）：
 
-            Debian / Ubuntu :  sudo apt install libmpv2 libayatana-appindicator3-1
-            Fedora / RHEL   :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3
+            Debian 12 / Ubuntu 24.04 :  sudo apt install libmpv2 libayatana-appindicator3-1
+            Ubuntu 22.04             :  sudo apt install libmpv1 libayatana-appindicator3-1
+            Fedora / RHEL            :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3
+
+          （media_kit 按 libmpv.so → libmpv.so.2 → libmpv.so.1 顺序探测，
+          Ubuntu 22.04 的 libmpv1（mpv 0.34）与 libmpv2（mpv 0.35+）均可。）
 
           启动：./ShiYinMusic
           （可选）在桌面环境中创建 .desktop 文件指向本目录的 ShiYinMusic。
@@ -116,7 +120,9 @@ jobs:
           ls -la "build/dist/shiyin-$tag-linux-x64-portable.tar.gz"
 
       # deb 包：bundle 入 /opt/shiyin-music，带 .desktop 与 hicolor 图标，
-      # 运行期依赖经 Depends 声明（libmpv2 即音频后端）。
+      # 运行期依赖经 Depends 声明（音频后端 libmpv：Ubuntu 24.04/Debian 12
+      # 是 libmpv2，Ubuntu 22.04 只有 libmpv1——media_kit 两个 soname 都能
+      # 探测，用备选依赖兼容 22.04，否则 22.04 用户 apt 安装直接失败）。
       - name: Build deb package
         run: |
           tag="${{ steps.names.outputs.tag }}"
@@ -138,7 +144,7 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: bamboostrip <bamboostrip@users.noreply.github.com>
-          Depends: libgtk-3-0, libmpv2, libayatana-appindicator3-1
+          Depends: libgtk-3-0, libmpv2 | libmpv1, libayatana-appindicator3-1
           Recommends: xdg-user-dirs
           Homepage: https://github.com/bamboostrip/shiyin-music
           Description: 视听音乐播放器 (ShiYin Music)

@@ -333,7 +333,7 @@ class _DownloadedList extends StatelessWidget {
           SongSheetAction(
             icon: Icons.folder_open_rounded,
             title: '打开文件夹',
-            onTap: () => _openContainingFolder(filePath),
+            onTap: () => _openContainingFolder(filePath, context),
           ),
           SongSheetAction(
             icon: Icons.info_outline_rounded,
@@ -477,7 +477,7 @@ class _DownloadedSongRow extends StatelessWidget {
                 title: const Text('打开文件夹'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _openContainingFolder(filePath);
+                  _openContainingFolder(filePath, ctx);
                 },
               ),
               ListTile(
@@ -508,27 +508,46 @@ class _DownloadedSongRow extends StatelessWidget {
 }
 
 /// 用系统文件管理器打开歌曲文件所在目录（移动端弹层与桌面菜单共用）。
-Future<void> _openContainingFolder(String filePath) async {
+///
+/// 任何一步失败（精简发行版没有 xdg-open、explorer 拉起失败等）都以
+/// SnackBar 反馈，不产生未捕获异步异常。
+Future<void> _openContainingFolder(String filePath, BuildContext context) async {
   final file = File(filePath);
   final dir = file.parent.path;
-
-  if (Platform.isWindows) {
-    await Process.run('explorer', [dir]);
-  } else if (Platform.isMacOS) {
-    await Process.run('open', [dir]);
-  } else if (Platform.isLinux) {
-    await Process.run('xdg-open', [dir]);
-  } else if (Platform.isAndroid) {
-    // Android 无法直接打开文件管理器到指定目录，尝试用 file:// URI
-    final uri = Uri.parse('file://$dir');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      // 回退：尝试 content URI 方式
-      final contentUri = Uri.parse(
-        'content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}',
-      );
-      await launchUrl(contentUri, mode: LaunchMode.externalApplication);
+  try {
+    if (Platform.isWindows) {
+      await Process.run('explorer', [dir]);
+    } else if (Platform.isMacOS) {
+      await Process.run('open', [dir]);
+    } else if (Platform.isLinux) {
+      await Process.run('xdg-open', [dir]);
+    } else if (Platform.isAndroid) {
+      // Android 无法直接打开文件管理器到指定目录，尝试用 file:// URI
+      // （路径含空格/中文必须编码，直接拼接会让 URI 解析截断）。
+      final uri = Uri.file(dir);
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        // 回退：尝试 content URI 方式
+        final contentUri = Uri.parse(
+          'content://com.android.externalstorage.documents/document/primary:${dir.replaceFirst('/storage/emulated/0/', '')}',
+        );
+        await launchUrl(contentUri, mode: LaunchMode.externalApplication);
+      }
+    } else {
+      // iOS 无文件管理器直达能力：明确反馈而非静默无响应。
+      _showOpenFolderError(context, '当前平台暂不支持打开所在目录');
+    }
+  } catch (e) {
+    debugPrint('[已下载] 打开所在目录失败: $e');
+    if (context.mounted) {
+      _showOpenFolderError(context, '打开目录失败，请手动前往：$dir');
     }
   }
+}
+
+void _showOpenFolderError(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+  );
 }
 
 /// 下载中行（显示进度）。

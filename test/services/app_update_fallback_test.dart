@@ -141,15 +141,57 @@ void main() {
       expect(content, '&lt;h2&gt;更新内容&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;修复&lt;/li&gt;&lt;/ul&gt;');
     });
 
-    test('链接缺失时回退 title 取 tag', () {
-      const feed = '<feed><entry><title>v2.5.2 发布</title>'
+    test('链接缺失时回退 title 取 tag（仅当 title 本身是合法正式版 tag）', () {
+      const feed = '<feed><entry><title>v2.5.2</title>'
           '<content type="html">x</content></entry></feed>';
       final entry = parseLatestEntryFromAtom(feed);
-      expect(entry?.$1, 'v2.5.2 发布');
+      expect(entry?.$1, 'v2.5.2');
+    });
+
+    test('链接缺失且 title 是自由文本（非版本 tag）时不采用，跳过该条目', () {
+      // Release 标题是发版者自由填写的文本：含中文/空格的标题直接当 tag
+      // 会污染文件名与版本比较，必须跳过。
+      const feed = '<feed><entry><title>v2.5.2 夏日版发布</title>'
+          '<content type="html">x</content></entry>'
+          '<entry><title>v2.5.1</title><content type="html">y</content>'
+          '</entry></feed>';
+      final entry = parseLatestEntryFromAtom(feed);
+      expect(entry?.$1, 'v2.5.1');
+    });
+
+    test('首个条目为预发布 tag 时跳过，取下一个正式版', () {
+      const feed = '<feed>'
+          '<entry><link rel="alternate" type="text/html" '
+          'href="https://github.com/a/b/releases/tag/v2.6.0-beta.1"/>'
+          '<title>v2.6.0-beta.1</title><content type="html">beta</content>'
+          '</entry>'
+          '<entry><link rel="alternate" type="text/html" '
+          'href="https://github.com/a/b/releases/tag/v2.5.2"/>'
+          '<title>v2.5.2</title><content type="html">stable</content>'
+          '</entry>'
+          '</feed>';
+      final entry = parseLatestEntryFromAtom(feed);
+      final (tag, link, content) = entry!;
+      expect(tag, 'v2.5.2');
+      expect(link, 'https://github.com/a/b/releases/tag/v2.5.2');
+      expect(content, 'stable');
     });
 
     test('空 feed（仓库无 Release）返回 null', () {
       expect(parseLatestEntryFromAtom('<feed><title>x</title></feed>'), isNull);
+    });
+  });
+
+  group('isStableVersionTag', () {
+    test('正式版 tag 判定', () {
+      expect(isStableVersionTag('v2.5.2'), isTrue);
+      expect(isStableVersionTag('V2.5'), isTrue);
+      expect(isStableVersionTag('2.5.2'), isTrue);
+      expect(isStableVersionTag('2'), isTrue);
+      expect(isStableVersionTag('v2.6.0-beta.1'), isFalse);
+      expect(isStableVersionTag('v2.6.0-rc1'), isFalse);
+      expect(isStableVersionTag('v2.5.2 发布'), isFalse);
+      expect(isStableVersionTag(''), isFalse);
     });
   });
 

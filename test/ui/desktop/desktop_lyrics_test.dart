@@ -540,4 +540,63 @@ void main() {
       expect(find.byType(Material), findsWidgets);
     });
   });
+
+  group('clampOverlayOriginToVisibleAreas（拔显示器/屏幕外位置钳制）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+
+    test('主屏内可见位置原样返回', () {
+      final origin =
+          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+        const Offset(500, 900),
+        [primary],
+        fallback: const Offset(100, 100),
+      );
+      expect(origin, const Offset(500, 900));
+    });
+
+    test('位置在已拔掉的副屏（屏幕外）→ 钳回主屏右下可见区', () {
+      final origin =
+          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+        const Offset(3840, 2000),
+        [primary],
+        fallback: const Offset(100, 100),
+      );
+      // 右/下至少留 80px 可见。
+      expect(origin.dx, primary.right - 80);
+      expect(origin.dy, primary.bottom - 80);
+    });
+
+    test('与主屏仅数像素交集（DPI 换算贴边残余）→ 钳回可见区', () {
+      // 窗口宽 780：左沿 1915 只剩 5px 可见。
+      final origin =
+          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+        const Offset(1915, 500),
+        [primary],
+        fallback: const Offset(100, 100),
+      );
+      expect(origin.dx, primary.right - 80);
+      expect(origin.dy, 500);
+    });
+
+    test('无显示器信息时返回 fallback（无从钳制）', () {
+      final origin =
+          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+        const Offset(-5000, -5000),
+        const <Rect>[],
+        fallback: const Offset(100, 100),
+      );
+      expect(origin, const Offset(100, 100));
+    });
+
+    test('多显示器：副屏内可见位置不误钳', () {
+      const secondary = Rect.fromLTWH(1920, 0, 1920, 1080);
+      final origin =
+          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+        const Offset(2500, 900),
+        [primary, secondary],
+        fallback: const Offset(100, 100),
+      );
+      expect(origin, const Offset(2500, 900));
+    });
+  });
 }

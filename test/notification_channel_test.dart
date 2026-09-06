@@ -43,4 +43,21 @@ void main() {
       expect(config.channelName, '时音 车机播放控制');
     });
   });
+
+  group('MusicAudioHandler.contentTypeForPath（本地文件代理 Content-Type）', () {
+    test('按扩展名映射，未知回退 audio/mpeg', () {
+      expect(MusicAudioHandler.contentTypeForPath('song.mp3'), 'audio/mpeg');
+      expect(MusicAudioHandler.contentTypeForPath('song.flac'.toLowerCase()),
+          'audio/flac');
+      expect(MusicAudioHandler.contentTypeForPath('D:\\音乐\\无损.FLAC'),
+          'audio/flac');
+      expect(MusicAudioHandler.contentTypeForPath('song.wav'), 'audio/wav');
+      expect(MusicAudioHandler.contentTypeForPath('song.ogg'), 'audio/ogg');
+      expect(MusicAudioHandler.contentTypeForPath('song.m4a'), 'audio/mp4');
+      expect(MusicAudioHandler.contentTypeForPath('song.aac'), 'audio/aac');
+      expect(MusicAudioHandler.contentTypeForPath('song.unknown'),
+          'audio/mpeg');
+      expect(MusicAudioHandler.contentTypeForPath('无扩展名'), 'audio/mpeg');
+    });
+  });
 }

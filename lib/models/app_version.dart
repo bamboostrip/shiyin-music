@@ -159,6 +159,16 @@ String stripVersionTagPrefix(String tag) {
   return t;
 }
 
+/// 是否为"正式版" tag：可选 v 前缀 + 纯数字点分段（`v2.4.0`、`2.4`）。
+///
+/// 预发布（`v2.6.0-beta`、`2.6.0-rc.1`）与任何带后缀的 tag 都不算——
+/// GitHub API 的 /releases/latest 只返回最新正式版，L2（Atom）/L3（302
+/// 探测）降级路径必须同样过滤，否则 API 限流时降级路径会把 beta 当正式
+/// 更新推给用户，与 L1 的语义不一致。
+bool isStableVersionTag(String tag) {
+  return RegExp(r'^[vV]?\d+(\.\d+)*$').hasMatch(tag.trim());
+}
+
 /// 取语义化版本的前三段整数（不足补 0，忽略预发布/构建号）。
 List<int> _semverParts(String version) {
   final core = stripVersionTagPrefix(version).split('-').first.split('+').first;

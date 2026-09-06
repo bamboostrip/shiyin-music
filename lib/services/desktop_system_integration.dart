@@ -165,7 +165,14 @@ class LaunchAtStartupManager implements AutoStartManager {
     if (_setupDone) return;
     launchAtStartup.setup(
       appName: AppConfig.appName,
-      appPath: Platform.resolvedExecutable,
+      // launch_at_startup 0.3.1 的 Windows 实现把 appPath 原样写入
+      // HKCU\...\CurrentVersion\Run，不加引号（上游已知问题）：安装到
+      // 含空格目录（如 C:\Program Files\）时 Windows 会把路径在第一个
+      // 空格处截断解析，自启失效。这里主动传入带引号的路径规避；
+      // isEnabled 的比对同样基于这个值，enable/查询两侧一致。
+      appPath: Platform.isWindows
+          ? '"${Platform.resolvedExecutable}"'
+          : Platform.resolvedExecutable,
     );
     _setupDone = true;
   }

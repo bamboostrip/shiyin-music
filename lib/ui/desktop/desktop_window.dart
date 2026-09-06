@@ -25,6 +25,10 @@ class DesktopWindow {
   static Future<void> ensureInitialized() async {
     if (!isDesktopFormFactor) return;
     await windowManager.ensureInitialized();
+    // 关闭拦截尽早打开：恢复链（读取几何/钳制/最大化）耗时期间用户点 X
+    // 也必须走 [_WindowGeometrySaver.onWindowClose]，否则窗口被原生直接
+    // 销毁、进程退出，初始化中的服务被拦腰斩断。
+    await windowManager.setPreventClose(true);
     final prefs = await SharedPreferences.getInstance();
     final geometry = DesktopWindowGeometry.load(prefs);
     final options = WindowOptions(
@@ -51,10 +55,6 @@ class DesktopWindow {
     });
     _saver = _WindowGeometrySaver(prefs);
     windowManager.addListener(_saver!);
-    // 关闭按钮拦截恒开（桌面形态才走到这里）：native 收到 WM_CLOSE 后
-    // 不再直接销毁窗口，改由 [_WindowGeometrySaver.onWindowClose] 决定
-    // 隐藏到托盘还是真正退出。
-    await windowManager.setPreventClose(true);
   }
 
   static _WindowGeometrySaver? _saver;
@@ -65,9 +65,56 @@ class DesktopWindow {
   /// 最大化状态持久化键（由 [_WindowGeometrySaver] 随事件写入）。
   static const String kMaximizedPrefKey = 'window.maximized';
 
+  /// 会话级"关闭到托盘"降级开关（null = 未降级，以持久化设置为准）。
+  ///
+  /// 托盘初始化失败时置 false：本会话内 X 按钮直接退出，保证应用可达。
+  /// 只降级当前会话，不回写持久化设置——托盘在下次启动恢复后，
+  /// 用户显式开启的"关闭到托盘"不受一次性的环境故障影响。
+  static bool? _closeToTraySessionOverride;
+
+  /// 退出前清理钩子（main.dart 注入：关闭桌面歌词子窗、销毁托盘等）。
+  ///
+  /// [quitGracefully] 在销毁主窗前调用；因 destroy() 原生实现是
+  /// PostQuitMessage（进程直接退出），Dart 侧不会获得优雅关闭机会，
+  /// 所有跨窗口/系统资源必须在 destroy 之前在此清理。
+  static Future<void> Function()? onBeforeQuit;
+
+  /// 统一退出路径：清理钩子 → 落盘几何 → 销毁窗口（进程随之退出）。
+  ///
+  /// 托盘"退出"与关闭按钮的 destroy 分支都必须走这里，禁止散落调用
+  /// windowManager.destroy()——否则托盘图标残留、桌面歌词子窗被硬杀
+  /// （子窗最后 500ms 防抖内的拖动位置丢失）。
+  static Future<void> quitGracefully() async {
+    final hook = onBeforeQuit;
+    if (hook != null) {
+      try {
+        await hook();
+      } catch (error) {
+        debugPrint('DesktopWindow: 退出前清理失败（继续退出）: $error');
+      }
+    }
+    try {
+      await flushGeometry();
+    } catch (error) {
+      debugPrint('DesktopWindow: 退出时保存几何失败（不阻止退出）: $error');
+    }
+    try {
+      await windowManager.destroy();
+    } catch (error) {
+      debugPrint('DesktopWindow: 窗口销毁失败: $error');
+    }
+  }
+
   /// 读取关闭行为：true（默认）→ 关闭时隐藏到托盘；false → 真正退出。
+  /// 会话级降级（托盘初始化失败）优先于持久化设置。
   static bool closeToTrayEnabled(SharedPreferences prefs) =>
-      prefs.getBool(kCloseToTrayPrefKey) ?? true;
+      _closeToTraySessionOverride ??
+      (prefs.getBool(kCloseToTrayPrefKey) ?? true);
+
+  /// 设置/清除会话级"关闭到托盘"降级（见 [_closeToTraySessionOverride]）。
+  static void setCloseToTraySessionOverride(bool? value) {
+    _closeToTraySessionOverride = value;
+  }
 
   /// 写入关闭行为设置。
   static Future<void> setCloseToTray(SharedPreferences prefs, bool value) =>
@@ -90,6 +137,15 @@ class DesktopWindow {
     await DesktopWindowGeometry.reset(prefs);
     await prefs.remove(kMaximizedPrefKey);
     if (!isDesktopFormFactor) return;
+    // 最大化状态下 setBounds/center 不生效且后续 resize 事件会把全屏
+    // 尺寸当常规几何落盘：先还原再重置。
+    try {
+      if (await windowManager.isMaximized()) {
+        await windowManager.unmaximize();
+      }
+    } catch (error) {
+      debugPrint('DesktopWindow: 重置前还原最大化失败（继续重置）: $error');
+    }
     await windowManager.setBounds(
       Rect.fromLTWH(0, 0, kDefaultSize.width, kDefaultSize.height),
     );
@@ -151,8 +207,9 @@ class DesktopWindowGeometry {
 
   Rect get rect => Rect.fromLTWH(left, top, width, height);
 
-  /// 将窗口几何钳制到至少与一块显示器可见区域相交，
-  /// 避免显示器配置变化后窗口恢复到屏幕外。
+  /// 将窗口几何钳制到至少在一块显示器可见区域内留出
+  /// [kMinVisibleEdge] 的可见边，避免显示器配置变化后窗口恢复到屏幕外
+  /// 或仅剩几像素可见（用户无法拖回）。
   /// [visibleAreas] 为各显示器的可见区域（左上角 + 尺寸）。
   static DesktopWindowGeometry clampToVisibleAreas(
     DesktopWindowGeometry geometry,
@@ -161,11 +218,17 @@ class DesktopWindowGeometry {
     // 无可用显示器信息时无从钳制，原样返回。
     if (visibleAreas.isEmpty) return geometry;
     final windowRect = geometry.rect;
-    // 任一可见区域与窗口矩形相交 → 位置仍可见，原样返回。
+    // 任一可见区域与窗口有足量交集（至少 kMinVisibleEdge 见方）→ 可见
+    // 且可拖动，原样返回。仅数像素交集视为不可用（拔显示器/DPI 换算后
+    // 贴边的典型残余），走下方重定位。
     for (final area in visibleAreas) {
-      if (area.overlaps(windowRect)) return geometry;
+      final intersection = area.intersect(windowRect);
+      if (intersection.width >= kMinVisibleEdge &&
+          intersection.height >= kMinVisibleEdge) {
+        return geometry;
+      }
     }
-    // 完全不可见 → 放进第一个可见区域，右/下边至少留出 80px 可见；
+    // 不可见/不可用 → 放进第一个可见区域，右/下边至少留出 80px 可见；
     // 窗口比区域（减去 80px）还宽/高时贴区域左上角。
     final area = visibleAreas.first;
     final clampedLeft = area.left +
@@ -277,7 +340,8 @@ class _WindowGeometrySaver extends WindowListener {
       if (DesktopWindow.closeToTrayEnabled(_prefs)) {
         await windowManager.hide();
       } else {
-        await windowManager.destroy();
+        // 统一退出路径：先走清理钩子（关歌词子窗/销毁托盘）再销毁。
+        await DesktopWindow.quitGracefully();
       }
     } catch (error) {
       debugPrint('DesktopWindow: 窗口关闭处理失败，降级强制销毁: $error');
@@ -302,11 +366,14 @@ class _WindowGeometrySaver extends WindowListener {
   }
 
   Future<void> _saveNow() async {
-    // 处于最大化状态时不落盘常规几何，避免最大化全屏尺寸覆盖用户常规窗口尺寸
-    if (DesktopWindow.maximizedPreferred(_prefs)) {
-      return;
-    }
+    // 处于最大化状态时不落盘常规几何，避免最大化全屏尺寸覆盖用户常规窗口尺寸。
+    // 查询实时状态而非持久化标记：持久化标记在 onWindowMaximize/Unmaximize
+    // 异步落盘，存在滞后（如刚启动按标记还原最大化时标记仍为 true 但几何
+    // 事件尚未到达）；且"重置窗口"会清标记，若此处读标记会让保护失效。
     try {
+      if (await windowManager.isMaximized()) {
+        return;
+      }
       final bounds = await windowManager.getBounds();
       await DesktopWindowGeometry(
         left: bounds.left,

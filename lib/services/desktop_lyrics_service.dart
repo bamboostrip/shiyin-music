@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../ui/form_factor.dart';
 import 'windows_desktop_lyrics_bridge.dart';
 
 typedef DesktopLyricsVisibilityChanged =
@@ -101,13 +100,18 @@ class DesktopLyricsService {
   /// Windows 桌面形态的悬浮窗桥接（进程级单例；Android 分支不使用）。
   /// 可见性、播控与锁定回调经静态转发交给实例级
   /// [_visibilityChanged] / [_playbackAction] / [_lockChanged]。
-  static final WindowsDesktopLyricsBridge? _windowsBridge = isDesktopFormFactor
+  static final WindowsDesktopLyricsBridge? _windowsBridge = _isWindowsDesktop
       ? WindowsDesktopLyricsBridge(
           onVisibilityChanged: _forwardVisibilityChanged,
           onPlaybackAction: _forwardPlaybackAction,
           onLockChanged: _forwardLockChanged,
         )
       : null;
+
+  /// 桌面分支（悬浮窗桥接）仅在 Windows：子窗插件注册方式见
+  /// [isSupportedPlatform] 注释。
+  static bool get _isWindowsDesktop =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
   static void _forwardVisibilityChanged({
     required bool visible,
@@ -131,8 +135,21 @@ class DesktopLyricsService {
   static bool get isSupportedPlatform {
     return !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
-            // 桌面歌词桥接目前仅在 Windows 验证；macOS/Linux 走同一分支但未经原生验证（子窗口插件注册方式不同）。
-            isDesktopFormFactor);
+            // 桌面歌词子窗（desktop_multi_window + window_manager 组合）仅在
+            // Windows runner 配置了子窗插件注册（windows/runner/main.cpp 的
+            // SetWindowCreatedCallback）。macOS/Linux 的 desktop_multi_window
+            // 子引擎只注册插件自身，window_manager 的 frameless/穿透/置顶全部
+            // MissingPluginException，悬浮窗会以默认系统边框样式出现且锁定/
+            // 穿透失效——在这些平台收窄为不支持，待原生侧补齐注册后再放开。
+            defaultTargetPlatform == TargetPlatform.windows);
+  }
+
+  /// 应用退出收口：主窗侧直接关闭悬浮子窗（不翻转持久化的开关状态）。
+  ///
+  /// 必须在 windowManager.destroy() 之前调用——destroy 的原生实现是
+  /// PostQuitMessage，进程直接退出，子窗否则被硬杀（拖动位置防抖丢失）。
+  static Future<void> shutdown() async {
+    await _windowsBridge?.hide();
   }
 
   void setVisibilityChangedHandler(DesktopLyricsVisibilityChanged? handler) {
@@ -172,7 +189,7 @@ class DesktopLyricsService {
   Future<bool> checkPermission() async {
     if (!isSupportedPlatform) return false;
     // Windows：悬浮窗无需特殊权限。
-    if (isDesktopFormFactor) return true;
+    if (_isWindowsDesktop) return true;
     try {
       final result = await _channel.invokeMethod<bool>('checkPermission');
       return result ?? false;
@@ -184,7 +201,7 @@ class DesktopLyricsService {
   Future<void> requestPermission() async {
     if (!isSupportedPlatform) return;
     // Windows：无权限流程，no-op。
-    if (isDesktopFormFactor) return;
+    if (_isWindowsDesktop) return;
     try {
       await _channel.invokeMethod<void>('requestPermission');
     } on MissingPluginException {
@@ -194,7 +211,7 @@ class DesktopLyricsService {
 
   Future<bool> show({required String title, required String artist}) async {
     if (!isSupportedPlatform) return false;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       return await _windowsBridge?.show(title: title, artist: artist) ?? false;
     }
     try {
@@ -212,7 +229,7 @@ class DesktopLyricsService {
 
   Future<void> hide() async {
     if (!isSupportedPlatform) return;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.hide();
       return;
     }
@@ -228,7 +245,7 @@ class DesktopLyricsService {
     required String next,
   }) async {
     if (!isSupportedPlatform) return;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.updateLyrics(current: current, next: next);
       return;
     }
@@ -244,7 +261,7 @@ class DesktopLyricsService {
 
   Future<void> updatePlayState({required bool isPlaying}) async {
     if (!isSupportedPlatform) return;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.updatePlayState(isPlaying: isPlaying);
       return;
     }
@@ -264,7 +281,7 @@ class DesktopLyricsService {
   }) async {
     if (!isSupportedPlatform) return;
     // Windows：v1 整行展示，不做逐字进度。
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.updateKaraokeProgress(
         progress: progress,
         lineDuration: lineDuration,
@@ -285,7 +302,7 @@ class DesktopLyricsService {
 
   Future<void> updateSettings(DesktopLyricsSettings settings) async {
     if (!isSupportedPlatform) return;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.updateSettings(settings);
       return;
     }
@@ -298,7 +315,7 @@ class DesktopLyricsService {
 
   Future<void> setAppForeground({required bool isForeground}) async {
     if (!isSupportedPlatform) return;
-    if (isDesktopFormFactor) {
+    if (_isWindowsDesktop) {
       await _windowsBridge?.setAppForeground(isForeground: isForeground);
       return;
     }
@@ -313,7 +330,7 @@ class DesktopLyricsService {
 
   Future<bool> isVisible() async {
     if (!isSupportedPlatform) return false;
-    if (isDesktopFormFactor) return _windowsBridge?.isVisible ?? false;
+    if (_isWindowsDesktop) return _windowsBridge?.isVisible ?? false;
     try {
       final result = await _channel.invokeMethod<bool>('isVisible');
       return result ?? false;

@@ -30,12 +30,27 @@ import '../design_tokens.dart';
 /// 子窗口控制器（入口函数创建后模块级持有，供关闭流程使用）。
 WindowController? _overlayWindowController;
 
-/// 拖动结束后的位置持久化键（与 brief 约定一致）。
-const String _kWindowLeftKey = 'desktop_lyrics.window.left';
-const String _kWindowTopKey = 'desktop_lyrics.window.top';
-
 /// 拖动结束后位置持久化的防抖间隔（WM_MOVE 风暴下合并落盘）。
 const Duration _kPersistDebounce = Duration(milliseconds: 500);
+
+/// 关闭流程重入 guard：closeLyricsOverlayWindow 可能由用户点 X、
+/// Alt+F4（onWindowClose 漏斗）与主窗侧 hide（window.close 被
+/// preventClose 拦截后转入漏斗）并发触发，只执行一次。
+bool _overlayCloseInFlight = false;
+
+/// 立即持久化当前窗口位置（防抖取消失效时与关闭前补存共用）。
+Future<void> persistOverlayWindowPosition() async {
+  try {
+    final position = await windowManager.getPosition();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+        WindowsDesktopLyricsBridge.windowLeftPrefKey, position.dx);
+    await prefs.setDouble(
+        WindowsDesktopLyricsBridge.windowTopPrefKey, position.dy);
+  } on Exception {
+    // 位置持久化失败不影响展示。
+  }
+}
 
 /// desktop_multi_window 子窗口参数判定（约定见包源码：
 /// args = ['multi_window', windowId, argumentsJson]）。
@@ -125,6 +140,15 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] setAlwaysOnTop 失败: $e');
   }
+  // 拦截外部关闭（Alt+F4/任务栏关闭）：默认路径下子窗被直接销毁且主窗
+  // 毫无感知（desktop_multi_window 的 OnWindowClose 是空实现），桥接会
+  // 残留 _visible=true、歌词静默冻结。拦截后统一走
+  // [_LyricsOverlayHomeState.onWindowClose] → closeLyricsOverlayWindow 漏斗。
+  try {
+    await windowManager.setPreventClose(true);
+  } catch (e) {
+    debugPrint('[桌面歌词悬浮窗] setPreventClose 失败: $e');
+  }
   // 桌面歌词属于纯悬浮组件，不应在系统任务栏占据独立图标。
   try {
     await windowManager.setSkipTaskbar(true);
@@ -154,11 +178,13 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   // （表现为锁定状态下重开/重启后歌词窗口空白），故此处只登记待应用。
   schedulePassthroughAfterShown(settings);
 
-  // 恢复上次拖动位置（失败不影响展示）。
+  // 恢复上次拖动位置（失败不影响展示）。记忆位置已由主窗侧在创建前
+  // 钳制到可见显示器区域并回写（子引擎无 screen_retriever 插件，无法
+  // 自行判断显示器配置变化），这里直接信任 prefs 的值。
   try {
     final prefs = await SharedPreferences.getInstance();
-    final left = prefs.getDouble(_kWindowLeftKey);
-    final top = prefs.getDouble(_kWindowTopKey);
+    final left = prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey);
+    final top = prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey);
     if (left != null && top != null) {
       await windowManager.setPosition(Offset(left, top));
     }
@@ -306,8 +332,18 @@ Future<void> schedulePassthroughAfterShown(DesktopLyricsSettings settings) async
   await _overlayPassthroughScheduler?.apply(settings);
 }
 
-/// 关闭悬浮窗：先通知主窗（触发 enabled=false 持久化），再销毁自身。
+/// 关闭悬浮窗的统一漏斗：补存位置 → 通知主窗 → 解除关闭拦截 → 销毁自身。
+///
+/// 触发来源：卡片关闭按钮、Alt+F4/任务栏关闭（preventClose 拦截后经
+/// [_LyricsOverlayHomeState.onWindowClose] 转入）、主窗侧 hide 的
+/// window.close()（同样被拦截转入；主窗凭 _visible=false 识别并忽略
+/// 其 windowClosed 上报，不会误翻持久化开关）。
 Future<void> closeLyricsOverlayWindow() async {
+  if (_overlayCloseInFlight) return;
+  _overlayCloseInFlight = true;
+  // 原生销毁不会执行 Dart dispose：先补存位置（拖动防抖 500ms 内的
+  // 最后一次移动在此落盘）。
+  await persistOverlayWindowPosition();
   try {
     await DesktopMultiWindow.invokeMethod(0, 'windowClosed');
   } on Exception {
@@ -320,6 +356,12 @@ Future<void> closeLyricsOverlayWindow() async {
   // WM_QUIT 会连带退出整个应用。上游 destroy 相关崩溃记录
   // （MixinNetwork/flutter-plugins#137、window_manager#549）仅适用于
   // destroy() 关闭路径，本文件已不再使用。
+  // 关闭拦截此时仍开着：SC_CLOSE 会被 preventClose 再次拦下，必须先解除。
+  try {
+    await windowManager.setPreventClose(false);
+  } on Exception {
+    // window_manager 不可用时 controller.close() 本就直接销毁。
+  }
   final controller = _overlayWindowController;
   if (controller != null) {
     await controller.close();
@@ -412,7 +454,7 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   void dispose() {
     // 取消未触发的防抖保存并立即补存一次，避免最后一次移动丢失。
     _persistDebounce?.cancel();
-    unawaited(_persistPosition());
+    unawaited(persistOverlayWindowPosition());
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -424,19 +466,17 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   void onWindowMoved() {
     _persistDebounce?.cancel();
     _persistDebounce = Timer(_kPersistDebounce, () {
-      unawaited(_persistPosition());
+      unawaited(persistOverlayWindowPosition());
     });
   }
 
-  Future<void> _persistPosition() async {
-    try {
-      final position = await windowManager.getPosition();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble(_kWindowLeftKey, position.dx);
-      await prefs.setDouble(_kWindowTopKey, position.dy);
-    } on Exception {
-      // 位置持久化失败不影响展示。
-    }
+  /// 外部关闭（Alt+F4/任务栏关闭）：ensureInitialized 阶段已
+  /// setPreventClose(true)，WM_CLOSE 被拦截转到这里而非直接销毁——
+  /// 否则主窗零感知（包的 OnWindowClose 是空实现），桥接状态失步、
+  /// 歌词静默冻结。统一走 closeLyricsOverlayWindow 漏斗。
+  @override
+  void onWindowClose() {
+    unawaited(closeLyricsOverlayWindow());
   }
 
   Future<void> _controlPlayback(String action) async {

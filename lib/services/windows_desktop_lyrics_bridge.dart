@@ -25,12 +25,14 @@
 import 'dart:async';
 import 'dart:convert';
 // window_manager/desktop_multi_window 未重导出 dart:ui 类型。
+import 'dart:math' as math;
 import 'dart:ui' show Offset, Rect, Size;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show MethodCall;
 import 'package:screen_retriever/screen_retriever.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'desktop_lyrics_service.dart';
 
@@ -50,6 +52,14 @@ class WindowsDesktopLyricsBridge {
   /// 悬浮窗固定尺寸（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
   static const double overlayWidth = 780;
   static const double overlayHeight = 88;
+
+  /// 悬浮窗拖动位置的持久化键（子窗 window_manager 逻辑坐标；
+  /// 主窗侧钳制后回写，子窗启动时读取恢复）。
+  static const String windowLeftPrefKey = 'desktop_lyrics.window.left';
+  static const String windowTopPrefKey = 'desktop_lyrics.window.top';
+
+  /// 钳制时至少保留的可见像素（与主窗 kMinVisibleEdge 语义一致）。
+  static const double _kMinVisibleEdge = 80;
 
   WindowController? _window;
   bool _handlerRegistered = false;
@@ -120,9 +130,9 @@ class WindowsDesktopLyricsBridge {
         // 子引擎就绪需数百毫秒，且悬浮窗入口在完成无标题栏样式/尺寸/位置
         // 恢复后会自行 show()（见 lyrics_overlay_window.dart 入口末尾）。
         // 主窗侧不得提前 show()，否则会闪现白底带标题栏的默认 720x120 窗口；
-        // 此处仅预置默认位置（首次展示无记忆位置时兜底，后续由悬浮窗自行
-        // 覆盖为记忆位置）。
-        await window.setFrame(await _defaultFrame());
+        // 此处预置初始位置：记忆位置（已主窗侧钳制）或底部居中默认值，
+        // 后续由悬浮窗自行 setPosition 覆盖为记忆位置（逻辑坐标）。
+        await window.setFrame(await _initialFrame());
       } on Exception catch (e) {
         debugPrint('[桌面歌词主窗] setFrame 失败: $e，关闭已创建窗口');
         // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
@@ -226,7 +236,17 @@ class WindowsDesktopLyricsBridge {
     if (_handlerRegistered) return;
     _handlerRegistered = true;
     DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
+      // 只信任当前子窗的消息：热重启等路径下可能存在桥接已失忆的旧子窗，
+      // 旧窗迟到的 windowClosed 会把指向新窗的 _window 清空、_visible 清
+      // 假，造成"新窗歌词冻结/开关状态错乱"。
+      if (_window == null || fromWindowId != _window!.windowId) {
+        return null;
+      }
       if (call.method == 'windowClosed') {
+        // 主窗自己发起的关闭（hide/退出收口）时 _visible 已为 false：
+        // 子窗 preventClose 拦截后补报的 windowClosed 不是用户手动关闭，
+        // 不得触发可见性回调（否则会把持久化开关错误翻转为关）。
+        if (!_visible) return null;
         // 子窗销毁：就绪门控同步失效，重建/重开需等待新一轮握手。
         _overlayReady = false;
         _visible = false;
@@ -257,21 +277,105 @@ class WindowsDesktopLyricsBridge {
     });
   }
 
-  /// 首次展示的默认位置：主显示器底部居中（之后由悬浮窗自行恢复记忆位置）。
-  Future<Rect> _defaultFrame() async {
+  /// 悬浮窗初始 frame（物理像素，供 desktop_multi_window 的 setFrame）。
+  ///
+  /// 优先恢复记忆的拖动位置；无记忆时落主显示器底部居中。记忆位置在
+  /// 主窗侧先行钳制到可见显示器区域并回写——悬浮窗侧（子引擎）只有
+  /// window_manager 可用（无 screen_retriever 插件注册），无法自行判断
+  /// 显示器配置变化，不钳制的话拔掉副显示器后悬浮窗会恢复到屏幕外成为
+  /// 不可见的"僵尸窗"（锁定态全穿透，用户没有任何入口找回）。
+  Future<Rect> _initialFrame() async {
     var origin = const Offset(100, 100);
+    var scaleFactor = 1.0;
+    var visibleAreas = const <Rect>[];
     try {
-      final display = await screenRetriever.getPrimaryDisplay();
-      final size = display.size;
+      final primary = await screenRetriever.getPrimaryDisplay();
+      final all = await screenRetriever.getAllDisplays();
+      final primaryArea = _visibleAreaOf(primary);
+      visibleAreas = [
+        primaryArea,
+        for (final display in all)
+          if (display.id != primary.id) _visibleAreaOf(display),
+      ];
+      scaleFactor = (primary.scaleFactor ?? 1.0).toDouble();
       origin = Offset(
-        (size.width - overlayWidth) / 2,
-        size.height - overlayHeight - 80,
+        primaryArea.left +
+            (primaryArea.width - overlayWidth) / 2,
+        primaryArea.top +
+            primaryArea.height -
+            overlayHeight -
+            80,
       );
     } on Exception catch (e) {
-      debugPrint('[桌面歌词主窗] 获取主显示器失败，用固定位置: $e');
-      // 拿不到显示器信息时退回固定位置。
+      debugPrint('[桌面歌词主窗] 获取显示器信息失败，用固定位置: $e');
+      // 拿不到显示器信息时无从钳制/换算，退回固定逻辑位置。
     }
-    return origin & const Size(WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final left = prefs.getDouble(windowLeftPrefKey);
+      final top = prefs.getDouble(windowTopPrefKey);
+      if (left != null && top != null) {
+        final clamped = clampOverlayOriginToVisibleAreas(
+          Offset(left, top),
+          visibleAreas,
+          fallback: origin,
+        );
+        if (clamped.dx != left || clamped.dy != top) {
+          await prefs.setDouble(windowLeftPrefKey, clamped.dx);
+          await prefs.setDouble(windowTopPrefKey, clamped.dy);
+        }
+        origin = clamped;
+      }
+    } on Exception catch (e) {
+      debugPrint('[桌面歌词主窗] 读取/钳制记忆位置失败，用默认位置: $e');
+    }
+    // desktop_multi_window 的 setFrame 底层是 MoveWindow（物理像素），
+    // 而 screen_retriever/window_manager 记忆位置都是逻辑坐标：
+    // 必须按主显示器缩放换算，否则 DPI>100% 时首帧位置/尺寸偏小偏移。
+    return Offset(origin.dx * scaleFactor, origin.dy * scaleFactor) &
+        Size(overlayWidth * scaleFactor, overlayHeight * scaleFactor);
+  }
+
+  /// 显示器的可见区域：优先 visiblePosition/visibleSize，缺失时退回原点/整屏。
+  static Rect _visibleAreaOf(Display display) {
+    final position = display.visiblePosition ?? Offset.zero;
+    final size = display.visibleSize ?? display.size;
+    return Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
+  }
+
+  /// 把悬浮窗原点钳制到至少留出 [_kMinVisibleEdge] 可见边（纯函数，供单测）。
+  ///
+  /// 与任一可见区域有足量交集 → 原样返回；否则钳入第一个区域
+  /// （右/下至少留 80px，窗口比区域宽时贴左/上）。无显示器信息时
+  /// 返回 [fallback]。
+  @visibleForTesting
+  static Offset clampOverlayOriginToVisibleAreas(
+    Offset origin,
+    List<Rect> visibleAreas, {
+    required Offset fallback,
+  }) {
+    if (visibleAreas.isEmpty) return fallback;
+    final windowRect = origin & const Size(overlayWidth, overlayHeight);
+    for (final area in visibleAreas) {
+      final intersection = area.intersect(windowRect);
+      if (intersection.width >= _kMinVisibleEdge &&
+          intersection.height >= _kMinVisibleEdge) {
+        return origin;
+      }
+    }
+    final area = visibleAreas.first;
+    final clampedLeft = origin.dx
+        .clamp(
+          area.left,
+          math.max(area.left, area.right - _kMinVisibleEdge),
+        )
+        .toDouble();
+    final clampedTop = origin.dy
+        .clamp(
+          area.top,
+          math.max(area.top, area.bottom - _kMinVisibleEdge),
+        )
+        .toDouble();
+    return Offset(clampedLeft, clampedTop);
   }
 }
