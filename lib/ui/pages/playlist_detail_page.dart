@@ -1944,59 +1944,80 @@ class _SimilarPlaylistCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isDesktop = isDesktopFormFactor;
     final cardRadius = isDesktop ? 8.0 : 14.0;
+    final hoverRadius = isDesktop ? 10.0 : cardRadius;
+    const desktopInset = 6.0;
+    final imageSize = isDesktop ? (120.0 - desktopInset * 2) : 120.0;
 
-    return InkWell(
+    final column = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(cardRadius),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: .08)
+                  : Colors.black.withValues(alpha: isDesktop ? .06 : .08),
+              width: 1,
+            ),
+            boxShadow: isDesktop
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(cardRadius),
+            child: Artwork(url: playlist.coverUrl, size: imageSize, borderRadius: cardRadius),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          playlist.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+        Text(
+          playlist.creatorName ?? '',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+
+    final padded = isDesktop
+        ? Padding(
+            padding: const EdgeInsets.all(desktopInset),
+            child: column,
+          )
+        : column;
+
+    final inkCard = InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(cardRadius),
+      borderRadius: BorderRadius.circular(hoverRadius),
       child: SizedBox(
         width: 120,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(cardRadius),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: .08)
-                      : Colors.black.withValues(alpha: isDesktop ? .06 : .08),
-                  width: 1,
-                ),
-                boxShadow: isDesktop
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(cardRadius),
-                child: Artwork(url: playlist.coverUrl, size: 120, borderRadius: cardRadius),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              playlist.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            ),
-            Text(
-              playlist.creatorName ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
+        child: padded,
       ),
     );
+
+    if (isDesktop) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: inkCard,
+      );
+    }
+    return inkCard;
   }
 }
 

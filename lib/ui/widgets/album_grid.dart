@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/music_models.dart';
 import '../design_tokens.dart';
+import '../form_factor.dart';
 import 'artwork.dart';
 
 /// 专辑网格目标列宽（逻辑像素）：对齐 QQ 音乐 PC 歌手页的单元格尺度。
@@ -141,43 +142,64 @@ class AlbumGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: Artwork(url: album.coverUrl, size: double.infinity),
-            ),
+    final isDesktop = isDesktopFormFactor;
+    const desktopInset = 6.0;
+
+    final column = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(isDesktop ? 8.0 : AppRadius.md),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Artwork(url: album.coverUrl, size: double.infinity),
           ),
-          const SizedBox(height: 6),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          album.name,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+            height: 1.35,
+          ),
+        ),
+        if (album.publishDate case final date?)
           Text(
-            album.name,
-            maxLines: 2,
+            date,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
+            style: TextStyle(
+              fontSize: 12,
               height: 1.35,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
-          if (album.publishDate case final date?)
-            Text(
-              date,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.35,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-        ],
-      ),
+      ],
     );
+
+    final padded = isDesktop
+        ? Padding(
+            padding: const EdgeInsets.all(desktopInset),
+            child: column,
+          )
+        : column;
+
+    final ink = InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(isDesktop ? 10.0 : AppRadius.md),
+      child: padded,
+    );
+
+    if (isDesktop) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ink,
+      );
+    }
+    return ink;
   }
 }

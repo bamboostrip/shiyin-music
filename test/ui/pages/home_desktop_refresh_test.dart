@@ -271,14 +271,23 @@ void main() {
     );
     expect(topSongOverlay, findsOneWidget);
 
-    // 未 hover：新歌速递封面播放按钮不挂载
-    expect(
-      find.descendant(
-        of: topSongOverlay,
-        matching: find.byIcon(Icons.play_arrow_rounded),
-      ),
-      findsNothing,
+    double overlayOpacity(Finder finder) => tester
+        .widget<AnimatedOpacity>(
+          find
+              .ancestor(
+                of: finder,
+                matching: find.byType(AnimatedOpacity),
+              )
+              .first,
+        )
+        .opacity;
+
+    // 未 hover：新歌速递封面播放按钮隐藏（透明度 0）
+    final unhoveredTopSongPlayIcon = find.descendant(
+      of: topSongOverlay,
+      matching: find.byIcon(Icons.play_arrow_rounded),
     );
+    expect(overlayOpacity(unhoveredTopSongPlayIcon), 0);
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
@@ -291,6 +300,7 @@ void main() {
       matching: find.byIcon(Icons.play_arrow_rounded),
     );
     expect(playIcon, findsOneWidget);
+    expect(overlayOpacity(playIcon), 1);
 
     await tester.tap(playIcon);
     await tester.pumpAndSettle();
@@ -311,14 +321,22 @@ void main() {
       matching: find.byType(InkWell),
     ).first;
 
-    // 未 hover 时，卡片上没有播放按钮
-    expect(
-      find.descendant(
-        of: cardFinder,
-        matching: find.byIcon(Icons.play_arrow_rounded),
-      ),
-      findsNothing,
+    // 未 hover 时，卡片上播放按钮透明度为 0
+    final unhoveredCardPlayIcon = find.descendant(
+      of: cardFinder,
+      matching: find.byIcon(Icons.play_arrow_rounded),
     );
+    double cardPlayOpacity(Finder finder) => tester
+        .widget<AnimatedOpacity>(
+          find
+              .ancestor(
+                of: finder,
+                matching: find.byType(AnimatedOpacity),
+              )
+              .first,
+        )
+        .opacity;
+    expect(cardPlayOpacity(unhoveredCardPlayIcon), 0);
 
     // 鼠标悬停到歌单卡片上
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);

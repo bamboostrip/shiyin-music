@@ -1736,11 +1736,17 @@ class _PlaylistCardState extends State<_PlaylistCard> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isDesktop = isDesktopFormFactor;
     final cardRadius = isDesktop ? 8.0 : 14.0;
+    final hoverRadius = isDesktop ? 10.0 : cardRadius;
+    const desktopInset = 6.0;
 
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        final cardWidth = widget.width ?? constraints.maxWidth;
-        final size = cardWidth.isInfinite ? 128.0 : cardWidth;
+        final rawWidth = widget.width ?? constraints.maxWidth;
+        final baseWidth = rawWidth.isInfinite ? 128.0 : rawWidth;
+        final cardWidth = isDesktop
+            ? (baseWidth - desktopInset * 2).clamp(0.0, double.infinity)
+            : baseWidth;
+        final size = cardWidth;
 
         final coverImage = Container(
           decoration: BoxDecoration(
@@ -1771,7 +1777,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
           ),
         );
 
-        return Column(
+        final column = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1814,14 +1820,21 @@ class _PlaylistCardState extends State<_PlaylistCard> {
                 fontSize: isDesktop ? 12 : 12.5,
               ),
             ),
-            if (isDesktop) const SizedBox(height: 6),
           ],
         );
+
+        if (isDesktop) {
+          return Padding(
+            padding: const EdgeInsets.all(desktopInset),
+            child: column,
+          );
+        }
+        return column;
       },
     );
 
     final inkCard = InkWell(
-      borderRadius: BorderRadius.circular(cardRadius),
+      borderRadius: BorderRadius.circular(hoverRadius),
       onTap: widget.onTap,
       child: content,
     );

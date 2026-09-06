@@ -170,9 +170,8 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
                     ),
                   ),
                 ),
-              // 播放按钮：未 hover 时不构建，hover 后才挂载。
-              if (shown)
-                Positioned.fill(child: positionedButton),
+              // 播放按钮：通过 IgnorePointer + AnimatedOpacity/Scale 实现渐隐和点击拦截。
+              Positioned.fill(child: positionedButton),
             ],
           );
         },
