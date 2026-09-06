@@ -14,6 +14,7 @@ import '../widgets/artwork.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
+import '../player/song_tap_handler.dart';
 import '../widgets/desktop_song_table_row.dart'
     show DesktopSongTableHeader, DesktopSongTableRow;
 import 'artist_detail_page.dart';
@@ -323,7 +324,17 @@ class _NewSongsSection extends StatelessWidget {
                         final song = songs[index];
                         return _NewSongCard(
                           song: song,
-                          onTap: () => player.playSong(song, queue: songs),
+                          onTap: () {
+                            if (openPlayerIfSameSong(
+                              context,
+                              player: player,
+                              auth: auth,
+                              song: song,
+                            )) {
+                              return;
+                            }
+                            player.playSong(song, queue: songs);
+                          },
                           isPlaying: player.currentSong?.hash == song.hash &&
                               song.hash.isNotEmpty,
                         );
@@ -343,7 +354,17 @@ class _NewSongsSection extends StatelessWidget {
                           final song = songs[index];
                           return _NewSongCard(
                             song: song,
-                            onTap: () => player.playSong(song, queue: songs),
+                            onTap: () {
+                              if (openPlayerIfSameSong(
+                                context,
+                                player: player,
+                                auth: auth,
+                                song: song,
+                              )) {
+                                return;
+                              }
+                              player.playSong(song, queue: songs);
+                            },
                             isPlaying: player.currentSong?.hash == song.hash &&
                                 song.hash.isNotEmpty,
                           );
@@ -905,6 +926,14 @@ class _RankDetailPageState extends State<RankDetailPage> {
   }
 
   void _playSong(Song song) {
+    if (openPlayerIfSameSong(
+      context,
+      player: widget.player,
+      auth: widget.auth,
+      song: song,
+    )) {
+      return;
+    }
     widget.player.playSong(song, queue: List.of(_songs));
     _expandQueueInBackgroundIfNeeded(startedWith: song);
   }

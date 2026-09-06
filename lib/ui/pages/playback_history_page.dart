@@ -11,6 +11,7 @@ import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
+import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
 
 /// 播放历史页面：展示最近播放的歌曲列表，支持点击播放和清空。
@@ -91,6 +92,14 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
   }
 
   void _play(Song song, List<Song> all) {
+    if (openPlayerIfSameSong(
+      context,
+      player: widget.player,
+      auth: widget.auth,
+      song: song,
+    )) {
+      return;
+    }
     widget.player.playSong(song, queue: List<Song>.of(all));
   }
 

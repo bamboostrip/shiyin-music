@@ -14,6 +14,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
 import '../keyboard_focus_guard.dart';
+import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
 import 'dart:math' as math;
@@ -230,6 +231,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _playSong(Song song) {
+    if (openPlayerIfSameSong(
+      context,
+      player: widget.player,
+      auth: widget.auth,
+      song: song,
+    )) {
+      return;
+    }
     widget.player.playSong(song, queue: _results);
   }
 

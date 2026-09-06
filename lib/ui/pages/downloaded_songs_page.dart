@@ -14,6 +14,7 @@ import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../widgets/song_action_sheets.dart';
 import '../adaptive_layout.dart';
+import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
 
 /// 已下载歌曲与播放缓存管理页。
@@ -441,6 +442,14 @@ class _DownloadedSongRow extends StatelessWidget {
             icon: const Icon(Icons.play_circle_fill_rounded),
             color: colorScheme.primary,
             onPressed: () {
+              if (openPlayerIfSameSong(
+                context,
+                player: player,
+                auth: auth,
+                song: song,
+              )) {
+                return;
+              }
               player.playSong(song);
             },
           ),
@@ -450,7 +459,17 @@ class _DownloadedSongRow extends StatelessWidget {
           ),
         ],
       ),
-      onTap: () => player.playSong(song),
+      onTap: () {
+        if (openPlayerIfSameSong(
+          context,
+          player: player,
+          auth: auth,
+          song: song,
+        )) {
+          return;
+        }
+        player.playSong(song);
+      },
     );
   }
 

@@ -22,6 +22,7 @@ import '../widgets/cover_play_overlay.dart';
 import '../widgets/home_song_row.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/toast.dart';
+import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
 import 'playlist_detail_page.dart';
 import 'search_page.dart';
@@ -359,6 +360,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _playSong(Song song, List<Song> queue) {
+    // 点到当前歌：打开播放页，绝不重头播放（主流移动端一致行为）。
+    if (openPlayerIfSameSong(
+      context,
+      player: widget.player,
+      auth: widget.auth,
+      song: song,
+    )) {
+      return;
+    }
     widget.player.playSong(song, queue: queue);
   }
 

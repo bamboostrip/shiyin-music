@@ -7,6 +7,7 @@ import '../../controllers/local_music_controller.dart';
 import '../widgets/toast.dart';
 import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
+import '../player/song_tap_handler.dart';
 
 class LocalSongsPage extends StatefulWidget {
   const LocalSongsPage({
@@ -603,6 +604,14 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                                 ),
                               ),
                               onTap: () {
+                                // 无 auth 时退化为“恢复播放/无反应”，同样不重头播放。
+                                if (openPlayerIfSameSong(
+                                  context,
+                                  player: widget.player,
+                                  song: song,
+                                )) {
+                                  return;
+                                }
                                 widget.player.playSong(
                                   song,
                                   queue: filteredSongs,

@@ -11,6 +11,7 @@ import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import 'artist_detail_page.dart';
 import '../adaptive_layout.dart';
+import '../player/song_tap_handler.dart';
 
 /// 用户云盘音乐页面。
 class CloudDrivePage extends StatefulWidget {
@@ -218,10 +219,20 @@ class _CloudDrivePageState extends State<CloudDrivePage> {
                             song: song,
                             index: index + 1,
                             player: widget.player,
-                            onTap: () => widget.player.playSong(
-                              song,
-                              queue: List<Song>.of(_songs),
-                            ),
+                            onTap: () {
+                              if (openPlayerIfSameSong(
+                                context,
+                                player: widget.player,
+                                auth: widget.auth,
+                                song: song,
+                              )) {
+                                return;
+                              }
+                              widget.player.playSong(
+                                song,
+                                queue: List<Song>.of(_songs),
+                              );
+                            },
                             onViewArtist: () => _openArtist(song),
                           );
                         },

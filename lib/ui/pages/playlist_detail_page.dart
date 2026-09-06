@@ -23,6 +23,7 @@ import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
 import '../design_tokens.dart';
 import '../form_factor.dart';
+import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
 
 /// 缓存中完整歌单歌曲列表的 key 后缀。
@@ -1726,6 +1727,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                   onTap: () {
                                     if (_isSelecting) {
                                       _toggleSongSelection(song);
+                                      return;
+                                    }
+                                    // 点到当前歌：打开播放页，绝不重头播放。
+                                    if (openPlayerIfSameSong(
+                                      context,
+                                      player: widget.player,
+                                      auth: widget.auth,
+                                      song: song,
+                                    )) {
                                       return;
                                     }
                                     final queue = _playbackQueueNow();

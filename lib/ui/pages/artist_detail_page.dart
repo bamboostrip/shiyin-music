@@ -14,6 +14,7 @@ import '../widgets/album_grid.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../adaptive_layout.dart';
 import '../form_factor.dart';
+import '../player/song_tap_handler.dart';
 import 'playlist_detail_page.dart';
 
 class ArtistDetailPage extends StatefulWidget {
@@ -601,10 +602,20 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                   song: song,
                                   auth: widget.auth,
                                   player: widget.player,
-                                  onTap: () => widget.player.playSong(
-                                    song,
-                                    queue: List<Song>.of(_songs),
-                                  ),
+                                  onTap: () {
+                                    if (openPlayerIfSameSong(
+                                      context,
+                                      player: widget.player,
+                                      auth: widget.auth,
+                                      song: song,
+                                    )) {
+                                      return;
+                                    }
+                                    widget.player.playSong(
+                                      song,
+                                      queue: List<Song>.of(_songs),
+                                    );
+                                  },
                                 );
                               },
                             ),
