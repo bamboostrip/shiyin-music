@@ -332,6 +332,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
+    userVolume =
+        (prefs.getDouble(_userVolumeSettingKey) ?? userVolume).clamp(0.0, 1.0);
     desktopLyricsEnabled =
         prefs.getBool(_desktopLyricsEnabledSettingKey) ?? desktopLyricsEnabled;
     final dlVersion = prefs.getInt(_desktopLyricsSettingsVersionKey) ?? 0;
@@ -353,6 +355,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
       );
     }
     unawaited(audioPlayer.setSpeed(playbackSpeed));
+    // 恢复用户音量到引擎（响度关闭时即最终值；开启后首播的 instant
+    // 应用会再按系数合成一次，此处只保证恢复后、首播前的一致性）
+    unawaited(audioPlayer.setVolume(userVolume));
     // 无论当前是否开启都同步设置到桥接：桥接的 settings 缓存是创建
     // 悬浮窗时随 createWindow 参数下发的内容源，若仅在已开启时同步，
     // 「上次锁定 → 本次启动后才开启」会以默认设置（未锁定）建窗，

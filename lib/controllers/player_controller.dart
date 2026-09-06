@@ -58,6 +58,7 @@ const _audioInterruptionEnabledSettingKey =
 const _autoResumeAfterInterruptionSettingKey =
     'settings.auto_resume_after_interruption';
 const _playbackSpeedSettingKey = 'settings.playback_speed';
+const _userVolumeSettingKey = 'settings.user_volume';
 const _desktopLyricsEnabledSettingKey = 'settings.desktop_lyrics_enabled';
 const _desktopLyricsSettingsKey = 'settings.desktop_lyrics_settings';
 // 桌面歌词设置版本号：v2 起默认透明悬浮（opacity 0.0/字号 24）。
@@ -408,6 +409,11 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool bluetoothLyricsEnabled = false;
   bool desktopLyricsEnabled = false;
   DesktopLyricsSettings desktopLyricsSettings = const DesktopLyricsSettings();
+
+  /// 用户音量（0..1）：UI 滑杆/快捷键的唯一真相源。
+  /// 引擎实际音量 = 用户音量 × 响度系数（见 _applyLoudnessGain），
+  /// 两通道分开后互不覆盖，滑块不再自己跳。
+  double userVolume = 1.0;
 
   // SuperLyric/蓝牙歌词同步状态
   int _lastSuperLyricIndex = -1;

@@ -2,13 +2,19 @@
 part of 'player_controller.dart';
 
 mixin _PlayerPlayback on _PlayerControllerBase {
-  /// 当前音量（0.0–1.0）。桌面播放栏音量滑杆使用。
-  double get volume => _audioHandler.audioPlayer.volume;
+  /// 当前用户音量（0.0–1.0）。桌面播放栏音量滑杆使用。
+  /// 注意：返回用户值而非引擎值——引擎值含响度系数，直接读它滑块会跳。
+  double get volume => userVolume;
 
-  /// 设置音量（0.0–1.0），越界值自动夹取。
+  /// 设置用户音量（0.0–1.0），越界值自动夹取。
+  /// 经响度系数合成后 instant 应用（打断在途 ramp 跟手），不破坏响度比。
   /// 音量会被快捷键等非 UI 入口修改，通知监听者以同步播放栏滑块。
   Future<void> setVolume(double value) async {
-    await _audioHandler.audioPlayer.setVolume(value.clamp(0.0, 1.0));
+    final clamped = value.clamp(0.0, 1.0);
+    userVolume = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_userVolumeSettingKey, clamped);
+    await _applyLoudnessGain(instant: true);
     notifyListeners();
   }
 

@@ -289,7 +289,8 @@ mixin _PlayerEffects on _PlayerControllerBase {
   }
 
   /// 应用当前歌曲的响度增益(sessionId 变化或分析完成时调用)。
-  /// [instant]=true 直接设置(缓存命中首播);false 走渐变(播放中分析完成)。
+  /// [instant]=true 直接设置(缓存命中首播/用户调音量);false 走渐变。
+  /// 用户音量恒参与合成，响度永远只动自己的系数通道。
   @override
   Future<void> _applyLoudnessGain({bool instant = false}) async {
     await _loudness.applyGain(
@@ -297,6 +298,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
       audioSessionId:
           _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
       gainDb: _pendingGainDb,
+      userVolume: userVolume,
       instant: instant,
     );
   }
@@ -308,6 +310,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
       audioPlayer: audioPlayer,
       audioSessionId:
           _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+      userVolume: userVolume,
     );
     if (enabled) {
       // 开启后,对当前歌曲立即分析并应用(用已解析的真实 URL,避免重新请求)
@@ -339,6 +342,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
         audioPlayer: audioPlayer,
         audioSessionId:
             _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        userVolume: userVolume,
       );
     }
     notifyListeners();

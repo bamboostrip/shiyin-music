@@ -195,6 +195,7 @@ class LoudnessService {
     required bool enabled,
     required AudioPlayer audioPlayer,
     int? audioSessionId,
+    double userVolume = 1.0,
   }) async {
     if (_enabled == enabled) return;
     _enabled = enabled;
@@ -204,6 +205,7 @@ class LoudnessService {
       await resetGain(
         audioPlayer: audioPlayer,
         audioSessionId: audioSessionId,
+        userVolume: userVolume,
       );
     }
   }
@@ -432,19 +434,25 @@ class LoudnessService {
   /// 增益先钳制到 [_maxGainDb] 避免过载;setVolume 的变化走渐变(ramp),
   /// 消除"分析完成后音量瞬间塌下去"的突兀感。Android LoudnessEnhancer
   /// 本身是 DRC 类效果,内置平滑,无需渐变。
+  ///
+  /// [userVolume] 为用户音量（0..1）：引擎目标 = 用户音量 × 响度系数，
+  /// 双通道彻底分开——调音量不再破坏响度比，响度 ramp 也不再覆盖用户音量。
   Future<void> applyGain({
     required AudioPlayer audioPlayer,
     required int? audioSessionId,
     required double? gainDb,
-    /// true=缓存命中/首播前已知增益,直接应用无需渐变;false=播放中分析完成,
+    double userVolume = 1.0,
+    /// true=缓存命中/首播前已知增益，直接应用无需渐变；false=播放中分析完成,
     /// 需渐变避免跳变。默认 false(保守,有渐变更安全)。
     bool instant = false,
   }) async {
+    final user = userVolume.clamp(0.0, 1.0);
     if (!_enabled || gainDb == null || !gainDb.isFinite) {
-      log('applyGain RESET (未启用或增益无效) instant=$instant');
+      log('applyGain RESET (未启用或增益无效) instant=$instant user=$user');
       await resetGain(
         audioPlayer: audioPlayer,
         audioSessionId: audioSessionId,
+        userVolume: user,
       );
       return;
     }
@@ -455,15 +463,15 @@ class LoudnessService {
 
     if (clampedGain <= 0) {
       // 响歌衰减:LoudnessEnhancer 不支持负增益,统一走 setVolume
-      final volume = pow(10, clampedGain / 20).toDouble().clamp(0.0, 1.0);
-      log('applyGain ATTENUATE gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant');
+      final volume = (user * pow(10, clampedGain / 20)).clamp(0.0, 1.0);
+      log('applyGain ATTENUATE gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user');
       await _disableNativeEnhancer(audioSessionId);
       await _setVolumeRamped(audioPlayer, volume, instant);
       return;
     }
 
     // 轻歌放大:Android 用 LoudnessEnhancer;Linux 用 mpv 数字放大(>1.0);
-    // Windows(WinRT Volume 0..1)/iOS/macOS 无放大能力,保持 1.0。
+    // Windows(WinRT Volume 0..1)/iOS/macOS 无放大能力,保持用户音量。
     if (defaultTargetPlatform == TargetPlatform.android) {
       final gainMb = (clampedGain * 100).round().clamp(0, 1500);
       try {
@@ -472,9 +480,9 @@ class LoudnessService {
           'enabled': true,
           'gainMb': gainMb,
         });
-        // 放大用 LoudnessEnhancer,setVolume 保持 1.0 避免双重增益
-        log('applyGain AMPLIFY(android) gain=${clampedGain.toStringAsFixed(2)}dB gainMb=$gainMb instant=$instant');
-        await audioPlayer.setVolume(1.0);
+        // 放大用 LoudnessEnhancer,engine 音量保持用户音量避免双重增益
+        log('applyGain AMPLIFY(android) gain=${clampedGain.toStringAsFixed(2)}dB gainMb=$gainMb instant=$instant user=$user');
+        await audioPlayer.setVolume(user);
         return;
       } on PlatformException catch (e) {
         log('applyGain AMPLIFY(android) FAILED ${e.code}: ${e.message} → 降级 setVolume');
@@ -484,17 +492,17 @@ class LoudnessService {
     } else if (defaultTargetPlatform == TargetPlatform.linux && !kIsWeb) {
       // mpv: just_audio volume 1.0 = mpv volume 100; 放大即 >100
       //（vendored just_audio_media_kit 已抬高 volume-max）。
-      final volume = pow(10, clampedGain / 20)
+      final volume = (user * pow(10, clampedGain / 20))
           .toDouble()
           .clamp(0.0, _linuxMaxBoostVolume);
-      log('applyGain AMPLIFY(linux/mpv) gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant');
+      log('applyGain AMPLIFY(linux/mpv) gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user');
       await _disableNativeEnhancer(audioSessionId);
       await _setVolumeRamped(audioPlayer, volume, instant);
       return;
     }
-    // Windows/iOS/macOS:无法放大,setVolume 保持 1.0
-    log('applyGain AMPLIFY_SKIP($defaultTargetPlatform) gain=${clampedGain.toStringAsFixed(2)}dB (平台不支持放大,保持原始音量)');
-    await audioPlayer.setVolume(1.0);
+    // Windows/iOS/macOS:无法放大,engine 保持用户音量
+    log('applyGain AMPLIFY_SKIP($defaultTargetPlatform) gain=${clampedGain.toStringAsFixed(2)}dB (平台不支持放大,保持用户音量 $user)');
+    await audioPlayer.setVolume(user);
   }
 
   /// Linux 放大上限（mpv 音量标量）。+6dB = 2.0；vendored 适配层把
@@ -559,10 +567,13 @@ class LoudnessService {
     }
   }
 
-  /// 重置增益(关闭/异常时恢复原始音量)。渐变回到 1.0 避免关开关时跳变。
+  /// 重置增益(关闭/异常时恢复用户音量)。渐变回去避免关开关时跳变；
+  /// [instant] 为 true 时直接设置（用户拖音量条需即时跟手）。
   Future<void> resetGain({
     required AudioPlayer audioPlayer,
     int? audioSessionId,
+    double userVolume = 1.0,
+    bool instant = false,
   }) async {
     if (defaultTargetPlatform == TargetPlatform.android) {
       try {
@@ -577,7 +588,11 @@ class LoudnessService {
         // 插件未注册(非 Android),忽略
       }
     }
-    await _setVolumeRamped(audioPlayer, 1.0, false);
+    await _setVolumeRamped(
+      audioPlayer,
+      userVolume.clamp(0.0, 1.0),
+      instant,
+    );
   }
 
   /// 释放原生 LoudnessEnhancer(App 退出/释放时)。
