@@ -404,7 +404,6 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _sleepFinishCurrentSong = false;
   bool _sleepFinishCurrentSongOption = false;
   String? errorMessage;
-  int seekRevision = 0;
   int? _androidAudioSessionId;
 
   bool get _isChangingSource => _changingSourceDepth > 0;

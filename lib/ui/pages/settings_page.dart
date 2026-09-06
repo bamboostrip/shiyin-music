@@ -18,6 +18,7 @@ import '../settings/cache_settings_section.dart';
 import '../settings/desktop_settings_section.dart';
 import '../settings/personalization_settings_section.dart';
 import '../settings/playback_settings_section.dart';
+import '../settings/settings_widgets.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/toast.dart';
 

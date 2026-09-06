@@ -44,9 +44,6 @@ class _FakePlayerController extends ChangeNotifier
   int activeLyricIndex = 3;
 
   @override
-  int seekRevision = 0;
-
-  @override
   bool isPreparing = false;
 
   @override

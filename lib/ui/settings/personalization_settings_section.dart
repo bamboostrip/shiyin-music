@@ -6,13 +6,6 @@ import '../pages/personalization_settings_page.dart';
 import '../widgets/toast.dart';
 import 'settings_widgets.dart';
 
-/// 字号档位对应的中文文案。
-String fontScaleLabel(double scale) {
-  if (scale >= 1.2) return '特大';
-  if (scale >= 1.1) return '大';
-  return '标准';
-}
-
 /// 设置页「个性化」分节。
 ///
 /// [showOrientationTiles] 由页面按形态计算后传入（横屏/车机只在平板上

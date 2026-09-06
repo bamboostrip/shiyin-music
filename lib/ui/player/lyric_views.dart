@@ -19,18 +19,12 @@ class LyricPlayerPage extends StatefulWidget {
     super.key,
     required this.player,
     required this.song,
-    required this.focusRequest,
-    required this.isPageActive,
     required this.isPageVisible,
-    required this.isPageTransitioning,
   });
 
   final PlayerController player;
   final Song song;
-  final int focusRequest;
-  final bool isPageActive;
   final bool isPageVisible;
-  final bool isPageTransitioning;
 
   @override
   State<LyricPlayerPage> createState() => _LyricPlayerPageState();
@@ -139,13 +133,9 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
             songHash: widget.song.hash,
             lyrics: widget.player.lyrics,
             activeIndex: widget.player.activeLyricIndex,
-            seekRevision: widget.player.seekRevision,
             isPreparing: widget.player.isPreparing,
             displayMode: displayMode,
-            focusRequest: widget.focusRequest,
-            isPageActive: widget.isPageActive,
             isPageVisible: widget.isPageVisible,
-            isPageTransitioning: widget.isPageTransitioning,
             lyricScale: _lyricScale,
           ),
           // 字体大小调节按钮（左侧底部）
@@ -198,13 +188,9 @@ class LyricViewport extends StatefulWidget {
     required this.songHash,
     required this.lyrics,
     required this.activeIndex,
-    required this.seekRevision,
     required this.isPreparing,
     required this.displayMode,
-    required this.focusRequest,
-    required this.isPageActive,
     required this.isPageVisible,
-    required this.isPageTransitioning,
     required this.lyricScale,
   });
 
@@ -212,13 +198,9 @@ class LyricViewport extends StatefulWidget {
   final String songHash;
   final List<LyricLine> lyrics;
   final int activeIndex;
-  final int seekRevision;
   final bool isPreparing;
   final LyricDisplayMode displayMode;
-  final int focusRequest;
-  final bool isPageActive;
   final bool isPageVisible;
-  final bool isPageTransitioning;
   final double lyricScale;
 
   @override

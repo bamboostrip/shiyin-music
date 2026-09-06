@@ -1,5 +1,14 @@
 import 'package:flutter/material.dart';
 
+/// 字号档位对应的中文文案。
+///
+/// 设置页（字体大小弹窗留在 settings_page）与个性化分节共用。
+String fontScaleLabel(double scale) {
+  if (scale >= 1.2) return '特大';
+  if (scale >= 1.1) return '大';
+  return '标准';
+}
+
 /// 设置页共用小组件：分节标题、卡片容器、瓦片与分隔线。
 class SectionHeader extends StatelessWidget {
   const SectionHeader({super.key, required this.title});

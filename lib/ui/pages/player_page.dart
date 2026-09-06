@@ -203,10 +203,8 @@ class _PlayerBodyState extends State<_PlayerBody> {
   final _pageController = PageController();
   var _page = 0;
   var _pageScrolling = false;
-  var _lyricFocusRequest = 0;
   bool? _lastSystemUiLandscape;
 
-  bool get _lyricPageActive => _page == 1 && !_pageScrolling;
   bool get _lyricPageVisible => _page == 1 || _pageScrolling;
 
   @override
@@ -297,10 +295,7 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                         ),
                                         player: widget.player,
                                         song: widget.song,
-                                        focusRequest: _lyricFocusRequest,
-                                        isPageActive: _lyricPageActive,
                                         isPageVisible: _lyricPageVisible,
-                                        isPageTransitioning: _pageScrolling,
                                       ),
                                     ],
                                   ),
@@ -350,7 +345,6 @@ class _PlayerBodyState extends State<_PlayerBody> {
   }
 
   void _setPageState({int? page, bool? scrolling}) {
-    final wasLyricActive = _lyricPageActive;
     final nextPage = page ?? _page;
     final nextScrolling = scrolling ?? _pageScrolling;
 
@@ -361,10 +355,6 @@ class _PlayerBodyState extends State<_PlayerBody> {
     setState(() {
       _page = nextPage;
       _pageScrolling = nextScrolling;
-      final nextLyricActive = _page == 1 && !_pageScrolling;
-      if (!wasLyricActive && nextLyricActive) {
-        _lyricFocusRequest++;
-      }
     });
   }
 

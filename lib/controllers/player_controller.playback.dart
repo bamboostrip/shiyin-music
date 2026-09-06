@@ -359,7 +359,6 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     _lastSmoothPosition = Duration.zero;
     // 用户手动 seek 后取消高潮武装，避免拖动进度条到高潮结束点后意外自动暂停。
     _climaxEndTime = null;
-    seekRevision++;
     _isScrubbing = false;
     _isSeeking = true;
     _setPositionBase(target, playing: isPlaying);

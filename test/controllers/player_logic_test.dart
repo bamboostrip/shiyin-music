@@ -301,6 +301,13 @@ void main() {
         ]);
       });
 
+      test('负数同样四舍五入（.5 远离零，与正数对称）', () {
+        expect(
+          PlayerEqualizerLogic.restoreLevels('[-1.4, -2.5, 2.5]', defaults),
+          [-1, -3, 3],
+        );
+      });
+
       test('长度不一致时按频段数重采样', () {
         expect(PlayerEqualizerLogic.restoreLevels('[100, 200]', defaults), [
           100,
