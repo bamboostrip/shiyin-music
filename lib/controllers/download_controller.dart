@@ -585,8 +585,23 @@ class DownloadController extends ChangeNotifier {
   }
 
   /// 清空所有已下载歌曲。
+  ///
+  /// 快照后删除：传输协程可能在 await 间隙改 [_downloads]，直接遍历
+  /// values 会抛 ConcurrentModificationError。先取消在途任务再删文件。
+  /// 注意：在播文件如正被代理 openRead serving，删后后续 Range 会 404；
+  /// 跨控制器停播/跳过需 player 协作，属大改，另开分支处理，这里只保不崩。
   Future<void> clearAllDownloads() async {
-    for (final entry in _downloads.values) {
+    final snapshot = List.of(_downloads.values);
+    for (final entry in snapshot) {
+      if (entry.status == DownloadStatus.downloading) {
+        try {
+          await _service.cancel(
+            _service.cacheKeyFor(entry.song, entry.quality),
+          );
+        } catch (_) {}
+      }
+    }
+    for (final entry in snapshot) {
       if (entry.filePath != null) {
         await _service.deleteFile(entry.filePath!);
       }
