@@ -91,6 +91,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
   /// 清空播放历史。
   Future<void> clearPlaybackHistory() => _historyService.clear();
 
+  /// 切音质后重载当前歌曲（不断队列、不断歌词，尽量原位继续）。
+  ///
+  /// 与 playSong 共用同一套守卫：换源深度计数（防 completed 插队）、
+  /// 解析/加载期 hash 校验（旧音质不抢新歌引擎）、智能音质降级与
+  /// VIP 领取重试（经 [_resolvePlayUrl]），定位走公开 [seek]。
   Future<void> _reloadCurrentSongForQuality() async {
     final song = currentSong;
     if (song == null) {
@@ -101,6 +106,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final targetPosition = smoothPosition;
     isPreparing = true;
     errorMessage = null;
+    _changingSourceDepth++;
+    // 切旧分析，避免旧歌 LUFS 回调算进新音质增益
+    unawaited(_loudness.cancelAnalysis());
     notifyListeners();
 
     try {
@@ -112,16 +120,12 @@ mixin _PlayerSettings on _PlayerControllerBase {
       } else if (song.source == SongSource.local) {
         url = song.id;
       } else {
-        final PlayUrl playUrl;
-        if (song.isCloudDrive) {
-          playUrl = await _api.cloudSongUrl(song);
-        } else if (song.source == SongSource.netease) {
-          playUrl = PlayUrl(
-            url: 'https://music.163.com/song/media/outer/url?id=${song.id}.mp3',
-            hash: song.hash,
-          );
-        } else {
-          playUrl = await _api.songUrl(song, quality: audioQuality);
+        // 复用主路径解析：云盘/网易/智能降级语义与 playSong 一致
+        final playUrl = await _resolvePlayUrl(song);
+        // 解析耗时数秒，期间用户可能已切歌：旧音质不得抢引擎
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 切音质解析期间已切歌，丢弃旧结果');
+          return;
         }
         if (playUrl.url.isEmpty) {
           throw Exception('当前音质暂时没有可播放地址');
@@ -144,9 +148,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
         queueSongs: queue,
         queueIndex: currentIndex,
       );
-      if (targetPosition > Duration.zero) {
-        await _audioHandler.seek(_clampPosition(targetPosition));
+      // 加载期间同样可能被切歌抢先：旧音质的 seek/play 全部作废
+      if (currentSong?.hash != song.hash) {
+        debugPrint('[时音][player] 切音质加载期间已切歌，中止旧后续动作');
+        return;
       }
+      if (targetPosition > Duration.zero) {
+        // 走公开 seek：serial/clamp/notify 语义与手势一致
+        await seek(targetPosition);
+      }
+      if (currentSong?.hash != song.hash) return;
       if (resumePlayback) {
         await _audioHandler.play();
       }
@@ -157,10 +168,30 @@ mixin _PlayerSettings on _PlayerControllerBase {
         );
       }
     } catch (error) {
+      if (_disposed) return;
+      // VIP 过期：领取后走完整播放流程重试（保留定位）
+      if (error is VipRequiredException && vipClaim != null) {
+        final claimed = await _tryClaimVipAndRetry(
+          song,
+          queue: queue,
+          initialPosition: targetPosition > Duration.zero
+              ? targetPosition
+              : null,
+          preserveClimax: true,
+        );
+        if (claimed) return;
+      }
+      if (currentSong?.hash != song.hash) {
+        debugPrint('[时音][player] 切音质失败时歌曲已切换，跳过错误态');
+        return;
+      }
       errorMessage = error.toString();
     } finally {
-      isPreparing = false;
-      notifyListeners();
+      if (!_disposed) {
+        if (_changingSourceDepth > 0) _changingSourceDepth--;
+        isPreparing = false;
+        notifyListeners();
+      }
     }
   }
 

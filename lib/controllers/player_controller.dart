@@ -543,6 +543,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   Future<void> _loadClimax(Song song);
 
+  /// VIP 过期领取后重试（playback 分片实现，settings 的切音质路径复用）。
+  Future<bool> _tryClaimVipAndRetry(
+    Song song, {
+    List<Song>? queue,
+    Duration? initialPosition,
+    bool preserveClimax,
+  });
+
   Future<void> _refreshEqualizerConfig();
 
   Future<void> _applyEqualizer();

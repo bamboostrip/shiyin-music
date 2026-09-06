@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -61,6 +62,11 @@ class RustApiClient implements ApiClientInterface {
     return _request('POST', path, query, body);
   }
 
+  /// 播放主链路统一超时：Rust 引擎弱网下可能不返回，不加超时 playSong
+  /// 会无限挂起，智能降级/重试拿不到错误。与 getRaw(15s) 对齐，取 20s
+  /// 给长尾留余量；超时转为 408 ApiException 进正常错误处理链。
+  static const Duration _requestTimeout = Duration(seconds: 20);
+
   Future<dynamic> _request(
     String method,
     String path,
@@ -79,10 +85,12 @@ class RustApiClient implements ApiClientInterface {
         path: path,
         query: queryJson,
         body: bodyJson,
-      );
+      ).timeout(_requestTimeout);
       if (result.isEmpty || result == 'null') return null;
       final decoded = jsonDecode(result);
       return unwrapData(decoded);
+    } on TimeoutException {
+      throw ApiException('请求超时，请检查网络后重试', statusCode: 408);
     } catch (e) {
       throw ApiException(e.toString(), statusCode: 500);
     }
