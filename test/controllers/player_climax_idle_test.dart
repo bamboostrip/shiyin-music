@@ -91,6 +91,7 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   final List<String> callLogs = [];
   final List<Duration> seekPositions = [];
   Future<void> Function()? onLoadSong;
+  bool throwOnSeek = false;
 
   @override
   AudioPlayer get audioPlayer => _audioPlayer;
@@ -108,6 +109,7 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   Future<void> seek(Duration position, [dynamic options]) async {
     callLogs.add('seek:${position.inSeconds}');
     seekPositions.add(position);
+    if (throwOnSeek) throw Exception('engine seek failed');
   }
 
   @override
@@ -381,6 +383,55 @@ void main() {
         expect(seekIndex > loadIndex && seekIndex < playIndex, isTrue);
       },
     );
+  });
+
+  group('seek 非 idle 错误语义（回归：调用方不接错即未处理异常）', () {
+    late _FakeAudioPlayer fakeAudioPlayer;
+    late _RecordingAudioHandler recordingAudioHandler;
+    late _MockMusicApi mockApi;
+    late PlayerController controller;
+
+    const testSong = Song(
+      id: 'test_song_1',
+      title: '测试歌曲',
+      artist: '测试歌手',
+      hash: 'test_hash_123',
+    );
+
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      fakeAudioPlayer = _FakeAudioPlayer();
+      recordingAudioHandler = _RecordingAudioHandler(fakeAudioPlayer);
+      mockApi = _MockMusicApi();
+      controller = PlayerController(mockApi, recordingAudioHandler);
+      controller.currentSong = testSong;
+      controller.queue = [testSong];
+    });
+
+    tearDown(() {
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+    });
+
+    test('非 idle 下引擎 seek 失败必须上抛（调用方才能提示而非声画脱节）', () async {
+      fakeAudioPlayer.setProcessingState(ProcessingState.ready);
+      recordingAudioHandler.throwOnSeek = true;
+
+      await expectLater(
+        controller.seek(const Duration(seconds: 10)),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('空队列 previous 边界回零失败不抛错，落错误态提示', () async {
+      fakeAudioPlayer.setProcessingState(ProcessingState.ready);
+      recordingAudioHandler.throwOnSeek = true;
+      controller.queue = const [];
+
+      await controller.previous();
+
+      expect(controller.errorMessage, isNotNull);
+    });
   });
 }
 

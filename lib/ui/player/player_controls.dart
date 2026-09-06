@@ -203,8 +203,15 @@ class Progress extends StatelessWidget {
                 max: max,
                 onChanged: (value) =>
                     player.previewSeek(Duration(milliseconds: value.round())),
-                onChangeEnd: (value) =>
-                    player.seek(Duration(milliseconds: value.round())),
+                onChangeEnd: (value) async {
+                  try {
+                    await player.seek(
+                      Duration(milliseconds: value.round()),
+                    );
+                  } catch (_) {
+                    Toast.error('定位失败，请重试');
+                  }
+                },
               ),
             ),
             Padding(

@@ -291,14 +291,20 @@ class _ProgressBarState extends State<_ProgressBar> {
                         ? (value) => setState(() => _dragValue = value)
                         : null,
                     onChangeEnd: durationMs > 0
-                        ? (value) {
-                            widget.player.seek(
-                              Duration(
-                                milliseconds:
-                                    (durationMs * value).round(),
-                              ),
-                            );
-                            setState(() => _dragValue = null);
+                        ? (value) async {
+                            try {
+                              await widget.player.seek(
+                                Duration(
+                                  milliseconds:
+                                      (durationMs * value).round(),
+                                ),
+                              );
+                            } catch (_) {
+                              Toast.error('定位失败，请重试');
+                            }
+                            if (mounted) {
+                              setState(() => _dragValue = null);
+                            }
                           }
                         : null,
                   ),

@@ -522,8 +522,15 @@ class _CarProgressBar extends StatelessWidget {
                 max: max,
                 onChanged: (val) =>
                     player.previewSeek(Duration(milliseconds: val.round())),
-                onChangeEnd: (val) =>
-                    player.seek(Duration(milliseconds: val.round())),
+                onChangeEnd: (val) async {
+                  try {
+                    await player.seek(
+                      Duration(milliseconds: val.round()),
+                    );
+                  } catch (_) {
+                    Toast.error('定位失败，请重试');
+                  }
+                },
               ),
             ),
             const SizedBox(height: 2),

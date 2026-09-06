@@ -104,16 +104,28 @@ mixin _PlayerQueue on _PlayerControllerBase {
     await playSong(nextSong, queue: queue);
   }
 
+  /// 边界回零（空队列/单曲/首曲 previous）：引擎异常时落错误态而非上抛，
+  /// 调用方（按钮直引/快捷键 unawaited）都不接错，上抛即未处理异常。
+  Future<void> _seekToStartSafe() async {
+    try {
+      await seek(Duration.zero);
+    } catch (error) {
+      debugPrint('[时音][player] 回零失败: $error');
+      errorMessage = '定位失败，请重试';
+      notifyListeners();
+    }
+  }
+
   @override
   Future<void> previous() async {
     if (queue.isEmpty) {
-      await seek(Duration.zero);
+      await _seekToStartSafe();
       return;
     }
 
     if (playbackMode == PlaybackMode.shuffle) {
       if (queue.length == 1) {
-        await seek(Duration.zero);
+        await _seekToStartSafe();
         return;
       }
       final prevIndex = _shuffleQueue.previous(queue.length);
@@ -127,7 +139,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
     if (index > 0) {
       await playSong(queue[index - 1], queue: queue);
     } else {
-      await seek(Duration.zero);
+      await _seekToStartSafe();
     }
   }
 

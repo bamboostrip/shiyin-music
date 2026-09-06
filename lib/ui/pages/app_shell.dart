@@ -780,7 +780,13 @@ class AppShortcutScope extends StatelessWidget {
                 forward: !intent.backward,
               );
               if (target != null) {
-                unawaited(player.seek(target));
+                // seek 非 idle 下引擎异常会抛错，快捷键无 context 可提示，
+                // 仅日志吞掉，避免未处理异步异常上报
+                unawaited(
+                  player.seek(target).catchError((Object error) {
+                    debugPrint('[时音][shortcut] seek 失败已忽略: $error');
+                  }),
+                );
               }
               return null;
             },
