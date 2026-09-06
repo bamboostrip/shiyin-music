@@ -217,6 +217,7 @@ class PlayerController extends _PlayerControllerBase
 
   @override
   void dispose() {
+    _disposed = true;
     _pauseListeningTimeTracker();
     _networkRestoredSub?.cancel();
     _autoResumeTimer?.cancel();
@@ -344,6 +345,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _desktopLyricsPreviewVisible = false;
   Duration? _pendingIdlePosition;
   Duration? _pendingInitialPosition;
+  bool _disposed = false;
 
   Song? currentSong;
   List<Song> queue = const [];

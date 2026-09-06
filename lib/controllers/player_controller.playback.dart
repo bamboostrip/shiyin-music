@@ -170,6 +170,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         debugPrint('[时音][player] 蜂窝网络跳过播后缓存: ${song.title}');
       }
     } catch (error) {
+      if (_disposed) return;
       _pendingInitialPosition = null;
       // VIP 过期：自动领取后重试一次（转发定位/队列上下文，避免冷启动
       // 定位与高潮试听从 0 秒重播）
@@ -219,14 +220,16 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       notifyListeners();
     } finally {
       _pendingInitialPosition = null;
-      if (_changingSourceDepth > 0) {
-        _changingSourceDepth--;
+      if (!_disposed) {
+        if (_changingSourceDepth > 0) {
+          _changingSourceDepth--;
+        }
+        if (isPreparing) {
+          isPreparing = false;
+          notifyListeners();
+        }
+        _scheduleSavePlaybackState();
       }
-      if (isPreparing) {
-        isPreparing = false;
-        notifyListeners();
-      }
-      _scheduleSavePlaybackState();
     }
   }
 
@@ -401,7 +404,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _setPositionBase(target, playing: isPlaying);
       _emitPosition();
     } catch (_) {
-      // idle 状态下底层播放器可能无音频源而抛出异常，此时已由 _pendingIdlePosition 兜底
+      // 仅 idle 吞错：无音频源时靠 _pendingIdlePosition 兜底。
+      // 非 idle 下的引擎错误（蓝牙断开/后端抖动）必须抛给调用方，
+      // 否则 UI 已显示目标进度、引擎仍在旧位，声画脱节且无错误。
+      if (audioPlayer.processingState != ProcessingState.idle) {
+        rethrow;
+      }
     } finally {
       if (serial == _seekSerial) {
         _isSeeking = false;
