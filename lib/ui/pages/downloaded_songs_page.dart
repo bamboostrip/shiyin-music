@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -534,13 +535,14 @@ Future<void> _openContainingFolder(String filePath, BuildContext context) async 
   final file = File(filePath);
   final dir = file.parent.path;
   try {
-    if (Platform.isWindows) {
+    final platform = defaultTargetPlatform;
+    if (platform == TargetPlatform.windows) {
       await Process.run('explorer', [dir]);
-    } else if (Platform.isMacOS) {
+    } else if (platform == TargetPlatform.macOS) {
       await Process.run('open', [dir]);
-    } else if (Platform.isLinux) {
+    } else if (platform == TargetPlatform.linux) {
       await Process.run('xdg-open', [dir]);
-    } else if (Platform.isAndroid) {
+    } else if (platform == TargetPlatform.android) {
       // Android 无法直接打开文件管理器到指定目录，尝试用 file:// URI
       // （路径含空格/中文必须编码，直接拼接会让 URI 解析截断）。
       final uri = Uri.file(dir);

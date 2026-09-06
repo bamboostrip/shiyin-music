@@ -1,6 +1,4 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'os_detect_web.dart' if (dart.library.io) 'os_detect_io.dart';
 
 /// 测试或调试注入开关：非 null 时 [isDesktopFormFactor] 直接返回该值。
 ///
@@ -10,8 +8,7 @@ bool? debugDesktopFormFactorOverride;
 /// 编译期参数：支持通过 `--dart-define=FORCE_MOBILE=true` 在 Windows/桌面宿主上直接调试移动端界面。
 const bool _forceMobile = bool.fromEnvironment('FORCE_MOBILE');
 
-final bool _osIsDesktop =
-    !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+final bool _osIsDesktop = hostIsDesktop;
 
 /// 操作系统是否属于桌面平台（不受 FORCE_MOBILE 覆盖影响）
 bool get isDesktopPlatform => _osIsDesktop;

@@ -90,8 +90,9 @@ class HomeSongRow extends StatelessWidget {
     final isDesktop = isDesktopFormFactor;
 
     // 主页歌曲行响应 player 重建（播放进度/状态），高频更新会触发
-    // Windows AXTree 竞态崩溃，排除语义树以规避 Flutter Windows 引擎 bug
+    // Windows AXTree 竞态崩溃，仅桌面平台排除语义树；移动端保留无障碍
     return ExcludeSemantics(
+      excluding: isDesktopPlatform,
       child: AnimatedBuilder(
         animation: player,
         builder: (context, _) {

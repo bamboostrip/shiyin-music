@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import '../adaptive_layout.dart';
 import '../../controllers/player_controller.dart';
@@ -360,7 +360,8 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                   ],
                 );
               }
-              if (!Platform.isAndroid || !widget.localMusic.hasPermission) {
+              if (defaultTargetPlatform != TargetPlatform.android ||
+                  !widget.localMusic.hasPermission) {
                 return const SizedBox.shrink();
               }
               return Row(
@@ -404,7 +405,7 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                   ),
                 );
               }
-            } else if (!Platform.isAndroid) {
+            } else if (defaultTargetPlatform != TargetPlatform.android) {
               // macOS：Rust 引擎未接入（见 form_factor.dart 的 macOS 适配清单）。
               return _buildEmptyState(
                 context,

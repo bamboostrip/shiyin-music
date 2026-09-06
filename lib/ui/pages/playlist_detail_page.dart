@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1418,10 +1417,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             children: [
               // Windows 平台滚动时 sliver item 回收重建会产生大量语义节点更新，
               // 触发 Flutter Windows 引擎 AXTree 更新 bug（console 提示
-              // "Failed to update ui::AXTree"）。在 Windows 上排除语义树消除提示，
+              // "Failed to update ui::AXTree"）。仅桌面平台排除语义树，
               // 移动端保留无障碍功能。
               ExcludeSemantics(
-                excluding: !Platform.isWindows,
+                excluding: isDesktopPlatform,
                 child: CustomScrollView(
                   controller: _scrollController,
                   slivers: [
@@ -3130,12 +3129,14 @@ class _SongRowState extends State<_SongRow> {
     final onDelete = widget.onDelete;
     final onViewArtist = widget.onViewArtist;
 
-    // 歌曲行响应 player 重建，高频更新会触发 Windows AXTree 竞态崩溃
+    // 歌曲行响应 player 重建，高频更新会触发 Windows AXTree 竞态崩溃，
+    // 仅桌面平台排除；移动端保留无障碍
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: ExcludeSemantics(
+        excluding: isDesktopPlatform,
         child: AnimatedBuilder(
           animation: player,
           builder: (context, _) {

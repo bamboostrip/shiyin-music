@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../form_factor.dart';
+
 /// PC hover 反馈容器：鼠标悬停时显示底色 + 手型光标。
 ///
 /// 包在歌曲行等可点击行外面，悬停即给用户“可点”反馈；
-/// 触屏设备上 MouseRegion 不触发，原有样式不变。
+/// 非桌面形态（触屏永不触发）直接返回 child，省一层 MouseRegion
+/// 与 Stateful 开销。
 class HoverRow extends StatefulWidget {
   const HoverRow({
     super.key,
@@ -27,6 +30,7 @@ class _HoverRowState extends State<HoverRow> {
 
   @override
   Widget build(BuildContext context) {
+    if (!isDesktopFormFactor) return widget.child;
     return MouseRegion(
       cursor: widget.cursor,
       onEnter: (_) => setState(() => _hovering = true),

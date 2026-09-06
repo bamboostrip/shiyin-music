@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -7,6 +6,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../design_tokens.dart';
+import '../form_factor.dart';
 import 'desktop_anchored_menu.dart';
 import 'now_playing_badge.dart';
 
@@ -269,7 +269,9 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: ExcludeSemantics(
-        excluding: !Platform.isWindows,
+        // 高频重建 + 桌面平台才排除（Windows AXTree 竞态）；注意原 `!isWindows`
+        // 写反了（在 Windows 上保留、在移动端排除），现按注释意图修正
+        excluding: isDesktopPlatform,
         child: AnimatedBuilder(
           animation: Listenable.merge([player, auth]),
           builder: (context, _) {

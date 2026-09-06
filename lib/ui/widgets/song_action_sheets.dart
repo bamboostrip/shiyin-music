@@ -544,8 +544,9 @@ Future<void> _showDesktopSongActionMenu({
   Offset? anchor,
 }) {
   // PC 规格：菜单锚定在触发点附近（右键位置 / ... 按钮下方），
-  // 屏幕边缘自动翻转；无坐标时退回原有居中弹窗兜底。
-  if (anchor != null) {
+  // 屏幕边缘自动翻转；无坐标或坐标无效（首帧未布局时 anchorBelow 回
+  // Offset.zero）退回原有居中弹窗兜底，避免菜单飞到左上角。
+  if (anchor != null && anchor != Offset.zero && anchor.isFinite) {
     return showDesktopAnchoredMenu<void>(
       context: context,
       anchor: anchor,
