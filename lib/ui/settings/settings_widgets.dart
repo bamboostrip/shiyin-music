@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 /// 设置页共用小组件：分节标题、卡片容器、瓦片与分隔线。
-
 class SectionHeader extends StatelessWidget {
   const SectionHeader({super.key, required this.title});
 

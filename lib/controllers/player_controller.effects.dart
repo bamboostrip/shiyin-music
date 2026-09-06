@@ -175,9 +175,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
   /// 旧分析,避免空跑占 CPU。
   ///
   /// 仅在缓存未命中(需原生解码分析)时触发渐变应用;缓存命中已由
-  @override
   /// 调用方(loadSong 前)instant 应用,这里 [analyzeAndComputeGain] 会
   /// 再次命中并返回相同值,gain 与 [_pendingGainDb] 一致则跳过重复应用。
+  @override
   Future<void> _analyzeAndApplyLoudness({
     required Song song,
     required String url,
@@ -288,9 +288,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
     }
   }
 
-  @override
   /// 应用当前歌曲的响度增益(sessionId 变化或分析完成时调用)。
   /// [instant]=true 直接设置(缓存命中首播);false 走渐变(播放中分析完成)。
+  @override
   Future<void> _applyLoudnessGain({bool instant = false}) async {
     await _loudness.applyGain(
       audioPlayer: audioPlayer,
