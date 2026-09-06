@@ -159,11 +159,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 记录播放历史与本地播放统计（后台执行，不阻塞播放）
       unawaited(_historyService.record(song));
       unawaited(_statsService.recordPlay(song));
-      // 首播后后台缓存（仅当本次用的是网络 URL）
-      if (networkUrl != null) {
+      // 首播后后台缓存（仅当本次用的是网络 URL，且当前网络允许）。
+      // 蜂窝网络默认跳过音频下载（只播不存），避免移动流量翻倍；
+      // 用户在设置中放行后才缓存。
+      if (networkUrl != null && isAudioPrecacheAllowed) {
         unawaited(
           downloadController?.cacheForPlayback(song, audioQuality, networkUrl),
         );
+      } else if (networkUrl != null) {
+        debugPrint('[时音][player] 蜂窝网络跳过播后缓存: ${song.title}');
       }
     } catch (error) {
       _pendingInitialPosition = null;

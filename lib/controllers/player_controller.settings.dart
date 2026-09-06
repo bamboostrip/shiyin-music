@@ -45,6 +45,18 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 开关移动数据下后台缓存。
+  ///
+  /// 关闭（默认）时蜂窝网络只预取歌词，不下载音频；
+  /// 打开后蜂窝网络也允许下一首预缓存 + 播后缓存。
+  Future<void> setAllowCellularPrecache(bool enabled) async {
+    if (allowCellularPrecache == enabled) return;
+    allowCellularPrecache = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_allowCellularPrecacheSettingKey, enabled);
+    notifyListeners();
+  }
+
   /// 开关开机自启播放歌曲功能。
   Future<void> setAutoPlayOnStartupEnabled(bool enabled) async {
     if (autoPlayOnStartupEnabled == enabled) return;
@@ -138,8 +150,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (resumePlayback) {
         await _audioHandler.play();
       }
-      // 切音质后后台缓存
-      if (networkUrl != null) {
+      // 切音质后后台缓存（同样受蜂窝门控约束）
+      if (networkUrl != null && isAudioPrecacheAllowed) {
         unawaited(
           downloadController?.cacheForPlayback(song, audioQuality, networkUrl),
         );
@@ -258,6 +270,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     );
     smartQualityEnabled =
         prefs.getBool(_smartQualitySettingKey) ?? smartQualityEnabled;
+    allowCellularPrecache =
+        prefs.getBool(_allowCellularPrecacheSettingKey) ??
+        allowCellularPrecache;
     autoPlayOnStartupEnabled =
         prefs.getBool(_autoPlayOnStartupSettingKey) ?? autoPlayOnStartupEnabled;
     equalizerEnabled =

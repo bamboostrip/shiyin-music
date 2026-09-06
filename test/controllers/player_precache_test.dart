@@ -11,6 +11,8 @@ import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/download_service.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/services/music_audio_handler.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:shiyin_music/services/network_monitor.dart';
 
 class _FakeDownloadService implements DownloadService {
   @override
@@ -507,6 +509,8 @@ void main() {
     tearDown(() {
       player.dispose();
       fakePlayer.disposeStreams();
+      // 门控单测会注入蜂窝/WiFi，每用例后恢复未知，避免串扰
+      NetworkMonitor.instance.debugSetResults(const []);
     });
 
     Future<void> startPlayback(
@@ -675,6 +679,54 @@ void main() {
         expect(testApi.songUrlCallCount, 1);
         expect(testApi.songUrlRequestedSongs, contains(song2));
         expect(spyDownloadController.cachedSongs, [song2]);
+      });
+    });
+
+    group('Test 4: 蜂窝网络门控（默认仅 WiFi 预缓存音频）', () {
+      test('蜂窝默认只预取歌词，不下载音频', () async {
+        NetworkMonitor.instance.debugSetResults(const [
+          ConnectivityResult.mobile,
+        ]);
+        player.allowCellularPrecache = false;
+
+        await startPlayback(song1, queue: [song1, song2]);
+
+        player.maybePrecacheNext(const Duration(seconds: 75));
+        await pumpEventQueue();
+
+        expect(testApi.lyricsRequestedSongs, contains(song2));
+        expect(spyDownloadController.cachedSongs, isEmpty);
+        expect(player.isAudioPrecacheAllowed, isFalse);
+      });
+
+      test('用户放行后蜂窝也下载音频', () async {
+        NetworkMonitor.instance.debugSetResults(const [
+          ConnectivityResult.mobile,
+        ]);
+        player.allowCellularPrecache = true;
+
+        await startPlayback(song1, queue: [song1, song2]);
+
+        player.maybePrecacheNext(const Duration(seconds: 75));
+        await pumpEventQueue();
+
+        expect(spyDownloadController.cachedSongs, [song2]);
+        expect(player.isAudioPrecacheAllowed, isTrue);
+      });
+
+      test('WiFi 下默认即下载音频', () async {
+        NetworkMonitor.instance.debugSetResults(const [
+          ConnectivityResult.wifi,
+        ]);
+        player.allowCellularPrecache = false;
+
+        await startPlayback(song1, queue: [song1, song2]);
+
+        player.maybePrecacheNext(const Duration(seconds: 75));
+        await pumpEventQueue();
+
+        expect(spyDownloadController.cachedSongs, [song2]);
+        expect(player.isAudioPrecacheAllowed, isTrue);
       });
     });
   });

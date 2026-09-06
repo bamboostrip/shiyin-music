@@ -67,6 +67,7 @@ const _desktopLyricsSettingsVersionKey =
     'settings.desktop_lyrics_settings_version';
 const _desktopLyricsSettingsVersion = 2;
 const _smartQualitySettingKey = 'settings.smart_quality_enabled';
+const _allowCellularPrecacheSettingKey = 'settings.allow_cellular_precache';
 const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
 const _autoPlayOnDeviceConnectedSettingKey =
     'settings.auto_play_on_device_connected';
@@ -371,6 +372,20 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 是否开启音质智能切换（播放失败时自动降级重试）。
   bool smartQualityEnabled = false;
+
+  /// 移动数据下是否允许后台缓存（下一首预缓存 + 播后缓存）。
+  ///
+  /// 默认 false = 仅 WiFi/有线/未知网络预缓存，蜂窝网络只预取歌词
+  /// （歌词几 KB 不计），不下载音频（几十 MB），避免移动流量翻倍。
+  bool allowCellularPrecache = false;
+
+  /// 当前网络是否允许后台下载音频（预缓存 + 播后缓存）。
+  ///
+  /// 默认仅 WiFi/有线/未知网络允许；蜂窝网络需用户显式放行
+  /// （[allowCellularPrecache]）。未知网络（单测/桌面无 NM 环境）
+  /// 按放行处理，避免误杀。
+  bool get isAudioPrecacheAllowed =>
+      allowCellularPrecache || !NetworkMonitor.instance.isCellular;
   bool autoPlayOnStartupEnabled = false;
   bool hasRestoredPlaybackState = false;
   double playbackSpeed = 1.0;

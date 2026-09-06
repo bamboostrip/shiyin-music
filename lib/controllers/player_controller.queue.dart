@@ -147,6 +147,9 @@ mixin _PlayerQueue on _PlayerControllerBase {
       _precachedForSongHash = song.hash;
       final next = _nextSong(peek: true);
       if (next != null && next.hash != song.hash) {
+        // 蜂窝网络且用户未放行时：只预取歌词（几 KB），不下载音频，
+        // 避免移动流量翻倍。_precacheTrack 内部同样有门控，这里
+        // 提前标记 hash 避免每 tick 重复触发歌词请求。
         unawaited(_precacheTrack(next));
       }
     }
@@ -155,16 +158,22 @@ mixin _PlayerQueue on _PlayerControllerBase {
   Future<void> _precacheTrack(Song song) async {
     _isPrecaching = true;
     try {
-      // 1. 预拉取歌词并缓存
+      // 1. 预拉取歌词并缓存（流量可忽略，蜂窝网络也执行）
       unawaited(loadLyrics(song));
 
-      // 2. 检查音频是否已有本地文件（已下载或播放缓存）
+      // 2. 蜂窝门控：未放行时不下载音频，只预取歌词
+      if (!isAudioPrecacheAllowed) {
+        debugPrint('[时音][player] 蜂窝网络跳过音频预缓存: ${song.title}');
+        return;
+      }
+
+      // 3. 检查音频是否已有本地文件（已下载或播放缓存）
       final local = downloadController?.localPathFor(song, audioQuality);
       if (local != null || song.source == SongSource.local) {
         return;
       }
 
-      // 3. 异步解析音频 URL 并后台下载落盘到 PlayCache
+      // 4. 异步解析音频 URL 并后台下载落盘到 PlayCache
       final playUrl = await _resolvePlayUrl(song);
       if (playUrl.url.isNotEmpty) {
         await downloadController?.cacheForPlayback(

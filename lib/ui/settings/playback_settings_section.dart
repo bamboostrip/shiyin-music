@@ -67,6 +67,17 @@ class PlaybackSettingsSection extends StatelessWidget {
             ),
             SettingsDivider(),
             SettingsSwitchTile(
+              icon: Icons.wifi_rounded,
+              iconColor: const Color(0xFF0288D1),
+              title: '移动数据下后台缓存',
+              subtitle: player.allowCellularPrecache
+                  ? '蜂窝网络也会预缓存下一首'
+                  : '默认仅 WiFi 下预缓存，省流量',
+              value: player.allowCellularPrecache,
+              onChanged: player.setAllowCellularPrecache,
+            ),
+            SettingsDivider(),
+            SettingsSwitchTile(
               icon: Icons.power_settings_new_rounded,
               iconColor: const Color(0xFF00897B),
               title: '开机自启播放',

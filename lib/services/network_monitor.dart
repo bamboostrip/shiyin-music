@@ -23,12 +23,44 @@ class NetworkMonitor {
   bool _hasNetwork = false;
   bool get hasNetwork => _hasNetwork;
 
+  /// 最近一次系统上报的连接类型（connectivity_plus 原值）。
+  /// 用于区分 WiFi/有线与按流量计费的蜂窝网络，驱动预缓存等
+  /// 后台下载门控。默认为空（未知），未知时按“非蜂窝”放行，
+  /// 避免单测/桌面无 NetworkManager 环境误杀后台任务。
+  List<ConnectivityResult> _results = const [];
+  List<ConnectivityResult> get results => List.unmodifiable(_results);
+
+  /// 是否为按流量计费的蜂窝网络。
+  ///
+  /// 判定：包含 mobile 且不包含 wifi/ethernet。
+  /// 多传输并存（如 wifi+vpn）按 WiFi 对待；未知/空按非蜂窝处理。
+  bool get isCellular {
+    if (_results.isEmpty) return false;
+    if (_results.contains(ConnectivityResult.wifi) ||
+        _results.contains(ConnectivityResult.ethernet)) {
+      return false;
+    }
+    return _results.contains(ConnectivityResult.mobile);
+  }
+
+  /// 是否为 WiFi/有线等非计费网络。
+  bool get isUnmetered =>
+      _results.contains(ConnectivityResult.wifi) ||
+      _results.contains(ConnectivityResult.ethernet);
+
   /// 是否已订阅系统网络变化。
   bool get isListening => _sub != null;
 
   Future<void> start() async {
     if (_sub != null) return;
-    _hasNetwork = await _checkNow();
+    try {
+      final results = await _connectivity.checkConnectivity();
+      _results = results;
+      _hasNetwork = results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      _results = const [];
+      _hasNetwork = false;
+    }
     _sub = _connectivity.onConnectivityChanged.listen(
       _onChanged,
       // 个别 Linux 桌面/极简环境没有 NetworkManager，connectivity_plus
@@ -45,16 +77,8 @@ class NetworkMonitor {
     _sub = null;
   }
 
-  Future<bool> _checkNow() async {
-    try {
-      final results = await _connectivity.checkConnectivity();
-      return results.any((r) => r != ConnectivityResult.none);
-    } catch (_) {
-      return false;
-    }
-  }
-
   void _onChanged(List<ConnectivityResult> results) {
+    _results = results;
     final hasNetwork = results.any((r) => r != ConnectivityResult.none);
     final wasOffline = !_hasNetwork;
     _hasNetwork = hasNetwork;
@@ -67,6 +91,13 @@ class NetworkMonitor {
   @visibleForTesting
   void debugSimulateRestored() {
     if (!_restored.isClosed) _restored.add(null);
+  }
+
+  /// 仅供测试：直接注入连接类型，驱动预缓存等流量门控单测。
+  @visibleForTesting
+  void debugSetResults(List<ConnectivityResult> results) {
+    _results = List.unmodifiable(results);
+    _hasNetwork = results.any((r) => r != ConnectivityResult.none);
   }
 
   void dispose() {
