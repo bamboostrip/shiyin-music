@@ -464,7 +464,9 @@ class LoudnessService {
     if (clampedGain <= 0) {
       // 响歌衰减:LoudnessEnhancer 不支持负增益,统一走 setVolume
       final volume = (user * pow(10, clampedGain / 20)).clamp(0.0, 1.0);
-      log('applyGain ATTENUATE gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user');
+      log(
+        'applyGain ATTENUATE gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user',
+      );
       await _disableNativeEnhancer(audioSessionId);
       await _setVolumeRamped(audioPlayer, volume, instant);
       return;
@@ -481,7 +483,9 @@ class LoudnessService {
           'gainMb': gainMb,
         });
         // 放大用 LoudnessEnhancer,engine 音量保持用户音量避免双重增益
-        log('applyGain AMPLIFY(android) gain=${clampedGain.toStringAsFixed(2)}dB gainMb=$gainMb instant=$instant user=$user');
+        log(
+          'applyGain AMPLIFY(android) gain=${clampedGain.toStringAsFixed(2)}dB gainMb=$gainMb instant=$instant user=$user',
+        );
         await audioPlayer.setVolume(user);
         return;
       } on PlatformException catch (e) {
@@ -492,16 +496,21 @@ class LoudnessService {
     } else if (defaultTargetPlatform == TargetPlatform.linux && !kIsWeb) {
       // mpv: just_audio volume 1.0 = mpv volume 100; 放大即 >100
       //（vendored just_audio_media_kit 已抬高 volume-max）。
-      final volume = (user * pow(10, clampedGain / 20))
-          .toDouble()
-          .clamp(0.0, _linuxMaxBoostVolume);
-      log('applyGain AMPLIFY(linux/mpv) gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user');
+      final volume = (user * pow(10, clampedGain / 20)).toDouble().clamp(
+        0.0,
+        _linuxMaxBoostVolume,
+      );
+      log(
+        'applyGain AMPLIFY(linux/mpv) gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant user=$user',
+      );
       await _disableNativeEnhancer(audioSessionId);
       await _setVolumeRamped(audioPlayer, volume, instant);
       return;
     }
     // Windows/iOS/macOS:无法放大,engine 保持用户音量
-    log('applyGain AMPLIFY_SKIP($defaultTargetPlatform) gain=${clampedGain.toStringAsFixed(2)}dB (平台不支持放大,保持用户音量 $user)');
+    log(
+      'applyGain AMPLIFY_SKIP($defaultTargetPlatform) gain=${clampedGain.toStringAsFixed(2)}dB (平台不支持放大,保持用户音量 $user)',
+    );
     await audioPlayer.setVolume(user);
   }
 

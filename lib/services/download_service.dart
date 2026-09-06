@@ -388,9 +388,7 @@ class DownloadService {
     // 206 的 contentLength 是"本次剩余字节数"，+startOffset 还原整包大小。
     final contentTotal = body.contentLength;
     // 期望总长：已知时用于截断校验。未知（-1）则跳过校验，保持旧行为。
-    final expectedTotal = contentTotal >= 0
-        ? startOffset + contentTotal
-        : null;
+    final expectedTotal = contentTotal >= 0 ? startOffset + contentTotal : null;
     try {
       await for (final chunk in body.stream) {
         sink.writeFromSync(chunk);
