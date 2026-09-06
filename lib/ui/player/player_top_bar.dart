@@ -108,10 +108,11 @@ class TopBar extends StatelessWidget {
               ),
             ),
             Builder(
-              builder: (moreButtonContext) => GlassIconButton(
+              builder: (moreButtonContext) => IconButton(
                 tooltip: '更多',
+                color: Colors.white,
                 onPressed: () => _showMoreSheet(moreButtonContext),
-                icon: Icons.more_horiz_rounded,
+                icon: const Icon(Icons.more_horiz_rounded),
               ),
             ),
           ],
@@ -159,23 +160,27 @@ class TopBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                GlassIconButton(
+                IconButton(
                   tooltip: liked ? '取消喜欢' : '喜欢',
+                  color: Colors.white,
                   onPressed: song.source == SongSource.kugou
                       ? () => auth.toggleLike(song)
                       : null,
-                  icon: liked
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
+                  icon: Icon(
+                    liked
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 PlayerAudioQualityPill(player: player),
                 const SizedBox(width: 8),
                 Builder(
-                  builder: (moreButtonContext) => GlassIconButton(
+                  builder: (moreButtonContext) => IconButton(
                     tooltip: '更多',
+                    color: Colors.white,
                     onPressed: () => _showMoreSheet(moreButtonContext),
-                    icon: Icons.more_horiz_rounded,
+                    icon: const Icon(Icons.more_horiz_rounded),
                   ),
                 ),
               ],
