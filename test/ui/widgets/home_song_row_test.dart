@@ -107,6 +107,39 @@ void main() {
       ]);
     });
 
+    testWidgets('桌面端悬停封面浮现播放按钮，单击播放按钮单次即可播放', (tester) async {
+      final playedSongs = <Song>[];
+      await tester.pumpWidget(
+        wrap(
+          buildRow(
+            onPlay: (song, queue) {
+              playedSongs.add(song);
+            },
+          ),
+        ),
+      );
+
+      // 未悬停时不显示播放按钮
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+
+      // 模拟鼠标悬停到整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.byType(HomeSongRow)));
+      await tester.pumpAndSettle();
+
+      // 悬停后封面浮现播放图标
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+
+      // 单击封面播放按钮（无需双击，单击即播）
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(playedSongs, [_song]);
+      await gesture.removePointer();
+    });
+
     testWidgets('右键弹出锚定上下文菜单（下一首播放/添加到歌单/查看歌手）',
         (tester) async {
       tester.view.physicalSize = const Size(1280, 800);

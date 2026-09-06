@@ -21,6 +21,14 @@ class CoverPlayOverlay extends StatefulWidget {
     this.enabled = true,
     this.borderRadius = AppRadius.lg,
     this.tooltip = '播放',
+    this.alignment = Alignment.center,
+    this.isHovered,
+    this.buttonSize,
+    this.iconSize = 26,
+    this.buttonColor,
+    this.iconColor,
+    this.margin,
+    this.darkenOnHover = true,
   });
 
   /// 封面本体（含圆角 / 描边等装饰）。
@@ -38,12 +46,37 @@ class CoverPlayOverlay extends StatefulWidget {
   /// 播放按钮的语义 / tooltip 文案。
   final String? tooltip;
 
+  /// 播放按钮对齐方式（居中或右下角）。
+  final AlignmentGeometry alignment;
+
+  /// 外部驱动的 hover 状态（如父级表格行或卡片 hover 时联动触发）。
+  /// 若为 null，则由自身内部 MouseRegion 驱动。
+  final bool? isHovered;
+
+  /// 播放按钮的宽高尺寸（若指定则使用 SizedBox.square，否则使用 padding）。
+  final double? buttonSize;
+
+  /// 播放按钮内部图标大小。
+  final double iconSize;
+
+  /// 播放按钮底色（默认 Theme.primary）。
+  final Color? buttonColor;
+
+  /// 播放按钮图标颜色（默认 Theme.onPrimary）。
+  final Color? iconColor;
+
+  /// 播放按钮的外边距（例如右下角对齐时距边缘的留白）。
+  final EdgeInsetsGeometry? margin;
+
+  /// hover 时是否在封面叠加半透明暗层。
+  final bool darkenOnHover;
+
   @override
   State<CoverPlayOverlay> createState() => _CoverPlayOverlayState();
 }
 
 class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
-  bool _hovered = false;
+  bool _internalHovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -51,28 +84,68 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
       return widget.cover;
     }
     final colorScheme = Theme.of(context).colorScheme;
-    final shown = _hovered;
+    final shown = widget.isHovered ?? _internalHovered;
+
+    final btnColor = widget.buttonColor ?? colorScheme.primary;
+    final icnColor = widget.iconColor ?? colorScheme.onPrimary;
+    final effectiveButtonSize = widget.buttonSize;
+
+    final playIcon = Icon(
+      Icons.play_arrow_rounded,
+      color: icnColor,
+      size: widget.iconSize,
+    );
+
     final playButton = Material(
-      color: colorScheme.primary,
+      color: btnColor,
       shape: const CircleBorder(),
       elevation: 2,
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: widget.onPlay,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(
-            Icons.play_arrow_rounded,
-            color: colorScheme.onPrimary,
-            size: 26,
+        child: effectiveButtonSize != null
+            ? SizedBox.square(
+                dimension: effectiveButtonSize,
+                child: Center(child: playIcon),
+              )
+            : Padding(
+                padding: const EdgeInsets.all(8),
+                child: playIcon,
+              ),
+      ),
+    );
+
+    final positionedButton = Align(
+      alignment: widget.alignment,
+      child: Padding(
+        padding: widget.margin ??
+            (widget.alignment == Alignment.bottomRight
+                ? const EdgeInsets.all(8)
+                : EdgeInsets.zero),
+        child: IgnorePointer(
+          ignoring: !shown,
+          child: AnimatedOpacity(
+            opacity: shown ? 1 : 0,
+            duration: kCoverPlayOverlayDuration,
+            child: AnimatedScale(
+              scale: shown ? 1 : 0.7,
+              duration: kCoverPlayOverlayDuration,
+              curve: Curves.easeOutCubic,
+              child: widget.tooltip == null
+                  ? playButton
+                  : Tooltip(
+                      message: widget.tooltip!,
+                      child: playButton,
+                    ),
+            ),
           ),
         ),
       ),
     );
 
     return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+      onEnter: (_) => setState(() => _internalHovered = true),
+      onExit: (_) => setState(() => _internalHovered = false),
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 封面本体：非 positioned 子级，决定 Stack 尺寸（可在纵向
@@ -87,42 +160,19 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
             fit: StackFit.loose,
             children: [
               base,
-              // 蒙层：纯视觉，永不拦截点击（卡片本体点击保持可达）。
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(widget.borderRadius),
-                    child: AnimatedOpacity(
-                      opacity: shown ? 1 : 0,
-                      duration: kCoverPlayOverlayDuration,
+              // 蒙层：纯视觉，未 hover 时不构建。
+              if (widget.darkenOnHover && shown)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(widget.borderRadius),
                       child: const ColoredBox(color: Colors.black38),
                     ),
                   ),
                 ),
-              ),
-              // 居中播放按钮：未浮现时不参与命中测试，浮现后才拦截点击。
-              Positioned.fill(
-                child: Center(
-                  child: IgnorePointer(
-                    ignoring: !shown,
-                    child: AnimatedOpacity(
-                      opacity: shown ? 1 : 0,
-                      duration: kCoverPlayOverlayDuration,
-                      child: AnimatedScale(
-                        scale: shown ? 1 : 0.7,
-                        duration: kCoverPlayOverlayDuration,
-                        curve: Curves.easeOutCubic,
-                        child: widget.tooltip == null
-                            ? playButton
-                            : Tooltip(
-                                message: widget.tooltip!,
-                                child: playButton,
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+              // 播放按钮：未 hover 时不构建，hover 后才挂载。
+              if (shown)
+                Positioned.fill(child: positionedButton),
             ],
           );
         },

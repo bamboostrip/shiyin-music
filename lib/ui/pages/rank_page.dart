@@ -1342,7 +1342,7 @@ class _RankDetailPageState extends State<RankDetailPage> {
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                       sliver: SliverFixedExtentList(
-                        itemExtent: 44.0,
+                        itemExtent: DesktopSongTableRow.rowHeight,
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
                             final song = _songs[index];

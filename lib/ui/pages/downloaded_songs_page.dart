@@ -238,7 +238,7 @@ class _DownloadedList extends StatelessWidget {
           ),
         ),
         SliverFixedExtentList(
-          itemExtent: 44.0,
+          itemExtent: DesktopSongTableRow.rowHeight,
           delegate: SliverChildBuilderDelegate((context, index) {
             final entry = completed[index];
             return DesktopSongTableRow(

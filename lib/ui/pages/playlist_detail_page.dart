@@ -1710,7 +1710,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               _isSelecting ? 110 : 16,
                             ),
                             sliver: SliverFixedExtentList(
-                              itemExtent: 44.0,
+                              itemExtent: _DesktopSongTableRow.rowHeight,
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
                                   final song = _filteredSongs[index];
@@ -1942,9 +1942,12 @@ class _SimilarPlaylistCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDesktop = isDesktopFormFactor;
+    final cardRadius = isDesktop ? 8.0 : 14.0;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(cardRadius),
       child: SizedBox(
         width: 120,
         child: Column(
@@ -1952,24 +1955,26 @@ class _SimilarPlaylistCard extends StatelessWidget {
           children: [
             Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(cardRadius),
                 border: Border.all(
                   color: isDark
                       ? Colors.white.withValues(alpha: .08)
-                      : Colors.white.withValues(alpha: .92),
+                      : Colors.black.withValues(alpha: isDesktop ? .06 : .08),
                   width: 1,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+                boxShadow: isDesktop
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Artwork(url: playlist.coverUrl, size: 120),
+                borderRadius: BorderRadius.circular(cardRadius),
+                child: Artwork(url: playlist.coverUrl, size: 120, borderRadius: cardRadius),
               ),
             ),
             const SizedBox(height: 6),

@@ -108,7 +108,7 @@ void main() {
       expect(find.text('05:25'), findsOneWidget);
 
       final rowSize = tester.getSize(find.byType(DesktopSongTableRow).first);
-      expect(rowSize.height, 44.0);
+      expect(rowSize.height, DesktopSongTableRow.rowHeight);
       expect(played, 0);
     });
 

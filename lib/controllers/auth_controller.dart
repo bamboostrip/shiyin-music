@@ -169,8 +169,20 @@ class AuthController extends ChangeNotifier {
   }
 
   bool canEditPlaylist(PlaylistSummary playlist) {
-    final item = findUserPlaylist(playlist) ?? playlist;
-    return item.canEditTracks;
+    if (!isLoggedIn) return false;
+    final item = findUserPlaylist(playlist);
+    if (item != null) {
+      return item.canEditTracks;
+    }
+    final myUserId = session?.userId;
+    if (myUserId != null &&
+        myUserId.isNotEmpty &&
+        playlist.creatorUserId != null &&
+        playlist.creatorUserId!.isNotEmpty &&
+        myUserId == playlist.creatorUserId) {
+      return playlist.canEditTracks;
+    }
+    return false;
   }
 
   Future<void> createPlaylist(String name, {bool private = false}) async {

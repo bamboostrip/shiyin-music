@@ -151,7 +151,7 @@ void main() {
       expect(find.text('光辉岁月'), findsOneWidget);
 
       final rowSize = tester.getSize(find.byType(DesktopSongTableRow).first);
-      expect(rowSize.height, 44.0);
+      expect(rowSize.height, DesktopSongTableRow.rowHeight);
 
       // 统计行与清空操作保留
       expect(find.text('已下载 2 首'), findsOneWidget);

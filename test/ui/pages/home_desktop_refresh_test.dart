@@ -22,6 +22,18 @@ class _FakeMusicApi implements MusicApi {
   List<Song> topSongsData = const [];
   List<PlaylistSummary> playlists = const [];
 
+  List<Song> playlistSongsData = const [];
+
+  @override
+  Future<List<Song>> playlistSongs(
+    String id, {
+    int page = 1,
+    int pageSize = 30,
+    bool fetchAll = false,
+  }) async {
+    return playlistSongsData;
+  }
+
   @override
   Future<DailyRecommend> dailyRecommend() async {
     dailyRecommendCalls++;
@@ -205,6 +217,10 @@ void main() {
       ]
       ..playlists = const [
         PlaylistSummary(id: 'pl_1', title: '歌单一', coverUrl: null),
+      ]
+      ..playlistSongsData = [
+        _song(201),
+        _song(202),
       ];
     final player = _FakePlayerController();
 
@@ -243,39 +259,94 @@ void main() {
   testWidgets('桌面端：新歌速递封面 hover 浮现播放蒙层，点击直接播放对应队列', (tester) async {
     final (api, player) = await pumpHome(tester, desktop: true);
 
-    // 蒙层只存在于新歌速递封面（推荐歌单卡未接播放 API，不加假按钮）。
-    final overlays = find.byType(CoverPlayOverlay);
-    expect(overlays, findsWidgets);
-
-    // 未 hover：按钮隐藏（透明度 0，且不拦截卡片点击）。
-    double overlayOpacity(Finder finder) => tester
-        .widget<AnimatedOpacity>(
-          find
-              .ancestor(
-                of: finder,
-                matching: find.byType(AnimatedOpacity),
-              )
-              .first,
-        )
-        .opacity;
-
-    final playIcon = find.descendant(
-      of: overlays.first,
-      matching: find.byIcon(Icons.play_arrow_rounded),
+    final topSongTitle = find.text('新歌101');
+    expect(topSongTitle, findsOneWidget);
+    final topSongCard = find.ancestor(
+      of: topSongTitle,
+      matching: find.byType(InkWell),
+    ).first;
+    final topSongOverlay = find.descendant(
+      of: topSongCard,
+      matching: find.byType(CoverPlayOverlay),
     );
-    expect(overlayOpacity(playIcon), 0);
+    expect(topSongOverlay, findsOneWidget);
+
+    // 未 hover：新歌速递封面播放按钮不挂载
+    expect(
+      find.descendant(
+        of: topSongOverlay,
+        matching: find.byIcon(Icons.play_arrow_rounded),
+      ),
+      findsNothing,
+    );
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
-    await mouse.moveTo(tester.getCenter(overlays.first));
+    await mouse.moveTo(tester.getCenter(topSongOverlay));
     await tester.pumpAndSettle();
-    expect(overlayOpacity(playIcon), 1);
+
+    final playIcon = find.descendant(
+      of: topSongOverlay,
+      matching: find.byIcon(Icons.play_arrow_rounded),
+    );
+    expect(playIcon, findsOneWidget);
 
     await tester.tap(playIcon);
     await tester.pumpAndSettle();
     expect(player.lastPlayedSong?.hash, 'hash_101');
     expect(player.lastQueue?.map((s) => s.hash), api.topSongsData.map((s) => s.hash));
+  });
+
+  testWidgets('桌面端：推荐歌单卡片 hover 右下角浮现播放按钮，点击直接播放歌单', (tester) async {
+    final (api, player) = await pumpHome(tester, desktop: true);
+
+    // 找到推荐歌单卡片（标题为 '歌单一'）
+    final playlistTitle = find.text('歌单一');
+    expect(playlistTitle, findsOneWidget);
+
+    // 找到包含该卡片的 InkWell
+    final cardFinder = find.ancestor(
+      of: playlistTitle,
+      matching: find.byType(InkWell),
+    ).first;
+
+    // 未 hover 时，卡片上没有播放按钮
+    expect(
+      find.descendant(
+        of: cardFinder,
+        matching: find.byIcon(Icons.play_arrow_rounded),
+      ),
+      findsNothing,
+    );
+
+    // 鼠标悬停到歌单卡片上
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(cardFinder));
+    await tester.pumpAndSettle();
+
+    // 悬停后右下角浮现播放按钮
+    final playBtnFinder = find.descendant(
+      of: cardFinder,
+      matching: find.byIcon(Icons.play_arrow_rounded),
+    );
+    expect(playBtnFinder, findsOneWidget);
+
+    // 验证播放按钮底色使用项目主题色 primary（而非硬编码的 QQ 音乐绿）
+    final playMaterial = tester.widgetList<Material>(
+      find.descendant(of: cardFinder, matching: find.byType(Material)),
+    ).firstWhere((m) => m.shape is CircleBorder && m.elevation == 2);
+    final theme = Theme.of(tester.element(cardFinder));
+    expect(playMaterial.color, theme.colorScheme.primary);
+
+    // 单击右下角播放按钮直接播放该歌单曲目
+    await tester.tap(playBtnFinder);
+    await tester.pumpAndSettle();
+
+    expect(player.lastPlayedSong?.hash, 'hash_201');
+    expect(player.lastQueue?.map((s) => s.hash), api.playlistSongsData.map((s) => s.hash));
   });
 
   testWidgets('移动端：保留下拉刷新，无页头刷新按钮、无悬浮播放蒙层', (tester) async {

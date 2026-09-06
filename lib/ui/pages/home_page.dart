@@ -337,6 +337,44 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _playPlaylist(PlaylistSummary playlist) async {
+    try {
+      final fullCacheKey = 'playlist_full_${playlist.id}';
+      final cached = await widget.cache.read<Map<String, dynamic>>(
+        fullCacheKey,
+        decode: (j) => j,
+        ttl: AppConfig.playlistDetailTtl,
+      );
+      List<Song> songs = const [];
+      if (cached != null && cached.data['songs'] is List) {
+        songs = (cached.data['songs'] as List)
+            .whereType<Map<String, dynamic>>()
+            .map(Song.fromCache)
+            .where((s) => s.hash.isNotEmpty)
+            .toList();
+      }
+      if (songs.isEmpty) {
+        Toast.info('正在获取歌单曲目…');
+        songs = await widget.api.playlistSongs(
+          playlist.id,
+          page: 1,
+          pageSize: 60,
+        );
+      }
+      if (!mounted) return;
+      if (songs.isNotEmpty) {
+        widget.player.playSong(songs.first, queue: List<Song>.of(songs));
+        Toast.show('正在播放歌单：${playlist.title}', type: ToastType.success);
+      } else {
+        Toast.error('歌单暂无可播放曲目');
+      }
+    } catch (_) {
+      if (mounted) {
+        Toast.error('播放失败，请稍后重试');
+      }
+    }
+  }
+
   void _openDailyRecommend(DailyRecommend daily) {
     final playlist = PlaylistSummary(
       id: 'daily_recommend',
@@ -488,6 +526,7 @@ class _HomePageState extends State<HomePage> {
                           _PlaylistRail(
                             playlists: data.playlists,
                             onTap: _openPlaylist,
+                            onPlay: _playPlaylist,
                           ),
                           if (data.topSongs.isNotEmpty)
                             _TopSongRail(
@@ -1396,9 +1435,12 @@ class _TopSongCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDesktop = isDesktopFormFactor;
+    final cardRadius = isDesktop ? 8.0 : 14.0;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(cardRadius),
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 横轨下外层定宽 110；桌面网格下撑满格宽做正方形封面。
@@ -1411,30 +1453,36 @@ class _TopSongCard extends StatelessWidget {
               // 桌面端：hover 封面浮现播放蒙层，点击 = 直接播放（与单击同义）；
               // 移动端 / 车机端 enabled=false，结构与接入前一致。
               CoverPlayOverlay(
-                enabled: isDesktopFormFactor,
+                enabled: isDesktop,
                 onPlay: onTap,
-                borderRadius: 14,
+                borderRadius: cardRadius,
+                buttonSize: 32,
+                iconSize: 22,
+                buttonColor: Colors.black54,
+                iconColor: Colors.white,
                 cover: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(cardRadius),
                     border: Border.all(
                       color: isDark
                           ? Colors.white.withValues(alpha: .08)
-                          : Colors.white.withValues(alpha: .92),
+                          : Colors.black.withValues(alpha: isDesktop ? .06 : .08),
                       width: 1,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: isDark ? .14 : .06,
-                        ),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    boxShadow: isDesktop
+                        ? null
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isDark ? .14 : .06,
+                              ),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(cardRadius),
                     child: Artwork(url: song.coverUrl, size: coverWidth),
                   ),
                 ),
@@ -1444,15 +1492,16 @@ class _TopSongCard extends StatelessWidget {
                 song.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
               ),
               Text(
                 song.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 12, color: colorScheme.onSurfaceVariant),
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           );
@@ -1463,10 +1512,15 @@ class _TopSongCard extends StatelessWidget {
 }
 
 class _PlaylistRail extends StatelessWidget {
-  const _PlaylistRail({required this.playlists, required this.onTap});
+  const _PlaylistRail({
+    required this.playlists,
+    required this.onTap,
+    this.onPlay,
+  });
 
   final List<PlaylistSummary> playlists;
   final ValueChanged<PlaylistSummary> onTap;
+  final ValueChanged<PlaylistSummary>? onPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -1509,6 +1563,7 @@ class _PlaylistRail extends StatelessWidget {
                 return _PlaylistCard(
                   playlist: playlist,
                   onTap: () => onTap(playlist),
+                  onPlay: onPlay == null ? null : () => onPlay!(playlist),
                 );
               },
             ),
@@ -1550,6 +1605,7 @@ class _PlaylistRail extends StatelessWidget {
                     return _PlaylistCard(
                       playlist: playlist,
                       onTap: () => onTap(playlist),
+                      onPlay: onPlay == null ? null : () => onPlay!(playlist),
                     );
                   },
                 );
@@ -1568,6 +1624,7 @@ class _PlaylistRail extends StatelessWidget {
                       return _PlaylistCard(
                         playlist: playlist,
                         onTap: () => onTap(playlist),
+                        onPlay: onPlay == null ? null : () => onPlay!(playlist),
                         width: 128,
                       );
                     },
@@ -1654,92 +1711,138 @@ class _CirclePlayButton extends StatelessWidget {
   }
 }
 
-class _PlaylistCard extends StatelessWidget {
+class _PlaylistCard extends StatefulWidget {
   const _PlaylistCard({
     required this.playlist,
     required this.onTap,
+    this.onPlay,
     this.width,
   });
 
   final PlaylistSummary playlist;
   final VoidCallback onTap;
+  final VoidCallback? onPlay;
   final double? width;
+
+  @override
+  State<_PlaylistCard> createState() => _PlaylistCardState();
+}
+
+class _PlaylistCardState extends State<_PlaylistCard> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDesktop = isDesktopFormFactor;
+    final cardRadius = isDesktop ? 8.0 : 14.0;
+
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        final cardWidth = width ?? constraints.maxWidth;
+        final cardWidth = widget.width ?? constraints.maxWidth;
         final size = cardWidth.isInfinite ? 128.0 : cardWidth;
+
+        final coverImage = Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(cardRadius),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: .08)
+                  : Colors.black.withValues(alpha: isDesktop ? .06 : .08),
+              width: 1,
+            ),
+            boxShadow: isDesktop
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? .14 : .06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(cardRadius),
+            child: Artwork(
+              url: widget.playlist.coverUrl,
+              size: size,
+              borderRadius: cardRadius,
+            ),
+          ),
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: .08)
-                      : Colors.white.withValues(alpha: .92),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? .14 : .06),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Artwork(url: playlist.coverUrl, size: size, borderRadius: 14),
-              ),
+            CoverPlayOverlay(
+              enabled: isDesktop && widget.onPlay != null,
+              alignment: Alignment.bottomRight,
+              borderRadius: cardRadius,
+              buttonSize: 36,
+              iconSize: 22,
+              margin: const EdgeInsets.all(8),
+              buttonColor: Theme.of(context).colorScheme.primary,
+              iconColor: Theme.of(context).colorScheme.onPrimary,
+              onPlay: () => widget.onPlay?.call(),
+              tooltip: '播放歌单',
+              isHovered: _hovered,
+              darkenOnHover: false,
+              cover: coverImage,
             ),
-            const SizedBox(height: 9),
+            const SizedBox(height: 8),
             SizedBox(
-              height: 42,
+              height: 40,
               child: Text(
-                playlist.title,
+                widget.playlist.title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  height: 1.16,
+                  fontWeight: FontWeight.w700,
+                  fontSize: isDesktop ? 13.5 : 14,
+                  height: 1.25,
                 ),
               ),
             ),
+            const SizedBox(height: 2),
             Text(
-              playlist.subtitle ?? _playCount(playlist.playCount),
+              widget.playlist.subtitle ?? _playCount(widget.playlist.playCount),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: isDesktop ? 12 : 12.5,
               ),
             ),
+            if (isDesktop) const SizedBox(height: 6),
           ],
         );
       },
     );
 
-    if (width != null) {
+    final inkCard = InkWell(
+      borderRadius: BorderRadius.circular(cardRadius),
+      onTap: widget.onTap,
+      child: content,
+    );
+
+    final mouseCard = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: isDesktop ? (_) => setState(() => _hovered = true) : null,
+      onExit: isDesktop ? (_) => setState(() => _hovered = false) : null,
+      child: inkCard,
+    );
+
+    if (widget.width != null) {
       return SizedBox(
-        width: width,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: content,
-        ),
+        width: widget.width,
+        child: mouseCard,
       );
     }
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: content,
+    return Align(
+      alignment: Alignment.topCenter,
+      child: mouseCard,
     );
   }
 }

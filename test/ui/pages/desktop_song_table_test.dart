@@ -120,7 +120,7 @@ void main() {
       duration: Duration(minutes: 4, seconds: 29),
     );
 
-    testWidgets('正常模式渲染 44px 高度与各列内容（含两位序号与 SQ 微标）', (tester) async {
+    testWidgets('正常模式渲染 48px 高度与各列内容（含两位序号、封面缩略图与 SQ 微标）', (tester) async {
       final fakePlayer = _FakePlayerController();
       final fakeAuth = _FakeAuthController();
 
@@ -147,7 +147,7 @@ void main() {
       );
 
       final rowFinder = find.byType(DesktopSongTableRow);
-      expect(tester.getSize(rowFinder).height, 44.0);
+      expect(tester.getSize(rowFinder).height, DesktopSongTableRow.rowHeight);
 
       expect(find.text('01'), findsOneWidget);
       expect(find.text('晴天'), findsOneWidget);
@@ -238,14 +238,15 @@ void main() {
       await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
       await tester.pumpAndSettle();
 
-      // 悬停后时长切换为操作按钮组
-      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      // 悬停后时长切换为操作按钮组，封面与操作列各包含一个播放图标
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNWidgets(2));
       expect(find.byIcon(Icons.favorite_border_rounded), findsOneWidget);
       expect(find.byIcon(Icons.playlist_add_rounded), findsOneWidget);
       expect(find.byIcon(Icons.more_horiz_rounded), findsOneWidget);
 
-      // 用鼠标光标点击播放按钮
-      final playCenter = tester.getCenter(find.byIcon(Icons.play_arrow_rounded));
+      // 用鼠标光标点击行尾播放按钮
+      final playButtons = find.byIcon(Icons.play_arrow_rounded);
+      final playCenter = tester.getCenter(playButtons.last);
       await gesture.moveTo(playCenter);
       await gesture.down(playCenter);
       await gesture.up();
@@ -261,6 +262,56 @@ void main() {
       await tester.pumpAndSettle();
       expect(fakeAuth.isLiked(testSong), isTrue);
       expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
+
+      await gesture.removePointer();
+    });
+
+    testWidgets('歌曲前面展示封面缩略图，hover 时点击封面播放按钮触发单次直接播放', (tester) async {
+      final fakePlayer = _FakePlayerController();
+      final fakeAuth = _FakeAuthController();
+      var coverPlayed = false;
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () => coverPlayed = true,
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+
+      // 未悬停时不显示播放按钮
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+
+      // 模拟鼠标悬停到整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
+      await tester.pumpAndSettle();
+
+      // 封面悬停播放图标出现
+      final coverPlayIcon = find.byWidgetPredicate(
+        (w) => w is Icon && w.icon == Icons.play_arrow_rounded && w.size == 18.0,
+      );
+      expect(coverPlayIcon, findsOneWidget);
+
+      // 单击封面播放按钮
+      await tester.tap(coverPlayIcon);
+      await tester.pumpAndSettle();
+      expect(coverPlayed, isTrue);
 
       await gesture.removePointer();
     });
@@ -541,6 +592,7 @@ void main() {
                     onDelete: () {},
                     onViewArtist: () {},
                     onMore: () {},
+                    showCover: false,
                   ),
                 ),
               ),

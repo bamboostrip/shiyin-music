@@ -97,12 +97,13 @@ class PlaylistSummary {
     if (type == 1) {
       return false;
     }
-    if (isDefault == 0) {
-      return true;
-    }
-    return currentUserId != null &&
+    if (currentUserId != null &&
+        currentUserId!.isNotEmpty &&
         creatorUserId != null &&
-        currentUserId == creatorUserId;
+        creatorUserId!.isNotEmpty) {
+      return currentUserId == creatorUserId;
+    }
+    return false;
   }
 
   /// 可对歌单内歌曲做增删（自建 / 我喜欢 / 默认收藏）

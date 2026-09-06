@@ -7,6 +7,8 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../design_tokens.dart';
 import '../form_factor.dart';
+import 'artwork.dart';
+import 'cover_play_overlay.dart';
 import 'desktop_anchored_menu.dart';
 import 'now_playing_badge.dart';
 
@@ -186,8 +188,11 @@ class DesktopSongTableHeader extends StatelessWidget {
   }
 }
 
-/// PC 桌面端紧凑高密度表格数据行（固定行高 44px）。
+/// PC 桌面端紧凑高密度表格数据行（固定行高 48px，包含 36px 封面缩略图）。
 class DesktopSongTableRow extends StatefulWidget {
+  /// 表格行基准高度（48px 为桌面密集型表格规范，为 36px 封面上下各留 6px 呼吸间距）。
+  static const double rowHeight = 48.0;
+
   const DesktopSongTableRow({
     super.key,
     required this.song,
@@ -207,6 +212,7 @@ class DesktopSongTableRow extends StatefulWidget {
     required this.onMore,
     this.onSecondaryMore,
     this.showHoverActions = true,
+    this.showCover = true,
   });
 
   final Song song;
@@ -234,6 +240,9 @@ class DesktopSongTableRow extends StatefulWidget {
   /// 外部平台歌曲（如网易云）仅支持播放，与移动端卡片行为保持一致：
   /// 悬停时只显示时长、不显示操作图标（右键菜单仍由页面自行决定内容）。
   final bool showHoverActions;
+
+  /// 是否在歌曲标题前展示封面缩略图（36×36，hover 时支持单击播放）。
+  final bool showCover;
 
   @override
   State<DesktopSongTableRow> createState() => _DesktopSongTableRowState();
@@ -336,7 +345,7 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
             );
 
             return Container(
-              height: 44,
+              height: DesktopSongTableRow.rowHeight,
               decoration: BoxDecoration(
                 color: bgColor,
                 borderRadius: BorderRadius.circular(6),
@@ -412,6 +421,29 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                           padding: const EdgeInsets.only(right: 12),
                           child: Row(
                             children: [
+                              if (widget.showCover) ...[
+                                SizedBox.square(
+                                  dimension: 36,
+                                  child: CoverPlayOverlay(
+                                    enabled: true,
+                                    isHovered: !selecting &&
+                                        _hovering &&
+                                        widget.showHoverActions,
+                                    borderRadius: 4,
+                                    buttonSize: 26,
+                                    iconSize: 18,
+                                    buttonColor: Colors.black54,
+                                    iconColor: Colors.white,
+                                    onPlay: widget.onPlay,
+                                    cover: Artwork(
+                                      url: song.coverUrl,
+                                      size: 36,
+                                      borderRadius: 4,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
                               Flexible(
                                 child: _HoverTipText(
                                   text: song.title,

@@ -280,7 +280,7 @@ class SearchSongResults extends StatelessWidget {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           sliver: SliverFixedExtentList(
-            itemExtent: 44.0,
+            itemExtent: DesktopSongTableRow.rowHeight,
             delegate: SliverChildBuilderDelegate((context, index) {
               final song = songs[index];
               final isExternal = song.source != SongSource.kugou;
