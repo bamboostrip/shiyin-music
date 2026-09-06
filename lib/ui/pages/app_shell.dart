@@ -20,9 +20,9 @@ import '../desktop/desktop_shell.dart';
 import '../keyboard_focus_guard.dart';
 import '../keyboard_shortcuts.dart';
 import '../form_factor.dart';
+import '../player/player_route.dart';
 import 'home_page.dart';
 import 'library_page.dart';
-import 'player_page.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
 
@@ -567,8 +567,9 @@ class _BottomNavItem extends StatelessWidget {
   }
 }
 
-class _CenterDisc extends StatelessWidget {
-  const _CenterDisc({required this.player, required this.auth});
+@visibleForTesting
+class CenterDisc extends StatelessWidget {
+  const CenterDisc({super.key, required this.player, required this.auth});
 
   final PlayerController player;
   final AuthController auth;
@@ -579,9 +580,7 @@ class _CenterDisc extends StatelessWidget {
       Toast.info('先去挑选一首喜欢的歌曲吧');
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PlayerPage(player: player, auth: auth)),
-    );
+    PlayerPageRoute.open(context, player: player, auth: auth);
   }
 
   @override
@@ -668,6 +667,8 @@ class _CenterDisc extends StatelessWidget {
     );
   }
 }
+
+typedef _CenterDisc = CenterDisc;
 
 /// 在已有 [TextScaler] 基础上再乘固定倍数（Flutter 内置 TextScaler 无 `*` 运算符）。
 class _RelativeTextScaler extends TextScaler {

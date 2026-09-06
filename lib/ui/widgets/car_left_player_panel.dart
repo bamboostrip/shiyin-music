@@ -3,7 +3,7 @@ import '../../config/app_config.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
-import '../pages/player_page.dart';
+import '../player/player_route.dart';
 import 'artwork.dart';
 import 'toast.dart';
 
@@ -101,10 +101,10 @@ class CarLeftPlayerPanel extends StatelessWidget {
                 const Spacer(),
                 Center(
                   child: GestureDetector(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => PlayerPage(player: player, auth: auth),
-                      ),
+                    onTap: () => PlayerPageRoute.open(
+                      context,
+                      player: player,
+                      auth: auth,
                     ),
                     child: Container(
                       decoration: BoxDecoration(
@@ -140,10 +140,10 @@ class CarLeftPlayerPanel extends StatelessWidget {
                     Expanded(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PlayerPage(player: player, auth: auth),
-                          ),
+                        onTap: () => PlayerPageRoute.open(
+                          context,
+                          player: player,
+                          auth: auth,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,

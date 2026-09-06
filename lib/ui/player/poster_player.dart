@@ -27,7 +27,6 @@ class PosterPlayerPage extends StatefulWidget {
     required this.onArtistTap,
     this.onLyricTap,
     this.onCoverTap,
-    this.onDismiss,
     this.onVerticalDragDown,
     this.onVerticalDragStart,
     this.onVerticalDragUpdate,
@@ -42,7 +41,6 @@ class PosterPlayerPage extends StatefulWidget {
   final ValueChanged<Song> onArtistTap;
   final VoidCallback? onLyricTap;
   final VoidCallback? onCoverTap;
-  final VoidCallback? onDismiss;
   final GestureDragDownCallback? onVerticalDragDown;
   final GestureDragStartCallback? onVerticalDragStart;
   final GestureDragUpdateCallback? onVerticalDragUpdate;

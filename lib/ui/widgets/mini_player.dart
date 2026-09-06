@@ -4,7 +4,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
-import '../pages/player_page.dart';
+import '../player/player_route.dart';
 import 'artwork.dart';
 import 'queue_sheet.dart';
 
@@ -34,10 +34,10 @@ class MiniPlayer extends StatelessWidget {
           return _MiniPlayerContent(
             song: song,
             player: player,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => PlayerPage(player: player, auth: auth),
-              ),
+            onTap: () => PlayerPageRoute.open(
+              context,
+              player: player,
+              auth: auth,
             ),
             onShowQueue: () => showQueueSheet(context, player),
           );

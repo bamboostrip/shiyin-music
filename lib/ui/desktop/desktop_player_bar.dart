@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
-import '../pages/player_page.dart';
+import '../player/player_route.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/climax_slider_track.dart';
@@ -36,11 +36,7 @@ class DesktopPlayerBar extends StatelessWidget {
 
   void _openPlayerPage(BuildContext context) {
     if (player.currentSong == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerPage(player: player, auth: auth),
-      ),
-    );
+    PlayerPageRoute.open(context, player: player, auth: auth);
   }
 
   @override

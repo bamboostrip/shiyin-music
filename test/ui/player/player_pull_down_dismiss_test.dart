@@ -349,5 +349,48 @@ void main() {
       // 播放页已 pop
       expect(find.byType(PlayerPage), findsNothing);
     });
+
+    testWidgets('在歌词页面内垂直滑动仅用于歌词滚动，不触发播放页整页下拉平移', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(buildTestApp(player: player, auth: auth));
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+      }
+
+      // 水平向左滑动手势切换到歌词页 (第 1 页)
+      await tester.drag(find.byKey(const PageStorageKey('poster-player-page')), const Offset(-400, 0));
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+      }
+
+      // 验证歌词页已处于活动状态
+      final lyricPageFinder = find.byKey(const PageStorageKey('lyric-player-page'));
+      expect(lyricPageFinder, findsOneWidget);
+
+      // 在歌词列表区域垂直向下拉动 100px
+      final gesture = await tester.startGesture(tester.getCenter(lyricPageFinder));
+      await gesture.moveBy(const Offset(0, 100));
+      await tester.pump();
+
+      // 整页 Transform.translate 的 y 位移必须保持为 0，不被下拉触发
+      final transformFinder = find.byKey(const Key('player_body_dismiss_transform'));
+      final Transform transform = tester.widget(transformFinder);
+      expect(transform.transform.getTranslation().y, equals(0.0));
+
+      // 顶部圆角也保持为 0
+      final clipFinder = find.byKey(const Key('player_body_dismiss_clip'));
+      final ClipRRect clip = tester.widget(clipFinder);
+      final borderRadius = clip.borderRadius as BorderRadius;
+      expect(borderRadius.topLeft, equals(Radius.zero));
+      expect(borderRadius.topRight, equals(Radius.zero));
+
+      await gesture.up();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+      }
+      expect(find.byType(PlayerPage), findsOneWidget);
+    });
   });
 }

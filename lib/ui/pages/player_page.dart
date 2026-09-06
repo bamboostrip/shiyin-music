@@ -413,7 +413,6 @@ class _PlayerBodyState extends State<_PlayerBody>
                                             auth: widget.auth,
                                             onArtistTap: _openArtist,
                                             onCoverTap: () => _showMoreSheet(context),
-                                            onDismiss: widget.onClose,
                                             onVerticalDragDown: _onVerticalDragDown,
                                             onVerticalDragStart:
                                                 _onVerticalDragStart,
