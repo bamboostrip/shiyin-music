@@ -339,6 +339,9 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _isScrubbing = false;
   bool _isHandlingCompletion = false;
   String? _completedSongHash;
+  // 完成处理锁绑定的歌曲 hash：不同歌的完成互不吞（旧歌处理中，新歌
+  // 又播完时放行新歌，旧流程靠 playSong 的 hash 自弃收敛）
+  String? _handlingCompletedHash;
   String? _precachedForSongHash;
   bool _isPrecaching = false;
   bool _isAppForeground = true;

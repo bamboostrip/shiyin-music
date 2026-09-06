@@ -301,6 +301,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
   /// VIP 过期时自动领取并重试播放，成功返回 true。
   /// 转发调用方的队列/定位/高潮上下文，避免重试丢定位。
+  @override
   Future<bool> _tryClaimVipAndRetry(
     Song song, {
     List<Song>? queue,
@@ -437,11 +438,19 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   }
 
   Future<void> _handleCompleted() async {
-    if (_isHandlingCompletion || currentSong == null) return;
-    if (_completedSongHash == currentSong!.hash) return;
+    final song = currentSong;
+    if (song == null) return;
+    if (_completedSongHash == song.hash) return;
+    if (_isHandlingCompletion) {
+      // 旧歌仍在处理（弱网解析下一首可能挂起数秒）：同歌去重，
+      // 不同歌说明用户已切走且新歌又播完，放行新歌，旧流程自弃
+      if (_handlingCompletedHash == song.hash) return;
+      debugPrint('[时音][player] 上一首完成处理中，新歌又完成，直接处理新歌');
+    }
     _isHandlingCompletion = true;
+    _handlingCompletedHash = song.hash;
     _completionFallbackTimer?.cancel();
-    _completedSongHash = currentSong!.hash;
+    _completedSongHash = song.hash;
 
     try {
       if (_sleepFinishCurrentSong) {
@@ -464,20 +473,35 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       }
 
       if (playbackMode == PlaybackMode.singleLoop) {
-        _completedSongHash = null;
-        await _audioHandler.seek(Duration.zero);
+        // 重启完成后再清去重 hash：重启在途中重复 completed 事件仍去重，
+        // 避免 self-loop 打转；下一轮正常播完可再次触发
+        await seek(Duration.zero);
+        if (currentSong?.hash != song.hash) return;
         await _audioHandler.play();
+        _completedSongHash = null;
         return;
       }
 
       final nextSong = _nextSong();
       if (nextSong == null) {
-        await _audioHandler.seek(Duration.zero);
+        await seek(Duration.zero);
         return;
       }
       await playSong(nextSong, queue: queue);
+    } catch (error) {
+      // playSong 内部不抛；这里只可能是 seek/play 引擎异常，记日志
+      // 落错误态，避免 unawaited 调用方的未处理异常
+      debugPrint('[时音][player] 完成处理失败: $error');
+      if (currentSong?.hash == song.hash) {
+        errorMessage = error.toString();
+        notifyListeners();
+      }
     } finally {
-      _isHandlingCompletion = false;
+      // 只复位自己绑定的锁：并发的新歌流程不受旧 finally 影响
+      if (_handlingCompletedHash == song.hash) {
+        _isHandlingCompletion = false;
+        _handlingCompletedHash = null;
+      }
     }
   }
 
@@ -495,8 +519,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       final delay =
           (remaining > Duration.zero ? remaining : Duration.zero) +
           const Duration(milliseconds: 180);
+      // 建 timer 时绑定歌曲：触发时已切歌则丢弃，避免旧 timer 推新歌连跳
+      final songHash = currentSong?.hash;
       _completionFallbackTimer = Timer(delay, () {
         if (!isPlaying || _isSeeking || _isScrubbing) return;
+        if (currentSong?.hash != songHash) return;
         final currentPosition = audioPlayer.position;
         if (duration > Duration.zero &&
             duration - currentPosition <= const Duration(milliseconds: 220)) {
