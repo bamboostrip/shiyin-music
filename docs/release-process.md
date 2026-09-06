@@ -117,15 +117,33 @@ CI 完成后 Release 页面应包含：
 
 Android（**顺序不能变**，impeller 在前）：
 - `shiyin-vX.Y.Z-impeller-arm64.apk`（默认渲染，老版本客户端只拿第一个 .apk 附件）
+- `shiyin-vX.Y.Z-impeller-arm64.apk.sha256`（完整性 sidecar）
 - `shiyin-vX.Y.Z-skia-arm64.apk`（老 GPU 闪屏/冻屏用户用这个）
+- `shiyin-vX.Y.Z-skia-arm64.apk.sha256`
 
 Windows（顺序不限，应用内按文件后缀识别）：
 - `shiyin-vX.Y.Z-windows-x64-portable.zip`（便携版，解压即用）
+- `shiyin-vX.Y.Z-windows-x64-portable.zip.sha256`
 - `shiyin-vX.Y.Z-windows-x64-setup.exe`（Inno 安装版）
+- `shiyin-vX.Y.Z-windows-x64-setup.exe.sha256`
+
+Linux（顺序不限）：
+- `shiyin-vX.Y.Z-linux-x64-portable.tar.gz`（便携版）
+- `shiyin-vX.Y.Z-linux-x64-portable.tar.gz.sha256`
+- `shiyin-vX.Y.Z-linux-x64.deb`（deb 安装包，Ubuntu 22.04+/Debian 12+）
+- `shiyin-vX.Y.Z-linux-x64.deb.sha256`
+
+> **sha256 sidecar**：CI 为每个附件生成同名 `.sha256` 文件（sha256sum
+> 文本格式）。应用内更新（Windows 安装版的 setup.exe 下载）完成后拉取
+> 同 URL 的 `.sha256` 比对，不一致即删包报错，杜绝截断/损坏/被替换的
+> 安装包落地执行；手动下载的用户可 `sha256sum -c` 自行核对。每产物独立
+> sidecar 而非单一汇总清单，是为了三条流水线并发上传同一 Release
+> 互不冲突。
 
 > 附件命名是应用内更新的识别约定，**必须严格遵守**：
 > Android 靠 `-{flavor}-arm64.apk` 选渲染器包，Windows 靠
-> `-portable.zip` / `-setup.exe` 后缀选形态包。zip 内文件在压缩包根目录，
+> `-portable.zip` / `-setup.exe` 后缀选形态包，Linux 靠 `.deb` /
+> `-portable.tar.gz` 选形态包。zip 内文件在压缩包根目录，
 > 便携版用户"解压覆盖旧目录"即可完成更新。
 
 ## 八、Windows 分发形态说明

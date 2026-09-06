@@ -168,13 +168,25 @@ jobs:
           dpkg-deb --info "build/dist/shiyin-$tag-linux-x64.deb" | head -20
           ls -la "build/dist/shiyin-$tag-linux-x64.deb"
 
+      # 完整性 sidecar：每个附件旁生成 `<附件名>.sha256`（与应用内更新
+      # 校验约定一致，见 AppUpdateService._verifySha256Sidecar）。
+      - name: Generate sha256 sidecars
+        run: |
+          cd build/dist
+          for f in shiyin-*-linux-x64-portable.tar.gz shiyin-*-linux-x64.deb; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -la *.sha256
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-desktop-${{ steps.names.outputs.tag }}
           path: |
             build/dist/shiyin-*-linux-x64-portable.tar.gz
+            build/dist/shiyin-*-linux-x64-portable.tar.gz.sha256
             build/dist/shiyin-*-linux-x64.deb
+            build/dist/shiyin-*-linux-x64.deb.sha256
           if-no-files-found: error
 
       # 仅附加附件，不创建/覆盖 Release 笔记（笔记由 gh release create 手写）。
@@ -184,5 +196,7 @@ jobs:
         with:
           files: |
             build/dist/shiyin-*-linux-x64-portable.tar.gz
+            build/dist/shiyin-*-linux-x64-portable.tar.gz.sha256
             build/dist/shiyin-*-linux-x64.deb
+            build/dist/shiyin-*-linux-x64.deb.sha256
           fail_on_unmatched_files: true

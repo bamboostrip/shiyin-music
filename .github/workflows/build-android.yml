@@ -129,11 +129,23 @@ jobs:
           name: apk-skia-${{ github.ref_name }}
           path: dist
 
+      # 完整性 sidecar：每个 APK 旁生成 `<文件名>.sha256`（与应用内更新
+      # 校验约定一致，Android 走浏览器下载由用户自行核对，一并提供）。
+      - name: Generate sha256 sidecars
+        run: |
+          cd dist
+          for f in shiyin-*.apk; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -la *.sha256
+
       # Release 笔记由 gh CLI 手动创建，此处仅按顺序附加 APK，不覆盖 body。
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk
+            dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk.sha256
             dist/shiyin-${{ github.ref_name }}-skia-arm64.apk
+            dist/shiyin-${{ github.ref_name }}-skia-arm64.apk.sha256
           name: 时音 ${{ github.ref_name }}

@@ -4,7 +4,9 @@ pub mod comment;
 pub mod discover;
 pub mod external_playlist;
 pub mod fm;
+pub mod local_media;
 pub mod login;
+pub mod loudness;
 pub mod lyric;
 // pub mod media_catalog; // unused
 pub mod playlist;

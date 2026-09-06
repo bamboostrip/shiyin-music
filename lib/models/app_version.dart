@@ -5,7 +5,8 @@ enum AppUpdatePlatform {
   android('android'),
   ios('ios'),
   hm('hm'),
-  windows('windows');
+  windows('windows'),
+  linux('linux');
 
   const AppUpdatePlatform(this.apiValue);
 
@@ -15,6 +16,9 @@ enum AppUpdatePlatform {
 /// Windows 分发形态的附件标识（见 [pickUpdateAssetUrl]）。
 const kWindowsAssetPortable = 'portable';
 const kWindowsAssetSetup = 'setup';
+
+/// Linux 附件标识：优先 `.deb`（apt 安装），回退便携 `portable.tar.gz`。
+const kLinuxAssetDeb = 'deb';
 
 class AppVersionInfo {
   const AppVersionInfo({
@@ -59,7 +63,8 @@ class AppVersionInfo {
   /// - `tag_name`（去掉前导 `v`）作为 [versionName]
   /// - `body` 作为更新说明 [updateContent]
   /// - 附件选择：Android 按 [renderer] 选 `-skia`/`-impeller` 变体 `.apk`；
-  ///   Windows 按 [windowsAssetKind] 选 `-portable.zip` / `-setup.exe`
+  ///   Windows 按 [windowsAssetKind] 选 `-portable.zip` / `-setup.exe`；
+  ///   Linux 按 [linuxAsset] 选 `.deb` / `-portable.tar.gz`
   ///   （规则见 [pickUpdateAssetUrl]）。选不中回退 Release 页面 [htmlUrl]
   /// - GitHub 不提供"强制更新"，故 [forceUpdate] 恒为 false
   factory AppVersionInfo.fromGitHubRelease(
@@ -67,6 +72,7 @@ class AppVersionInfo {
     String htmlUrl = '',
     String renderer = '',
     String windowsAssetKind = '',
+    bool linuxAsset = false,
   }) {
     final rawTag = asString(json['tag_name']) ?? '';
     final versionName = stripVersionTagPrefix(rawTag);
@@ -85,12 +91,15 @@ class AppVersionInfo {
       assets,
       renderer: renderer,
       windowsAssetKind: windowsAssetKind,
+      linuxAsset: linuxAsset,
     );
     final releasePageUrl = asString(json['html_url']) ?? htmlUrl;
 
     return AppVersionInfo(
       platform: windowsAssetKind.isNotEmpty
           ? AppUpdatePlatform.windows.apiValue
+          : linuxAsset
+          ? AppUpdatePlatform.linux.apiValue
           : AppUpdatePlatform.android.apiValue,
       versionName: versionName.isEmpty ? rawTag : versionName,
       versionCode: semverToCode(versionName),
@@ -106,6 +115,7 @@ class AppVersionInfo {
 ///
 /// - Windows 便携版：优先 `*-portable.zip`，回退任意 `.zip`；
 /// - Windows 安装版：优先 `*-setup.exe`，回退任意 `.exe`；
+/// - Linux：优先 `.deb`，回退 `*-portable.tar.gz`；
 /// - Android：优先文件名含 `-$renderer` 的 `.apk`（如
 ///   `shiyin-v2.5.1-skia-arm64.apk`），回退第一个 `.apk`
 ///   （兼容双包之前的老 Release；发版时 impeller 包放前面，老客户端行为不变）。
@@ -115,6 +125,7 @@ String pickUpdateAssetUrl(
   Iterable<(String, String)> assets, {
   String renderer = '',
   String windowsAssetKind = '',
+  bool linuxAsset = false,
 }) {
   final entries = <(String, String)>[
     for (final asset in assets)
@@ -135,6 +146,12 @@ String pickUpdateAssetUrl(
   if (windowsAssetKind == kWindowsAssetSetup) {
     return _firstUrl(byExtension('-setup.exe')) ??
         _firstUrl(byExtension('.exe')) ??
+        '';
+  }
+  if (linuxAsset) {
+    return _firstUrl(byExtension('.deb')) ??
+        _firstUrl(byExtension('-portable.tar.gz')) ??
+        _firstUrl(byExtension('.tar.gz')) ??
         '';
   }
 

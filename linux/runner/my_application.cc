@@ -6,7 +6,26 @@
 #endif
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
+#include <desktop_multi_window/desktop_multi_window_plugin.h>
+#include <window_manager/window_manager_plugin.h>
+
 #include "flutter/generated_plugin_registrant.h"
+
+// desktop_multi_window 子窗口（桌面歌词悬浮窗）引擎默认只注册该插件自身
+// （包源码 linux/flutter_window.cc：internal 注册 + WindowChannel(id)，
+// 后者把子引擎 "mixin.one/flutter_multi_window_channel" 的原生处理器绑定为
+// 子窗自身）。与 Windows runner（windows/runner/main.cpp 的
+// DesktopMultiWindowSetWindowCreatedCallback）同构：回调里禁止
+// fl_register_plugins 全量注册——重复注册 DesktopMultiWindowPlugin 会在
+// 已 Attach 主窗时再走一遍主窗注册路径，早退无害，但过程对象析构可能
+// 触碰共享单例状态；这里只补注册悬浮窗必需的 window_manager（隐藏
+// 标题栏/置顶/跳过任务栏/防关闭等）。shared_preferences_linux 为纯
+// Dart 插件，无需原生注册。
+static void register_subwindow_plugins(FlPluginRegistry* registry) {
+  auto* registrar = fl_plugin_registry_get_registrar_for_plugin(
+      registry, "WindowManagerPlugin");
+  window_manager_plugin_register_with_registrar(registrar);
+}
 
 // Loads the application window icon from the installed PNG resources. Returns
 // nullptr if the file cannot be read; callers should fall back gracefully.
@@ -103,6 +122,12 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+
+  // 子窗引擎创建时（desktop_multi_window 创建歌词悬浮窗）回调注册
+  // window_manager。必须在任何 createWindow 之前设置——activate 是
+  // 主窗唯一入口，主窗生命周期内子窗只会晚于此创建。
+  desktop_multi_window_plugin_set_window_created_callback(
+      register_subwindow_plugins);
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 

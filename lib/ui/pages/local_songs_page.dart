@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../adaptive_layout.dart';
 import '../../controllers/player_controller.dart';
@@ -51,6 +52,107 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
     } else {
       Toast.error('未授予音频访问权限');
     }
+  }
+
+  // ---- 桌面（Windows/Linux）：目录添加 / 管理 ----
+
+  bool get _isDesktop => LocalMusicController.isDesktopScanSupported;
+
+  /// file_picker 选择目录加入扫描根（选择器打开较慢，先给 loading 提示）。
+  Future<void> _pickAndAddDesktopRoot() async {
+    Toast.info('请选择音乐文件夹...');
+    final directory = await FilePicker.getDirectoryPath(
+      dialogTitle: '选择音乐文件夹',
+      lockParentWindow: true,
+    );
+    if (directory == null) return;
+    await widget.localMusic.addDesktopRoot(directory);
+    Toast.success('已添加目录，正在扫描本地音乐');
+  }
+
+  /// 桌面目录管理：列出扫描根，可删除/继续添加。
+  void _showDesktopRootsDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AnimatedBuilder(
+          animation: widget.localMusic,
+          builder: (context, _) {
+            final colorScheme = Theme.of(dialogContext).colorScheme;
+            final roots = widget.localMusic.desktopRoots;
+            return AlertDialog(
+              title: const Text('音乐目录'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: SizedBox(
+                  width: double.maxFinite,
+                  child: roots.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Text(
+                            '尚未添加任何目录。添加后时会递归扫描目录内的音频文件。',
+                            style: Theme.of(dialogContext).textTheme.bodyMedium
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: roots.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final root = roots[index];
+                            return ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.folder_rounded,
+                                color: colorScheme.primary.withValues(alpha: .8),
+                              ),
+                              title: Text(
+                                root,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              trailing: IconButton(
+                                tooltip: '移除目录',
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: colorScheme.error,
+                                ),
+                                onPressed: widget.localMusic.isScanning
+                                    ? null
+                                    : () => widget.localMusic
+                                        .removeDesktopRoot(root),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('关闭'),
+                ),
+                FilledButton.icon(
+                  onPressed: widget.localMusic.isScanning
+                      ? null
+                      : () {
+                          Navigator.of(dialogContext).pop();
+                          _pickAndAddDesktopRoot();
+                        },
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: const Text('添加目录'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   /// 打开「扫描目录设置」：勾选/取消勾选文件夹以排除录音等目录。
@@ -212,13 +314,49 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
             animation: widget.localMusic,
             builder: (context, _) {
               if (widget.localMusic.isScanning) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                final progress = widget.localMusic.scanProgress;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        value: progress.total > 0
+                            ? progress.done / progress.total
+                            : null,
+                      ),
+                    ),
                   ),
+                );
+              }
+              if (_isDesktop) {
+                return Row(
+                  children: [
+                    IconButton(
+                      tooltip: '音乐目录',
+                      onPressed: _showDesktopRootsDialog,
+                      icon: const Icon(Icons.folder_open_rounded),
+                    ),
+                    IconButton(
+                      tooltip: '扫描目录设置',
+                      onPressed:
+                          widget.localMusic.songs.isEmpty ? null : _showFolderFilterSheet,
+                      icon: const Icon(Icons.rule_folder_rounded),
+                    ),
+                    IconButton(
+                      tooltip: '重新扫描',
+                      onPressed:
+                          widget.localMusic.desktopRoots.isEmpty
+                              ? null
+                              : () async {
+                                  await widget.localMusic.scanLocalMusic();
+                                  Toast.success('扫描完成');
+                                },
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
                 );
               }
               if (!Platform.isAndroid || !widget.localMusic.hasPermission) {
@@ -249,19 +387,35 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
         child: AnimatedBuilder(
           animation: Listenable.merge([widget.localMusic, widget.player]),
           builder: (context, _) {
-            // 非 Android 平台提示不支持
-            if (!Platform.isAndroid) {
+            // 桌面（Windows/Linux）：无目录时引导添加；有目录走通用列表。
+            if (_isDesktop) {
+              if (widget.localMusic.desktopRoots.isEmpty) {
+                return _buildEmptyState(
+                  context,
+                  colorScheme,
+                  icon: Icons.library_music_rounded,
+                  title: '添加本地音乐目录',
+                  subtitle: '选择存放音乐文件的文件夹，会递归扫描其中的音频并读取标签信息',
+                  action: FilledButton.icon(
+                    onPressed: _pickAndAddDesktopRoot,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('添加音乐目录'),
+                  ),
+                );
+              }
+            } else if (!Platform.isAndroid) {
+              // macOS：Rust 引擎未接入（见 form_factor.dart 的 macOS 适配清单）。
               return _buildEmptyState(
                 context,
                 colorScheme,
                 icon: Icons.phone_android_rounded,
-                title: '仅支持 Android 设备',
-                subtitle: '本地音乐功能仅在 Android 平台上可用',
+                title: '暂不支持当前平台',
+                subtitle: '本地音乐功能支持 Android / Windows / Linux',
               );
             }
 
-            // 未授权状态
-            if (!widget.localMusic.hasPermission) {
+            // Android 未授权状态（桌面跳过）
+            if (!_isDesktop && !widget.localMusic.hasPermission) {
               return _buildEmptyState(
                 context,
                 colorScheme,
@@ -374,8 +528,15 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                           icon: Icons.library_music_rounded,
                           title: allSongs.isEmpty ? '未找到本地音乐' : '没有检索到匹配的歌曲',
                           subtitle: allSongs.isEmpty
-                              ? '设备上没有可播放的音频文件'
+                              ? (_isDesktop ? '所选目录中没有音频文件，可添加或更换目录' : '设备上没有可播放的音频文件')
                               : '尝试其他关键词搜索',
+                          action: allSongs.isEmpty && _isDesktop
+                              ? TextButton.icon(
+                                  onPressed: _showDesktopRootsDialog,
+                                  icon: const Icon(Icons.folder_open_rounded),
+                                  label: const Text('管理音乐目录'),
+                                )
+                              : null,
                         )
                       : ListView.builder(
                           padding: const EdgeInsets.only(bottom: 120),

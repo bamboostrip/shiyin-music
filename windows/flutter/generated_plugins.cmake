@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audio_service_win
   connectivity_plus
   desktop_multi_window
   file_selector_windows

@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/folder_filter.dart';
 import '../models/music_models.dart';
+import '../src/rust/api.dart' as rust;
+import '../src/rust/services/local_media.dart' show LocalSongEntry;
 
 class LocalMusicController extends ChangeNotifier {
   LocalMusicController() {
@@ -12,6 +15,26 @@ class LocalMusicController extends ChangeNotifier {
 
   static const _channel = MethodChannel('kgka_music_hl/local_music');
   static const _excludedFoldersKey = 'settings.local_music_excluded_folders';
+
+  // ---- 桌面（Windows/Linux）扫描根目录 ----
+  // Android 走 MediaStore 全盘扫描；桌面没有统一媒体库，用户显式添加
+  // 根目录后由 Rust 引擎（symphonia probe）递归扫描并读标签。
+  static const _desktopRootsKey = 'local_music.desktop_roots';
+
+  /// 桌面是否支持本地音乐扫描（Rust 引擎仅接入 Windows/Linux 构建）。
+  static bool get isDesktopScanSupported =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux);
+
+  List<String> _desktopRoots = [];
+  StreamSubscription<rust.ScanEvent>? _scanSubscription;
+  int _scanDone = 0;
+  int _scanTotal = 0;
+
+  /// 用户添加的桌面扫描根目录（原样保存，展示用）。
+  List<String> get desktopRoots => List.unmodifiable(_desktopRoots);
+
+  /// 桌面扫描进度（已处理 / 总数），仅 [isScanning] 时有意义。
+  ({int done, int total}) get scanProgress => (done: _scanDone, total: _scanTotal);
 
   bool _hasPermission = false;
   List<Song> _songs = [];
@@ -55,6 +78,13 @@ class LocalMusicController extends ChangeNotifier {
 
   Future<void> _init() async {
     await _loadExcludedFolders();
+    if (isDesktopScanSupported) {
+      await _loadDesktopRoots();
+      if (_desktopRoots.isNotEmpty) {
+        unawaited(scanLocalMusic());
+      }
+      return;
+    }
     await _checkPermission();
   }
 
@@ -141,6 +171,10 @@ class LocalMusicController extends ChangeNotifier {
   }
 
   Future<void> scanLocalMusic() async {
+    if (isDesktopScanSupported) {
+      await _scanDesktopMusic();
+      return;
+    }
     if (!Platform.isAndroid) return;
     if (!_hasPermission) return;
 
@@ -226,6 +260,14 @@ class LocalMusicController extends ChangeNotifier {
 
   /// 获取本地歌曲的内嵌歌词。
   Future<String?> getEmbeddedLyrics(String filePath) async {
+    if (isDesktopScanSupported) {
+      try {
+        return await rust.readLocalLyrics(path: filePath);
+      } catch (e) {
+        debugPrint('Error reading embedded lyrics (rust): $e');
+        return null;
+      }
+    }
     if (!Platform.isAndroid) return null;
     try {
       return await _channel.invokeMethod<String>('getEmbeddedLyrics', {
@@ -235,5 +277,140 @@ class LocalMusicController extends ChangeNotifier {
       debugPrint('Error getting embedded lyrics: $e');
       return null;
     }
+  }
+
+  // ---- 桌面（Windows/Linux）本地音乐 ----
+
+  Future<void> _loadDesktopRoots() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _desktopRoots =
+          (prefs.getStringList(_desktopRootsKey) ?? const []).toList();
+    } catch (e) {
+      debugPrint('Error loading desktop roots: $e');
+    }
+  }
+
+  Future<void> _persistDesktopRoots() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_desktopRootsKey, _desktopRoots);
+    } catch (e) {
+      debugPrint('Error persisting desktop roots: $e');
+    }
+  }
+
+  /// 添加桌面扫描根目录（去重后持久化并立即重新扫描）。
+  Future<void> addDesktopRoot(String path) async {
+    final normalized = path.trim();
+    if (normalized.isEmpty || _desktopRoots.contains(normalized)) return;
+    _desktopRoots.add(normalized);
+    notifyListeners();
+    await _persistDesktopRoots();
+    await scanLocalMusic();
+  }
+
+  /// 移除桌面扫描根目录并重新扫描（歌曲列表即时收敛）。
+  Future<void> removeDesktopRoot(String path) async {
+    if (!_desktopRoots.remove(path)) return;
+    notifyListeners();
+    await _persistDesktopRoots();
+    if (_desktopRoots.isEmpty) {
+      _rawSongs = [];
+      _applyFolderFilter();
+      notifyListeners();
+      return;
+    }
+    await scanLocalMusic();
+  }
+
+  /// Rust 引擎扫描：递归列出根目录下音频文件并 probe 标签/时长。
+  /// 进度（done/total）驱动 UI；结果/失败经流事件（见 rust/src/api.rs
+  /// 的 ScanEvent，frb 的 StreamSink 模式不保留返回值）。
+  Future<void> _scanDesktopMusic() async {
+    if (!isDesktopScanSupported) return;
+    if (_desktopRoots.isEmpty) return;
+    if (_isScanning) return;
+
+    _isScanning = true;
+    _scanDone = 0;
+    _scanTotal = 0;
+    notifyListeners();
+
+    try {
+      final stream = rust.scanLocalMedia(roots: _desktopRoots.toList());
+      _scanSubscription?.cancel();
+      final completer = Completer<void>();
+      _scanSubscription = stream.listen(
+        (event) {
+          final failure = event.failure;
+          if (failure != null) {
+            debugPrint('LocalMusicController: 桌面扫描失败: $failure');
+            return;
+          }
+          final entries = event.entries;
+          if (entries != null) {
+            _rawSongs = [
+              for (final entry in entries) _songFromDesktopEntry(entry),
+            ];
+            for (final song in _rawSongs) {
+              _recordFolderDisplayName(song.id);
+            }
+            _applyFolderFilter();
+            return;
+          }
+          _scanDone = event.done;
+          _scanTotal = event.total;
+          notifyListeners();
+        },
+        onError: (Object error) {
+          debugPrint('LocalMusicController: 桌面扫描异常: $error');
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+        cancelOnError: false,
+      );
+      await completer.future.timeout(const Duration(minutes: 10), onTimeout: () {
+        unawaited(rust.cancelLocalScan());
+      });
+    } catch (e) {
+      debugPrint('Error scanning desktop local music: $e');
+    }
+
+    await _scanSubscription?.cancel();
+    _scanSubscription = null;
+    _isScanning = false;
+    notifyListeners();
+  }
+
+  /// Rust 扫描条目 → Song。标签缺失回退"文件名猜标题"
+  /// （"艺术家 - 歌名.ext" 模式由 cleanSongTitle 解析）。
+  Song _songFromDesktopEntry(LocalSongEntry entry) {
+    final fileName = _fileNameOf(entry.path);
+    final rawTitle = entry.title.isNotEmpty ? entry.title : fileName;
+    final artist = entry.artist.isNotEmpty ? entry.artist : '未知艺人';
+    final cleanedTitle = cleanSongTitle(rawTitle, artist: artist);
+    return Song(
+      id: entry.path,
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: artist,
+      albumName: entry.album.isNotEmpty ? entry.album : null,
+      hash: entry.path,
+      coverUrl: null,
+      duration: entry.durationMs > 0
+          ? Duration(milliseconds: entry.durationMs.toInt())
+          : null,
+      source: SongSource.local,
+    );
+  }
+
+  /// 路径 → 去扩展名的文件名（标题回退用）。
+  static String _fileNameOf(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final name = normalized.substring(normalized.lastIndexOf('/') + 1);
+    final dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
   }
 }

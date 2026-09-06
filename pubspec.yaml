@@ -10,6 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   audio_service: ^0.18.18
+  # desktop_system_media.dart 子类化平台实现时需要请求类型
+  # （ConfigureRequest/SetMediaItemRequest 等）。
+  audio_service_platform_interface: ^0.1.3
   audio_session: ^0.2.3
   http: ^1.5.0
   just_audio: ^0.10.4
@@ -17,8 +20,21 @@ dependencies:
   # Linux 桌面音频后端：just_audio 官方不出 Linux 实现，社区方案为
   # media_kit(libmpv) 适配。仅在 main.dart 的 Platform.isLinux 分支注册，
   # 不影响 Windows 的 just_audio_windows。运行期依赖系统 libmpv2。
+  # 本地 vendored 副本（packages/just_audio_media_kit）：仅含 load() 时
+  # 清空 _setPosition 的最小补丁（上游 2.1.0 跨歌残留 seek 目标 bug），
+  # 升级上游版本时需确认该修复是否已包含。
   just_audio_media_kit: ^2.1.0
   media_kit_libs_linux: ^1.2.1
+  # Linux MPRIS 系统媒体集成：audio_service 的 Linux 平台实现，
+  # 依赖后自动接管 AudioService.init（媒体键/GNOME/KDE 媒体控件）。
+  # 0.2.1 稳定版不支持相对 Seek（平台接口无对应方法），可接受。
+  audio_service_mpris: ^0.2.1
+  # Windows SMTC 系统媒体集成（音量浮层/媒体键/锁屏）：audio_service 的
+  # Windows 平台实现，与 MPRIS 同构，依赖后自动接管 AudioService.init，
+  # 无需手动接线（未选 smtc_windows：其 uuid ^4 与 system_tray 的 uuid ^3 冲突）。
+  audio_service_win: ^0.0.3
+  # 更新包 sha256 完整性校验（对照 Release 附带的 checksums.txt）。
+  crypto: ^3.0.7
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
   window_manager: ^0.4.3
@@ -44,6 +60,9 @@ dev_dependencies:
 dependency_overrides:
   window_manager:
     path: packages/window_manager
+  # 见上方依赖注释：本地最小补丁副本。
+  just_audio_media_kit:
+    path: packages/just_audio_media_kit
 
 flutter:
   uses-material-design: true

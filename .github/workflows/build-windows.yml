@@ -111,13 +111,28 @@ jobs:
           Rename-Item "build\dist\shiyin-windows-x64-setup.exe" "shiyin-$tag-windows-x64-setup.exe"
           Get-Item "build\dist\shiyin-$tag-windows-x64-setup.exe" | Select-Object Name, Length
 
+      # 完整性 sidecar：每个附件旁生成 `<附件名>.sha256`（sha256sum 文本格式）。
+      # 应用内更新下载 setup.exe 后拉取同 URL 的 .sha256 比对（见
+      # AppUpdateService._verifySha256Sidecar）；每产物独立 sidecar 也避免
+      # 与并发上传的 linux/android workflow 争抢同一份汇总清单。
+      - name: Generate sha256 sidecars
+        shell: pwsh
+        run: |
+          Get-ChildItem build\dist\shiyin-*.zip, build\dist\shiyin-*.exe | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Encoding ascii -NoNewline "$($_.FullName).sha256"
+            Get-Item "$($_.FullName).sha256" | Select-Object Name, Length
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-desktop-${{ steps.names.outputs.tag }}
           path: |
             build/dist/shiyin-*-windows-x64-portable.zip
+            build/dist/shiyin-*-windows-x64-portable.zip.sha256
             build/dist/shiyin-*-windows-x64-setup.exe
+            build/dist/shiyin-*-windows-x64-setup.exe.sha256
           if-no-files-found: error
 
       # 仅附加附件，不创建/覆盖 Release 笔记（笔记由 gh release create 手写）。
@@ -127,5 +142,7 @@ jobs:
         with:
           files: |
             build/dist/shiyin-*-windows-x64-portable.zip
+            build/dist/shiyin-*-windows-x64-portable.zip.sha256
             build/dist/shiyin-*-windows-x64-setup.exe
+            build/dist/shiyin-*-windows-x64-setup.exe.sha256
           fail_on_unmatched_files: true

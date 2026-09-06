@@ -10,6 +10,16 @@ import '../models/music_models.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
 
+/// 网易云域名（页 API/外链 CDN）统一在此判断：163 页面系（music.163.com）
+/// 与音频 CDN 系（*.music.126.net）都要求 Referer，缺失时部分节点 403。
+bool _isNeteaseHost(Uri uri) {
+  final host = uri.host.toLowerCase();
+  return host == '163.com' ||
+      host.endsWith('.163.com') ||
+      host == '126.net' ||
+      host.endsWith('.126.net');
+}
+
 /// 单次 load 的代理路由：远端 URL 或本地文件二选一。
 ///
 /// 按 seq（`/play/<seq>`）路由而非共享单槽：两次 loadSong 重叠（快速切歌、
@@ -127,8 +137,15 @@ class MusicAudioHandler extends BaseAudioHandler
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 10);
-      final upstream = await client.openUrl(req.method, Uri.parse(target));
+      final targetUri = Uri.parse(target);
+      final upstream = await client.openUrl(req.method, targetUri);
       upstream.headers.set(HttpHeaders.userAgentHeader, _kgUserAgent);
+      // 网易云外链（music.163.com / *.music.126.net）校验 Referer：
+      // 只带 UA 不带 Referer 时部分 CDN 节点直接 403。酷狗 CDN 不吃
+      // Referer，保持原样不动。
+      if (_isNeteaseHost(targetUri)) {
+        upstream.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
+      }
       final range = req.headers.value(HttpHeaders.rangeHeader);
       if (range != null) {
         upstream.headers.set(HttpHeaders.rangeHeader, range);
@@ -246,15 +263,68 @@ class MusicAudioHandler extends BaseAudioHandler
     }
     final proxyUrl = 'http://127.0.0.1:${_proxy!.port}/play/$seq';
     try {
-      await audioPlayer.setUrl(proxyUrl).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw Exception('音频加载超时，请检查网络后重试');
-        },
-      );
+      await _enqueueEngineLoad(seq, proxyUrl);
     } on PlayerException catch (e) {
       throw Exception('播放失败: ${e.message}');
     }
+  }
+
+  // ---- 引擎加载串行门 ----------------------------------------------------
+  //
+  // just_audio_windows 的 WinRT MediaPlayer 在高频 setUrl（快速连点切歌）
+  // 时，native 回调线程与 COM 平台线程竞态，会触发 "Lost connection to
+  // device" 进程崩溃——与 completed→自动下一首的 100ms workaround
+  // （player_controller._handleCompleted）同根源的上游后端缺陷。
+  // 门规则：
+  // 1. 串行：同一时刻至多一个 setUrl 在 native 侧执行（异步链排队）；
+  // 2. 最小间隔：Windows 上两次 setUrl 发起至少间隔 [_minEngineLoadGap]，
+  //    覆盖上一次加载/中止后 native 回调的尾部清理窗口；
+  // 3. 只加载最新：排队期间出现更新的 load 注册时，旧 load 直接跳过
+  //    （不碰引擎），上层 playSong 的 hash 守卫会把对应的旧流程收尾。
+  // 连点 N 次的净效果：队列里的旧任务瞬间跳过，只有最后一次真正进引擎。
+
+  /// Windows 两次引擎加载的最小间隔。与 completed workaround 的 100ms
+  /// 同量级、稍保守：连点场景每次加载的 native 开销远大于 250ms 的
+  /// 用户感知阈值，取安全值。
+  static const _minEngineLoadGap = Duration(milliseconds: 250);
+
+  /// 引擎加载串行链的尾端（Promise 链式排队）。
+  Future<void> _engineLoadChain = Future<void>.value();
+
+  /// 上一次 setUrl 发起时刻（仅 Windows 记录）。
+  DateTime? _lastEngineLoadAt;
+
+  Future<void> _enqueueEngineLoad(int seq, String proxyUrl) {
+    final task = _engineLoadChain
+        .then((_) => _performEngineLoad(seq, proxyUrl));
+    // 推进链尾但不吞掉调用方的异常：失败的任务本身仍会把错误抛给
+    // 等待它的 _loadViaProxy，链上后续任务不受影响。
+    _engineLoadChain = task.then(
+      (_) {},
+      onError: (_) {},
+    );
+    return task;
+  }
+
+  Future<void> _performEngineLoad(int seq, String proxyUrl) async {
+    if (seq != _loadSeq) return; // 已被更新的加载取代，跳过
+    if (Platform.isWindows) {
+      final last = _lastEngineLoadAt;
+      if (last != null) {
+        final elapsed = DateTime.now().difference(last);
+        if (elapsed < _minEngineLoadGap) {
+          await Future<void>.delayed(_minEngineLoadGap - elapsed);
+          if (seq != _loadSeq) return; // 等待期间又被更新取代
+        }
+      }
+      _lastEngineLoadAt = DateTime.now();
+    }
+    await audioPlayer.setUrl(proxyUrl).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        throw Exception('音频加载超时，请检查网络后重试');
+      },
+    );
   }
 
   @override

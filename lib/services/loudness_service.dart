@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../src/rust/api.dart' as rust;
 
 /// 响度均衡服务:基于 EBU R128 K-weighted LUFS 分析并应用增益,
 /// 消除歌曲间音量差异(避免忽大忽小)。
@@ -148,9 +151,27 @@ class LoudnessService {
   static String _shortHash(String hash) =>
       hash.length > 8 ? hash.substring(0, 8) : hash;
 
-  /// 是否支持原生 LUFS 分析(Android/iOS)。
-  /// 桌面/Web 不支持。
-  bool get isAnalysisSupported => !kIsWeb;
+  /// 是否支持原生 LUFS 分析。
+  ///
+  /// - Android/iOS：MethodChannel 原生实现（LoudnessAnalyzer.kt / Swift）。
+  /// - Windows/Linux：Rust 引擎（symphonia 解码 + 同款 EBU R128 计量，
+  ///   见 rust/src/services/loudness.rs，算法与 Android 1:1 对齐）。
+  /// - macOS：Rust 引擎未接入 Xcode 构建（见 form_factor.dart 的 macOS
+  ///   适配清单），不支持；Web 不支持。
+  bool get isAnalysisSupported {
+    if (kIsWeb) return false;
+    if (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS) {
+      return true;
+    }
+    return Platform.isWindows || Platform.isLinux;
+  }
+
+  /// 桌面（Windows/Linux）走 Rust 引擎分析通道。
+  static bool get _useRustAnalyzer {
+    assert(!kIsWeb);
+    return Platform.isWindows || Platform.isLinux;
+  }
 
   /// 初始化:加载缓存与开关状态。
   Future<void> init() async {
@@ -233,6 +254,16 @@ class LoudnessService {
 
     log('analyze START hash=${_shortHash(songHash)} url=$url interval=${_progressIntervalMs}ms');
 
+    // 桌面（Windows/Linux）：Rust 引擎（symphonia + EBU R128），
+    // 渐进事件语义与原生通道一致（Progress → Done，取消时无 Done）。
+    if (_useRustAnalyzer) {
+      return _analyzeViaRust(
+        songHash: songHash,
+        url: url,
+        onProgress: onProgress,
+      );
+    }
+
     // 设置当前活跃进度回调。原生反向 invokeMethod 到来时转发给 onProgress。
     // 注意:必须在新分析开始前设置,并确保上一分析的回调已被清空(由 controller
     // 在切歌时调 cancelAnalysis 保证)。
@@ -267,13 +298,7 @@ class LoudnessService {
       onProgress?.call(gain, lufs, analyzedMs, true);
 
       // 缓存原始 LUFS(LRU:命中后重新排队,写入时超限淘汰最早条目)
-      _cache.remove(songHash);
-      _cache[songHash] = lufs;
-      while (_cache.length > _maxCacheSize) {
-        _cache.remove(_cache.keys.first);
-      }
-      unawaited(_persistCache());
-      log('cache WRITE hash=${_shortHash(songHash)} size=${_cache.length}');
+      _cacheLufs(songHash, lufs);
       return gain;
     } on PlatformException catch (e) {
       _activeProgressCallback = null;
@@ -286,6 +311,84 @@ class LoudnessService {
     }
   }
 
+  /// 桌面 Rust 分析通道（渐进事件 → onProgress，Done → 缓存 + 返回增益）。
+  ///
+  /// 事件语义见 rust/src/api.rs 的 [rust.LoudnessEvent]：
+  /// - failure != null：分析失败，返回 null（不写缓存）；
+  /// - isFinal：最终值（写缓存 + isFinal=true 回调）后流关闭；
+  /// - 流关闭而没有 isFinal：被取消，返回 null。
+  Future<double?> _analyzeViaRust({
+    required String songHash,
+    required String url,
+    void Function(double gainDb, double lufs, int analyzedMs, bool isFinal)? onProgress,
+  }) async {
+    final completer = Completer<double?>();
+    StreamSubscription<rust.LoudnessEvent>? subscription;
+    var settled = false;
+
+    Future<void> finish(double? value) async {
+      if (settled) return;
+      settled = true;
+      await subscription?.cancel();
+      if (!completer.isCompleted) completer.complete(value);
+    }
+
+    try {
+      final stream = rust.analyzeLoudness(url: url);
+      subscription = stream.listen(
+        (event) {
+          final failure = event.failure;
+          if (failure != null) {
+            log('analyze FAILED(rust) hash=${_shortHash(songHash)} $failure');
+            finish(null);
+            return;
+          }
+          final lufs = event.lufs;
+          if (!lufs.isFinite) {
+            log('analyze INVALID(rust) hash=${_shortHash(songHash)} lufs=$lufs');
+            finish(null);
+            return;
+          }
+          final gain = _clampedGainFromLufs(lufs);
+          final analyzedMs = event.analyzedMs.toInt();
+          onProgress?.call(gain, lufs, analyzedMs, event.isFinal);
+          if (event.isFinal) {
+            log('analyze DONE(rust) hash=${_shortHash(songHash)} lufs=${lufs.toStringAsFixed(1)} gain=${gain.toStringAsFixed(2)}dB analyzed=${analyzedMs}ms');
+            _cacheLufs(songHash, lufs);
+            finish(gain);
+          }
+        },
+        onError: (Object error) {
+          log('analyze FAILED(rust) hash=${_shortHash(songHash)} $error');
+          finish(null);
+        },
+        onDone: () {
+          // 没有 isFinal 事件就关流 = 被取消（对齐 Android 语义）。
+          log('analyze CANCELLED(rust) hash=${_shortHash(songHash)}');
+          finish(null);
+        },
+        cancelOnError: false,
+      );
+    } catch (error) {
+      // RustLib 未初始化 / FFI 异常等：按分析失败处理。
+      log('analyze RUST_ERROR hash=${_shortHash(songHash)} $error');
+      finish(null);
+    }
+
+    return completer.future;
+  }
+
+  /// 缓存原始 LUFS（LRU：命中后重新排队，写入时超限淘汰最早条目）。
+  void _cacheLufs(String songHash, double lufs) {
+    _cache.remove(songHash);
+    _cache[songHash] = lufs;
+    while (_cache.length > _maxCacheSize) {
+      _cache.remove(_cache.keys.first);
+    }
+    unawaited(_persistCache());
+    log('cache WRITE hash=${_shortHash(songHash)} size=${_cache.length}');
+  }
+
   /// 取消当前在途的响度分析(切歌时调用)。
   /// 通知原生解码循环立即结束,同时清空活跃进度回调,使任何迟到的中途进度
   /// 被丢弃。不阻塞——取消是异步的,旧分析的 Future 会以 null 返回。
@@ -293,6 +396,15 @@ class LoudnessService {
     log('cancelAnalysis 调用 (切歌/关开关/清缓存)');
     _activeProgressCallback = null;
     if (!isAnalysisSupported) return;
+    if (_useRustAnalyzer) {
+      try {
+        await rust.cancelLoudnessAnalysis();
+      } catch (error) {
+        // RustLib 未就绪等：忽略（序号守卫会兜底丢弃旧结果）。
+        debugPrint('[loudness] rust cancelLoudnessAnalysis 失败: $error');
+      }
+      return;
+    }
     try {
       await _channel.invokeMethod<bool>('cancelLoudnessAnalysis');
     } on PlatformException catch (_) { // ignore: empty_catches
@@ -304,12 +416,16 @@ class LoudnessService {
 
   /// 应用增益。
   ///
-  /// 按增益正负分流,保证两端语义一致:
-  /// - gain > 0(歌曲偏轻,需放大):Android 用 [LoudnessEnhancer] 放大
-  ///   (官方仅支持正向放大),setVolume 保持 1.0;iOS/桌面无原生放大,
-  ///   只能保持 1.0。
-  /// - gain <= 0(歌曲偏响,需衰减):两端统一用 [AudioPlayer.setVolume]
-  ///   衰减。Android 的 LoudnessEnhancer 不支持负增益(衰减属未定义行为,
+  /// 按增益正负分流:
+  /// - gain > 0(歌曲偏轻,需放大):
+  ///   - Android:原生 [LoudnessEnhancer](官方仅支持正向放大),setVolume 1.0;
+  ///   - Linux:mpv 音量上限已被 vendored just_audio_media_kit 抬高
+  ///     (volume-max=400),setVolume 可 >1.0 直接数字放大;
+  ///   - Windows:WinRT MediaPlayer.Volume 只认 0..1,无放大能力,
+  ///     保持 1.0(平台限制,设置页有说明);
+  ///   - iOS/macOS:同 Windows,保持 1.0。
+  /// - gain <= 0(歌曲偏响,需衰减):统一用 [AudioPlayer.setVolume] 衰减。
+  ///   Android 的 LoudnessEnhancer 不支持负增益(衰减属未定义行为,
   ///   多数设备无效),故响歌也走 setVolume。
   /// - gain 为 null/非有限/未启用:重置为原始音量。
   ///
@@ -346,7 +462,8 @@ class LoudnessService {
       return;
     }
 
-    // 轻歌放大:Android 优先用 LoudnessEnhancer,失败/其他平台降级 setVolume(=1.0)
+    // 轻歌放大:Android 用 LoudnessEnhancer;Linux 用 mpv 数字放大(>1.0);
+    // Windows(WinRT Volume 0..1)/iOS/macOS 无放大能力,保持 1.0。
     if (defaultTargetPlatform == TargetPlatform.android) {
       final gainMb = (clampedGain * 100).round().clamp(0, 1500);
       try {
@@ -364,23 +481,44 @@ class LoudnessService {
       } on MissingPluginException {
         log('applyGain AMPLIFY(android) NO_PLUGIN → 降级 setVolume');
       }
+    } else if (defaultTargetPlatform == TargetPlatform.linux && !kIsWeb) {
+      // mpv: just_audio volume 1.0 = mpv volume 100; 放大即 >100
+      //（vendored just_audio_media_kit 已抬高 volume-max）。
+      final volume = pow(10, clampedGain / 20)
+          .toDouble()
+          .clamp(0.0, _linuxMaxBoostVolume);
+      log('applyGain AMPLIFY(linux/mpv) gain=${clampedGain.toStringAsFixed(2)}dB volume=${volume.toStringAsFixed(3)} instant=$instant');
+      await _disableNativeEnhancer(audioSessionId);
+      await _setVolumeRamped(audioPlayer, volume, instant);
+      return;
     }
-    // iOS/桌面:无法放大,setVolume 保持 1.0
+    // Windows/iOS/macOS:无法放大,setVolume 保持 1.0
     log('applyGain AMPLIFY_SKIP($defaultTargetPlatform) gain=${clampedGain.toStringAsFixed(2)}dB (平台不支持放大,保持原始音量)');
     await audioPlayer.setVolume(1.0);
   }
 
+  /// Linux 放大上限（mpv 音量标量）。+6dB = 2.0；vendored 适配层把
+  /// mpv volume-max 抬到 400（=4.0/+12dB），留出钳制后的安全余量。
+  static const double _linuxMaxBoostVolume = 2.0;
+
+  /// 平台音量上限（ramp 插值时的 clamp 边界）。
+  static double get _platformMaxVolume =>
+      (!kIsWeb && Platform.isLinux) ? _linuxMaxBoostVolume : 1.0;
+
   /// 平滑过渡 setVolume。instant=true 直接设置(缓存命中首播);否则在
-  /// [_rampDurationMs] 内线性插值,消除音量突变。
+  /// [_rampDurationMs] 内线性插值,消除音量突变。插值边界按平台音量上限
+  /// clamp（Linux 放大路径允许 >1.0，见 [_linuxMaxBoostVolume]）。
   Future<void> _setVolumeRamped(
     AudioPlayer audioPlayer,
     double targetVolume, [
     bool instant = false,
   ]) async {
     _volumeRampTimer?.cancel();
+    final maxVolume = _platformMaxVolume;
+    final clampedTarget = targetVolume.clamp(0.0, maxVolume);
     final current = audioPlayer.volume;
-    if (instant || (current - targetVolume).abs() < 0.002) {
-      await audioPlayer.setVolume(targetVolume);
+    if (instant || (current - clampedTarget).abs() < 0.002) {
+      await audioPlayer.setVolume(clampedTarget);
       return;
     }
     // 20ms 步进,总时长 _rampDurationMs
@@ -393,11 +531,11 @@ class LoudnessService {
       (t) {
         i++;
         final t01 = i / steps;
-        final v = current + (targetVolume - current) * t01;
-        audioPlayer.setVolume(v.clamp(0.0, 1.0));
+        final v = current + (clampedTarget - current) * t01;
+        audioPlayer.setVolume(v.clamp(0.0, maxVolume));
         if (i >= steps) {
           t.cancel();
-          audioPlayer.setVolume(targetVolume);
+          audioPlayer.setVolume(clampedTarget);
           completer.complete();
         }
       },

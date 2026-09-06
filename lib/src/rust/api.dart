@@ -5,6 +5,7 @@
 
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'services/local_media.dart';
 
 Future<Engine> createEngine({required String dataDir}) =>
     RustLib.instance.api.crateApiCreateEngine(dataDir: dataDir);
@@ -35,5 +36,97 @@ Future<void> engineSetSession({
   t1: t1,
 );
 
+/// 渐进式分析一首歌的响度（LUFS）。取消（cancel_loudness_analysis 或
+/// Dart 侧取消订阅）时流直接关闭且没有 is_final 事件，对齐 Android
+/// 通道"取消返回 null"的语义。
+Stream<LoudnessEvent> analyzeLoudness({required String url}) =>
+    RustLib.instance.api.crateApiAnalyzeLoudness(url: url);
+
+/// 取消在途的响度分析（切歌时 Dart 侧调用）。
+Future<void> cancelLoudnessAnalysis() =>
+    RustLib.instance.api.crateApiCancelLoudnessAnalysis();
+
+/// 读取本地音频的内嵌歌词标签（桌面端对应 Android 的 getEmbeddedLyrics）。
+Future<String?> readLocalLyrics({required String path}) =>
+    RustLib.instance.api.crateApiReadLocalLyrics(path: path);
+
+/// 扫描用户添加的本地音乐根目录，结果经流事件下发；
+/// cancel_local_scan 或取消订阅可中止。
+Stream<ScanEvent> scanLocalMedia({required List<String> roots}) =>
+    RustLib.instance.api.crateApiScanLocalMedia(roots: roots);
+
+/// 取消在途的本地音乐扫描。
+Future<void> cancelLocalScan() =>
+    RustLib.instance.api.crateApiCancelLocalScan();
+
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Engine>>
 abstract class Engine implements RustOpaqueInterface {}
+
+/// 响度分析流事件。
+class LoudnessEvent {
+  /// 截至当前/最终的 integrated LUFS。
+  final double lufs;
+
+  /// 已解码音频时长（毫秒）。
+  final PlatformInt64 analyzedMs;
+
+  /// true = 全曲分析完成（Dart 侧据此写缓存 + 最后微调）。
+  final bool isFinal;
+
+  /// Some(reason) = 分析失败（解码/网络等），此时 lufs 无效。
+  final String? failure;
+
+  const LoudnessEvent({
+    required this.lufs,
+    required this.analyzedMs,
+    required this.isFinal,
+    this.failure,
+  });
+
+  @override
+  int get hashCode =>
+      lufs.hashCode ^ analyzedMs.hashCode ^ isFinal.hashCode ^ failure.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LoudnessEvent &&
+          runtimeType == other.runtimeType &&
+          lufs == other.lufs &&
+          analyzedMs == other.analyzedMs &&
+          isFinal == other.isFinal &&
+          failure == other.failure;
+}
+
+/// 本地音乐扫描流事件。
+class ScanEvent {
+  final int done;
+  final int total;
+
+  /// Some = 扫描完成（含结果）。取消时流关闭且本字段恒为 None。
+  final List<LocalSongEntry>? entries;
+
+  /// Some(reason) = 扫描失败。
+  final String? failure;
+
+  const ScanEvent({
+    required this.done,
+    required this.total,
+    this.entries,
+    this.failure,
+  });
+
+  @override
+  int get hashCode =>
+      done.hashCode ^ total.hashCode ^ entries.hashCode ^ failure.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ScanEvent &&
+          runtimeType == other.runtimeType &&
+          done == other.done &&
+          total == other.total &&
+          entries == other.entries &&
+          failure == other.failure;
+}

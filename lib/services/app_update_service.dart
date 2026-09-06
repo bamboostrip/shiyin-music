@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -16,7 +17,14 @@ import '../models/app_version.dart';
 /// CI 打 `v*` tag 时会在 GitHub 发布带附件的 Release，本服务判断是否有新版本：
 /// - Android：跳浏览器下载 APK；
 /// - Windows 便携版：跳浏览器下载 zip，用户自行解压覆盖；
-/// - Windows 安装版：应用内下载 setup.exe（进度 + 取消），退出并拉起安装向导。
+/// - Windows 安装版：应用内下载 setup.exe（进度 + 取消，sha256 校验通过后
+///   才允许安装），退出并拉起安装向导；
+/// - Linux：跳浏览器下载 `.deb`（回退便携 tar.gz），用户用包管理器安装。
+///
+/// 完整性：CI 为每个 Release 附件生成 sidecar `<附件名>.sha256`；
+/// 应用内下载路径（Windows 安装版）下载完成后拉取 sidecar 比对 sha256，
+/// 不一致即删包报错，杜绝截断/损坏/被替换的安装包落地执行。
+/// 跳浏览器下载的形态由用户自行核对，不在应用内校验。
 ///
 /// 版本查询多级容灾（对齐 handwrite-sim 的 updater 策略，规避 api.github.com
 /// 未鉴权 60 次/时/IP 的 403 风控）：
@@ -42,13 +50,14 @@ class AppUpdateService {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-  /// 是否支持检查更新（非 Web 的 Android / Windows）。
+  /// 是否支持检查更新（非 Web 的 Android / Windows / Linux）。
   static bool get isSupportedPlatform {
     if (kIsWeb) {
       return false;
     }
     return defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.windows;
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
   }
 
   /// Windows 分发形态：exe 同目录存在 Inno 安装时写入的
@@ -83,6 +92,9 @@ class AppUpdateService {
 
   bool get _isWindows =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  bool get _isLinux =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -199,6 +211,7 @@ class AppUpdateService {
       decoded,
       renderer: _rendererForAsset,
       windowsAssetKind: _windowsAssetKind,
+      linuxAsset: _isLinux,
     );
   }
 
@@ -271,11 +284,14 @@ class AppUpdateService {
       assets,
       renderer: _rendererForAsset,
       windowsAssetKind: _windowsAssetKind,
+      linuxAsset: _isLinux,
     );
 
     return AppVersionInfo(
       platform: _isWindows
           ? AppUpdatePlatform.windows.apiValue
+          : _isLinux
+          ? AppUpdatePlatform.linux.apiValue
           : AppUpdatePlatform.android.apiValue,
       versionName: versionName.isEmpty ? tag : versionName,
       versionCode: semverToCode(versionName),
@@ -339,7 +355,10 @@ class AppUpdateService {
   /// 应用内下载 Windows 安装包到系统"下载"目录，返回本地文件路径。
   ///
   /// 进度经 [onProgress]（累计已收 / 总字节）回调；[cancelToken] 取消后
-  /// 残留的部分文件会被清理。完成后校验文件大小大于 0。
+  /// 残留的部分文件会被清理。完成后依次校验：文件大小大于 0、
+  /// sha256 与 Release 的 sidecar（`<附件名>.sha256`，见类注释）一致。
+  /// sidecar 不存在（2026-09 之前的老 Release）时仅记录日志跳过校验，
+  /// 保持向后兼容；sidecar 存在但不一致/不可解析一律视为损坏，删包报错。
   Future<String> downloadWindowsSetup(
     AppVersionInfo version, {
     void Function(int received, int total)? onProgress,
@@ -391,7 +410,71 @@ class AppUpdateService {
     if (!await file.exists() || await file.length() <= 0) {
       throw StateError('安装包下载不完整');
     }
+
+    // 完整性校验：sha256 sidecar（缺失时跳过，见方法注释）。
+    try {
+      await _verifySha256Sidecar(uri, file);
+    } on StateError {
+      rethrow;
+    } catch (error) {
+      debugPrint('[AppUpdate] sha256 sidecar 校验异常（按损坏处理）: $error');
+      try {
+        await file.delete();
+      } catch (_) {}
+      throw StateError('安装包完整性校验失败');
+    }
     return destPath;
+  }
+
+  /// 拉取 `<asset>.sha256` sidecar 并与本地文件比对。
+  ///
+  /// - sidecar 404/不存在：仅日志，视为通过（老 Release 兼容）；
+  /// - sidecar 内容无法解析出 64 位 hex：视为校验失败（损坏/被篡改的
+  ///   sidecar 本身就是异常信号）；
+  /// - hex 不一致：删包并抛错（截断、CDN 损坏或被替换）。
+  Future<void> _verifySha256Sidecar(Uri assetUri, File file) async {
+    final sidecarUrl = '${assetUri.toString()}.sha256';
+    final http.Response response;
+    try {
+      response = await http
+          .get(
+            Uri.parse(sidecarUrl),
+            headers: const {'User-Agent': _browserUserAgent},
+          )
+          .timeout(const Duration(seconds: 15));
+    } on Exception catch (error) {
+      // 拉取失败（网络抖动等）不拦截安装：本地文件已完整下载，
+      // 风险与老 Release 相同。宁可放过不可误杀。
+      debugPrint('[AppUpdate] sha256 sidecar 拉取失败（跳过校验）: $error');
+      return;
+    }
+    if (response.statusCode == HttpStatus.notFound) {
+      debugPrint('[AppUpdate] Release 无 sha256 sidecar（老版本），跳过校验');
+      return;
+    }
+    if (response.statusCode != HttpStatus.ok) {
+      throw StateError('校验文件下载失败（${response.statusCode}）');
+    }
+
+    // sha256sum 输出格式：`<hex>  <filename>`（二进制模式带 `*` 前缀）。
+    final hexMatch =
+        RegExp(r'^([0-9a-fA-F]{64})', multiLine: true).firstMatch(response.body);
+    if (hexMatch == null) {
+      throw StateError('校验文件格式异常');
+    }
+    final expected = hexMatch.group(1)!.toLowerCase();
+
+    final digest = await sha256.bind(file.openRead()).first;
+    final actual = digest.toString();
+    if (actual != expected) {
+      try {
+        await file.delete();
+      } catch (_) {}
+      throw StateError(
+        '安装包校验不一致（本地 $actual ≠ 发布 $expected），已删除，请重试',
+      );
+    }
+    debugPrint('[AppUpdate] sha256 校验通过: $actual');
   }
 
   /// 拉起安装向导并退出本应用（Windows 安装版"退出并安装"）。
@@ -575,9 +658,8 @@ List<(String, String)> parseExpandedAssetLinks(String html) {
       continue;
     }
     final lower = name.toLowerCase();
-    if (!lower.endsWith('.zip') && !lower.endsWith('.exe') && !lower.endsWith(
-      '.apk',
-    )) {
+    const accepted = ['.zip', '.exe', '.apk', '.deb', '.tar.gz'];
+    if (!accepted.any(lower.endsWith)) {
       continue;
     }
     if (assets.any((asset) => asset.$1 == name)) {

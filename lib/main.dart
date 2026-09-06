@@ -19,6 +19,7 @@ import 'core/rust_api_client.dart';
 import 'services/cache_service.dart';
 import 'services/desktop_lyrics_service.dart';
 import 'services/desktop_system_integration.dart';
+import 'services/desktop_system_media.dart';
 import 'services/device_info_service.dart';
 import 'services/download_service.dart';
 import 'services/music_audio_handler.dart';
@@ -71,14 +72,18 @@ Future<void> main(List<String> args) async {
   // 后端（见 pubspec.yaml 依赖注释）。必须在创建首个 AudioPlayer
   // （AudioService.init → MusicAudioHandler 字段初始化）之前调用；
   // 仅在 Linux 分支注册，避免覆盖 Windows 的 just_audio_windows 后端。
-  // audio_service 在 Linux 走 platform interface 的 NoOpAudioService（与
-  // Windows 现状一致），无需分支；media 键/系统媒体会话后续可按需接入
-  // audio_service_mpris。
   // kIsWeb 前置：web 上访问 Platform.isLinux 会直接 throw（当前 web 构建
   // 因 dart:io 无法编译，此为防御性收敛，保持与 form_factor 判定同构）。
   if (!kIsWeb && Platform.isLinux) {
     JustAudioMediaKit.ensureInitialized();
   }
+
+  // 桌面系统媒体集成：Windows SMTC（音量浮层/媒体键/锁屏控件）与
+  // Linux MPRIS（GNOME/KDE 媒体控件/媒体键）。audio_service 在桌面默认
+  // 走 NoOp 平台实现，这里替换为对应平台实现；必须在 AudioService.init
+  // 之前调用（audio_service 的 _platform 懒初始化发生在 init 内）。
+  // 平台实现初始化失败（无 D-Bus 等）内部已降级，不会阻断启动。
+  registerDesktopSystemMediaPlatform();
 
   final audioHandler = await AudioService.init(
     builder: MusicAudioHandler.new,
