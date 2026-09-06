@@ -362,6 +362,10 @@ class DownloadService {
     var received = 0;
     // 206 的 contentLength 是"本次剩余字节数"，+startOffset 还原整包大小。
     final contentTotal = body.contentLength;
+    // 期望总长：已知时用于截断校验。未知（-1）则跳过校验，保持旧行为。
+    final expectedTotal = contentTotal >= 0
+        ? startOffset + contentTotal
+        : null;
     try {
       await for (final chunk in body.stream) {
         sink.writeFromSync(chunk);
@@ -377,6 +381,14 @@ class DownloadService {
     }
     if (received == 0 && startOffset == 0) {
       throw StateError('下载内容为空');
+    }
+    // 截断校验：流“干净结束”但字节不足时不 rename，保留 .part 供续传。
+    // 弱网/代理提前 FIN 即落在此分支，避免残缺文件被当完整落盘。
+    if (expectedTotal != null && startOffset + received != expectedTotal) {
+      throw StateError(
+        '下载不完整：已收 ${startOffset + received}，期望 $expectedTotal，'
+        '保留半成品供续传',
+      );
     }
   }
 
