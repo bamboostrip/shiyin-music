@@ -185,6 +185,52 @@ void main() {
 
       expect(File(partPath).readAsBytesSync(), data);
     });
+
+    test('流中途干净断掉但字节不足：抛错且保留半成品供续传，不当成功', () async {
+      // 用拦截器桩模拟“代理提前 FIN 但流干净结束”：headers 声称 64KB，
+      //body 只给一半且正常 close（真实 HttpClient 在 contentLength 不符
+      // 时多抛 HttpException，而某些代理/分块场景会干净结束，此时靠
+      // downloadWithResume 的期望长度校验兜底）。
+      final fullLength = 64 * 1024;
+      final half = Uint8List.fromList(
+        List<int>.generate(fullLength ~/ 2, (i) => i % 251),
+      );
+      final stubDio = Dio();
+      stubDio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            final stream = Stream<Uint8List>.value(half);
+            handler.resolve(
+              Response<ResponseBody>(
+                requestOptions: options,
+                statusCode: HttpStatus.ok,
+                data: ResponseBody(
+                  stream,
+                  HttpStatus.ok,
+                  headers: {
+                    Headers.contentLengthHeader: [fullLength.toString()],
+                  },
+                ),
+              ),
+            );
+          },
+        ),
+      );
+      addTearDown(stubDio.close);
+      final partPath = '${tempDir.path}/truncated.mp3.part';
+
+      await expectLater(
+        DownloadService.downloadWithResume(
+          dio: stubDio,
+          url: 'http://127.0.0.1/audio.mp3',
+          partPath: partPath,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      // 半成品保留（可续传），而非被删或被当完整文件
+      expect(File(partPath).existsSync(), isTrue);
+      expect(File(partPath).lengthSync(), half.length);
+    });
   });
 
   group('resolveNonCollidingPath', () {

@@ -236,9 +236,9 @@ class SettingsPage extends StatelessWidget {
             auth.vipClaim,
           ]),
           builder: (context, _) {
-            // 横屏/车机只在平板上出现：手机上无用，桌面上恒横屏且无车机概念。
-            final showOrientationTiles =
-                !isDesktopFormFactor && AdaptiveLayout.isTablet(context);
+            // 横屏/车机开关：移动端（手机+平板）全量展示，桌面恒横屏无此概念。
+            // 手机残留值曾因平板门控无 UI 可改，现还回开关即恢复可编辑。
+            final showOrientationTiles = !isDesktopFormFactor;
             return AdaptiveContentPadding(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
