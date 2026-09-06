@@ -54,6 +54,10 @@ void main() {
       expect(find.text('开机自启'), findsOneWidget);
       expect(find.text('重置窗口'), findsOneWidget);
 
+      // 桌面恒横屏、无车机概念：横屏/车机开关不出现
+      expect(find.text('横屏模式'), findsNothing);
+      expect(find.text('车机模式'), findsNothing);
+
       // 默认关。
       expect(_autoStartSwitch(tester).value, isFalse);
       expect(autoStart.reads, 1);
