@@ -163,6 +163,9 @@ void main() {
     required Song song,
     VoidCallback? onCoverTap,
     VoidCallback? onDismiss,
+    GestureDragStartCallback? onVerticalDragStart,
+    GestureDragUpdateCallback? onVerticalDragUpdate,
+    GestureDragEndCallback? onVerticalDragEnd,
     Size size = const Size(390, 844),
   }) {
     return MaterialApp(
@@ -180,6 +183,9 @@ void main() {
               onQueue: () {},
               onCoverTap: onCoverTap,
               onDismiss: onDismiss,
+              onVerticalDragStart: onVerticalDragStart,
+              onVerticalDragUpdate: onVerticalDragUpdate,
+              onVerticalDragEnd: onVerticalDragEnd,
             ),
           ),
         ),
@@ -212,17 +218,21 @@ void main() {
       expect(coverTapped, isTrue);
     });
 
-    testWidgets('在封面页向下拖拽超过 80px 释放能触发 onDismiss', (tester) async {
+    testWidgets('在封面页向下拖拽能触发 onVerticalDrag* 委托回调', (tester) async {
       final player = _FakePlayerController();
       final auth = _FakeAuthController();
-      var dismissed = false;
+      var dragStarted = false;
+      var dragUpdated = false;
+      var dragEnded = false;
 
       await tester.pumpWidget(
         buildTestWidget(
           player: player,
           auth: auth,
           song: testSong,
-          onDismiss: () => dismissed = true,
+          onVerticalDragStart: (_) => dragStarted = true,
+          onVerticalDragUpdate: (_) => dragUpdated = true,
+          onVerticalDragEnd: (_) => dragEnded = true,
         ),
       );
       await tester.pump();
@@ -234,20 +244,23 @@ void main() {
       );
       await tester.pump();
 
-      expect(dismissed, isTrue);
+      expect(dragStarted, isTrue);
+      expect(dragUpdated, isTrue);
+      expect(dragEnded, isTrue);
     });
 
-    testWidgets('在封面页快速向下甩动 (velocity > 800px/s) 释放触发 onDismiss', (tester) async {
+    testWidgets('在封面页快速向下甩动能触发 onVerticalDragEnd 委托并获取速度', (tester) async {
       final player = _FakePlayerController();
       final auth = _FakeAuthController();
-      var dismissed = false;
+      double? endVelocity;
 
       await tester.pumpWidget(
         buildTestWidget(
           player: player,
           auth: auth,
           song: testSong,
-          onDismiss: () => dismissed = true,
+          onVerticalDragEnd: (details) =>
+              endVelocity = details.primaryVelocity,
         ),
       );
       await tester.pump();
@@ -259,53 +272,44 @@ void main() {
       );
       await tester.pump();
 
-      expect(dismissed, isTrue);
+      expect(endVelocity, isNotNull);
+      expect(endVelocity!, greaterThan(800.0));
     });
 
-    testWidgets('在封面页轻微下拉 (<40px) 释放不触发 onDismiss 并回弹复位', (tester) async {
+    testWidgets('在封面页轻微下拉正常将手势事件向上委托至 parent 容器', (tester) async {
       final player = _FakePlayerController();
       final auth = _FakeAuthController();
-      var dismissed = false;
+      var dragStarted = false;
+      double totalDelta = 0;
 
       await tester.pumpWidget(
         buildTestWidget(
           player: player,
           auth: auth,
           song: testSong,
-          onDismiss: () => dismissed = true,
+          onVerticalDragStart: (_) => dragStarted = true,
+          onVerticalDragUpdate: (details) {
+            totalDelta += details.primaryDelta ?? 0;
+          },
         ),
       );
       await tester.pump();
 
-      // 下拉 30px
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byType(Artwork).first),
+      // 下拉 40px
+      await tester.drag(
+        find.byType(Artwork).first,
+        const Offset(0, 40),
       );
-      await gesture.moveBy(const Offset(0, 30));
       await tester.pump();
 
-      final transformFinder = find.byKey(
-        const Key('poster_player_dismiss_transform'),
-      );
-      expect(transformFinder, findsOneWidget);
-
-      await gesture.up();
-      await tester.pump();
-
-      // 未达到 80px，不应触发 onDismiss
-      expect(dismissed, isFalse);
-
-      // 回弹动画完成 (250ms)
-      await tester.pump(const Duration(milliseconds: 300));
-
-      final Transform transform = tester.widget(transformFinder);
-      expect(transform.transform.getTranslation().y, equals(0.0));
+      expect(dragStarted, isTrue);
+      expect(totalDelta, greaterThan(0));
     });
 
     testWidgets('水平向右拖拽不触发 onDismiss 并交由 PageView 切换至上一页', (tester) async {
       final player = _FakePlayerController();
       final auth = _FakeAuthController();
-      var dismissed = false;
+      var dragStarted = false;
       final pageController = PageController(initialPage: 1);
 
       await tester.pumpWidget(
@@ -321,7 +325,7 @@ void main() {
                   auth: auth,
                   onArtistTap: (_) {},
                   onQueue: () {},
-                  onDismiss: () => dismissed = true,
+                  onVerticalDragStart: (_) => dragStarted = true,
                 ),
               ],
             ),
@@ -336,8 +340,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 25));
       }
 
-      // 不触发 onDismiss
-      expect(dismissed, isFalse);
+      // 不触发垂直拖拽
+      expect(dragStarted, isFalse);
       // PageView 切换到第 0 页
       expect(pageController.page, closeTo(0.0, 0.01));
     });
@@ -395,7 +399,7 @@ void main() {
 
       // 下拉超过 80px
       await tester.drag(find.byType(Artwork).first, const Offset(0, 100));
-      for (var i = 0; i < 25; i++) {
+      for (var i = 0; i < 35; i++) {
         await tester.pump(const Duration(milliseconds: 25));
       }
 

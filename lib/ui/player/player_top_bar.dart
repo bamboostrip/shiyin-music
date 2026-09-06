@@ -65,6 +65,11 @@ class TopBar extends StatelessWidget {
     required this.onArtistTap,
     this.currentPage,
     this.onPageSelected,
+    this.onVerticalDragDown,
+    this.onVerticalDragStart,
+    this.onVerticalDragUpdate,
+    this.onVerticalDragEnd,
+    this.onVerticalDragCancel,
   });
 
   final PlayerController player;
@@ -74,11 +79,17 @@ class TopBar extends StatelessWidget {
   final ValueChanged<Song> onArtistTap;
   final int? currentPage;
   final ValueChanged<int>? onPageSelected;
+  final GestureDragDownCallback? onVerticalDragDown;
+  final GestureDragStartCallback? onVerticalDragStart;
+  final GestureDragUpdateCallback? onVerticalDragUpdate;
+  final GestureDragEndCallback? onVerticalDragEnd;
+  final GestureDragCancelCallback? onVerticalDragCancel;
 
   @override
   Widget build(BuildContext context) {
+    Widget content;
     if (currentPage != null) {
-      return Padding(
+      content = Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
         child: Row(
           children: [
@@ -106,72 +117,82 @@ class TopBar extends StatelessWidget {
           ],
         ),
       );
+    } else {
+      content = AnimatedBuilder(
+        animation: auth,
+        builder: (context, _) {
+          final liked = auth.isLiked(song);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 16, 6),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: '返回',
+                  color: Colors.white,
+                  onPressed: onClose,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        song.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        song.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: .82),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GlassIconButton(
+                  tooltip: liked ? '取消喜欢' : '喜欢',
+                  onPressed: song.source == SongSource.kugou
+                      ? () => auth.toggleLike(song)
+                      : null,
+                  icon: liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                ),
+                const SizedBox(width: 8),
+                PlayerAudioQualityPill(player: player),
+                const SizedBox(width: 8),
+                Builder(
+                  builder: (moreButtonContext) => GlassIconButton(
+                    tooltip: '更多',
+                    onPressed: () => _showMoreSheet(moreButtonContext),
+                    icon: Icons.more_horiz_rounded,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
     }
 
-    return AnimatedBuilder(
-      animation: auth,
-      builder: (context, _) {
-        final liked = auth.isLiked(song);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 16, 6),
-          child: Row(
-            children: [
-              IconButton(
-                tooltip: '返回',
-                color: Colors.white,
-                onPressed: onClose,
-                icon: const Icon(Icons.keyboard_arrow_down_rounded),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      song.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: .82),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              GlassIconButton(
-                tooltip: liked ? '取消喜欢' : '喜欢',
-                onPressed: song.source == SongSource.kugou
-                    ? () => auth.toggleLike(song)
-                    : null,
-                icon: liked
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-              ),
-              const SizedBox(width: 8),
-              PlayerAudioQualityPill(player: player),
-              const SizedBox(width: 8),
-              Builder(
-                builder: (moreButtonContext) => GlassIconButton(
-                  tooltip: '更多',
-                  onPressed: () => _showMoreSheet(moreButtonContext),
-                  icon: Icons.more_horiz_rounded,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragDown: onVerticalDragDown,
+      onVerticalDragStart: onVerticalDragStart,
+      onVerticalDragUpdate: onVerticalDragUpdate,
+      onVerticalDragEnd: onVerticalDragEnd,
+      onVerticalDragCancel: onVerticalDragCancel,
+      child: content,
     );
   }
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -199,19 +200,120 @@ class _PlayerBody extends StatefulWidget {
   State<_PlayerBody> createState() => _PlayerBodyState();
 }
 
-class _PlayerBodyState extends State<_PlayerBody> {
+class _PlayerBodyState extends State<_PlayerBody>
+    with SingleTickerProviderStateMixin {
   final _pageController = PageController(initialPage: 0);
   var _page = 0;
   var _pageScrolling = false;
   bool? _lastSystemUiLandscape;
 
+  double _dragDownY = 0.0;
+  double _dragDistance = 0.0;
+  bool _isDismissing = false;
+  late final AnimationController _dismissController;
+  late Animation<double> _dismissAnimation;
+
   bool get _lyricPageVisible => _page == 1 || _pageScrolling;
 
   @override
+  void initState() {
+    super.initState();
+    _dismissAnimation = const AlwaysStoppedAnimation(0.0);
+    _dismissController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    )..addListener(() {
+        setState(() {
+          _dragDistance = _dismissAnimation.value;
+        });
+      })..addStatusListener((status) {
+        if (status == AnimationStatus.completed && _isDismissing) {
+          widget.onClose();
+        }
+      });
+  }
+
+  @override
   void dispose() {
+    _dismissController.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _onVerticalDragDown(DragDownDetails details) {
+    if (_isDismissing) return;
+    _dragDownY = details.globalPosition.dy;
+  }
+
+  void _onVerticalDragStart(DragStartDetails details) {
+    if (_isDismissing) return;
+    if (_dismissController.isAnimating) {
+      _dismissController.stop();
+    }
+    final slop = details.globalPosition.dy - _dragDownY;
+    if (slop > 0) {
+      setState(() {
+        _dragDistance = slop;
+      });
+    }
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    if (_isDismissing) return;
+    final delta = details.primaryDelta ?? 0.0;
+    // 阻尼处理：超过 80 之后位移系数降低
+    final factor = _dragDistance > 80.0 ? 0.6 : 1.0;
+    final newDistance = math.max(0.0, _dragDistance + delta * factor);
+    if (newDistance != _dragDistance) {
+      setState(() {
+        _dragDistance = newDistance;
+      });
+    }
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    if (_isDismissing) return;
+    final velocity = details.primaryVelocity ?? 0.0;
+    if (_dragDistance > 80.0 || velocity > 800.0) {
+      _animateDismiss();
+    } else {
+      _animateReset();
+    }
+  }
+
+  void _onVerticalDragCancel() {
+    if (_isDismissing) return;
+    if (_dragDistance > 0) {
+      _animateReset();
+    }
+  }
+
+  void _animateDismiss() {
+    _isDismissing = true;
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    _dismissAnimation = Tween<double>(
+      begin: _dragDistance,
+      end: screenHeight,
+    ).animate(CurvedAnimation(
+      parent: _dismissController,
+      curve: Curves.easeInCubic,
+    ));
+    _dismissController.duration = const Duration(milliseconds: 200);
+    _dismissController.forward(from: 0.0);
+  }
+
+  void _animateReset() {
+    _isDismissing = false;
+    _dismissAnimation = Tween<double>(
+      begin: _dragDistance,
+      end: 0.0,
+    ).animate(CurvedAnimation(
+      parent: _dismissController,
+      curve: Curves.easeOutCubic,
+    ));
+    _dismissController.duration = const Duration(milliseconds: 250);
+    _dismissController.forward(from: 0.0);
   }
 
   @override
@@ -241,93 +343,116 @@ class _PlayerBodyState extends State<_PlayerBody> {
             statusBarIconBrightness: Brightness.light,
             statusBarBrightness: Brightness.light,
           ),
-          child: Scaffold(
-            backgroundColor: Colors.black,
-            body: Stack(
-              children: [
-                ArtworkBackground(song: widget.song),
-                SafeArea(
-                  // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
-                  // 竖屏已由外层 Scaffold 处理，这里对所有方向统一保留 SafeArea。
-                  child: Column(
-                    children: [
-                      if (!useSplitLayout)
-                        TopBar(
-                          player: widget.player,
-                          auth: widget.auth,
-                          song: widget.song,
-                          onClose: widget.onClose,
-                          onArtistTap: _openArtist,
-                          currentPage: _page,
-                          onPageSelected: (index) =>
-                              _pageController.animateToPage(
-                            index,
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeInOut,
-                          ),
-                        ),
-                      Expanded(
-                        child: useSplitLayout
-                            ? ExcludeSemantics(
-                                child: LandscapePlayerContent(
-                                  player: widget.player,
-                                  auth: widget.auth,
-                                  song: widget.song,
-                                  onClose: widget.onClose,
-                                  onQueue: widget.onQueue,
-                                  onArtistTap: _openArtist,
-                                ),
-                              )
-                            : HorizontalWheelPageScroll(
-                                controller: _pageController,
-                                child: NotificationListener<ScrollNotification>(
-                                  onNotification: _handlePageScrollNotification,
-                                  child: PageView(
-                                    controller: _pageController,
-                                    allowImplicitScrolling: true,
-                                    onPageChanged: (value) =>
-                                        _setPageState(page: value),
-                                    children: [
-                                      PosterPlayerPage(
-                                        key: const PageStorageKey(
-                                          'poster-player-page',
-                                        ),
-                                        player: widget.player,
-                                        song: widget.song,
-                                        onQueue: widget.onQueue,
-                                        auth: widget.auth,
-                                        onArtistTap: _openArtist,
-                                        onCoverTap: () => _showMoreSheet(context),
-                                        onDismiss: widget.onClose,
-                                        onLyricTap: () {
-                                          if (_pageController.hasClients) {
-                                            _pageController.animateToPage(
-                                              1,
-                                              duration: const Duration(
-                                                milliseconds: 250,
-                                              ),
-                                              curve: Curves.easeInOut,
-                                            );
-                                          }
-                                        },
-                                      ),
-                                      LyricPlayerPage(
-                                        key: const PageStorageKey(
-                                          'lyric-player-page',
-                                        ),
-                                        player: widget.player,
-                                        song: widget.song,
-                                        isPageVisible: _lyricPageVisible,
-                                      ),
-                                    ],
-                                  ),
-                                ),
+          child: Transform.translate(
+            key: const Key('player_body_dismiss_transform'),
+            offset: Offset(0, _dragDistance),
+            child: ClipRRect(
+              key: const Key('player_body_dismiss_clip'),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(_dragDistance > 0 ? 12.0 : 0.0),
+              ),
+              child: Scaffold(
+                backgroundColor: Colors.black,
+                body: Stack(
+                  children: [
+                    ArtworkBackground(song: widget.song),
+                    SafeArea(
+                      // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
+                      // 竖屏已由外层 Scaffold 处理，这里对所有方向统一保留 SafeArea。
+                      child: Column(
+                        children: [
+                          if (!useSplitLayout)
+                            TopBar(
+                              player: widget.player,
+                              auth: widget.auth,
+                              song: widget.song,
+                              onClose: widget.onClose,
+                              onArtistTap: _openArtist,
+                              currentPage: _page,
+                              onPageSelected: (index) =>
+                                  _pageController.animateToPage(
+                                index,
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeInOut,
                               ),
+                              onVerticalDragDown: _onVerticalDragDown,
+                              onVerticalDragStart: _onVerticalDragStart,
+                              onVerticalDragUpdate: _onVerticalDragUpdate,
+                              onVerticalDragEnd: _onVerticalDragEnd,
+                              onVerticalDragCancel: _onVerticalDragCancel,
+                            ),
+                          Expanded(
+                            child: useSplitLayout
+                                ? ExcludeSemantics(
+                                    child: LandscapePlayerContent(
+                                      player: widget.player,
+                                      auth: widget.auth,
+                                      song: widget.song,
+                                      onClose: widget.onClose,
+                                      onQueue: widget.onQueue,
+                                      onArtistTap: _openArtist,
+                                    ),
+                                  )
+                                : HorizontalWheelPageScroll(
+                                    controller: _pageController,
+                                    child: NotificationListener<ScrollNotification>(
+                                      onNotification: _handlePageScrollNotification,
+                                      child: PageView(
+                                        controller: _pageController,
+                                        allowImplicitScrolling: true,
+                                        onPageChanged: (value) =>
+                                            _setPageState(page: value),
+                                        children: [
+                                          PosterPlayerPage(
+                                            key: const PageStorageKey(
+                                              'poster-player-page',
+                                            ),
+                                            player: widget.player,
+                                            song: widget.song,
+                                            onQueue: widget.onQueue,
+                                            auth: widget.auth,
+                                            onArtistTap: _openArtist,
+                                            onCoverTap: () => _showMoreSheet(context),
+                                            onDismiss: widget.onClose,
+                                            onVerticalDragDown: _onVerticalDragDown,
+                                            onVerticalDragStart:
+                                                _onVerticalDragStart,
+                                            onVerticalDragUpdate:
+                                                _onVerticalDragUpdate,
+                                            onVerticalDragEnd: _onVerticalDragEnd,
+                                            onVerticalDragCancel:
+                                                _onVerticalDragCancel,
+                                            onLyricTap: () {
+                                              if (_pageController.hasClients) {
+                                                _pageController.animateToPage(
+                                                  1,
+                                                  duration: const Duration(
+                                                    milliseconds: 250,
+                                                  ),
+                                                  curve: Curves.easeInOut,
+                                                );
+                                              }
+                                            },
+                                          ),
+                                          LyricPlayerPage(
+                                            key: const PageStorageKey(
+                                              'lyric-player-page',
+                                            ),
+                                            player: widget.player,
+                                            song: widget.song,
+                                            isPageVisible: _lyricPageVisible,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

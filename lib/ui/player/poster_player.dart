@@ -28,6 +28,11 @@ class PosterPlayerPage extends StatefulWidget {
     this.onLyricTap,
     this.onCoverTap,
     this.onDismiss,
+    this.onVerticalDragDown,
+    this.onVerticalDragStart,
+    this.onVerticalDragUpdate,
+    this.onVerticalDragEnd,
+    this.onVerticalDragCancel,
   });
 
   final PlayerController player;
@@ -38,194 +43,108 @@ class PosterPlayerPage extends StatefulWidget {
   final VoidCallback? onLyricTap;
   final VoidCallback? onCoverTap;
   final VoidCallback? onDismiss;
+  final GestureDragDownCallback? onVerticalDragDown;
+  final GestureDragStartCallback? onVerticalDragStart;
+  final GestureDragUpdateCallback? onVerticalDragUpdate;
+  final GestureDragEndCallback? onVerticalDragEnd;
+  final GestureDragCancelCallback? onVerticalDragCancel;
 
   @override
   State<PosterPlayerPage> createState() => _PosterPlayerPageState();
 }
 
 class _PosterPlayerPageState extends State<PosterPlayerPage>
-    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
-  double _dragDownY = 0.0;
-  double _dragDistance = 0.0;
-  late final AnimationController _resetController;
-  late Animation<double> _resetAnimation;
-
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _resetAnimation = const AlwaysStoppedAnimation(0.0);
-    _resetController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    )..addListener(() {
-        setState(() {
-          _dragDistance = _resetAnimation.value;
-        });
-      });
-  }
-
-  @override
-  void dispose() {
-    _resetController.dispose();
-    super.dispose();
-  }
-
-  void _onVerticalDragDown(DragDownDetails details) {
-    _dragDownY = details.globalPosition.dy;
-  }
-
-  void _onVerticalDragStart(DragStartDetails details) {
-    if (widget.onDismiss == null) return;
-    if (_resetController.isAnimating) {
-      _resetController.stop();
-    }
-    final slop = details.globalPosition.dy - _dragDownY;
-    if (slop > 0) {
-      setState(() {
-        _dragDistance = slop;
-      });
-    }
-  }
-
-  void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (widget.onDismiss == null) return;
-    final delta = details.primaryDelta ?? 0.0;
-    // 阻尼处理：超过 80 之后位移系数降低
-    final factor = _dragDistance > 80.0 ? 0.6 : 1.0;
-    final newDistance = math.max(0.0, _dragDistance + delta * factor);
-    if (newDistance != _dragDistance) {
-      setState(() {
-        _dragDistance = newDistance;
-      });
-    }
-  }
-
-  void _onVerticalDragEnd(DragEndDetails details) {
-    if (widget.onDismiss == null) return;
-    final velocity = details.primaryVelocity ?? 0.0;
-    if (_dragDistance > 80.0 || velocity > 800.0) {
-      widget.onDismiss?.call();
-      _dragDistance = 0.0;
-    } else {
-      _animateReset();
-    }
-  }
-
-  void _onVerticalDragCancel() {
-    if (widget.onDismiss == null) return;
-    if (_dragDistance > 0) {
-      _animateReset();
-    }
-  }
-
-  void _animateReset() {
-    _resetAnimation = Tween<double>(
-      begin: _dragDistance,
-      end: 0.0,
-    ).animate(CurvedAnimation(
-      parent: _resetController,
-      curve: Curves.easeOutCubic,
-    ));
-    _resetController.forward(from: 0.0);
-  }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onVerticalDragDown: widget.onDismiss != null ? _onVerticalDragDown : null,
-      onVerticalDragStart:
-          widget.onDismiss != null ? _onVerticalDragStart : null,
-      onVerticalDragUpdate:
-          widget.onDismiss != null ? _onVerticalDragUpdate : null,
-      onVerticalDragEnd: widget.onDismiss != null ? _onVerticalDragEnd : null,
-      onVerticalDragCancel:
-          widget.onDismiss != null ? _onVerticalDragCancel : null,
-      child: Transform.translate(
-        key: const Key('poster_player_dismiss_transform'),
-        offset: Offset(0, _dragDistance),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxHeight < 650;
-            final horizontalPadding = compact ? 20.0 : 28.0;
+      onVerticalDragDown: widget.onVerticalDragDown,
+      onVerticalDragStart: widget.onVerticalDragStart,
+      onVerticalDragUpdate: widget.onVerticalDragUpdate,
+      onVerticalDragEnd: widget.onVerticalDragEnd,
+      onVerticalDragCancel: widget.onVerticalDragCancel,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxHeight < 650;
+          final horizontalPadding = compact ? 20.0 : 28.0;
 
-            final maxArtworkHeight =
-                (constraints.maxHeight * (compact ? 0.34 : 0.42))
-                    .clamp(130.0, 330.0);
-            final artworkMaxWidth = math.min(
-              constraints.maxWidth - horizontalPadding * 2,
-              maxArtworkHeight,
-            );
+          final maxArtworkHeight =
+              (constraints.maxHeight * (compact ? 0.34 : 0.42))
+                  .clamp(130.0, 330.0);
+          final artworkMaxWidth = math.min(
+            constraints.maxWidth - horizontalPadding * 2,
+            maxArtworkHeight,
+          );
 
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                compact ? 4 : 8,
-                horizontalPadding,
-                compact ? 10 : 16,
-              ),
-              child: Column(
-                children: [
-                  const Spacer(),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: artworkMaxWidth),
-                    child: AspectRatio(
-                      aspectRatio: 1,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          widget.onCoverTap?.call();
-                        },
-                        child: Hero(
-                          tag: 'player_cover',
-                          child: Artwork(
-                            url: widget.song.coverUrl,
-                            size: double.infinity,
-                            borderRadius: 8,
-                          ),
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              compact ? 4 : 8,
+              horizontalPadding,
+              compact ? 10 : 16,
+            ),
+            child: Column(
+              children: [
+                const Spacer(),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: artworkMaxWidth),
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        widget.onCoverTap?.call();
+                      },
+                      child: Hero(
+                        tag: 'player_cover',
+                        child: Artwork(
+                          url: widget.song.coverUrl,
+                          size: double.infinity,
+                          borderRadius: 8,
                         ),
                       ),
                     ),
                   ),
-              SizedBox(height: compact ? 12 : 20),
-              PosterSongInfoRow(
-                song: widget.song,
-                player: widget.player,
-                auth: widget.auth,
-                onArtistTap: widget.onArtistTap,
-              ),
-              SizedBox(height: compact ? 8 : 14),
-              PosterLyricPreview(
-                player: widget.player,
-                onLyricTap: widget.onLyricTap,
-                compact: compact,
-              ),
-              SizedBox(height: compact ? 8 : 12),
-              PosterActionRail(
-                player: widget.player,
-                song: widget.song,
-                auth: widget.auth,
-              ),
-              const Spacer(),
-              Progress(player: widget.player, bright: true),
-              SizedBox(height: compact ? 6 : 10),
-              Controls(
-                player: widget.player,
-                bright: true,
-                onQueue: widget.onQueue,
-              ),
-            ],
-          ),
-        );
-      },
-    ),
-  ),
-);
+                ),
+                SizedBox(height: compact ? 12 : 20),
+                PosterSongInfoRow(
+                  song: widget.song,
+                  player: widget.player,
+                  auth: widget.auth,
+                  onArtistTap: widget.onArtistTap,
+                ),
+                SizedBox(height: compact ? 8 : 14),
+                PosterLyricPreview(
+                  player: widget.player,
+                  onLyricTap: widget.onLyricTap,
+                  compact: compact,
+                ),
+                SizedBox(height: compact ? 8 : 12),
+                PosterActionRail(
+                  player: widget.player,
+                  song: widget.song,
+                  auth: widget.auth,
+                ),
+                const Spacer(),
+                Progress(player: widget.player, bright: true),
+                SizedBox(height: compact ? 6 : 10),
+                Controls(
+                  player: widget.player,
+                  bright: true,
+                  onQueue: widget.onQueue,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 
