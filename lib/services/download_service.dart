@@ -227,6 +227,14 @@ class DownloadService {
     // .part 带 cacheKey：不同歌曲清洗出同名文件（大小写变体/非法字符
     // 归一）时若共用 partPath，并发下载会互相写对方的半成品。
     final partPath = '$targetPath.$key.part';
+    // 升级迁移：旧版 partPath 为 $targetPath.part（不带 key），新版无法
+    // 复用，残留即垃圾。首次遇到顺手删除，避免公共 Download 目录堆积。
+    final legacyPart = File('$targetPath.part');
+    if (legacyPart.path != partPath && legacyPart.existsSync()) {
+      try {
+        await legacyPart.delete();
+      } catch (_) {}
+    }
     final cancelToken = CancelToken();
     _cancelTokens[key] = cancelToken;
 
