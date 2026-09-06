@@ -1508,71 +1508,80 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                         pinned: true,
                         delegate: _StickyHeaderDelegate(
                           height: _stickyHeaderDelegateHeight,
-                          child: isDesktopFormFactor
-                              ? Container(
-                                  color: Theme.of(context).colorScheme.surface,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SizedBox(
-                                        height: _stickyHeaderHeight,
-                                        child: _ListStickyBar(
-                                          flatTop: true,
-                                          selecting: _isSelecting,
-                                          selectedCount: _selectedCount,
-                                          allSelected: _isAllSelected,
-                                          onToggleSelectAll: _selectPool.isEmpty
-                                              ? null
-                                              : _toggleSelectAll,
-                                          onDone: _exitSelectMode,
-                                          title: stickyTitle,
-                                          subtitle: stickySubtitle,
-                                          canPlay: _playbackQueueNow().isNotEmpty,
-                                          onPlay: _playAll,
-                                          onSearch: _toggleSearch,
-                                          onSort: () => _showSortSheet(context),
-                                          selectEnabled:
-                                              _songs.isNotEmpty || _hasMore,
-                                          onSelect: _enterSelectMode,
-                                        ),
+                          scrollController: _scrollController,
+                          heroExpandedHeight:
+                              _isSearching ? 0.0 : _heroExpandedHeight,
+                          builder: (context, topRadius) {
+                            if (isDesktopFormFactor) {
+                              return Container(
+                                color: Theme.of(context).colorScheme.surface,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      height: _stickyHeaderHeight,
+                                      child: ListStickyBar(
+                                        flatTop: true,
+                                        topRadiusOverride: 0.0,
+                                        selecting: _isSelecting,
+                                        selectedCount: _selectedCount,
+                                        allSelected: _isAllSelected,
+                                        onToggleSelectAll: _selectPool.isEmpty
+                                            ? null
+                                            : _toggleSelectAll,
+                                        onDone: _exitSelectMode,
+                                        title: stickyTitle,
+                                        subtitle: stickySubtitle,
+                                        canPlay:
+                                            _playbackQueueNow().isNotEmpty,
+                                        onPlay: _playAll,
+                                        onSearch: _toggleSearch,
+                                        onSort: () => _showSortSheet(context),
+                                        selectEnabled:
+                                            _songs.isNotEmpty || _hasMore,
+                                        onSelect: _enterSelectMode,
                                       ),
-                                      if (_showDesktopTableHeader)
-                                        SizedBox(
-                                          height: 36.0,
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                            ),
-                                            child: _DesktopSongTableHeader(
-                                              selecting: _isSelecting,
-                                              allSelected: _isAllSelected,
-                                              onToggleSelectAll: _selectPool.isEmpty
-                                                  ? null
-                                                  : _toggleSelectAll,
-                                            ),
+                                    ),
+                                    if (_showDesktopTableHeader)
+                                      SizedBox(
+                                        height: 36.0,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                          ),
+                                          child: _DesktopSongTableHeader(
+                                            selecting: _isSelecting,
+                                            allSelected: _isAllSelected,
+                                            onToggleSelectAll:
+                                                _selectPool.isEmpty
+                                                    ? null
+                                                    : _toggleSelectAll,
                                           ),
                                         ),
-                                    ],
-                                  ),
-                                )
-                              : _ListStickyBar(
-                                  selecting: _isSelecting,
-                                  selectedCount: _selectedCount,
-                                  allSelected: _isAllSelected,
-                                  onToggleSelectAll: _selectPool.isEmpty
-                                      ? null
-                                      : _toggleSelectAll,
-                                  onDone: _exitSelectMode,
-                                  title: stickyTitle,
-                                  subtitle: stickySubtitle,
-                                  canPlay: _playbackQueueNow().isNotEmpty,
-                                  onPlay: _playAll,
-                                  onSearch: _toggleSearch,
-                                  onSort: () => _showSortSheet(context),
-                                  selectEnabled:
-                                      _songs.isNotEmpty || _hasMore,
-                                  onSelect: _enterSelectMode,
+                                      ),
+                                  ],
                                 ),
+                              );
+                            }
+                            return ListStickyBar(
+                              topRadiusOverride: topRadius,
+                              selecting: _isSelecting,
+                              selectedCount: _selectedCount,
+                              allSelected: _isAllSelected,
+                              onToggleSelectAll: _selectPool.isEmpty
+                                  ? null
+                                  : _toggleSelectAll,
+                              onDone: _exitSelectMode,
+                              title: stickyTitle,
+                              subtitle: stickySubtitle,
+                              canPlay: _playbackQueueNow().isNotEmpty,
+                              onPlay: _playAll,
+                              onSearch: _toggleSearch,
+                              onSort: () => _showSortSheet(context),
+                              selectEnabled: _songs.isNotEmpty || _hasMore,
+                              onSelect: _enterSelectMode,
+                            );
+                          },
                         ),
                       ),
                       // 只有空列表时才用全屏 loading 占位；已有歌曲时保留列表、
@@ -2606,11 +2615,24 @@ class _SkeletonBox extends StatelessWidget {
 }
 
 /// 粘性头的 sliver 代理：固定高度，置顶后依然可播/可搜/可排（参考图4）。
-class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _StickyHeaderDelegate({required this.height, required this.child});
+@visibleForTesting
+class StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  StickyHeaderDelegate({
+    required this.height,
+    this.child,
+    this.builder,
+    this.scrollController,
+    this.heroExpandedHeight,
+  }) : assert(
+          child != null || builder != null,
+          'Either child or builder must be provided',
+        );
 
   final double height;
-  final Widget child;
+  final Widget? child;
+  final Widget Function(BuildContext context, double topRadius)? builder;
+  final ScrollController? scrollController;
+  final double? heroExpandedHeight;
 
   @override
   double get minExtent => height;
@@ -2618,31 +2640,72 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   double get maxExtent => height;
 
+  double _computeTopRadius(bool overlapsContent) {
+    if (isDesktopFormFactor || overlapsContent) {
+      return 0.0;
+    }
+    if (scrollController != null &&
+        scrollController!.hasClients &&
+        heroExpandedHeight != null) {
+      final delta = heroExpandedHeight! - kToolbarHeight;
+      final offset = scrollController!.offset;
+      if (offset >= delta) {
+        return 0.0;
+      }
+      if (offset <= delta - 16.0) {
+        return 16.0;
+      }
+      return (16.0 * (delta - offset) / 16.0).clamp(0.0, 16.0);
+    }
+    return 16.0;
+  }
+
   @override
   Widget build(
     BuildContext context,
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    return SizedBox.expand(child: child);
+    if (builder != null) {
+      if (scrollController != null) {
+        return AnimatedBuilder(
+          animation: scrollController!,
+          builder: (context, _) {
+            final radius = _computeTopRadius(overlapsContent);
+            return SizedBox.expand(child: builder!(context, radius));
+          },
+        );
+      }
+      final radius = _computeTopRadius(overlapsContent);
+      return SizedBox.expand(child: builder!(context, radius));
+    }
+    return SizedBox.expand(child: child!);
   }
 
   @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.height != height || oldDelegate.child != child;
+  bool shouldRebuild(covariant StickyHeaderDelegate oldDelegate) {
+    return oldDelegate.height != height ||
+        oldDelegate.child != child ||
+        oldDelegate.builder != builder ||
+        oldDelegate.scrollController != scrollController ||
+        oldDelegate.heroExpandedHeight != heroExpandedHeight;
   }
 }
+
+typedef _StickyHeaderDelegate = StickyHeaderDelegate;
 
 /// 参考图4的粘性歌曲条：左侧蓝色播放 pill，
 /// 中间两行计数（标题+副标题各自省略，窄屏不再挤没「已加载」），
 /// 右侧搜索/排序/多选三个幽灵图标。多选模式下切换为已选计数+全选。
 ///
 /// 圆角契约（PC+移动统一收敛到设计 Token）：
-/// - 移动端：顶部圆角 16（AppRadius.lg 标准卡片），置顶时与背景自然衔接；
+/// - 移动端：顶部圆角 16（AppRadius.lg 标准卡片），未吸顶时为 16，吸顶过程中平滑插值到 0；
 /// - 桌面端：[flatTop]=true 时顶部直角、无上浮阴影（QQ 音乐 PC 式扁平表头，
 ///   置顶时与 AppBar 无缝，不再出现 22px 大圆角置顶后的两侧缺口）。
-class _ListStickyBar extends StatelessWidget {
-  const _ListStickyBar({
+@visibleForTesting
+class ListStickyBar extends StatelessWidget {
+  const ListStickyBar({
+    super.key,
     required this.selecting,
     required this.selectedCount,
     required this.allSelected,
@@ -2657,6 +2720,7 @@ class _ListStickyBar extends StatelessWidget {
     required this.selectEnabled,
     required this.onSelect,
     this.flatTop = false,
+    this.topRadiusOverride,
   });
 
   final bool selecting;
@@ -2673,21 +2737,26 @@ class _ListStickyBar extends StatelessWidget {
   final bool selectEnabled;
   final VoidCallback onSelect;
   final bool flatTop;
+  final double? topRadiusOverride;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final effectiveRadius =
+        (topRadiusOverride ?? (flatTop ? 0.0 : AppRadius.lg))
+            .clamp(0.0, AppRadius.lg);
+
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        borderRadius: flatTop
+        borderRadius: effectiveRadius <= 0
             ? BorderRadius.zero
-            : const BorderRadius.vertical(
-                top: Radius.circular(AppRadius.lg),
+            : BorderRadius.vertical(
+                top: Radius.circular(effectiveRadius),
               ),
-        boxShadow: flatTop
+        boxShadow: effectiveRadius <= 0
             ? null
             : [
                 BoxShadow(
@@ -2833,6 +2902,8 @@ class _ListStickyBar extends StatelessWidget {
     );
   }
 }
+
+typedef _ListStickyBar = ListStickyBar;
 
 class _StickyHeaderIconButton extends StatelessWidget {
   const _StickyHeaderIconButton({
