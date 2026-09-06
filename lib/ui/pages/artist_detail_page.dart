@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../widgets/app_section.dart';
-import '../design_tokens.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -647,19 +645,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                         )
                       else
-                        isDesktopFormFactor
-                            // PC：QQ 音乐风格响应式网格（sliver，随宽度自适应列数）。
-                            ? AlbumSliverGridSection(
-                                albums: _albums,
-                                onTap: _openAlbum,
-                              )
-                            // 移动端 / 车机端：保持原横轨。
-                            : SliverToBoxAdapter(
-                                child: _ArtistAlbumSection(
-                                  albums: _albums,
-                                  onTap: _openAlbum,
-                                ),
-                              ),
+                        AlbumSliverGridSection(
+                          albums: _albums,
+                          onTap: _openAlbum,
+                          sectionSidePadding: isDesktopFormFactor ? 18 : 16,
+                        ),
                     ],
                     // 底部留白：移动端播放中时为 MiniPlayer 预留空间，
                     // 防止卡片遮挡导致用户点不到最底部的几首歌。
@@ -704,86 +694,83 @@ class _ArtistHeader extends StatelessWidget {
     final avatar = detail?.avatarUrl ?? fallback.avatarUrl;
 
     // 作为 SliverAppBar 的 flexibleSpace 背景，尺寸由展开高度决定，
-    // 这里只需填满并保留底部圆角。
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (avatar == null)
-            const _ArtistPosterFallback()
-          else
-            Image.network(
-              avatar,
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
-              cacheWidth: 800,
-              cacheHeight: 800,
-              errorBuilder: (context, error, stackTrace) =>
-                  const _ArtistPosterFallback(),
-            ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withValues(alpha: .20),
-                  Colors.black.withValues(alpha: .06),
-                  Colors.black.withValues(alpha: .58),
-                ],
-                stops: const [0, .48, 1],
-              ),
-            ),
+    // 底部直角平铺，与下方 Tab 栏无缝衔接，无圆角裁切。
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (avatar == null)
+          const _ArtistPosterFallback()
+        else
+          Image.network(
+            avatar,
+            fit: BoxFit.cover,
+            alignment: Alignment.topCenter,
+            cacheWidth: 800,
+            cacheHeight: 800,
+            errorBuilder: (context, error, stackTrace) =>
+                const _ArtistPosterFallback(),
           ),
-          Positioned(
-            left: 22,
-            right: 22,
-            bottom: 26,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  detail?.name ?? fallback.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    height: 1.08,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: .18),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: .22),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    child: Text(
-                      detail?.birthday?.isNotEmpty == true
-                          ? '生日 ${detail!.birthday}'
-                          : '歌手 ID ${detail?.id ?? fallback.id}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withValues(alpha: .88),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: .20),
+                Colors.black.withValues(alpha: .06),
+                Colors.black.withValues(alpha: .58),
               ],
+              stops: const [0, .48, 1],
             ),
           ),
-        ],
-      ),
+        ),
+        Positioned(
+          left: 22,
+          right: 22,
+          bottom: 26,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                detail?.name ?? fallback.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  height: 1.08,
+                ),
+              ),
+              const SizedBox(height: 10),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: .18),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: .22),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  child: Text(
+                    detail?.birthday?.isNotEmpty == true
+                        ? '生日 ${detail!.birthday}'
+                        : '歌手 ID ${detail?.id ?? fallback.id}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: .88),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -810,73 +797,6 @@ class _ArtistPosterFallback extends StatelessWidget {
         Icons.person_rounded,
         size: 88,
         color: Colors.white.withValues(alpha: .86),
-      ),
-    );
-  }
-}
-
-/// 歌手专辑横向区块（移动端 / 车机端横轨；PC 端为 AlbumSliverGridSection）。
-class _ArtistAlbumSection extends StatelessWidget {
-  const _ArtistAlbumSection({required this.albums, required this.onTap});
-
-  final List<ArtistAlbum> albums;
-  final ValueChanged<ArtistAlbum> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppHorizontalRail<ArtistAlbum>(
-      title: '专辑 ${albums.length}',
-      items: albums,
-      height: 168,
-      itemWidth: 120,
-      topPadding: 4,
-      headerPadding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
-      itemBuilder: (context, album) =>
-          _ArtistAlbumCard(album: album, onTap: () => onTap(album)),
-    );
-  }
-}
-
-class _ArtistAlbumCard extends StatelessWidget {
-  const _ArtistAlbumCard({required this.album, required this.onTap});
-
-  final ArtistAlbum album;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: SizedBox(
-        width: 120,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              child: Artwork(url: album.coverUrl, size: 120),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              album.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            ),
-            if (album.publishDate case final date?)
-              Text(
-                date,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
-        ),
       ),
     );
   }

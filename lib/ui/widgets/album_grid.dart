@@ -38,13 +38,26 @@ double albumGridCellExtent(double cellWidth) => cellWidth + 64;
 /// 专辑网格横向 / 纵向间距。
 const double _kAlbumGridSpacing = 14;
 
-/// 专辑区（PC 桌面端）：标题 + 响应式网格，以 sliver 形式嵌入页面
-/// [CustomScrollView]。
+/// 根据可用宽度自适应计算专辑网格列数（支持移动端与桌面端）。
 ///
-/// 基准 = QQ 音乐 PC 歌手页：多行多列网格，列数由 [albumGridColumns]
-/// 随可用宽度自适应；不用 shrinkWrap GridView，滚动交给页面外层
-/// 纵向滚动处理。移动端 / 车机端不使用本组件（保持 [AppHorizontalRail]
-/// 横轨路径不变）。
+/// - contentWidth < 300: 2 列（极窄屏）
+/// - 300 <= contentWidth <= 500: 3 列（手机竖屏基准，卡片宽度约 105~120dp）
+/// - contentWidth > 500: 调用 [albumGridColumns]，4~8 列自适应（桌面/平板/宽屏）
+int resolveAlbumGridColumns(double contentWidth) {
+  if (contentWidth < 300) {
+    return 2;
+  }
+  if (contentWidth <= 500) {
+    return 3;
+  }
+  return albumGridColumns(contentWidth);
+}
+
+/// 专辑区：标题 + 响应式网格，以 sliver 形式嵌入页面
+/// [CustomScrollView]（支持移动端与桌面端纵向滚动）。
+///
+/// 列数随可用宽度自适应（手机竖屏 3 列，桌面端 4~8 列）；
+/// 滚动交给外层页面纵向滚动处理。
 class AlbumSliverGridSection extends StatelessWidget {
   const AlbumSliverGridSection({
     super.key,
@@ -56,7 +69,7 @@ class AlbumSliverGridSection extends StatelessWidget {
   final List<ArtistAlbum> albums;
   final ValueChanged<ArtistAlbum> onTap;
 
-  /// 区块两侧外边距，与页面其他 PC 区块（18px）保持一致。
+  /// 区块两侧外边距，桌面端默认 18px，移动端可设为 16px。
   final double sectionSidePadding;
 
   @override
@@ -65,7 +78,7 @@ class AlbumSliverGridSection extends StatelessWidget {
       builder: (context, constraints) {
         final side = sectionSidePadding;
         final contentWidth = constraints.crossAxisExtent - side * 2;
-        final columns = albumGridColumns(contentWidth);
+        final columns = resolveAlbumGridColumns(contentWidth);
         final spacing = columns > 1 ? _kAlbumGridSpacing : 0.0;
         final cellWidth =
             ((contentWidth - spacing * (columns - 1)) / columns)

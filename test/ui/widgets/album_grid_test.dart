@@ -74,6 +74,26 @@ void main() {
     });
   });
 
+  group('resolveAlbumGridColumns 移动端与桌面端自适应列数', () {
+    test('手机竖屏常见内容宽度 (300~500) 固定为 3 列', () {
+      expect(resolveAlbumGridColumns(320), 3);
+      expect(resolveAlbumGridColumns(354), 3); // 390 宽 - 36 padding
+      expect(resolveAlbumGridColumns(400), 3);
+      expect(resolveAlbumGridColumns(500), 3);
+    });
+
+    test('极窄宽度 (< 300) 返回 2 列', () {
+      expect(resolveAlbumGridColumns(280), 2);
+      expect(resolveAlbumGridColumns(200), 2);
+      expect(resolveAlbumGridColumns(0), 2);
+    });
+
+    test('宽屏宽度 (> 500) 交由 albumGridColumns 计算 (4~8 列)', () {
+      expect(resolveAlbumGridColumns(564), 4); // 600 宽 - 36 padding
+      expect(resolveAlbumGridColumns(1164), 6); // 1200 宽 - 36 padding
+    });
+  });
+
   group('albumGridCellExtent 纯函数', () {
     test('单元格高度 = 方形封面宽 + 文本块固定高度', () {
       expect(albumGridCellExtent(0), 64);
@@ -82,6 +102,14 @@ void main() {
   });
 
   group('AlbumSliverGridSection', () {
+    testWidgets('手机竖屏宽度（390px）自适应渲染 3 列网格', (tester) async {
+      await _pump(tester, albums: _albums(6), width: 390);
+
+      expect(find.text('专辑 6'), findsOneWidget);
+      expect(_columnCountOf(tester), 3);
+      expect(find.text('专辑名称0'), findsOneWidget);
+      expect(find.text('专辑名称5'), findsOneWidget);
+    });
     testWidgets('渲染标题与专辑卡片，列数随宽度自适应', (tester) async {
       await _pump(tester, albums: _albums(8), width: 1200);
 

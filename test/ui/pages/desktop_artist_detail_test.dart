@@ -313,5 +313,41 @@ void main() {
 
       expect(find.byType(MiniPlayer), findsOneWidget);
     });
+
+    testWidgets('移动端点击【所有专辑】Tab 渲染 AlbumSliverGridSection 竖向网格', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildSubject());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('所有专辑'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlbumSliverGridSection), findsOneWidget);
+      expect(find.text('范特西'), findsOneWidget);
+      expect(find.text('专辑 1'), findsOneWidget);
+    });
+
+    testWidgets('移动端歌手头部不使用 28px 圆角裁切', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildSubject());
+      await tester.pumpAndSettle();
+
+      final clipRRects = tester.widgetList<ClipRRect>(find.byType(ClipRRect));
+      for (final clip in clipRRects) {
+        if (clip.borderRadius is BorderRadius) {
+          final br = clip.borderRadius as BorderRadius;
+          expect(br.bottomLeft.x, isNot(28.0));
+          expect(br.bottomRight.x, isNot(28.0));
+        }
+      }
+    });
   });
 }
