@@ -56,6 +56,7 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
   @override
   void initState() {
     super.initState();
+    _resetAnimation = const AlwaysStoppedAnimation(0.0);
     _resetController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -83,7 +84,9 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
     }
     final slop = details.globalPosition.dy - _dragDownY;
     if (slop > 0) {
-      _dragDistance = slop;
+      setState(() {
+        _dragDistance = slop;
+      });
     }
   }
 
@@ -105,6 +108,7 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
     final velocity = details.primaryVelocity ?? 0.0;
     if (_dragDistance > 80.0 || velocity > 800.0) {
       widget.onDismiss?.call();
+      _dragDistance = 0.0;
     } else {
       _animateReset();
     }

@@ -2652,12 +2652,12 @@ class StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
       if (offset >= delta) {
         return 0.0;
       }
-      if (offset <= delta - 16.0) {
-        return 16.0;
+      if (offset <= delta - AppRadius.lg) {
+        return AppRadius.lg;
       }
-      return (16.0 * (delta - offset) / 16.0).clamp(0.0, 16.0);
+      return (AppRadius.lg * (delta - offset) / AppRadius.lg).clamp(0.0, AppRadius.lg);
     }
-    return 16.0;
+    return AppRadius.lg;
   }
 
   @override
@@ -2902,8 +2902,6 @@ class ListStickyBar extends StatelessWidget {
     );
   }
 }
-
-typedef _ListStickyBar = ListStickyBar;
 
 class _StickyHeaderIconButton extends StatelessWidget {
   const _StickyHeaderIconButton({
