@@ -34,6 +34,10 @@ class NetworkMonitor {
   ///
   /// 判定：包含 mobile 且不包含 wifi/ethernet。
   /// 多传输并存（如 wifi+vpn）按 WiFi 对待；未知/空按非蜂窝处理。
+  ///
+  /// 未知按放行是安全的：唯一消费者是后台音频缓存门控，而预缓存
+  /// 要求播放 ≥15s 才会触发，远晚于 start() 的一次 checkConnectivity
+  /// （毫秒级）；真正查不到的桌面无 NM 环境本就没有蜂窝。
   bool get isCellular {
     if (_results.isEmpty) return false;
     if (_results.contains(ConnectivityResult.wifi) ||

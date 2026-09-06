@@ -599,9 +599,30 @@ class CenterDisc extends StatelessWidget {
         builder: (context, _) {
           final song = player.currentSong;
           final hasSong = song != null;
-          final durationMs = player.duration.inMilliseconds;
-          final positionMs = player.position.inMilliseconds;
-          final progress = (durationMs > 0 ? positionMs / durationMs : 0.0).clamp(0.0, 1.0);
+          // 进度环单独听 positionListenable：position 字段只在大 notify 才变，
+          // 直接读它圆环播放中会 frozen，这里用 tick 值驱动
+          final progressRing = ValueListenableBuilder<Duration>(
+            valueListenable: player.positionListenable,
+            builder: (context, pos, _) {
+              final durationMs = player.duration.inMilliseconds;
+              final progress = (durationMs > 0 && hasSong
+                      ? pos.inMilliseconds / durationMs
+                      : 0.0)
+                  .clamp(0.0, 1.0);
+              return SizedBox(
+                width: 52,
+                height: 52,
+                child: CircularProgressIndicator(
+                  value: hasSong ? progress : 0,
+                  strokeWidth: 2.5,
+                  backgroundColor:
+                      colorScheme.outlineVariant.withValues(alpha: .35),
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(colorScheme.primary),
+                ),
+              );
+            },
+          );
           return SizedBox(
             width: 52,
             height: 52,
@@ -609,16 +630,7 @@ class CenterDisc extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 // 进度环
-                SizedBox(
-                  width: 52,
-                  height: 52,
-                  child: CircularProgressIndicator(
-                    value: hasSong ? progress : 0,
-                    strokeWidth: 2.5,
-                    backgroundColor: colorScheme.outlineVariant.withValues(alpha: .35),
-                    valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
-                  ),
-                ),
+                progressRing,
                 // 封面
                 Container(
                   width: 42,

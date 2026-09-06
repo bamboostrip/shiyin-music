@@ -178,11 +178,11 @@ class _MiniPlayerContent extends StatelessWidget {
                         ),
                         ValueListenableBuilder<Duration>(
                           valueListenable: player.positionListenable,
-                          builder: (context, _, _) {
+                          builder: (context, pos, _) {
                             final progress =
                                 player.duration.inMilliseconds == 0
                                     ? 0.0
-                                    : (player.position.inMilliseconds /
+                                    : (pos.inMilliseconds /
                                             player.duration.inMilliseconds)
                                         .clamp(0.0, 1.0);
                             return Column(
