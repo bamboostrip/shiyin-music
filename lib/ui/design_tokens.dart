@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 abstract final class AppRadius {
   static const double xs = 6;
   static const double sm = 8;
+  /// 底部弹窗顶部圆角（紧凑、优雅，QQ 音乐风格）
+  static const double sheet = 10;
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 20;

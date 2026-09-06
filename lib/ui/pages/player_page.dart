@@ -200,12 +200,12 @@ class _PlayerBody extends StatefulWidget {
 }
 
 class _PlayerBodyState extends State<_PlayerBody> {
-  final _pageController = PageController(initialPage: 1);
-  var _page = 1;
+  final _pageController = PageController(initialPage: 0);
+  var _page = 0;
   var _pageScrolling = false;
   bool? _lastSystemUiLandscape;
 
-  bool get _lyricPageVisible => _page == 0 || _pageScrolling;
+  bool get _lyricPageVisible => _page == 1 || _pageScrolling;
 
   @override
   void dispose() {
@@ -288,14 +288,6 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                     onPageChanged: (value) =>
                                         _setPageState(page: value),
                                     children: [
-                                      LyricPlayerPage(
-                                        key: const PageStorageKey(
-                                          'lyric-player-page',
-                                        ),
-                                        player: widget.player,
-                                        song: widget.song,
-                                        isPageVisible: _lyricPageVisible,
-                                      ),
                                       PosterPlayerPage(
                                         key: const PageStorageKey(
                                           'poster-player-page',
@@ -310,7 +302,7 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                         onLyricTap: () {
                                           if (_pageController.hasClients) {
                                             _pageController.animateToPage(
-                                              0,
+                                              1,
                                               duration: const Duration(
                                                 milliseconds: 250,
                                               ),
@@ -318,6 +310,14 @@ class _PlayerBodyState extends State<_PlayerBody> {
                                             );
                                           }
                                         },
+                                      ),
+                                      LyricPlayerPage(
+                                        key: const PageStorageKey(
+                                          'lyric-player-page',
+                                        ),
+                                        player: widget.player,
+                                        song: widget.song,
+                                        isPageVisible: _lyricPageVisible,
                                       ),
                                     ],
                                   ),

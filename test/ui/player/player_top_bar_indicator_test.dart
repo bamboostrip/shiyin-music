@@ -286,7 +286,7 @@ void main() {
   });
 
   group('PlayerPage 页面顺序与滑动', () {
-    testWidgets('默认加载封面页（Index 1），向右滑切换至歌词页（Index 0）且顶栏指示器同步更新', (tester) async {
+    testWidgets('默认加载封面页（Index 0），向左滑切换至歌词页（Index 1）且顶栏指示器同步更新', (tester) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -305,34 +305,69 @@ void main() {
       // ArtworkBackground 有一个无限循环的动画，单步 pump 推进
       await tester.pump(const Duration(milliseconds: 100));
 
-      // 验证顶栏指示器显示 currentPage = 1
+      // 验证顶栏指示器显示 currentPage = 0（左长右短：代表封面页）
       final indicatorFinder = find.byType(PlayerPageIndicator);
       expect(indicatorFinder, findsOneWidget);
       final indicator = tester.widget<PlayerPageIndicator>(indicatorFinder);
-      expect(indicator.currentPage, 1);
+      expect(indicator.currentPage, 0);
 
       // 验证默认处于封面页 (PosterPlayerPage)，且位于可见区域
       expect(find.byType(PosterPlayerPage), findsOneWidget);
 
       // 验证底部原 _PageDots 不复存在（由顶栏指示器替代）
-      // 原 _PageDots 包含 2 个非 PlayerPageIndicator 内的 AnimatedContainer
       final allAnimatedContainers = tester.widgetList<AnimatedContainer>(
         find.byType(AnimatedContainer),
       ).toList();
       // 只应该有 PlayerPageIndicator 内的 2 个 AnimatedContainer
       expect(allAnimatedContainers.length, 2);
 
-      // 向右滑动（手指从左滑向右，切换到 Page 0 歌词页）
-      await tester.drag(find.byType(PageView), const Offset(300, 0));
+      // 向左滑动（手指从右滑向左 Offset(-300, 0)，进入右侧 Page 1 歌词页）
+      await tester.drag(find.byType(PageView), const Offset(-300, 0));
       // 推进动画（PageView 滚动动画 250ms）
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump(const Duration(milliseconds: 50));
 
-      // 验证指示器更新为 currentPage = 0
+      // 验证指示器更新为 currentPage = 1（左短右长：代表歌词页）
       final updatedIndicator = tester.widget<PlayerPageIndicator>(find.byType(PlayerPageIndicator));
-      expect(updatedIndicator.currentPage, 0);
+      expect(updatedIndicator.currentPage, 1);
 
       // 验证当前显示为歌词页 (LyricPlayerPage)
+      expect(find.byType(LyricPlayerPage), findsOneWidget);
+    });
+
+    testWidgets('在封面页点击歌词预览行切换至歌词页（Index 1）', (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final player = _FakePlayerController();
+      player.lyrics = const [
+        LyricLine(time: Duration.zero, text: '故事的小黄花'),
+      ];
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PlayerPage(
+            player: player,
+            auth: auth,
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 查找歌词预览组件并点击
+      final lyricPreviewFinder = find.byType(PosterLyricPreview);
+      expect(lyricPreviewFinder, findsOneWidget);
+      await tester.tap(lyricPreviewFinder);
+      await tester.pump();
+      for (var i = 0; i < 15; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+      }
+
+      // 指示器应更新为 1
+      final updatedIndicator = tester.widget<PlayerPageIndicator>(find.byType(PlayerPageIndicator));
+      expect(updatedIndicator.currentPage, 1);
       expect(find.byType(LyricPlayerPage), findsOneWidget);
     });
   });

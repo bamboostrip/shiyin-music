@@ -113,7 +113,7 @@ class AppTheme {
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(
-            top: Radius.circular(AppRadius.lg),
+            top: Radius.circular(AppRadius.sheet),
           ),
         ),
         clipBehavior: Clip.antiAlias,
