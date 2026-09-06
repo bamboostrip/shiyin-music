@@ -171,9 +171,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       }
     } catch (error) {
       _pendingInitialPosition = null;
-      // VIP 过期：自动领取后重试一次
+      // VIP 过期：自动领取后重试一次（转发定位/队列上下文，避免冷启动
+      // 定位与高潮试听从 0 秒重播）
       if (error is VipRequiredException && vipClaim != null) {
-        final claimed = await _tryClaimVipAndRetry(song);
+        final claimed = await _tryClaimVipAndRetry(
+          song,
+          queue: queue,
+          initialPosition: initialPosition,
+          preserveClimax: preserveClimax,
+        );
         if (claimed) return;
       }
       // 网络类失败（非 VIP、非首次重试）：短暂等待后自动重试一次。
@@ -291,7 +297,13 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   }
 
   /// VIP 过期时自动领取并重试播放，成功返回 true。
-  Future<bool> _tryClaimVipAndRetry(Song song) async {
+  /// 转发调用方的队列/定位/高潮上下文，避免重试丢定位。
+  Future<bool> _tryClaimVipAndRetry(
+    Song song, {
+    List<Song>? queue,
+    Duration? initialPosition,
+    bool preserveClimax = false,
+  }) async {
     try {
       final result = await vipClaim!.claimNow(null);
       if (result.status == VipClaimStatus.success ||
@@ -300,8 +312,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         final playUrl = await _api.songUrl(song, quality: audioQuality);
         if (playUrl.url.isNotEmpty) {
           errorMessage = null;
-          // 重新走完整播放流程
-          unawaited(playSong(song));
+          // 重新走完整播放流程（保留定位与高潮武装）
+          unawaited(
+            playSong(
+              song,
+              queue: queue,
+              initialPosition: initialPosition,
+              preserveClimax: preserveClimax,
+            ),
+          );
           return true;
         }
       }
