@@ -294,13 +294,7 @@ void main() {
       await gesture.up();
       await tester.pump();
 
-      // 在滑出过程中，页面下移行进中
-      await tester.pump(const Duration(milliseconds: 100));
-      final transformFinder = find.byKey(const Key('player_body_dismiss_transform'));
-      final Transform transform = tester.widget(transformFinder);
-      expect(transform.transform.getTranslation().y, greaterThan(100.0));
-
-      // 动画完成 (200ms) 并触发 pop，pop 动画完成
+      // 释放后立即触发 pop（无 200ms 本地延时），推进路由退场动画直至完全退出
       for (var i = 0; i < 35; i++) {
         await tester.pump(const Duration(milliseconds: 25));
       }

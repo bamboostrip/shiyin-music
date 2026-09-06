@@ -226,10 +226,6 @@ class _PlayerBodyState extends State<_PlayerBody>
         setState(() {
           _dragDistance = _dismissAnimation.value;
         });
-      })..addStatusListener((status) {
-        if (status == AnimationStatus.completed && _isDismissing) {
-          widget.onClose();
-        }
       });
   }
 
@@ -276,7 +272,8 @@ class _PlayerBodyState extends State<_PlayerBody>
     if (_isDismissing) return;
     final velocity = details.primaryVelocity ?? 0.0;
     if (_dragDistance > 80.0 || velocity > 800.0) {
-      _animateDismiss();
+      _isDismissing = true;
+      widget.onClose();
     } else {
       _animateReset();
     }
@@ -287,20 +284,6 @@ class _PlayerBodyState extends State<_PlayerBody>
     if (_dragDistance > 0) {
       _animateReset();
     }
-  }
-
-  void _animateDismiss() {
-    _isDismissing = true;
-    final screenHeight = MediaQuery.sizeOf(context).height;
-    _dismissAnimation = Tween<double>(
-      begin: _dragDistance,
-      end: screenHeight,
-    ).animate(CurvedAnimation(
-      parent: _dismissController,
-      curve: Curves.easeInCubic,
-    ));
-    _dismissController.duration = const Duration(milliseconds: 200);
-    _dismissController.forward(from: 0.0);
   }
 
   void _animateReset() {

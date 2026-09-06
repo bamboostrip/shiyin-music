@@ -265,18 +265,19 @@ void main() {
         // 底层页面依然可见
         expect(find.text('Underlying HomePage Content'), findsOneWidget);
 
-        // 释放手势触发 dismiss 退出
+        // 释放手势触发 dismiss 退出（无 200ms 本地延时，立即触发 Navigator pop 并协同原生 SlideTransition 退场）
         await gesture.up();
         await tester.pump();
 
-        // 退场动画中
+        // 验证 PlayerPageRoute 的 SlideTransition 原生退场已立即执行
         await tester.pump(const Duration(milliseconds: 100));
-        final dismissingTransform =
-            tester.widget<Transform>(transformFinder);
-        expect(
-          dismissingTransform.transform.getTranslation().y,
-          greaterThan(100.0),
+        final slideFinder = find.ancestor(
+          of: find.byType(PlayerPage),
+          matching: find.byType(SlideTransition),
         );
+        expect(slideFinder, findsOneWidget);
+        final slide = tester.widget<SlideTransition>(slideFinder);
+        expect(slide.position.value.dy, greaterThan(0.0));
 
         // 等待退场完全结束
         await pumpUntilSettled(tester);

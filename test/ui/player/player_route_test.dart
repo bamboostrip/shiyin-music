@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/auth_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
+import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/player_page.dart';
@@ -32,6 +34,12 @@ class _TestNavigatorObserver extends NavigatorObserver {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    ThemeController();
+    debugDesktopFormFactorOverride = null;
+  });
+
   tearDown(() {
     debugDesktopFormFactorOverride = null;
   });
@@ -211,6 +219,144 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(PlayerPage), findsOneWidget);
       });
+
+      testWidgets(
+        'pushes MaterialPageRoute on landscape when carMode is enabled',
+        (tester) async {
+          debugDesktopFormFactorOverride = false;
+          await ThemeController.instance.setCarModeEnabled(true);
+          final observer = _TestNavigatorObserver();
+          final player = _FakePlayerController();
+          final auth = _FakeAuthController();
+
+          await tester.pumpWidget(
+            MaterialApp(
+              navigatorObservers: [observer],
+              home: MediaQuery(
+                data: const MediaQueryData(size: Size(1024, 600)),
+                child: Builder(
+                  builder: (context) {
+                    return Scaffold(
+                      body: ElevatedButton(
+                        onPressed: () {
+                          PlayerPageRoute.open<void>(
+                            context,
+                            player: player,
+                            auth: auth,
+                          );
+                        },
+                        child: const Text('Open Player'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+
+          await tester.tap(find.text('Open Player'));
+          await tester.pump();
+
+          expect(observer.pushedRoutes.last, isA<MaterialPageRoute<void>>());
+          expect(
+            observer.pushedRoutes.last,
+            isNot(isA<PlayerPageRoute<void>>()),
+          );
+
+          await tester.pumpAndSettle();
+          expect(find.byType(PlayerPage), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'pushes PlayerPageRoute on landscape when carMode is disabled',
+        (tester) async {
+          debugDesktopFormFactorOverride = false;
+          await ThemeController.instance.setCarModeEnabled(false);
+          final observer = _TestNavigatorObserver();
+          final player = _FakePlayerController();
+          final auth = _FakeAuthController();
+
+          await tester.pumpWidget(
+            MaterialApp(
+              navigatorObservers: [observer],
+              home: MediaQuery(
+                data: const MediaQueryData(size: Size(1024, 600)),
+                child: Builder(
+                  builder: (context) {
+                    return Scaffold(
+                      body: ElevatedButton(
+                        onPressed: () {
+                          PlayerPageRoute.open<void>(
+                            context,
+                            player: player,
+                            auth: auth,
+                          );
+                        },
+                        child: const Text('Open Player'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+
+          await tester.tap(find.text('Open Player'));
+          await tester.pump();
+
+          expect(observer.pushedRoutes.last, isA<PlayerPageRoute<void>>());
+          expect((observer.pushedRoutes.last as ModalRoute).opaque, isFalse);
+
+          await tester.pumpAndSettle();
+          expect(find.byType(PlayerPage), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'pushes PlayerPageRoute on portrait even when carMode is enabled',
+        (tester) async {
+          debugDesktopFormFactorOverride = false;
+          await ThemeController.instance.setCarModeEnabled(true);
+          final observer = _TestNavigatorObserver();
+          final player = _FakePlayerController();
+          final auth = _FakeAuthController();
+
+          await tester.pumpWidget(
+            MaterialApp(
+              navigatorObservers: [observer],
+              home: MediaQuery(
+                data: const MediaQueryData(size: Size(390, 844)),
+                child: Builder(
+                  builder: (context) {
+                    return Scaffold(
+                      body: ElevatedButton(
+                        onPressed: () {
+                          PlayerPageRoute.open<void>(
+                            context,
+                            player: player,
+                            auth: auth,
+                          );
+                        },
+                        child: const Text('Open Player'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+
+          await tester.tap(find.text('Open Player'));
+          await tester.pump();
+
+          expect(observer.pushedRoutes.last, isA<PlayerPageRoute<void>>());
+          expect((observer.pushedRoutes.last as ModalRoute).opaque, isFalse);
+
+          await tester.pumpAndSettle();
+          expect(find.byType(PlayerPage), findsOneWidget);
+        },
+      );
     });
   });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../controllers/theme_controller.dart';
 import '../form_factor.dart';
 import '../pages/player_page.dart';
 
@@ -35,13 +36,17 @@ class PlayerPageRoute<T> extends PageRouteBuilder<T> {
           reverseTransitionDuration: const Duration(milliseconds: 250),
         );
 
-  /// 跨平台自适应打开播放页：桌面端走普通 MaterialPageRoute，移动端走 PlayerPageRoute
+  /// 跨平台自适应打开播放页：PC 桌面端或车机横屏双拼模式走普通 MaterialPageRoute，移动端竖屏走 PlayerPageRoute
   static Future<T?> open<T>(
     BuildContext context, {
     required PlayerController player,
     required AuthController auth,
   }) {
-    if (isDesktopFormFactor) {
+    final size = MediaQuery.sizeOf(context);
+    final landscape = size.width > size.height;
+    final isCarMode = ThemeController.instance.carModeEnabled;
+
+    if (isDesktopFormFactor || (landscape && isCarMode)) {
       return Navigator.of(context).push<T>(
         MaterialPageRoute(
           builder: (_) => PlayerPage(player: player, auth: auth),
