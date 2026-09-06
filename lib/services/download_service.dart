@@ -48,23 +48,44 @@ class DownloadService {
 
   /// 持久下载目录。
   ///
-  /// Android 用系统公共下载目录（/storage/emulated/0/Download），
-  /// 桌面端（Windows/Linux/macOS）用系统"下载"目录（path_provider 的
-  /// getDownloadsDirectory：Windows 是 shell Downloads 已知目录，Linux 是
-  /// XDG Downloads）——桌面端与"歌曲已保存到下载目录"的通知文案、更新包
-  /// 落点（app_update_service 同用 Downloads）保持一致；
-  /// 其他平台或获取失败时回退到应用文档目录。
+  /// - Android：App 专属外部目录（`Android/data/<包名>/files/ka_music_downloads`），
+  ///   无需存储权限，卸载自动清理，不被系统相册/音乐扫描。
+  ///   API29+ 分区存储下公共 Download 裸写必 EACCES，故不再使用公共目录。
+  ///   存量用户旧索引仍是公共目录绝对路径，文件本身还在就继续可播可删；
+  ///   新下载落新目录，目录大小统计口径随之切换（一次性显示回落，属预期）。
+  /// - 桌面端（Windows/Linux/macOS）：系统"下载"目录（path_provider 的
+  ///   getDownloadsDirectory：Windows 是 shell Downloads 已知目录，Linux 是
+  ///   XDG Downloads）——与"歌曲已保存到下载目录"的通知文案、更新包
+  ///   落点（app_update_service 同用 Downloads）保持一致；
+  /// - 其他平台（iOS 等）或获取失败时回退到应用文档目录。
   Future<Directory> downloadDir() async {
-    if (Platform.isAndroid ||
-        Platform.isWindows ||
-        Platform.isLinux ||
-        Platform.isMacOS) {
+    if (Platform.isAndroid) {
+      try {
+        final external = await getExternalStorageDirectory();
+        if (external != null) {
+          return _ensureDir(
+            Directory('${external.path}/${AppConfig.downloadDirName}'),
+          );
+        }
+      } catch (_) {
+        // 取外部目录失败（如外置存储未挂载）则落到文档目录兜底
+      }
+      final base = await getApplicationDocumentsDirectory();
+      return _ensureDir(
+        Directory('${base.path}/${AppConfig.downloadDirName}'),
+      );
+    }
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       final downloadsDir = await getDownloadsDirectory();
       if (downloadsDir != null) {
         final dir =
             Directory('${downloadsDir.path}/${AppConfig.downloadDirName}');
         return _ensureDir(dir);
       }
+      final base = await getApplicationDocumentsDirectory();
+      return _ensureDir(
+        Directory('${base.path}/${AppConfig.downloadDirName}'),
+      );
     }
     final base = await getApplicationDocumentsDirectory();
     return _ensureDir(
