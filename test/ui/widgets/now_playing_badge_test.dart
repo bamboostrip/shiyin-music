@@ -20,13 +20,14 @@ void main() {
 
       final badge = tester.widget<NowPlayingBadge>(find.byType(NowPlayingBadge));
       expect(badge.barCount, 3);
-      expect(
-        find.descendant(
-          of: find.byType(NowPlayingBadge),
-          matching: find.byType(CustomPaint),
-        ),
-        findsOneWidget,
+      final customPaintFinder = find.descendant(
+        of: find.byType(NowPlayingBadge),
+        matching: find.byType(CustomPaint),
       );
+      expect(customPaintFinder, findsOneWidget);
+      final painter =
+          tester.widget<CustomPaint>(customPaintFinder).painter as NowPlayingPainter;
+      expect(painter.barCount, 3);
     });
 
     testWidgets('renders with 4 bars when specified', (tester) async {
@@ -45,13 +46,14 @@ void main() {
 
       final badge = tester.widget<NowPlayingBadge>(find.byType(NowPlayingBadge));
       expect(badge.barCount, 4);
-      expect(
-        find.descendant(
-          of: find.byType(NowPlayingBadge),
-          matching: find.byType(CustomPaint),
-        ),
-        findsOneWidget,
+      final customPaintFinder = find.descendant(
+        of: find.byType(NowPlayingBadge),
+        matching: find.byType(CustomPaint),
       );
+      expect(customPaintFinder, findsOneWidget);
+      final painter =
+          tester.widget<CustomPaint>(customPaintFinder).painter as NowPlayingPainter;
+      expect(painter.barCount, 4);
     });
 
     testWidgets('renders empty SizedBox when active is false', (tester) async {
@@ -109,6 +111,13 @@ void main() {
         ),
       );
       await tester.pump();
+      final customPaintFinder = find.descendant(
+        of: find.byType(NowPlayingBadge),
+        matching: find.byType(CustomPaint),
+      );
+      final painter =
+          tester.widget<CustomPaint>(customPaintFinder).painter as NowPlayingPainter;
+      expect(painter.progress, 0.42);
 
       // Switch back to playing: true
       await tester.pumpWidget(
