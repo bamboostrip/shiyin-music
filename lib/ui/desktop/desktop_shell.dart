@@ -8,6 +8,7 @@ import '../../controllers/local_music_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../services/cache_service.dart';
+import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../pages/comment_page.dart';
 import '../pages/artist_detail_page.dart';
@@ -435,6 +436,9 @@ class _DesktopShellState extends State<DesktopShell> {
                     onSubmitted: _submitSearch,
                     onEscape: () => _closeSearchPanel(unfocus: true),
                     onChromeTap: () => _closeSearchPanel(unfocus: true),
+                    onOpenIdentify: IdentifyService.isSupported
+                        ? () => _openIdentify(context)
+                        : null,
                   ),
                   const Divider(height: 1, thickness: 1),
                   Expanded(

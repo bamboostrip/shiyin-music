@@ -4,7 +4,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
+import '../pages/identify_page.dart';
 import '../pages/search_page.dart';
 
 /// 页面层固定吸顶头视图：以普通 widget 形式渲染
@@ -272,6 +274,7 @@ class HomeSearchBar extends StatelessWidget {
     this.auth,
     this.player,
     this.onTap,
+    this.onIdentifyTap,
     this.height = 36.0,
     this.hintText = '搜索歌曲、歌手、专辑',
     this.margin,
@@ -281,6 +284,7 @@ class HomeSearchBar extends StatelessWidget {
   final AuthController? auth;
   final PlayerController? player;
   final VoidCallback? onTap;
+  final VoidCallback? onIdentifyTap;
   final double height;
   final String hintText;
   final EdgeInsetsGeometry? margin;
@@ -299,52 +303,101 @@ class HomeSearchBar extends StatelessWidget {
     }
   }
 
+  void _openIdentify(BuildContext context) {
+    if (onIdentifyTap != null) {
+      onIdentifyTap!();
+      return;
+    }
+    if (player == null) return;
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IdentifyPage(player: player!),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showIdentify = IdentifyService.isSupported && player != null;
 
-    Widget content = Material(
-      color: Colors.transparent,
-      child: InkWell(
+    Widget content = Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.07)
+            : const Color(0xFFF3F4F6),
         borderRadius: BorderRadius.circular(height / 2),
-        onTap: () => _handleTap(context),
-        child: Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.07)
-                : const Color(0xFFF3F4F6),
-            borderRadius: BorderRadius.circular(height / 2),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.search_rounded,
-                size: 16.5,
-                color: colorScheme.onSurfaceVariant.withValues(
-                  alpha: isDark ? 0.65 : 0.5,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.horizontal(
+                  left: Radius.circular(height / 2),
+                  right:
+                      showIdentify ? Radius.zero : Radius.circular(height / 2),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  hintText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                onTap: () => _handleTap(context),
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 12,
+                    right: showIdentify ? 0 : 12,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (showIdentify) const SizedBox(width: 20),
+                      Icon(
+                        Icons.search_rounded,
+                        size: 16.5,
                         color: colorScheme.onSurfaceVariant.withValues(
-                          alpha: isDark ? 0.7 : 0.6,
+                          alpha: isDark ? 0.65 : 0.5,
                         ),
-                        fontWeight: FontWeight.w400,
-                        fontSize: 14,
                       ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          hintText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: isDark ? 0.7 : 0.6,
+                                ),
+                                fontWeight: FontWeight.w400,
+                                fontSize: 14,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
+            ),
+            if (showIdentify)
+              InkResponse(
+                radius: 18,
+                onTap: () => _openIdentify(context),
+                child: Tooltip(
+                  message: '听歌识曲',
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Icon(
+                      Icons.graphic_eq_rounded,
+                      size: 18,
+                      color: colorScheme.onSurfaceVariant.withValues(
+                        alpha: isDark ? 0.8 : 0.7,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

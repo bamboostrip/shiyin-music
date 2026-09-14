@@ -27,6 +27,7 @@ class DesktopTitleBar extends StatefulWidget {
     this.onFocusChanged,
     this.onEscape,
     this.onChromeTap,
+    this.onOpenIdentify,
   });
 
   /// 保留参数兼容旧调用点：播放信息已由底部播放栏展示，标题栏不再重复显示。
@@ -50,6 +51,9 @@ class DesktopTitleBar extends StatefulWidget {
 
   /// 点击标题栏非搜索区（品牌/拖拽区/窗口按钮）时回调，用于收起搜索浮层。
   final VoidCallback? onChromeTap;
+
+  /// 点击搜索胶囊右侧「听歌识曲」按钮时回调。
+  final VoidCallback? onOpenIdentify;
 
   @override
   State<DesktopTitleBar> createState() => _DesktopTitleBarState();
@@ -155,6 +159,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
                       onSubmitted: widget.onSubmitted,
                       onFocusChanged: widget.onFocusChanged,
                       onEscape: widget.onEscape,
+                      onOpenIdentify: widget.onOpenIdentify,
                     ),
                   )
                 else
@@ -277,6 +282,7 @@ class _TitleBarSearchField extends StatefulWidget {
     this.onSubmitted,
     this.onFocusChanged,
     this.onEscape,
+    this.onOpenIdentify,
   });
 
   final VoidCallback? onTapLegacy;
@@ -286,6 +292,7 @@ class _TitleBarSearchField extends StatefulWidget {
   final ValueChanged<String>? onSubmitted;
   final ValueChanged<bool>? onFocusChanged;
   final VoidCallback? onEscape;
+  final VoidCallback? onOpenIdentify;
 
   @override
   State<_TitleBarSearchField> createState() => _TitleBarSearchFieldState();
@@ -452,10 +459,67 @@ class _TitleBarSearchFieldState extends State<_TitleBarSearchField> {
                 ),
               ),
             ],
+            if (widget.onOpenIdentify != null) ...[
+              const SizedBox(width: 4),
+              _DesktopIdentifyButton(onTap: widget.onOpenIdentify!),
+            ],
           ],
         ),
       ),
     ),
+    );
+  }
+}
+
+/// 顶栏搜索胶囊内部右侧「听歌识曲」按钮。
+class _DesktopIdentifyButton extends StatefulWidget {
+  const _DesktopIdentifyButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_DesktopIdentifyButton> createState() => _DesktopIdentifyButtonState();
+}
+
+class _DesktopIdentifyButtonState extends State<_DesktopIdentifyButton> {
+  var _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Tooltip(
+          message: '听歌识曲',
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: _hovering
+                  ? colorScheme.onSurface.withValues(alpha: isDark ? .12 : .08)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.graphic_eq_rounded,
+              size: 15.5,
+              color: _hovering
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant.withValues(
+                      alpha: isDark ? .8 : .65,
+                    ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
