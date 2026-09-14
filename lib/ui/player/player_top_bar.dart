@@ -26,11 +26,7 @@ class PlayerPageIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildDot(0),
-        const SizedBox(width: 4),
-        _buildDot(1),
-      ],
+      children: [_buildDot(0), const SizedBox(width: 4), _buildDot(1)],
     );
   }
 
@@ -143,10 +139,11 @@ class TopBar extends StatelessWidget {
                         song.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
                       Text(
                         song.artist,
@@ -244,8 +241,7 @@ void showPlayerMoreSheet({
           icon: Icons.graphic_eq_rounded,
           title: '音效',
           isGrid: true,
-          onTap: () =>
-              showAudioEffectsSheet(context: context, player: player),
+          onTap: () => showAudioEffectsSheet(context: context, player: player),
         ),
       SongSheetAction(
         icon: Icons.auto_awesome_rounded,
@@ -272,9 +268,7 @@ void showPlayerMoreSheet({
           isGrid: true,
           onTap: () async {
             Navigator.of(context).pop();
-            await player.setDesktopLyricsEnabled(
-              !player.desktopLyricsEnabled,
-            );
+            await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
           },
         ),
         if (player.desktopLyricsEnabled)
@@ -289,26 +283,13 @@ void showPlayerMoreSheet({
             ),
           ),
       ],
-      SongSheetAction(
-        icon: Icons.queue_music_rounded,
-        title: '下一首',
-        isGrid: true,
-        onTap: () => addSongToQueueWithFeedback(
-          context: context,
-          player: player,
-          song: song,
-        ),
-      ),
       // List actions
       if (song.source == SongSource.kugou)
         SongSheetAction(
           icon: Icons.playlist_add_rounded,
           title: '添加到歌单',
-          onTap: () => showAddToPlaylistSheet(
-            context: context,
-            auth: auth,
-            song: song,
-          ),
+          onTap: () =>
+              showAddToPlaylistSheet(context: context, auth: auth, song: song),
         ),
     ],
   );

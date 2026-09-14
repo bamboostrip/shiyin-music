@@ -17,8 +17,7 @@ class _FakeApi implements MusicApi {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class _FakePlayerController extends ChangeNotifier
-    implements PlayerController {
+class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   Song? currentSong = const Song(
     id: 'test-song-1',
@@ -45,8 +44,9 @@ class _FakePlayerController extends ChangeNotifier
   Duration duration = const Duration(minutes: 4, seconds: 29);
 
   @override
-  final ValueNotifier<Duration> positionListenable =
-      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> positionListenable = ValueNotifier<Duration>(
+    Duration.zero,
+  );
 
   @override
   Duration position = const Duration(seconds: 30);
@@ -236,10 +236,7 @@ void main() {
       await tester.pump();
 
       // 从封面区域开始向下拖拽 100px
-      await tester.drag(
-        find.byType(Artwork).first,
-        const Offset(0, 100),
-      );
+      await tester.drag(find.byType(Artwork).first, const Offset(0, 100));
       await tester.pump();
 
       expect(dragStarted, isTrue);
@@ -257,17 +254,12 @@ void main() {
           player: player,
           auth: auth,
           song: testSong,
-          onVerticalDragEnd: (details) =>
-              endVelocity = details.primaryVelocity,
+          onVerticalDragEnd: (details) => endVelocity = details.primaryVelocity,
         ),
       );
       await tester.pump();
 
-      await tester.fling(
-        find.byType(Artwork).first,
-        const Offset(0, 60),
-        1000,
-      );
+      await tester.fling(find.byType(Artwork).first, const Offset(0, 60), 1000);
       await tester.pump();
 
       expect(endVelocity, isNotNull);
@@ -294,10 +286,7 @@ void main() {
       await tester.pump();
 
       // 下拉 40px
-      await tester.drag(
-        find.byType(Artwork).first,
-        const Offset(0, 40),
-      );
+      await tester.drag(find.byType(Artwork).first, const Offset(0, 40));
       await tester.pump();
 
       expect(dragStarted, isTrue);
@@ -350,10 +339,7 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: PlayerPage(
-            player: player,
-            auth: auth,
-          ),
+          home: PlayerPage(player: player, auth: auth),
         ),
       );
       await tester.pump();
@@ -365,9 +351,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 25));
       }
 
-      // 验证 Sheet 中存在倍速和音质选项
+      // 验证 Sheet 中存在倍速和音质选项，且不包含当前歌曲无意义的「下一首」
       expect(find.text('倍速'), findsOneWidget);
       expect(find.text('音质'), findsOneWidget);
+      expect(find.text('下一首'), findsNothing);
     });
 
     testWidgets('在 PlayerPage 中向下拉动超过 80px 退出播放页', (tester) async {
