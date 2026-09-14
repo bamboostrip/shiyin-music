@@ -94,6 +94,11 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
   late TextPainter _textPainter;
   double _textWidth = 0.0;
 
+  /// 内部 TextPainter 必须与两个渲染 Text 应用同一系统文本缩放：
+  /// 缺失时（历史实现）测量宽度 < 实际绘制宽度，逐字高亮的 clip 边界
+  /// 滞后、跑马灯溢出判定失真（Windows 辅助功能文本缩放 ≠ 100% 时）。
+  TextScaler _textScaler = TextScaler.noScaling;
+
   @override
   void initState() {
     super.initState();
@@ -111,9 +116,21 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
         ),
       ),
       textDirection: TextDirection.ltr,
+      textScaler: _textScaler,
       maxLines: 1,
     )..layout();
     _textWidth = _textPainter.width;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scaler = MediaQuery.textScalerOf(context);
+    if (scaler != _textScaler) {
+      _textScaler = scaler;
+      _textPainter.dispose();
+      _initTextPainter();
+    }
   }
 
   @override
@@ -209,8 +226,12 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
         progress: widget.progress,
       );
 
+      // 显式测量高度：外层常是 FittedBox(scaleDown)（给子级无界高度约束），
+      // OverflowBox 只约束宽度时会把自身高度解析成 Infinity 直接布局断言
+      // （悬浮窗/设置预览中超长歌词行 + 文本缩放 ≠100% 必触发）。
       return SizedBox(
         width: widget.availableWidth,
+        height: _textPainter.height,
         child: ClipRect(
           child: Transform.translate(
             offset: Offset(scrollOffset, 0),

@@ -725,6 +725,8 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
   bool _isHoveringPill = false;
   bool _polling = false;
   Timer? _pollTimer;
+  int _pollTickCount = 0;
+  Offset? _cachedWindowPos;
 
   @override
   void initState() {
@@ -732,6 +734,21 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
     _pollTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
       _pollCursor();
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant LockedLyricsBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 外部（主窗设置推送）收到 updateSettings 会无条件重施
+    // setIgnoreMouseEvents(locked)：用户正悬浮胶囊时穿透被加了回去，而本地
+    // hover 标记仍为 true，轮询只认"状态迁移"就永远不会再恢复点击（胶囊
+    // 死锁到光标移出再进）。重置标记后，下一轮轮询（≤80ms）按"新进入
+    // 胶囊"重新解除穿透。
+    if (oldWidget.settings != widget.settings) {
+      _isHoveringWindow = false;
+      _isHoveringPill = false;
+      _cachedWindowPos = null;
+    }
   }
 
   @override
@@ -761,12 +778,18 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
             : await windowManager.getCursorScreenPoint();
       } catch (_) {}
 
-      Offset? windowPos;
-      try {
-        windowPos = widget.windowPositionProvider != null
-            ? await widget.windowPositionProvider!()
-            : await windowManager.getPosition();
-      } catch (_) {}
+      // 窗口位置只在拖动/主窗复位时变化（锁定态穿透后根本无法拖动），
+      // 每轮都查纯是平台通道往返浪费：缓存并每 ~1s 校准一次，
+      // 平时每轮只查光标（通道调用从 2 次/轮降到 1 次/轮）。
+      _pollTickCount++;
+      if (_cachedWindowPos == null || _pollTickCount % 12 == 0) {
+        try {
+          _cachedWindowPos = widget.windowPositionProvider != null
+              ? await widget.windowPositionProvider!()
+              : await windowManager.getPosition();
+        } catch (_) {}
+      }
+      final windowPos = _cachedWindowPos;
 
       if (!mounted || cursorPos == null || windowPos == null) return;
 
@@ -973,7 +996,9 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     }
   }
 
-  Future<Offset> _getWindowPosition() async {
+  /// 失败返回 null：调用方必须放弃后续几何操作——历史实现失败时返回
+  /// Offset.zero，restore 会把窗口"还原"到屏幕左上角 (0,0)。
+  Future<Offset?> _getWindowPosition() async {
     try {
       final getter = windowPositionGetter ?? widget.windowPositionGetter;
       if (getter != null) {
@@ -982,7 +1007,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
       return await windowManager.getPosition();
     } catch (e) {
       debugPrint('[桌面歌词悬浮窗] 获取窗口位置失败: $e');
-      return Offset.zero;
+      return null;
     }
   }
 
@@ -1007,6 +1032,10 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     try {
       if (visible) {
         final pos = await _getWindowPosition();
+        if (pos == null) {
+          // 取位失败：放弃本次展开，维持收起态几何（比误操作窗口安全）。
+          return;
+        }
         _originalWindowTop = pos.dy;
         final popsUpward = pos.dy >=
             WindowsDesktopLyricsBridge.overlayMenuUpwardMinTop;
@@ -1058,6 +1087,10 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
         // 再翻状态位把锚点切回"贴顶"，此时窗口已回到歌词带高度，
         // 两种锚点渲染完全一致。
         final pos = await _getWindowPosition();
+        if (pos == null) {
+          // 取位失败：跳过还原，保持当前几何（还原到 (0,0) 是更糟的选项）。
+          return;
+        }
         await _setWindowBounds(
           Rect.fromLTWH(
             pos.dx,
@@ -1157,6 +1190,8 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
       final popsUpward = _menuPopsUpward;
       () async {
         final pos = await _getWindowPosition();
+        // 取位失败（窗口可能已销毁）时跳过还原，绝不能落到 (0,0)。
+        if (pos == null) return;
         await _setWindowBounds(
           Rect.fromLTWH(
             pos.dx,
@@ -1504,24 +1539,28 @@ Widget buildOverlayLyricsBody({
     );
   }
 
-  return SizedBox(
-    width: WindowsDesktopLyricsBridge.overlayWidth,
-    height: WindowsDesktopLyricsBridge.overlayHeight,
-    child: Padding(
-      // 顶部 lyricsTopInset 是工具栏/解锁胶囊的专属带（锁定态为负空间）：
-      // 歌词只在下方歌词带内居中，与按钮彻底脱开。
-      padding: const EdgeInsets.only(
-        top: WindowsDesktopLyricsBridge.lyricsTopInset,
-        bottom: 2.0,
-        left: horizontalPadding,
-        right: horizontalPadding,
-      ),
-      child: Center(
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: SizedBox(
-            width: contentWidth,
-            child: body,
+  // RepaintBoundary：逐字进度消息以最高 30Hz 到达，每次都会触发歌词行
+  // 重绘；独立成层后工具栏/解锁胶囊/快捷菜单不必随之重新光栅化。
+  return RepaintBoundary(
+    child: SizedBox(
+      width: WindowsDesktopLyricsBridge.overlayWidth,
+      height: WindowsDesktopLyricsBridge.overlayHeight,
+      child: Padding(
+        // 顶部 lyricsTopInset 是工具栏/解锁胶囊的专属带（锁定态为负空间）：
+        // 歌词只在下方歌词带内居中，与按钮彻底脱开。
+        padding: const EdgeInsets.only(
+          top: WindowsDesktopLyricsBridge.lyricsTopInset,
+          bottom: 2.0,
+          left: horizontalPadding,
+          right: horizontalPadding,
+        ),
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: contentWidth,
+              child: body,
+            ),
           ),
         ),
       ),

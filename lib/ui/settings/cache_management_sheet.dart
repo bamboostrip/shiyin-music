@@ -39,34 +39,48 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
   }
 
   Future<void> _loadSizes() async {
-    int? dataCache, download, playCache, imageCache;
-    if (widget.cache != null) {
-      try {
-        dataCache = await widget.cache!.getCacheSize();
-      } catch (_) {}
-    }
-    if (widget.downloads != null) {
-      try {
-        download = await widget.downloads!.getDownloadDirSize();
-      } catch (_) {}
-      try {
-        playCache = await widget.downloads!.getPlayCacheDirSize();
-      } catch (_) {}
-    }
-    // 封面磁盘缓存：上限按平台默认（桌面 200MB / 移动与车机 50MB），
-    // 不提供上限调节——它和"播放缓存上限"是两类资源，混在一起会让用户
-    // 误以为一个数字能兜住全部占用。这里只报大小 + 支持清理。
-    if (ImageDiskCache.instance.enabled) {
-      try {
-        imageCache = await ImageDiskCache.instance.totalSize();
-      } catch (_) {}
-    }
+    // 四路大小统计彼此独立，并行计算缩短"计算中…"窗口
+    // （下载/播放缓存目录树遍历已在服务层移出主 isolate）。
+    final results = await Future.wait<Map<String, int?>>([
+      () async {
+        if (widget.cache == null) return {'data': null};
+        try {
+          return {'data': await widget.cache!.getCacheSize()};
+        } catch (_) {
+          return {'data': null};
+        }
+      }(),
+      () async {
+        if (widget.downloads == null) return {'download': null};
+        try {
+          return {'download': await widget.downloads!.getDownloadDirSize()};
+        } catch (_) {
+          return {'download': null};
+        }
+      }(),
+      () async {
+        if (widget.downloads == null) return {'playCache': null};
+        try {
+          return {'playCache': await widget.downloads!.getPlayCacheDirSize()};
+        } catch (_) {
+          return {'playCache': null};
+        }
+      }(),
+      () async {
+        if (!ImageDiskCache.instance.enabled) return {'image': null};
+        try {
+          return {'image': await ImageDiskCache.instance.totalSize()};
+        } catch (_) {
+          return {'image': null};
+        }
+      }(),
+    ]);
     if (mounted) {
       setState(() {
-        _dataCacheSize = dataCache;
-        _downloadSize = download;
-        _playCacheSize = playCache;
-        _imageCacheSize = imageCache;
+        _dataCacheSize = results[0]['data'];
+        _downloadSize = results[1]['download'];
+        _playCacheSize = results[2]['playCache'];
+        _imageCacheSize = results[3]['image'];
       });
     }
   }
@@ -394,10 +408,13 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
       return content;
     }
 
+    // 底部弹窗形态：内容可达 500+ dp（四项缓存 + 上限行），横屏/小屏设备
+    // 可用高度不足会 RenderFlex 溢出，改为可滚动（对话框形态高度不受限，
+    // 维持原布局）。
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-        child: content,
+        child: SingleChildScrollView(child: content),
       ),
     );
   }

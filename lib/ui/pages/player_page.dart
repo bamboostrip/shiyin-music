@@ -308,7 +308,10 @@ class _PlayerBodyState extends State<_PlayerBody>
                 backgroundColor: Colors.black,
                 body: Stack(
                   children: [
-                    ArtworkBackground(song: widget.song),
+                    ArtworkBackground(
+                      song: widget.song,
+                      playing: widget.player.isPlaying,
+                    ),
                     SafeArea(
                       // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
                       // 竖屏已由外层 Scaffold 处理，这里对所有方向统一保留 SafeArea。

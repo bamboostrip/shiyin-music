@@ -2154,6 +2154,44 @@ void main() {
       expect(mouseEventsCalls.last, isTrue);
     });
 
+    testWidgets('设置外部重推后胶囊悬浮可恢复（穿透死锁回归）', (tester) async {
+      Offset? cursorPos = const Offset(450, 103);
+      const windowPos = Offset(100, 100);
+      final mouseEventsCalls = <bool>[];
+
+      Widget buildWith({required double opacity}) => MaterialApp(
+        home: Scaffold(
+          body: LockedLyricsBody(
+            settings: DesktopLyricsSettings(locked: true, opacity: opacity),
+            current: '当前歌词',
+            next: '下一句歌词',
+            onToggleLock: (_) {},
+            cursorPositionProvider: () async => cursorPos,
+            windowPositionProvider: () async => windowPos,
+            ignoreMouseEventsSetter: (ignore) async =>
+                mouseEventsCalls.add(ignore),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(buildWith(opacity: 1.0));
+      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+
+      // 悬浮胶囊：穿透解除（false）
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(mouseEventsCalls.last, isFalse);
+
+      // 主窗推送设置更新（如拖动不透明度滑杆）：updateSettings 会无条件
+      // 重施 setIgnoreMouseEvents(true)（外部写入，不经过 setter 记录）。
+      await tester.pumpWidget(buildWith(opacity: 0.9));
+      await tester.pump(const Duration(milliseconds: 80));
+
+      // 光标仍在胶囊上：轮询必须把它当作"新进入胶囊"重新解除穿透，
+      // 否则本地 hover 标记仍为 true，穿透永远恢复不了（胶囊死锁）。
+      expect(mouseEventsCalls.last, isFalse);
+      expect(mouseEventsCalls.where((c) => !c).length, greaterThanOrEqualTo(2));
+    });
+
     testWidgets('点击胶囊触发 onToggleLock(false)', (tester) async {
       Offset? cursorPos = const Offset(450, 103);
       const windowPos = Offset(100, 100);

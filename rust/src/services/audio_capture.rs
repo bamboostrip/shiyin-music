@@ -79,7 +79,9 @@ pub mod desktop {
         sample_rate: u32,
         channels: u16,
         total_samples: usize,
-        last_log_sec: usize,
+        /// 自上次快照以来的峰值振幅(快照时在调用线程输出诊断后复位)。
+        /// 音频线程里绝不做 console I/O:println 持有 stdout 锁且是同步写,
+        /// 放在实时回调里会拉高回调延迟、并与 snapshot 抢同一把 ring 锁。
         interval_peak: f32,
     }
 
@@ -103,22 +105,15 @@ pub mod desktop {
                     self.start = 0;
                 }
             }
-            let current_sec = self.total_samples / self.sample_rate.max(1) as usize;
-            if current_sec > self.last_log_sec {
-                self.last_log_sec = current_sec;
-                println!(
-                    "[AudioCapture] 采集中: 已累计接收 {} 秒数据 (总采样 {}), 最近 1 秒峰值振幅 = {:.4}",
-                    current_sec, self.total_samples, self.interval_peak
-                );
-                self.interval_peak = 0.0;
-            }
         }
 
-        fn tail(&self, duration_ms: u32) -> Vec<f32> {
+        fn tail(&mut self, duration_ms: u32) -> Vec<f32> {
             let n = ((self.sample_rate as u64 * duration_ms as u64) / 1000) as usize;
             let avail = self.samples.len() - self.start;
             let take = n.min(avail);
-            self.samples[self.samples.len() - take..].to_vec()
+            let tail = self.samples[self.samples.len() - take..].to_vec();
+            self.interval_peak = 0.0;
+            tail
         }
     }
 
@@ -137,7 +132,6 @@ pub mod desktop {
             sample_rate,
             channels,
             total_samples: 0,
-            last_log_sec: 0,
             interval_peak: 0.0,
         }))
     }
@@ -300,18 +294,25 @@ pub mod desktop {
             println!("[AudioCapture] 提取快照失败: 采集尚未启动");
             return Err("采集未启动".into());
         };
-        let (samples, src_rate, total_samples) = {
-            let r = state.ring.lock().map_err(|_| "环形缓冲锁不可用")?;
-            (r.tail(duration_ms), r.sample_rate, r.total_samples)
+        let (samples, src_rate, total_samples, interval_peak) = {
+            let mut r = state.ring.lock().map_err(|_| "环形缓冲锁不可用")?;
+            let tail = r.tail(duration_ms);
+            (
+                tail,
+                r.sample_rate,
+                r.total_samples,
+                std::mem::replace(&mut r.interval_peak, 0.0),
+            )
         };
         let peak = samples.iter().copied().fold(0.0f32, |a, b| a.max(b.abs()));
         println!(
-            "[AudioCapture] 提取 PCM 快照: 请求时长={}ms, 累计接收采样={}, 快照采样数={} (约{:.2}s), 峰值振幅={:.4}",
+            "[AudioCapture] 提取 PCM 快照: 请求时长={}ms, 累计接收采样={}, 快照采样数={} (约{:.2}s), 快照峰值振幅={:.4}, 期间峰值振幅={:.4}",
             duration_ms,
             total_samples,
             samples.len(),
             samples.len() as f32 / src_rate.max(1) as f32,
-            peak
+            peak,
+            interval_peak
         );
         if total_samples == 0 || samples.is_empty() {
             println!("[AudioCapture] 警告: 采集缓冲区为空 (0 采样)! 若使用系统内录(system)，请确认系统默认输出设备当前正在播放声音。");
@@ -457,7 +458,6 @@ pub mod desktop {
                 sample_rate: 48000,
                 channels: 2,
                 total_samples: 0,
-                last_log_sec: 0,
                 interval_peak: 0.0,
             };
             ring.push_interleaved(&[0.2, 0.6, 0.2, 0.6]);
@@ -472,13 +472,12 @@ pub mod desktop {
 
         #[test]
         fn ring_tail_takes_last_n_ms() {
-            let ring = Ring {
+            let mut ring = Ring {
                 samples: (0..48000).map(|i| i as f32).collect(),
                 start: 0,
                 sample_rate: 48000,
                 channels: 1,
                 total_samples: 48000,
-                last_log_sec: 1,
                 interval_peak: 0.0,
             };
             let tail = ring.tail(500);

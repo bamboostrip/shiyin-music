@@ -96,7 +96,7 @@ class IdentifyPage extends StatefulWidget {
 }
 
 class _IdentifyPageState extends State<IdentifyPage>
-    with SingleTickerProviderStateMixin {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   /// 自动提交时限:满 10s 仍无人手动点击"立即识别"就自动收尾。
   static const _autoSubmitDelay = Duration(seconds: 10);
 
@@ -123,6 +123,16 @@ class _IdentifyPageState extends State<IdentifyPage>
   Timer? _autoSubmitTimer;
   Timer? _elapsedTimer;
 
+  /// 在途的采集 start（null = 当前没有待收尾的 start）。
+  /// dispose/后台切换时的 cancel 必须排在它完成后：两条 FRB 调用在 Rust
+  /// 线程池上相互独立，cancel 先于 start 落地的话，流会在页面死后才启动，
+  /// 麦克风指示灯常亮到下一次识曲或进程退出。
+  Future<void>? _startFuture;
+
+  /// 采集启停串行链：所有 cancel 追加到队尾，后续 start 排在链上——
+  /// 保证「上一次 cancel」永远先于「下一次 start」生效，不会误杀新流。
+  Future<void> _captureTeardown = Future.value();
+
   /// 是否显示 mic/system 源切换(仅桌面形态;Android/移动形态只有麦克风)。
   bool get _showSourceSwitch =>
       !kIsWeb && isDesktopFormFactor && (Platform.isWindows || Platform.isLinux);
@@ -130,6 +140,7 @@ class _IdentifyPageState extends State<IdentifyPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _backend = widget.captureBackend ?? IdentifyService.platformDefault();
     // 聆听脉冲:1.2s 一轮的 repeat 控制器(测试不能 pumpAndSettle 的原因)。
     _pulse = AnimationController(
@@ -141,13 +152,57 @@ class _IdentifyPageState extends State<IdentifyPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoSubmitTimer?.cancel();
     _elapsedTimer?.cancel();
     _pulse.dispose();
     // 关页一律停采集:桌面 stopAndCollect 只取快照不停流,matching/done/empty
-    // 态离开页面也必须 cancel(两端 cancel 均幂等安全,fire-and-forget)。
-    unawaited(_backend.cancel());
+    // 态离开页面也必须 cancel(两端 cancel 均幂等安全)。cancel 排队在
+    // 在途 start 之后,不留无主采集流。
+    _cancelCapture();
     super.dispose();
+  }
+
+  /// 后台静默期处理:Android 12+ 切后台会悄悄切断麦克风,留在 listening
+  /// 只会让 10s 自动提交白跑一趟网络(录到静音/空数据)。退后台即停采集
+  /// 与计时,回前台重新开一轮完整聆听窗口。
+  ///
+  /// 只响应 paused/hidden(完全不可见):inactive 在权限弹窗等瞬态遮挡时
+  /// 也会触发,此时采集尚未开始/正在进行,不能打断。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      if (_phase == _IdentifyPhase.listening) {
+        _autoSubmitTimer?.cancel();
+        _elapsedTimer?.cancel();
+        _cancelCapture();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (mounted && _phase == _IdentifyPhase.listening) {
+        _beginListening();
+      }
+    }
+  }
+
+  /// 取消当前采集:排在任何在途 start 之后,并把后续 start 挡在自己后面。
+  void _cancelCapture() {
+    final pendingStart = _startFuture;
+    _startFuture = null;
+    _captureTeardown = _captureTeardown.then((_) async {
+      if (pendingStart != null) {
+        try {
+          await pendingStart;
+        } catch (_) {
+          // start 自身失败已有错误态处理,这里只保证时序。
+        }
+      }
+      try {
+        await _backend.cancel();
+      } catch (_) {
+        // cancel 幂等;后端已释放时忽略。
+      }
+    });
   }
 
   /// 进入(或重试、切源后重新进入)聆听态:开采集 + 起两个计时器 + 起脉冲。
@@ -163,10 +218,18 @@ class _IdentifyPageState extends State<IdentifyPage>
     });
     _pulse.repeat();
     debugPrint('[IdentifyPage] 开始采集: source=${_source.value}');
-    // fire-and-forget:start 失败(如 Android 麦克风权限被拒)转错误态。
+    // 排在 teardown 链之后启动(防旧 cancel 误杀新流);fire-and-forget:
+    // start 失败(如 Android 麦克风权限被拒)转错误态。
     unawaited(
-      _backend.start(source: _source.value).catchError((Object error) {
-        if (mounted) _showError(error);
+      _captureTeardown.then((_) async {
+        if (!mounted || _phase != _IdentifyPhase.listening) return;
+        final start = _backend.start(source: _source.value);
+        _startFuture = start;
+        try {
+          await start;
+        } catch (error) {
+          if (mounted) _showError(error);
+        }
       }),
     );
   }
@@ -219,6 +282,8 @@ class _IdentifyPageState extends State<IdentifyPage>
   }
 
   void _showError(Object error) {
+    // 错误态不再聆听:停掉脉冲,否则错误页以 60fps 空转到关闭。
+    _pulse.stop();
     setState(() {
       _phase = _IdentifyPhase.error;
       _errorText = error.toString();
@@ -243,7 +308,8 @@ class _IdentifyPageState extends State<IdentifyPage>
     _autoSubmitTimer?.cancel();
     _elapsedTimer?.cancel();
     setState(() => _source = source);
-    await _backend.cancel();
+    _cancelCapture();
+    await _captureTeardown;
     if (mounted && _phase == _IdentifyPhase.listening) _beginListening();
   }
 

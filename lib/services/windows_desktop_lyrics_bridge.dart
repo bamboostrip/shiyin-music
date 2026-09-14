@@ -116,6 +116,17 @@ class WindowsDesktopLyricsBridge {
   double _progress = 0.0;
   bool _appForeground = true;
 
+  // ---- updateProgress 节流状态 ----
+  // 主窗存在两条进度推送路径（positionStream tick + 播放中的持久帧回调，
+  // 帧回调频率 = 主窗刷新率，可高达 165Hz），子窗每条消息都会全量重建并
+  // 重绘歌词层。在桥接层统一节流：距上次发送 ≥33ms 且进度增量超过
+  // [_kProgressSendEpsilon]（或播放态翻转）才真正 invoke，否则只更新缓存。
+  DateTime _lastProgressSentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _lastSentProgress = -1.0;
+  bool _lastSentIsPlaying = false;
+  static const Duration _kProgressMinSendInterval = Duration(milliseconds: 33);
+  static const double _kProgressSendEpsilon = 1 / 256;
+
   /// 双行交替高亮：当前句是否落在**下行**（= 歌词行下标为奇数）。
   /// 子窗据此决定哪个字行带动画进度：正在唱的那一行文字不移动，
   /// 只让另一行换成下一句（见 buildOverlayLyricsBody）。
@@ -262,6 +273,24 @@ class WindowsDesktopLyricsBridge {
     _progress = progress;
     _isPlaying = isPlaying;
     if (!_visible || !_overlayReady) return;
+    // 节流 + 增量去重：子窗高亮只随消息推进（自身不内插），1/256 行宽的
+    // 步进在 780px 窗口约 3px，视觉上不可分辨；换句时 progress 从 ~1.0 跳回
+    // 0.0、暂停/恢复时 isPlaying 翻转，均无条件放行。
+    final now = DateTime.now();
+    final progressDelta = (progress - _lastSentProgress).abs();
+    final playStateFlipped = isPlaying != _lastSentIsPlaying;
+    final isLineReset =
+        _lastSentProgress > 0.5 && progress < 0.5 && !playStateFlipped;
+    final intervalElapsed = now.difference(_lastProgressSentAt) >=
+        _kProgressMinSendInterval;
+    if (!playStateFlipped &&
+        !isLineReset &&
+        (!intervalElapsed || progressDelta < _kProgressSendEpsilon)) {
+      return;
+    }
+    _lastProgressSentAt = now;
+    _lastSentProgress = progress;
+    _lastSentIsPlaying = isPlaying;
     try {
       await _invokeSub('updateProgress', <String, dynamic>{
         'progress': progress,
@@ -335,6 +364,11 @@ class WindowsDesktopLyricsBridge {
             'progress': _progress,
             'isPlaying': _isPlaying,
           });
+          // 握手补发已送达最新进度：同步节流基线，避免旧会话的
+          // _lastSentProgress 抑制新窗口的首次增量推送。
+          _lastProgressSentAt = DateTime.now();
+          _lastSentProgress = _progress;
+          _lastSentIsPlaying = _isPlaying;
         } on Exception catch (e) {
           debugPrint('[桌面歌词主窗] updateProgress 补发失败: $e');
         }

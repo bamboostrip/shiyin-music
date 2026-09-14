@@ -8,9 +8,13 @@ import '../form_factor.dart';
 import '../widgets/artwork.dart';
 
 class ArtworkBackground extends StatefulWidget {
-  const ArtworkBackground({super.key, required this.song});
+  const ArtworkBackground({super.key, required this.song, this.playing = true});
 
   final Song song;
+
+  /// 是否正在播放：旋转+全屏模糊背景按显示刷新率持续消耗 GPU，
+  /// 暂停时冻结在当前角度（纯装饰动画，暂停不动无可感知差异）。
+  final bool playing;
 
   @override
   State<ArtworkBackground> createState() => _ArtworkBackgroundState();
@@ -26,7 +30,26 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
     _rotationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 40), // 40 seconds for a full rotation
-    )..repeat();
+    );
+    _syncRotation();
+  }
+
+  @override
+  void didUpdateWidget(covariant ArtworkBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.playing != widget.playing) {
+      _syncRotation();
+    }
+  }
+
+  void _syncRotation() {
+    if (widget.playing) {
+      if (!_rotationController.isAnimating) {
+        _rotationController.repeat();
+      }
+    } else if (_rotationController.isAnimating) {
+      _rotationController.stop(canceled: false);
+    }
   }
 
   @override

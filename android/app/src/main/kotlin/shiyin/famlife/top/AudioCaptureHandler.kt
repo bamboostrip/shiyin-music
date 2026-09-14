@@ -9,6 +9,7 @@ import android.os.Looper
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -21,6 +22,13 @@ import kotlin.concurrent.thread
  * start 后台线程持续读 AudioRecord 进有界缓冲(最多 MAX_BUFFER_MS),
  * stop 取末尾 durationMs 毫秒字节返回并释放。取消语义对齐响度分析:
  * cancel 直接丢弃,不返回数据。
+ *
+ * 线程模型:一次 start 对应一个 [Session](独享 AudioRecord + reader 线程 +
+ * 存活标记)。release 顺序必须是「标记失效 → stop 让阻塞中的 read 尽快返回
+ * → join 等 reader 线程退出 → release」——AudioRecord 官方文档明确:
+ * 另一线程 read 进行中时直接 release() 属未定义行为(可原生崩溃);
+ * 共享全局 reading 标记的旧实现里,新一轮 start 把标记翻回 true 还会让
+ * 旧 reader 线程复活、把旧设备的数据混进新会话缓冲。
  */
 internal object AudioCaptureHandler {
     private const val SAMPLE_RATE = 8000
@@ -29,8 +37,13 @@ internal object AudioCaptureHandler {
     private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
     private const val PERMISSION_CODE = 4101
 
-    @Volatile private var record: AudioRecord? = null
-    @Volatile private var reading = false
+    /** 单次采集会话:独享录音实例、reader 线程与存活标记。 */
+    private class Session(val record: AudioRecord) {
+        val alive = AtomicBoolean(true)
+        lateinit var thread: Thread
+    }
+
+    @Volatile private var session: Session? = null
     private val buffer = ArrayDeque<ByteArray>()
     private var bufferedBytes = 0
     private var pendingPermissionResult: MethodChannel.Result? = null
@@ -75,6 +88,9 @@ internal object AudioCaptureHandler {
             result.success(true)
             return
         }
+        // 新请求顶掉尚未应答的旧请求时,旧 result 必须以错误收尾,
+        // 否则 Dart 侧第一个调用者的 Future 永远悬挂。
+        pendingPermissionResult?.error("permission", "已被新的权限请求取代", null)
         pendingPermissionResult = result
         androidx.core.app.ActivityCompat.requestPermissions(
             activity,
@@ -106,12 +122,14 @@ internal object AudioCaptureHandler {
             return
         }
         synchronized(buffer) { buffer.clear(); bufferedBytes = 0 }
-        record = rec
-        reading = true
+        val s = Session(rec)
+        session = s
         rec.startRecording()
-        thread(name = "identify-capture") {
+        s.thread = thread(name = "identify-capture") {
             val chunk = ByteArray(BYTES_PER_MS * 200) // 200ms 一块
-            while (reading) {
+            // 循环条件绑定本会话的存活标记(而非共享全局标记):
+            // 旧会话失效后即使标记被新会话复用也不会复活。
+            while (s.alive.get()) {
                 val n = rec.read(chunk, 0, chunk.size)
                 if (n <= 0) break
                 synchronized(buffer) {
@@ -153,12 +171,14 @@ internal object AudioCaptureHandler {
     }
 
     private fun release() {
-        reading = false
+        val s = session ?: return
+        session = null
+        // 顺序见类注释:read 进行中直接 release 是未定义行为;stop() 让
+        // 阻塞中的 read 尽快返回,join 兜底等线程退出后再 release。
+        s.alive.set(false)
+        try { s.record.stop() } catch (_: IllegalStateException) {}
+        try { s.thread.join(300) } catch (_: InterruptedException) {}
+        s.record.release()
         synchronized(buffer) { buffer.clear(); bufferedBytes = 0 }
-        record?.let {
-            try { it.stop() } catch (_: IllegalStateException) {}
-            it.release()
-        }
-        record = null
     }
 }

@@ -17,7 +17,7 @@
 
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
@@ -34,14 +34,23 @@ const PROGRESS_INTERVAL_MS: i64 = 500;
 /// 分析时长上限（毫秒）：足够覆盖绝大多数歌曲，防御超长文件/损坏流。
 const MAX_ANALYSIS_MS: i64 = 30 * 60 * 1000;
 
-/// 全局取消标志。同一时刻只允许一个分析在途（controller 切歌时先取消
-/// 旧的再起新的），全局 AtomicBool 与 Android 侧 `loudnessAnalysisCancelled`
-/// 语义一致。
-static CANCELLED: AtomicBool = AtomicBool::new(false);
+/// 分析取消模型：代数计数（generation）+ 每次调用的独立 stop 标志。
+///
+/// 历史实现是单个全局 `AtomicBool`，analyze 入口先 `store(false)`：
+/// - 快速切歌时"取消旧分析"与"启动新分析"两次调用在 FRB 线程池上无序，
+///   新分析可能先复位标志，旧分析随即失去取消（白跑整段解码）；
+/// - Dart 侧取消订阅导致的 `events.add` 失败也置同一个全局标志，
+///   迟到的旧订阅错误会误杀**其后才启动**的新歌分析（返回 None，
+///   新歌整轮没有响度均衡）。
+///
+/// 现在：cancel 使代数 +1；analyze 启动时记录当前代数，代数变化即取消
+/// ——旧任务只被"自己启动之后"发生的取消杀死，复位语义不复存在。
+/// 订阅断开只置本调用私有的 stop，不影响其他任务。
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// 取消当前在途的响度分析（对应 Android 通道的 cancelLoudnessAnalysis）。
 pub fn cancel_loudness_analysis() {
-    CANCELLED.store(true, Ordering::SeqCst);
+    GENERATION.fetch_add(1, Ordering::SeqCst);
 }
 
 /// 分析进度/结果事件（Dart 侧 Stream 元素）。
@@ -65,20 +74,38 @@ pub struct LoudnessResult {
 
 /// 分析一首歌的响度。`source` 为 http(s) URL 或本地文件路径。
 ///
-/// 进度经 `progress` 回调推送（含最终值一次）；取消（全局标志）时返回
-/// `None`，与 Android 通道"取消返回 null"对齐。
+/// 进度经 `progress` 回调推送（含最终值一次）；取消（代数变化或本调用
+/// 的 [stop] 置位）时返回 `None`，与 Android 通道"取消返回 null"对齐。
 pub fn analyze(
     source: &str,
+    stop: &AtomicBool,
     progress: &mut dyn FnMut(LoudnessProgress),
 ) -> anyhow::Result<Option<LoudnessResult>> {
-    CANCELLED.store(false, Ordering::SeqCst);
+    let generation = GENERATION.load(Ordering::SeqCst);
+    let cancelled =
+        || stop.load(Ordering::SeqCst) || GENERATION.load(Ordering::SeqCst) != generation;
 
-    let local_path = match resolve_local(source)? {
-        Some(path) => path,
+    let (local_path, is_temp) = match resolve_local(source, &cancelled)? {
+        Some(pair) => pair,
         None => return Ok(None), // 已取消
     };
+    let result = analyze_file(&local_path, &cancelled, progress);
+    // http 源的临时文件分析完就删（成功/失败/取消一致）：历史实现只写
+    // 不删也不复用,每首首次播放的歌都给 %TEMP% 永久留下 3-10MB。
+    // 删除必须在 analyze_file 返回后:解码期间 File 句柄未释放,Windows
+    // 上打开中的文件删除会失败。
+    if is_temp {
+        let _ = std::fs::remove_file(&local_path);
+    }
+    result
+}
 
-    let file = File::open(&local_path)?;
+fn analyze_file(
+    local_path: &std::path::Path,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(LoudnessProgress),
+) -> anyhow::Result<Option<LoudnessResult>> {
+    let file = File::open(local_path)?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = local_path.extension().and_then(|e| e.to_str()) {
@@ -118,7 +145,7 @@ pub fn analyze(
     let mut last_progress_ms: i64 = 0;
 
     loop {
-        if CANCELLED.load(Ordering::SeqCst) {
+        if cancelled() {
             return Ok(None);
         }
         let packet = match format.next_packet() {
@@ -167,7 +194,7 @@ pub fn analyze(
         }
     }
 
-    if CANCELLED.load(Ordering::SeqCst) {
+    if cancelled() {
         return Ok(None);
     }
     let lufs = meter.integrated_lufs();
@@ -180,15 +207,25 @@ pub fn analyze(
 }
 
 /// http(s) 源下载到临时文件（带酷狗 UA，缺省 403）；本地路径直接返回。
-/// 返回 None 表示下载前/中被取消。
-fn resolve_local(source: &str) -> anyhow::Result<Option<PathBuf>> {
+/// 返回 None 表示下载前/中被取消；Some((path, is_temp)) 的 is_temp 标记
+/// 是否为本函数管理的临时文件（分析结束后由调用方删除，本地文件绝不能删）。
+fn resolve_local(
+    source: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> anyhow::Result<Option<(PathBuf, bool)>> {
     if !source.starts_with("http://") && !source.starts_with("https://") {
-        return Ok(Some(PathBuf::from(source)));
+        return Ok(Some((PathBuf::from(source), false)));
     }
 
     let dir = std::env::temp_dir().join("shiyin-loudness");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("analyze-{}.bin", simple_hash(source)));
+
+    // 崩溃/取消残留的同名临时文件直接复用，免去一次重复下载
+    // （正常路径分析结束即删，命中窗口很小，但零成本顺手兜住）。
+    if path.exists() {
+        return Ok(Some((path, true)));
+    }
 
     // 网易云外链校验 Referer（与 Dart 播放代理一致）；酷狗 CDN 不吃
     // Referer，但为防个别节点拒绝陌生 Referer，仅对 163 域名注入。
@@ -211,13 +248,12 @@ fn resolve_local(source: &str) -> anyhow::Result<Option<PathBuf>> {
         request = request.header("Referer", "https://music.163.com/");
     }
     let bytes = request.send()?.error_for_status()?.bytes()?;
-    if CANCELLED.load(Ordering::SeqCst) {
+    if cancelled() {
         let _ = std::fs::remove_file(&path);
         return Ok(None);
     }
     std::fs::write(&path, &bytes)?;
-    // 同 hash 复用临时文件（命中即免重复下载），目录交给系统清理。
-    Ok(Some(path))
+    Ok(Some((path, true)))
 }
 
 /// URL → 稳定短哈希文件名（FNV-1a，仅用于临时文件命名）。

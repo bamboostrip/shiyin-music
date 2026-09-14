@@ -1,38 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
-
-/// An animatable that implements a ping-pong marquee translation cycle:
-/// 1. Pause at offset 0 for [p1] of total duration.
-/// 2. Smoothly scroll forward to -[overflow] between [p1] and [p2].
-/// 3. Pause at -[overflow] between [p2] and [p3].
-/// 4. Smoothly scroll back to 0 between [p3] and 1.0.
-class _MarqueeAnimatable extends Animatable<double> {
-  const _MarqueeAnimatable({
-    required this.overflow,
-    required this.p1,
-    required this.p2,
-    required this.p3,
-    this.curve = Curves.linear,
-  });
-
-  final double overflow;
-  final double p1;
-  final double p2;
-  final double p3;
-  final Curve curve;
-
-  @override
-  double transform(double t) {
-    if (t <= p1) return 0.0;
-    if (t <= p2) {
-      final progress = (t - p1) / (p2 - p1);
-      return -overflow * curve.transform(progress.clamp(0.0, 1.0));
-    }
-    if (t <= p3) return -overflow;
-    final progress = (t - p3) / (1.0 - p3);
-    return -overflow * (1.0 - curve.transform(progress.clamp(0.0, 1.0)));
-  }
-}
 
 /// A reusable marquee text widget that smoothly scrolls overflowing text
 /// in a ping-pong manner with pauses at the start and end boundaries.
@@ -92,6 +61,14 @@ class _MarqueeTextState extends State<MarqueeText>
   late final AnimationController _controller;
   Animation<double>? _animation;
 
+  /// 暂停相位用 Timer 而非持续 repeat 的 ticker 承载：跑马灯在两端的
+  /// 停留期（默认各 2s）不需要任何帧，避免桌面播放栏常驻 60fps 唤醒。
+  Timer? _pauseTimer;
+
+  /// 当前是否处于回滚半程（reverse 完成 fires dismissed，reset 也会，
+  /// 用此标记区分"回滚到位"与"人为归零"）。
+  bool _reversing = false;
+
   double? _lastOverflow;
   Duration? _lastPauseDuration;
   double? _lastVelocity;
@@ -100,13 +77,57 @@ class _MarqueeTextState extends State<MarqueeText>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this);
+    _controller = AnimationController(vsync: this)
+      ..addStatusListener(_onStatusChanged);
   }
 
   @override
   void dispose() {
+    _pauseTimer?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _onStatusChanged(AnimationStatus status) {
+    final isForwardEnd = status == AnimationStatus.completed;
+    final isReverseEnd = status == AnimationStatus.dismissed && _reversing;
+    if (!isForwardEnd && !isReverseEnd) return;
+    _schedulePause(nextReverse: isForwardEnd);
+  }
+
+  void _schedulePause({required bool nextReverse}) {
+    _pauseTimer?.cancel();
+    final pause =
+        widget.pauseDuration < Duration.zero
+            ? Duration.zero
+            : widget.pauseDuration;
+    _pauseTimer = Timer(pause, () {
+      if (!mounted) return;
+      if (nextReverse) {
+        _reversing = true;
+        _controller.reverse();
+      } else {
+        _reversing = false;
+        _controller.forward();
+      }
+    });
+  }
+
+  /// 从起点重新开始一个乒乓周期（起始端先停留 [MarqueeText.pauseDuration]）。
+  void _startCycle() {
+    _pauseTimer?.cancel();
+    _reversing = false;
+    _controller.reset();
+    _schedulePause(nextReverse: false);
+  }
+
+  void _stopCycle() {
+    _pauseTimer?.cancel();
+    _reversing = false;
+    if (_controller.isAnimating) {
+      _controller.stop();
+    }
+    _controller.reset();
   }
 
   @override
@@ -156,11 +177,10 @@ class _MarqueeTextState extends State<MarqueeText>
         // If text fits in available width (or width is unconstrained):
         // Render static Text.rich with 0 animation overhead.
         if (availableWidth.isInfinite || overflow <= 0) {
-          if (_controller.isAnimating) {
+          if (_controller.isAnimating || _pauseTimer != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _controller.isAnimating) {
-                _controller.stop();
-                _controller.reset();
+              if (mounted && (_controller.isAnimating || _pauseTimer != null)) {
+                _stopCycle();
               }
             });
           }
@@ -184,7 +204,6 @@ class _MarqueeTextState extends State<MarqueeText>
         final moveDuration = Duration(
           milliseconds: moveDurationMs > 0 ? moveDurationMs : 1,
         );
-        final totalDuration = (pauseDuration * 2) + (moveDuration * 2);
 
         // 触发条件只看"影响滚动几何/时序"的量。刻意不做 textSpan/style 的
         // 实例比较：调用方（播放栏）每次重建都会 new 一个 TextSpan，身份
@@ -204,28 +223,14 @@ class _MarqueeTextState extends State<MarqueeText>
           _lastVelocity = velocity;
           _lastCurve = widget.curve;
 
-          _controller.duration = totalDuration;
-
-          final pauseMs = pauseDuration.inMicroseconds.toDouble();
-          final moveMs = moveDuration.inMicroseconds.toDouble();
-          final totalMs = totalDuration.inMicroseconds.toDouble();
-
-          final p1 = totalMs > 0 ? pauseMs / totalMs : 0.0;
-          final p2 = totalMs > 0 ? (pauseMs + moveMs) / totalMs : 0.5;
-          final p3 = totalMs > 0 ? (2 * pauseMs + moveMs) / totalMs : 0.5;
-
-          _animation = _MarqueeAnimatable(
-            overflow: overflow,
-            p1: p1,
-            p2: p2,
-            p3: p3,
-            curve: widget.curve,
-          ).animate(_controller);
+          _controller.duration = moveDuration;
+          _animation = Tween<double>(begin: 0, end: -overflow)
+              .chain(CurveTween(curve: widget.curve))
+              .animate(_controller);
 
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            _controller.reset();
-            _controller.repeat();
+            _startCycle();
           });
         }
 

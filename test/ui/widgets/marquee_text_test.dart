@@ -88,8 +88,11 @@ void main() {
         transform = tester.widget<Transform>(innerTransform);
         expect(transform.transform.getTranslation().x, 0.0);
 
-        // After pause ends, begins scrolling left (negative x translation)
+        // After pause ends, begins scrolling left (negative x translation)。
+        // 暂停由 Timer 承载：跨过暂停边界的 pump 先启动滚动（首帧 elapsed 为
+        // 0），需再泵一帧才能读到非零位移。
         await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(milliseconds: 100));
         transform = tester.widget<Transform>(innerTransform);
         expect(transform.transform.getTranslation().x, lessThan(0.0));
       },
@@ -129,8 +132,10 @@ void main() {
       transform = tester.widget<Transform>(innerTransform);
       expect(transform.transform.getTranslation().x, 0.0);
 
-      // Advance into scroll: offset becomes negative
+      // Advance into scroll: offset becomes negative（Timer 驱动的暂停结束后
+      // 首帧 elapsed 为 0，需再泵一帧读取位移）。
       await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 100));
       transform = tester.widget<Transform>(innerTransform);
       final midOffset = transform.transform.getTranslation().x;
       expect(midOffset, lessThan(0.0));
@@ -262,10 +267,11 @@ void main() {
             ),
           ),
         );
-        await tester.pumpWidget(build());
-        await tester.pump();
-        // 滚入前进段（默认 30px/s）：1.2s 后偏移约 -36px。
-        await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pumpWidget(build());
+      // 滚入前进段（默认 30px/s）：先推进一小段时间让零时长暂停 Timer
+      // 触发并启动滚动，1.2s 后偏移约 -36px。
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 1200));
 
         Offset translateOffset() {
           final transform = find
@@ -373,7 +379,8 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      // 零时长暂停 Timer 需一次时间推进才会触发并启动滚动。
+      await tester.pump(const Duration(milliseconds: 16));
       await tester.pump(const Duration(milliseconds: 100));
 
       final marquee = find.byType(MarqueeText);

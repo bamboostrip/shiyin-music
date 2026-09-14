@@ -56,19 +56,26 @@ pub struct LoudnessEvent {
 /// Dart 侧取消订阅）时流直接关闭且没有 is_final 事件，对齐 Android
 /// 通道"取消返回 null"的语义。
 pub fn analyze_loudness(url: String, events: StreamSink<LoudnessEvent>) -> Result<(), String> {
+    // 本调用私有的停止标志：Dart 侧取消订阅后 add 报错只停自己。
+    // （历史实现此处置全局取消标志，旧订阅迟到的错误会误杀其后启动的
+    // 新歌分析。）
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_for_cb = stop.clone();
     let mut send_progress = |p: loudness::LoudnessProgress| {
+        if stop_for_cb.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let event = LoudnessEvent {
             lufs: p.lufs,
             analyzed_ms: p.analyzed_ms,
             is_final: p.is_final,
             failure: None,
         };
-        // Dart 侧取消订阅后 add 报错，置取消标志让解码循环退出。
         if events.add(event).is_err() {
-            loudness::cancel_loudness_analysis();
+            stop_for_cb.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     };
-    match loudness::analyze(&url, &mut send_progress) {
+    match loudness::analyze(&url, &stop, &mut send_progress) {
         Ok(_) => Ok(()), // 取消（None）时不发事件，直接关流
         Err(e) => {
             let _ = events.add(LoudnessEvent {

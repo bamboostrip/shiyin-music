@@ -9,13 +9,34 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   /// 设置用户音量（0.0–1.0），越界值自动夹取。
   /// 经响度系数合成后 instant 应用（打断在途 ramp 跟手），不破坏响度比。
   /// 音量会被快捷键等非 UI 入口修改，通知监听者以同步播放栏滑块。
+  /// 拖动滑杆/滚轮调节会高频调用：引擎音量即时应用保持跟手，SharedPreferences
+  /// 落盘防抖合并（此前每 tick 一次磁盘写，且写完才应用音量，拖动发涩）。
   Future<void> setVolume(double value) async {
     final clamped = value.clamp(0.0, 1.0);
     userVolume = clamped;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_userVolumeSettingKey, clamped);
+    _volumePersistDebounce?.cancel();
+    _volumePersistDebounce = Timer(const Duration(milliseconds: 500), () {
+      _volumePersistDebounce = null;
+      unawaited(_persistUserVolume(clamped));
+    });
     await _applyLoudnessGain(instant: true);
     notifyListeners();
+  }
+
+  Future<void> _persistUserVolume(double clamped) async {
+    _persistedUserVolume = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_userVolumeSettingKey, clamped);
+  }
+
+  /// 尽快落盘未写入的用户音量（dispose 时防抖窗口内还有最后一次调节）。
+  void _flushPendingVolumePersist() {
+    final pending = _volumePersistDebounce?.isActive ?? false;
+    _volumePersistDebounce?.cancel();
+    _volumePersistDebounce = null;
+    if (pending && userVolume != _persistedUserVolume) {
+      unawaited(_persistUserVolume(userVolume));
+    }
   }
 
   String get playbackSpeedLabel {
@@ -213,6 +234,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         errorMessage = '播放失败，正在重试...';
         notifyListeners();
         await Future<void>.delayed(const Duration(seconds: 2));
+        if (_disposed) return;
         if (currentSong?.hash != song.hash) {
           debugPrint('[时音][player] 重试等待期间歌曲已切换，放弃重试: ${song.title}');
           return;
@@ -265,6 +287,33 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         _scheduleSavePlaybackState();
       }
     }
+  }
+
+  /// 播放中的中途错误处理（接入点见构造器 `_errorSub`）。
+  ///
+  /// 断流/解码失败发生时 load 早已成功、[playSong] 已返回，错误不经其
+  /// catch 分支；底层 `playing` 不变（mpv 只是停止出数据），没有这里的
+  /// 话 isPlaying 恒为 true、smoothPosition 持续外推，界面"假播放"到
+  /// 曲尾。与 playSong 失败路径做相同收尾（暂停引擎、复位位置展示），
+  /// 并计入连续失败 streak 复用 3 次阈值自动跳过；同时写入 errorMessage
+  /// ——网络恢复钩子（onConnectivityRestored）会据此自动重播一次。
+  void _handleMidPlaybackError(PlayerException error) {
+    if (_disposed) return;
+    final song = currentSong;
+    if (song == null) return;
+    // 加载/换源期的错误由 playSong 的失败路径统一处理，避免双重计数。
+    if (isPreparing || _isChangingSource) return;
+    // 用户已暂停时迟到的错误不处理（无"假播放"问题，保留现场等用户操作）。
+    if (!isPlaying) return;
+    debugPrint('[时音][player] 播放中出错: ${song.title} ($error)');
+    unawaited(_audioHandler.pause());
+    duration = song.duration ?? duration;
+    _setPositionBase(Duration.zero, playing: false);
+    _lastSmoothPosition = Duration.zero;
+    _emitPosition();
+    errorMessage = '播放中断，请稍后重试';
+    notifyListeners();
+    _registerPlaybackFailure(song);
   }
 
   /// 记录一次最终播放失败（已走完 VIP 领取与自动重试）。

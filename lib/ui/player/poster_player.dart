@@ -429,7 +429,13 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
     if (!mounted || widget.player.isScrubbing) {
       return;
     }
-    setState(() => _position = widget.player.smoothPosition);
+    // 歌词高亮按字推进，~30Hz 刷新视觉足够；无阈值逐帧 setState 会把
+    // 预览子树在高刷屏上推到 165Hz 重建（对齐 mobile_lyric_list 的做法）。
+    final next = widget.player.smoothPosition;
+    if ((next - _position).abs() < const Duration(milliseconds: 20)) {
+      return;
+    }
+    setState(() => _position = next);
   }
 
   @override

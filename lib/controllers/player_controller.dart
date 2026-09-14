@@ -211,6 +211,11 @@ class PlayerController extends _PlayerControllerBase
         }
       }
     });
+    // 播放中的中途错误（断流/解码失败等）：此时 load 早已成功、playSong 已
+    // 返回，错误不会经过其 catch——不接的话 isPlaying 恒为 true、进度继续
+    // 外推，界面"假播放"到曲尾且无任何提示与自愈。加载期（isPreparing/
+    // 换源深度>0）的错误仍由 playSong 的失败路径处理，这里只兜中途失败。
+    _errorSub = audioPlayer.errorStream.listen(_handleMidPlaybackError);
     _androidAudioSessionSub = audioPlayer.androidAudioSessionIdStream.listen((
       sessionId,
     ) {
@@ -240,6 +245,7 @@ class PlayerController extends _PlayerControllerBase
     // dispose 完成后 notifyListeners 并对已释放的 AudioPlayer 应用增益。
     _loudnessSerial++;
     _pauseListeningTimeTracker();
+    _flushPendingVolumePersist();
     _networkRestoredSub?.cancel();
     _autoResumeTimer?.cancel();
     _sleepTimer?.cancel();
@@ -247,6 +253,7 @@ class PlayerController extends _PlayerControllerBase
     _durationSub.cancel();
     _stateSub.cancel();
     _processingStateSub.cancel();
+    _errorSub.cancel();
     _androidAudioSessionSub.cancel();
     _interruptionSub?.cancel();
     _becomingNoisySub?.cancel();
@@ -335,6 +342,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   late final StreamSubscription<Duration?> _durationSub;
   late final StreamSubscription<PlayerState> _stateSub;
   late final StreamSubscription<ProcessingState> _processingStateSub;
+  late final StreamSubscription<PlayerException> _errorSub;
   late final StreamSubscription<int?> _androidAudioSessionSub;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
@@ -453,6 +461,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 引擎实际音量 = 用户音量 × 响度系数（见 _applyLoudnessGain），
   /// 两通道分开后互不覆盖，滑块不再自己跳。
   double userVolume = 1.0;
+
+  /// 音量落盘防抖（见 _PlayerPlayback.setUserVolume）与最近落盘值。
+  Timer? _volumePersistDebounce;
+  double _persistedUserVolume = 1.0;
 
   // SuperLyric/蓝牙歌词同步状态
   int _lastSuperLyricIndex = -1;

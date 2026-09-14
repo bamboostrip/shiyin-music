@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
@@ -41,6 +42,27 @@ class _FakeCaptureBackend implements IdentifyCaptureBackend {
   @override
   Future<Uint8List?> stopAndCollect({int durationMs = 10000}) async =>
       Uint8List.fromList(List.filled(16000, 1));
+
+  @override
+  Future<void> cancel() async => cancelCalls++;
+}
+
+/// start 迟迟不完成的采集后端:复现"页面在 start 在途时被关闭"的时序。
+class _SlowStartBackend implements IdentifyCaptureBackend {
+  int startCalls = 0;
+  int cancelCalls = 0;
+  final Completer<void> _startCompleter = Completer<void>();
+
+  void completeStart() => _startCompleter.complete();
+
+  @override
+  Future<void> start({String source = 'mic'}) {
+    startCalls++;
+    return _startCompleter.future;
+  }
+
+  @override
+  Future<Uint8List?> stopAndCollect({int durationMs = 10000}) async => null;
 
   @override
   Future<void> cancel() async => cancelCalls++;
@@ -122,6 +144,29 @@ void main() {
     await tester.tap(find.byTooltip('返回'));
     await tester.pump(const Duration(seconds: 1));
     expect(backend.cancelCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets('dispose 排队在途 start 之后才 cancel，不留无主采集流', (tester) async {
+    debugDesktopFormFactorOverride = false;
+    final backend = _SlowStartBackend();
+    final player = _FakePlayer();
+
+    await tester.pumpWidget(MaterialApp(
+      home: IdentifyPage(player: player, captureBackend: backend),
+    ));
+    await tester.pump(); // 首帧:start 已发起但未完成
+    expect(backend.startCalls, 1);
+
+    // 页面在 start 未完成时被移除
+    await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+    await tester.pump();
+    // start 完成前不得 cancel（cancel 先落地会被后到的 start 反杀成无主流）
+    expect(backend.cancelCalls, 0);
+
+    // start 完成 → 排队中的 cancel 紧随执行
+    backend.completeStart();
+    await tester.pump();
+    expect(backend.cancelCalls, 1);
   });
 
   testWidgets('移动端形态：更多按钮可弹出操作菜单（含下一首播放）', (tester) async {

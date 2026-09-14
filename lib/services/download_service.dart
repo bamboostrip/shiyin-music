@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
@@ -537,36 +538,45 @@ class DownloadService {
 
   /// 获取下载目录的总大小（字节）。
   Future<int> getDownloadDirSize() async {
-    try {
-      final dir = await downloadDir();
-      if (!dir.existsSync()) return 0;
-      var total = 0;
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File) {
-          total += entity.lengthSync();
-        }
-      }
-      return total;
-    } catch (_) {
-      return 0;
-    }
+    final dir = await downloadDir();
+    return _dirSizeOffMainIsolate(dir);
   }
 
   /// 获取播放缓存目录的总大小（字节）。
   Future<int> getPlayCacheDirSize() async {
-    try {
-      final dir = await playCacheDir();
-      if (!dir.existsSync()) return 0;
+    final dir = await playCacheDir();
+    return _dirSizeOffMainIsolate(dir);
+  }
+
+  /// 目录树可能包含数千文件（整库下载）、被占用的文件（Windows 锁定/
+  /// 删除中的文件 stat 会抛异常）或路径超长：
+  /// - 遍历放到独立 isolate 执行，避免冻结 UI（打开缓存管理弹窗即触发）；
+  /// - 单个条目失败跳过，而不是让整趟统计归零（归零会静默禁用"清理"按钮）。
+  /// 目录路径本身先在主 isolate 解析（path_provider 是平台通道，不能跨
+  /// isolate 调用），只把可发送的 String 带进 isolate。
+  static Future<int> _dirSizeOffMainIsolate(Directory dir) async {
+    if (!dir.existsSync()) return 0;
+    final path = dir.path;
+    return Isolate.run(() {
       var total = 0;
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File) {
+      final List<FileSystemEntity> entries;
+      try {
+        entries = Directory(
+          path,
+        ).listSync(recursive: true, followLinks: false);
+      } catch (_) {
+        return total;
+      }
+      for (final entity in entries) {
+        if (entity is! File) continue;
+        try {
           total += entity.lengthSync();
+        } catch (_) {
+          // 单文件 stat 失败（占用/竞态删除/权限）：跳过继续统计。
         }
       }
       return total;
-    } catch (_) {
-      return 0;
-    }
+    });
   }
 
   /// 清空整个播放缓存目录。

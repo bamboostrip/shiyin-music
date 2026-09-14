@@ -16,6 +16,7 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   final _playerStateController = StreamController<PlayerState>.broadcast();
   final _processingStateController =
       StreamController<ProcessingState>.broadcast();
+  final _errorController = StreamController<PlayerException>.broadcast();
   final _androidAudioSessionIdController = StreamController<int?>.broadcast();
 
   @override
@@ -34,6 +35,9 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   @override
   Stream<int?> get androidAudioSessionIdStream =>
       _androidAudioSessionIdController.stream;
+
+  @override
+  Stream<PlayerException> get errorStream => _errorController.stream;
 
   @override
   double get volume => 1.0;
@@ -62,6 +66,7 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
     _playerStateController.close();
     _processingStateController.close();
     _androidAudioSessionIdController.close();
+    _errorController.close();
   }
 }
 
