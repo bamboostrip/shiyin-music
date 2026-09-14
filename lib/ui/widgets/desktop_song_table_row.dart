@@ -292,6 +292,7 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
             final active = !selecting &&
                 song.hash.isNotEmpty &&
                 player.currentSong?.hash == song.hash;
+            final isCurrentPlaying = active && player.isPlaying;
             final activeColor = colorScheme.primary;
 
             Color bgColor;
@@ -434,6 +435,10 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                     isHovered: !selecting &&
                                         _hovering &&
                                         widget.showHoverActions,
+                                    isCurrent: active,
+                                    isPlaying: isCurrentPlaying,
+                                    onPause: () => player.togglePlay(),
+                                    onResume: () => player.togglePlay(),
                                     borderRadius: 4,
                                     buttonSize: 26,
                                     iconSize: 18,
@@ -497,9 +502,19 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
                                   _DesktopRowIconButton(
-                                    icon: Icons.play_arrow_rounded,
-                                    tooltip: '播放',
-                                    onTap: widget.onPlay,
+                                    icon: isCurrentPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    tooltip: isCurrentPlaying
+                                        ? '暂停'
+                                        : (active ? '继续播放' : '播放'),
+                                    onTap: () {
+                                      if (active) {
+                                        player.togglePlay();
+                                      } else {
+                                        widget.onPlay();
+                                      }
+                                    },
                                   ),
                                   const SizedBox(width: 2),
                                   _DesktopRowIconButton(

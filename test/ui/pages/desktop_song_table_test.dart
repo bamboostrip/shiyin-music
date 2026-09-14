@@ -16,6 +16,15 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool isPlaying = false;
 
+  int togglePlayCount = 0;
+
+  @override
+  Future<void> togglePlay() async {
+    togglePlayCount++;
+    isPlaying = !isPlaying;
+    notifyListeners();
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -345,8 +354,8 @@ void main() {
         ),
       );
 
-      // 正在播放时，序号列替换为 NowPlayingBadge
-      expect(find.byType(NowPlayingBadge), findsOneWidget);
+      // 正在播放时，序号列替换为 NowPlayingBadge，封面同时显示跳动音波（共 2 个）
+      expect(find.byType(NowPlayingBadge), findsNWidgets(2));
       expect(find.text('01'), findsNothing);
     });
 
@@ -662,6 +671,215 @@ void main() {
       expect(find.byIcon(Icons.playlist_add_rounded), findsNothing);
       expect(find.byIcon(Icons.more_horiz_rounded), findsNothing);
       await gesture.removePointer();
+    });
+
+    testWidgets('正在播放歌曲封面显示 4 柱跳动音波，点击触发暂停', (tester) async {
+      final fakePlayer = _FakePlayerController()
+        ..currentSong = testSong
+        ..isPlaying = true;
+      final fakeAuth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 序号列渲染 3 柱 NowPlayingBadge，封面内部渲染 4 柱 NowPlayingBadge
+      final badges = find.byType(NowPlayingBadge);
+      expect(badges, findsNWidgets(2));
+
+      final coverBadgeFinder = find.byWidgetPredicate(
+        (w) =>
+            w is NowPlayingBadge && w.barCount == 4 && w.color == Colors.white,
+      );
+      expect(coverBadgeFinder, findsOneWidget);
+
+      // 点击封面跳动音波触发 pause (togglePlay)
+      await tester.tap(coverBadgeFinder);
+      await tester.pump();
+      expect(fakePlayer.togglePlayCount, 1);
+      expect(fakePlayer.isPlaying, isFalse);
+    });
+
+    testWidgets('正在播放歌曲悬停显示暂停图标与「暂停」提示，点击触发暂停', (tester) async {
+      final fakePlayer = _FakePlayerController()
+        ..currentSong = testSong
+        ..isPlaying = true;
+      final fakeAuth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 悬停整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 右侧悬浮操作列展示暂停图标，且 tooltip 为「暂停」
+      final pauseButton = find.byIcon(Icons.pause_rounded);
+      expect(pauseButton, findsOneWidget);
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(of: pauseButton, matching: find.byType(Tooltip)).first,
+      );
+      expect(tooltip.message, '暂停');
+
+      // 点击右侧悬浮暂停按钮
+      await tester.tap(pauseButton);
+      await tester.pump();
+      expect(fakePlayer.togglePlayCount, 1);
+      expect(fakePlayer.isPlaying, isFalse);
+    });
+
+    testWidgets('当前歌曲处于暂停态时，悬停显示「继续播放」，点击触发播放恢复', (tester) async {
+      final fakePlayer = _FakePlayerController()
+        ..currentSong = testSong
+        ..isPlaying = false;
+      final fakeAuth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () {},
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 悬停整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
+      await tester.pumpAndSettle();
+
+      // 右侧悬浮操作列展示播放图标，tooltip 为「继续播放」
+      final playButtons = find.byIcon(Icons.play_arrow_rounded);
+      final rightActionTooltip = tester.widget<Tooltip>(
+        find
+            .ancestor(of: playButtons.last, matching: find.byType(Tooltip))
+            .first,
+      );
+      expect(rightActionTooltip.message, '继续播放');
+
+      // 点击右侧继续播放按钮
+      await tester.tap(playButtons.last);
+      await tester.pump();
+      expect(fakePlayer.togglePlayCount, 1);
+      expect(fakePlayer.isPlaying, isTrue);
+    });
+
+    testWidgets('非当前歌曲悬停显示「播放」，点击调用 onPlay', (tester) async {
+      const otherSong = Song(
+        id: '999',
+        title: '另一首歌',
+        artist: '艺人',
+        hash: 'hash_other',
+        duration: Duration(minutes: 3),
+      );
+      final fakePlayer = _FakePlayerController()
+        ..currentSong = otherSong
+        ..isPlaying = true;
+      final fakeAuth = _FakeAuthController();
+      var onPlayCalled = false;
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: testSong,
+            index: 1,
+            player: fakePlayer,
+            auth: fakeAuth,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () {},
+            onDoubleTap: () {},
+            onPlay: () => onPlayCalled = true,
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 悬停整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(find.byType(DesktopSongTableRow)));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 非当前歌曲右侧操作列 tooltip 为「播放」
+      final playButtons = find.byIcon(Icons.play_arrow_rounded);
+      final rightActionTooltip = tester.widget<Tooltip>(
+        find
+            .ancestor(of: playButtons.last, matching: find.byType(Tooltip))
+            .first,
+      );
+      expect(rightActionTooltip.message, '播放');
+
+      // 点击右侧播放按钮
+      await tester.tap(playButtons.last);
+      await tester.pump();
+      expect(onPlayCalled, isTrue);
+      expect(fakePlayer.togglePlayCount, 0);
     });
   });
 }
