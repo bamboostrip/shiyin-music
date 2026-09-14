@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/ui/widgets/cover_play_overlay.dart';
+import 'package:shiyin_music/ui/widgets/now_playing_badge.dart';
 
 /// 悬浮播放按钮的 AnimatedOpacity 取值（0 = 隐藏，1 = 浮现）。
 double _buttonOpacity(WidgetTester tester) {
@@ -34,6 +35,11 @@ Future<void> _pumpOverlay(
   required VoidCallback onPlay,
   required VoidCallback onCoverTap,
   bool enabled = true,
+  bool isCurrent = false,
+  bool isPlaying = false,
+  VoidCallback? onPause,
+  VoidCallback? onResume,
+  double? buttonSize,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -45,6 +51,11 @@ Future<void> _pumpOverlay(
             child: CoverPlayOverlay(
               enabled: enabled,
               onPlay: onPlay,
+              isCurrent: isCurrent,
+              isPlaying: isPlaying,
+              onPause: onPause,
+              onResume: onResume,
+              buttonSize: buttonSize,
               cover: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: onCoverTap,
@@ -145,5 +156,190 @@ void main() {
     await tester.pump();
     expect(coverTaps, 1);
     expect(playTaps, 0);
+  });
+
+  group('CoverPlayOverlay 播放态与交互矩阵', () {
+    testWidgets('isCurrent && isPlaying：未 hover 即可见半透明蒙层与 4 柱 NowPlayingBadge，点击触发 onPause', (tester) async {
+      var pauseTaps = 0;
+      var playTaps = 0;
+      var coverTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        isCurrent: true,
+        isPlaying: true,
+        onPause: () => pauseTaps++,
+        onPlay: () => playTaps++,
+        onCoverTap: () => coverTaps++,
+      );
+
+      // 未 hover 即可见 4 柱跳动音波与半透明蒙层
+      final badgeFinder = find.byType(NowPlayingBadge);
+      expect(badgeFinder, findsOneWidget);
+      final badge = tester.widget<NowPlayingBadge>(badgeFinder);
+      expect(badge.active, isTrue);
+      expect(badge.playing, isTrue);
+      expect(badge.barCount, 4);
+      expect(badge.color, Colors.white);
+
+      final maskFinder = find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == Colors.black38,
+      );
+      expect(maskFinder, findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+
+      // 点击音波徽章直接触发 onPause
+      await tester.tap(badgeFinder);
+      await tester.pump();
+      expect(pauseTaps, 1);
+      expect(playTaps, 0);
+      expect(coverTaps, 0);
+    });
+
+    testWidgets('isCurrent && isPlaying：hover 时展示「暂停」Tooltip，若未提供 onPause 则回退触发 onPlay', (tester) async {
+      var playTaps = 0;
+      var coverTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        isCurrent: true,
+        isPlaying: true,
+        onPlay: () => playTaps++,
+        onCoverTap: () => coverTaps++,
+      );
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byType(CoverPlayOverlay)));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.byTooltip('暂停'), findsOneWidget);
+
+      await tester.tap(find.byType(NowPlayingBadge));
+      await tester.pump();
+      expect(playTaps, 1);
+      expect(coverTaps, 0);
+    });
+
+    testWidgets('isCurrent && !isPlaying（暂停态）：未 hover 无蒙层与音波，hover 浮现「继续播放」并触发 onResume', (tester) async {
+      var resumeTaps = 0;
+      var playTaps = 0;
+      var coverTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        isCurrent: true,
+        isPlaying: false,
+        onResume: () => resumeTaps++,
+        onPlay: () => playTaps++,
+        onCoverTap: () => coverTaps++,
+      );
+
+      // 未 hover：无蒙层、无音波，卡片本体可点
+      expect(find.byType(NowPlayingBadge), findsNothing);
+      final maskFinder = find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == Colors.black38,
+      );
+      expect(maskFinder, findsNothing);
+      expect(_buttonOpacity(tester), 0);
+      expect(_buttonClickable(tester), isFalse);
+
+      await tester.tap(find.byType(CoverPlayOverlay));
+      await tester.pump();
+      expect(coverTaps, 1);
+      expect(resumeTaps, 0);
+      expect(playTaps, 0);
+
+      // hover：浮现播放按钮与「继续播放」Tooltip
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byType(CoverPlayOverlay)));
+      await tester.pumpAndSettle();
+
+      expect(_buttonOpacity(tester), 1);
+      expect(_buttonClickable(tester), isTrue);
+      expect(find.byTooltip('继续播放'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump();
+      expect(resumeTaps, 1);
+      expect(playTaps, 0);
+    });
+
+    testWidgets('isCurrent && !isPlaying：未提供 onResume 时点击回退触发 onPlay', (tester) async {
+      var playTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        isCurrent: true,
+        isPlaying: false,
+        onPlay: () => playTaps++,
+        onCoverTap: () {},
+      );
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byType(CoverPlayOverlay)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump();
+      expect(playTaps, 1);
+    });
+
+    testWidgets('!isCurrent：hover 浮现「播放」Tooltip 并触发 onPlay', (tester) async {
+      var playTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        isCurrent: false,
+        isPlaying: false,
+        onPlay: () => playTaps++,
+        onCoverTap: () {},
+      );
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byType(CoverPlayOverlay)));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('播放'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump();
+      expect(playTaps, 1);
+    });
+
+    testWidgets('enabled=false 时即便是 isCurrent && isPlaying 也直接返回 cover 本体', (tester) async {
+      var pauseTaps = 0;
+      var playTaps = 0;
+      var coverTaps = 0;
+
+      await _pumpOverlay(
+        tester,
+        enabled: false,
+        isCurrent: true,
+        isPlaying: true,
+        onPause: () => pauseTaps++,
+        onPlay: () => playTaps++,
+        onCoverTap: () => coverTaps++,
+      );
+
+      expect(find.byType(NowPlayingBadge), findsNothing);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+      final maskFinder = find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == Colors.black38,
+      );
+      expect(maskFinder, findsNothing);
+
+      await tester.tap(find.byType(CoverPlayOverlay));
+      await tester.pump();
+      expect(coverTaps, 1);
+      expect(pauseTaps, 0);
+      expect(playTaps, 0);
+    });
   });
 }

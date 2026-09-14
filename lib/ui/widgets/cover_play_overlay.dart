@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../design_tokens.dart';
+import 'now_playing_badge.dart';
 
 /// 封面悬停播放蒙层的浮现动画时长（桌面 hover 反馈，轻快不拖沓）。
 const Duration kCoverPlayOverlayDuration = Duration(milliseconds: 150);
@@ -19,6 +20,10 @@ class CoverPlayOverlay extends StatefulWidget {
     required this.cover,
     required this.onPlay,
     this.enabled = true,
+    this.isCurrent = false,
+    this.isPlaying = false,
+    this.onPause,
+    this.onResume,
     this.borderRadius = AppRadius.lg,
     this.tooltip = '播放',
     this.alignment = Alignment.center,
@@ -39,6 +44,18 @@ class CoverPlayOverlay extends StatefulWidget {
 
   /// 是否启用悬浮蒙层（首页共享卡片按 isDesktopFormFactor 门控）。
   final bool enabled;
+
+  /// 是否为当前曲目。
+  final bool isCurrent;
+
+  /// 是否正在播放。
+  final bool isPlaying;
+
+  /// 当前曲目正在播放时点击触发（默认回退到 onPlay）。
+  final VoidCallback? onPause;
+
+  /// 当前曲目处于暂停状态时点击触发（默认回退到 onPlay）。
+  final VoidCallback? onResume;
 
   /// 蒙层圆角，与封面圆角一致。
   final double borderRadius;
@@ -86,40 +103,93 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
     final colorScheme = Theme.of(context).colorScheme;
     final shown = widget.isHovered ?? _internalHovered;
 
+    final isPlayingNow = widget.isCurrent && widget.isPlaying;
+    final isPausedNow = widget.isCurrent && !widget.isPlaying;
+
     final btnColor = widget.buttonColor ?? colorScheme.primary;
     final icnColor = widget.iconColor ?? colorScheme.onPrimary;
     final effectiveButtonSize = widget.buttonSize;
 
-    final playIcon = Icon(
-      Icons.play_arrow_rounded,
-      color: icnColor,
-      size: widget.iconSize,
-    );
+    final Widget centerControl;
 
-    final playButton = Material(
-      color: btnColor,
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        // 单击即播放 → 手型。InkWell 默认（adaptiveClickable）在 Windows/
-        // macOS 原生上解析为 basic 箭头而非 click，会把外层的手型区域
-        // 顶成箭头，必须显式声明。
-        mouseCursor: SystemMouseCursors.click,
-        onTap: widget.onPlay,
-        child: effectiveButtonSize != null
-            ? SizedBox.square(
-                dimension: effectiveButtonSize,
-                child: Center(child: playIcon),
-              )
-            : Padding(
-                padding: const EdgeInsets.all(8),
-                child: playIcon,
-              ),
-      ),
-    );
+    if (isPlayingNow) {
+      final badgeSize = effectiveButtonSize != null
+          ? (effectiveButtonSize * 0.6).clamp(14.0, 20.0)
+          : 16.0;
 
-    final positionedButton = Align(
+      final badgeWidget = NowPlayingBadge(
+        active: true,
+        playing: true,
+        color: Colors.white,
+        size: badgeSize,
+        barCount: 4,
+      );
+
+      final badgeButton = Material(
+        type: MaterialType.transparency,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          mouseCursor: SystemMouseCursors.click,
+          onTap: widget.onPause ?? widget.onPlay,
+          child: effectiveButtonSize != null
+              ? SizedBox.square(
+                  dimension: effectiveButtonSize,
+                  child: Center(child: badgeWidget),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: badgeWidget,
+                ),
+        ),
+      );
+
+      centerControl = Tooltip(
+        message: '暂停',
+        child: badgeButton,
+      );
+    } else {
+      final playIcon = Icon(
+        Icons.play_arrow_rounded,
+        color: icnColor,
+        size: widget.iconSize,
+      );
+
+      final playButton = Material(
+        color: btnColor,
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          // 单击即播放 → 手型。InkWell 默认（adaptiveClickable）在 Windows/
+          // macOS 原生上解析为 basic 箭头而非 click，会把外层的手型区域
+          // 顶成箭头，必须显式声明。
+          mouseCursor: SystemMouseCursors.click,
+          onTap: isPausedNow
+              ? (widget.onResume ?? widget.onPlay)
+              : widget.onPlay,
+          child: effectiveButtonSize != null
+              ? SizedBox.square(
+                  dimension: effectiveButtonSize,
+                  child: Center(child: playIcon),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: playIcon,
+                ),
+        ),
+      );
+
+      final standardTooltip = isPausedNow ? '继续播放' : widget.tooltip;
+      centerControl = standardTooltip == null
+          ? playButton
+          : Tooltip(
+              message: standardTooltip,
+              child: playButton,
+            );
+    }
+
+    final positionedControl = Align(
       alignment: widget.alignment,
       child: Padding(
         padding: widget.margin ??
@@ -127,25 +197,22 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
                 ? const EdgeInsets.all(8)
                 : EdgeInsets.zero),
         child: IgnorePointer(
-          ignoring: !shown,
+          ignoring: isPlayingNow ? false : !shown,
           child: AnimatedOpacity(
-            opacity: shown ? 1 : 0,
+            opacity: (isPlayingNow || shown) ? 1 : 0,
             duration: kCoverPlayOverlayDuration,
             child: AnimatedScale(
-              scale: shown ? 1 : 0.7,
+              scale: (isPlayingNow || shown) ? 1 : 0.7,
               duration: kCoverPlayOverlayDuration,
               curve: Curves.easeOutCubic,
-              child: widget.tooltip == null
-                  ? playButton
-                  : Tooltip(
-                      message: widget.tooltip!,
-                      child: playButton,
-                    ),
+              child: centerControl,
             ),
           ),
         ),
       ),
     );
+
+    final showMask = (widget.darkenOnHover && shown) || isPlayingNow;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _internalHovered = true),
@@ -164,8 +231,8 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
             fit: StackFit.loose,
             children: [
               base,
-              // 蒙层：纯视觉，未 hover 时不构建。
-              if (widget.darkenOnHover && shown)
+              // 蒙层：播放中常驻显示，悬浮时按需显示。
+              if (showMask)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: ClipRRect(
@@ -174,8 +241,8 @@ class _CoverPlayOverlayState extends State<CoverPlayOverlay> {
                     ),
                   ),
                 ),
-              // 播放按钮：通过 IgnorePointer + AnimatedOpacity/Scale 实现渐隐和点击拦截。
-              Positioned.fill(child: positionedButton),
+              // 居中控制组件：播放中为跳动音波，非播放中为悬浮圆形播放按钮。
+              Positioned.fill(child: positionedControl),
             ],
           );
         },
