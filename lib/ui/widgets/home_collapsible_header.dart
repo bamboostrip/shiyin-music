@@ -339,7 +339,7 @@ class HomeSearchBar extends StatelessWidget {
                           alpha: isDark ? 0.7 : 0.6,
                         ),
                         fontWeight: FontWeight.w400,
-                        fontSize: 13.5,
+                        fontSize: 14,
                       ),
                 ),
               ),
