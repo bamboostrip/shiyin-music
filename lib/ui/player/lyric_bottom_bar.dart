@@ -83,9 +83,7 @@ class LyricTogglePill extends StatelessWidget {
 
 /// 歌词字号与排版弹层入口按钮 `[词]`
 class _LyricSettingsPill extends StatelessWidget {
-  const _LyricSettingsPill({
-    required this.onTap,
-  });
+  const _LyricSettingsPill({required this.onTap});
 
   final VoidCallback onTap;
 
@@ -125,9 +123,7 @@ class _LyricSettingsPill extends StatelessWidget {
 
 /// 歌词页底部圆形播放/暂停按键
 class _LyricRoundPlayPauseButton extends StatelessWidget {
-  const _LyricRoundPlayPauseButton({
-    required this.player,
-  });
+  const _LyricRoundPlayPauseButton({required this.player});
 
   final PlayerController player;
 
@@ -233,9 +229,7 @@ class LyricBottomBar extends StatelessWidget {
           const Spacer(),
 
           // 右侧：[词] 字号调节
-          _LyricSettingsPill(
-            onTap: () => _showFontSizeSheet(context),
-          ),
+          _LyricSettingsPill(onTap: () => _showFontSizeSheet(context)),
           const SizedBox(width: 14),
 
           // [译 on/off]
@@ -305,9 +299,7 @@ class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
         decoration: BoxDecoration(
           color: const Color(0xFF1E1E24).withValues(alpha: 0.95),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.12),
-          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.4),

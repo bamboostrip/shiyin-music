@@ -146,6 +146,7 @@ class KaraokeLinePainter extends CustomPainter {
       canvas.restore();
     }
   }
+
   @override
   bool shouldRepaint(covariant KaraokeLinePainter oldDelegate) {
     return oldDelegate.position != position ||

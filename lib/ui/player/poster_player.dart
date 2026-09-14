@@ -9,7 +9,6 @@ import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
-import '../pages/comment_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
@@ -74,8 +73,10 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
           final horizontalPadding = compact ? 20.0 : 28.0;
 
           final maxArtworkHeight =
-              (constraints.maxHeight * (compact ? 0.34 : 0.42))
-                  .clamp(130.0, 330.0);
+              (constraints.maxHeight * (compact ? 0.34 : 0.42)).clamp(
+                130.0,
+                330.0,
+              );
           final artworkMaxWidth = math.min(
             constraints.maxWidth - horizontalPadding * 2,
             maxArtworkHeight,
@@ -224,8 +225,7 @@ class PosterSongInfoRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 iconSize: 26,
                 tooltip: liked ? '取消喜欢' : '喜欢',
-                onPressed:
-                    likeEnabled ? () => auth.toggleLike(song) : null,
+                onPressed: likeEnabled ? () => auth.toggleLike(song) : null,
                 icon: Icon(
                   liked
                       ? Icons.favorite_rounded
@@ -273,9 +273,7 @@ class PosterActionRail extends StatelessWidget {
             iconSize: 24,
             tooltip: downloaded ? '已下载' : '下载',
             icon: Icon(
-              downloaded
-                  ? Icons.download_done_rounded
-                  : Icons.download_rounded,
+              downloaded ? Icons.download_done_rounded : Icons.download_rounded,
             ),
             color: downloaded
                 ? Theme.of(context).colorScheme.primary
@@ -306,8 +304,6 @@ class PosterActionRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isKugou = song.source == SongSource.kugou;
-
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
@@ -317,11 +313,8 @@ class PosterActionRail extends StatelessWidget {
           tooltip: '添加到歌单',
           icon: const Icon(Icons.playlist_add_rounded),
           color: Colors.white.withValues(alpha: .85),
-          onPressed: () => showAddToPlaylistSheet(
-            context: context,
-            auth: auth,
-            song: song,
-          ),
+          onPressed: () =>
+              showAddToPlaylistSheet(context: context, auth: auth, song: song),
         ),
 
         // 2. 音效 / 定时
@@ -516,9 +509,9 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
                   child: MarqueeSingleLine(
                     textKey:
                         current.translation != null &&
-                                current.translation!.isNotEmpty
-                            ? current.time.inMilliseconds
-                            : (next?.time.inMilliseconds ?? -1),
+                            current.translation!.isNotEmpty
+                        ? current.time.inMilliseconds
+                        : (next?.time.inMilliseconds ?? -1),
                     child: Text(
                       current.translation != null &&
                               current.translation!.isNotEmpty

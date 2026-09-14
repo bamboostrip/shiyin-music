@@ -5,7 +5,6 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../pages/artist_detail_page.dart';
-import '../pages/comment_page.dart';
 import '../player/player_comment_button.dart';
 import '../player/player_route.dart';
 

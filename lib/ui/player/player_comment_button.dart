@@ -84,11 +84,7 @@ class _PlayerCommentButtonState extends State<PlayerCommentButton> {
     if (_commentCountInFlight.contains(mixsongid)) return;
     _commentCountInFlight.add(mixsongid);
     try {
-      final response = await api.musicComments(
-        mixsongid,
-        page: 1,
-        pageSize: 1,
-      );
+      final response = await api.musicComments(mixsongid, page: 1, pageSize: 1);
       final count = response.count as int?;
       if (count != null && count > 0) {
         _commentCountCache[mixsongid] = count;

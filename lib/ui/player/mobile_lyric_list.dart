@@ -59,8 +59,8 @@ class _MobileLyricListState extends State<MobileLyricList>
     _activeLyricIndex = widget.lyrics.isEmpty
         ? -1
         : (widget.activeIndex >= 0
-            ? widget.activeIndex
-            : widget.player.activeLyricIndex);
+              ? widget.activeIndex
+              : widget.player.activeLyricIndex);
     _smoothPosition = widget.player.smoothPosition;
 
     final initialOffset = _estimateOffsetForIndex(_activeLyricIndex);
@@ -72,7 +72,7 @@ class _MobileLyricListState extends State<MobileLyricList>
     _syncTicker();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scrollToActive(animate: false);
+      if (mounted && widget.isPageVisible) _scrollToActive(animate: false);
     });
   }
 
@@ -133,8 +133,12 @@ class _MobileLyricListState extends State<MobileLyricList>
   void didUpdateWidget(covariant MobileLyricList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.player != widget.player) {
-      oldWidget.player.positionListenable.removeListener(_onPositionListenableChanged);
-      widget.player.positionListenable.addListener(_onPositionListenableChanged);
+      oldWidget.player.positionListenable.removeListener(
+        _onPositionListenableChanged,
+      );
+      widget.player.positionListenable.addListener(
+        _onPositionListenableChanged,
+      );
     }
     if (oldWidget.songHash != widget.songHash) {
       _rowKeys.clear();
@@ -144,8 +148,8 @@ class _MobileLyricListState extends State<MobileLyricList>
       _activeLyricIndex = widget.lyrics.isEmpty
           ? -1
           : (widget.activeIndex >= 0
-              ? widget.activeIndex
-              : widget.player.activeLyricIndex);
+                ? widget.activeIndex
+                : widget.player.activeLyricIndex);
       _smoothPosition = widget.player.smoothPosition;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToActive(animate: false);
@@ -157,8 +161,8 @@ class _MobileLyricListState extends State<MobileLyricList>
       _activeLyricIndex = widget.lyrics.isEmpty
           ? -1
           : (widget.activeIndex >= 0
-              ? widget.activeIndex
-              : widget.player.activeLyricIndex);
+                ? widget.activeIndex
+                : widget.player.activeLyricIndex);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_userHolding) _scrollToActive(animate: false);
       });
@@ -168,13 +172,20 @@ class _MobileLyricListState extends State<MobileLyricList>
         _scrollToActive(animate: true);
       }
     }
+    if (!oldWidget.isPageVisible && widget.isPageVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_userHolding) _scrollToActive(animate: false);
+      });
+    }
     _syncTicker();
   }
 
   @override
   void dispose() {
     _ticker.dispose();
-    widget.player.positionListenable.removeListener(_onPositionListenableChanged);
+    widget.player.positionListenable.removeListener(
+      _onPositionListenableChanged,
+    );
     _resumeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -189,12 +200,22 @@ class _MobileLyricListState extends State<MobileLyricList>
   }
 
   void _scrollToActive({required bool animate}) {
-    if (!mounted || _activeLyricIndex < 0 || widget.lyrics.isEmpty) return;
+    if (!mounted ||
+        !widget.isPageVisible ||
+        _activeLyricIndex < 0 ||
+        widget.lyrics.isEmpty) {
+      return;
+    }
+    if (!_scrollController.hasClients) {
+      return;
+    }
+
     final key = _rowKeys[_activeLyricIndex];
     final rowContext = key?.currentContext;
-    if (rowContext != null && rowContext.mounted) {
-      Scrollable.ensureVisible(
-        rowContext,
+    final renderBox = rowContext?.findRenderObject();
+    if (renderBox != null && renderBox is RenderBox && rowContext!.mounted) {
+      _scrollController.position.ensureVisible(
+        renderBox,
         alignment: 0.38,
         duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
         curve: Curves.easeOutCubic,
@@ -202,24 +223,26 @@ class _MobileLyricListState extends State<MobileLyricList>
       return;
     }
 
-    if (_scrollController.hasClients) {
-      final approxOffset = _estimateOffsetForIndex(_activeLyricIndex);
-      _scrollController.jumpTo(
-        approxOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-      );
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final retryContext = _rowKeys[_activeLyricIndex]?.currentContext;
-        if (retryContext != null && retryContext.mounted) {
-          Scrollable.ensureVisible(
-            retryContext,
-            alignment: 0.38,
-            duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
-            curve: Curves.easeOutCubic,
-          );
-        }
-      });
-    }
+    final approxOffset = _estimateOffsetForIndex(_activeLyricIndex);
+    _scrollController.jumpTo(
+      approxOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.isPageVisible) return;
+      final retryContext = _rowKeys[_activeLyricIndex]?.currentContext;
+      final retryBox = retryContext?.findRenderObject();
+      if (retryBox != null &&
+          retryBox is RenderBox &&
+          retryContext!.mounted &&
+          _scrollController.hasClients) {
+        _scrollController.position.ensureVisible(
+          retryBox,
+          alignment: 0.38,
+          duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
   }
 
   void _updateFocusedIndex(double viewportHeight) {
@@ -320,7 +343,8 @@ class _MobileLyricListState extends State<MobileLyricList>
         final targetY = viewportHeight * 0.38;
         final defaultIdx = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
         final currentFocusIdx = _focusedIndex ?? defaultIdx;
-        final focusedLine = (_userHolding &&
+        final focusedLine =
+            (_userHolding &&
                 currentFocusIdx >= 0 &&
                 currentFocusIdx < widget.lyrics.length)
             ? widget.lyrics[currentFocusIdx]
@@ -353,10 +377,12 @@ class _MobileLyricListState extends State<MobileLyricList>
                     final isHighlighted = _userHolding ? isFocused : isPlaying;
                     final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
 
-                    final showTrans = widget.showTranslation &&
+                    final showTrans =
+                        widget.showTranslation &&
                         line.translation != null &&
                         line.translation!.isNotEmpty;
-                    final showRom = widget.showRomanization &&
+                    final showRom =
+                        widget.showRomanization &&
                         line.romanization != null &&
                         line.romanization!.isNotEmpty;
 
@@ -369,8 +395,8 @@ class _MobileLyricListState extends State<MobileLyricList>
                       mainColor = Colors.white.withValues(alpha: 0.35);
                     }
 
-                    final double fontSize = (isHighlighted ? 26.0 : 20.0) *
-                        widget.lyricScale;
+                    final double fontSize =
+                        (isHighlighted ? 26.0 : 20.0) * widget.lyricScale;
                     final fontWeight = isHighlighted
                         ? FontWeight.w900
                         : FontWeight.w700;
@@ -534,11 +560,7 @@ class _MobileSeekPointerButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.play_arrow_rounded,
-              size: 14,
-              color: Colors.white,
-            ),
+            const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.white),
             const SizedBox(width: 3),
             Text(
               timeText,

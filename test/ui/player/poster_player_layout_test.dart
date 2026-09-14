@@ -8,6 +8,7 @@ import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
+import 'package:shiyin_music/ui/player/player_comment_button.dart';
 import 'package:shiyin_music/ui/player/player_controls.dart';
 import 'package:shiyin_music/ui/player/poster_player.dart';
 
@@ -16,8 +17,7 @@ class _FakeApi implements MusicApi {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class _FakePlayerController extends ChangeNotifier
-    implements PlayerController {
+class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   Song? currentSong = const Song(
     id: 'test-song-1',
@@ -42,8 +42,9 @@ class _FakePlayerController extends ChangeNotifier
   Duration duration = const Duration(minutes: 4, seconds: 29);
 
   @override
-  final ValueNotifier<Duration> positionListenable =
-      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> positionListenable = ValueNotifier<Duration>(
+    Duration.zero,
+  );
 
   @override
   Duration position = const Duration(seconds: 30);
@@ -229,11 +230,7 @@ void main() {
       final auth = _FakeAuthController();
 
       await tester.pumpWidget(
-        buildTestWidget(
-          player: player,
-          auth: auth,
-          song: testSong,
-        ),
+        buildTestWidget(player: player, auth: auth, song: testSong),
       );
       await tester.pump();
 
@@ -274,11 +271,7 @@ void main() {
       final auth = _FakeAuthController();
 
       await tester.pumpWidget(
-        buildTestWidget(
-          player: player,
-          auth: auth,
-          song: testSong,
-        ),
+        buildTestWidget(player: player, auth: auth, song: testSong),
       );
       await tester.pump();
 
@@ -292,7 +285,7 @@ void main() {
       expect(find.byIcon(Icons.download_rounded), findsOneWidget);
 
       // 评论
-      expect(find.byIcon(Icons.chat_bubble_outline_rounded), findsOneWidget);
+      expect(find.byType(PlayerCommentButton), findsOneWidget);
     });
 
     testWidgets('不支持音效时快捷操作栏展示定时播放图标', (tester) async {
@@ -301,11 +294,7 @@ void main() {
       final auth = _FakeAuthController();
 
       await tester.pumpWidget(
-        buildTestWidget(
-          player: player,
-          auth: auth,
-          song: testSong,
-        ),
+        buildTestWidget(player: player, auth: auth, song: testSong),
       );
       await tester.pump();
 
@@ -326,16 +315,12 @@ void main() {
       );
 
       await tester.pumpWidget(
-        buildTestWidget(
-          player: player,
-          auth: auth,
-          song: nonKugouSong,
-        ),
+        buildTestWidget(player: player, auth: auth, song: nonKugouSong),
       );
       await tester.pump();
 
-      final commentBtn = find.ancestor(
-        of: find.byIcon(Icons.chat_bubble_outline_rounded),
+      final commentBtn = find.descendant(
+        of: find.byType(PlayerCommentButton),
         matching: find.byType(IconButton),
       );
       expect(commentBtn, findsOneWidget);

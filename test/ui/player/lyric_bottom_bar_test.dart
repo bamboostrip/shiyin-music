@@ -48,11 +48,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: LyricTogglePill(
-              label: '音',
-              isOn: false,
-              onToggle: () {},
-            ),
+            body: LyricTogglePill(label: '音', isOn: false, onToggle: () {}),
           ),
         ),
       );
@@ -64,12 +60,7 @@ void main() {
 
   group('LyricBottomBar', () {
     testWidgets('renders comment, font, pills and play button', (tester) async {
-      const song = Song(
-        id: 's1',
-        hash: 'h1',
-        title: 'Song',
-        artist: 'Artist',
-      );
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
       final player = _FakePlayerController();
       bool translationState = false;
       bool romanizationState = false;
@@ -105,19 +96,18 @@ void main() {
       expect(translationState, isTrue);
 
       // 点击播放/暂停
-      final playBtn = find.byKey(const ValueKey('lyric_round_play_pause_button'));
+      final playBtn = find.byKey(
+        const ValueKey('lyric_round_play_pause_button'),
+      );
       expect(playBtn, findsOneWidget);
       await tester.tap(playBtn);
       expect(player.playPauseCalls, 1);
     });
 
-    testWidgets('hides translation pill when hasTranslation is false', (tester) async {
-      const song = Song(
-        id: 's1',
-        hash: 'h1',
-        title: 'Song',
-        artist: 'Artist',
-      );
+    testWidgets('hides translation pill when hasTranslation is false', (
+      tester,
+    ) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
       final player = _FakePlayerController();
 
       await tester.pumpWidget(

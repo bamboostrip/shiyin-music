@@ -12,7 +12,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
        _isPlaying = initialIsPlaying;
 
   Duration _position;
-  bool _isPlaying;
+  final bool _isPlaying;
   Duration? lastSeekPosition;
   int seekCalls = 0;
 
@@ -82,60 +82,63 @@ void main() {
     ),
   ];
 
-  testWidgets('MobileLyricList renders lines and translations based on switches', (tester) async {
-    final player = _FakePlayerController();
-    player.lyrics = testLyrics;
+  testWidgets(
+    'MobileLyricList renders lines and translations based on switches',
+    (tester) async {
+      final player = _FakePlayerController();
+      player.lyrics = testLyrics;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 360,
-            height: 640,
-            child: MobileLyricList(
-              player: player,
-              songHash: 'hash1',
-              lyrics: testLyrics,
-              activeIndex: 0,
-              showTranslation: true,
-              showRomanization: false,
-              lyricScale: 1.0,
-              isPageVisible: true,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              height: 640,
+              child: MobileLyricList(
+                player: player,
+                songHash: 'hash1',
+                lyrics: testLyrics,
+                activeIndex: 0,
+                showTranslation: true,
+                showRomanization: false,
+                lyricScale: 1.0,
+                isPageVisible: true,
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text('First line of lyric'), findsOneWidget);
-    expect(find.text('第一句歌词'), findsOneWidget);
-    expect(find.text('di er ju ge ci'), findsNothing);
+      expect(find.text('First line of lyric'), findsOneWidget);
+      expect(find.text('第一句歌词'), findsOneWidget);
+      expect(find.text('di er ju ge ci'), findsNothing);
 
-    // Rebuild with romanization enabled
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 360,
-            height: 640,
-            child: MobileLyricList(
-              player: player,
-              songHash: 'hash1',
-              lyrics: testLyrics,
-              activeIndex: 0,
-              showTranslation: false,
-              showRomanization: true,
-              lyricScale: 1.0,
-              isPageVisible: true,
+      // Rebuild with romanization enabled
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              height: 640,
+              child: MobileLyricList(
+                player: player,
+                songHash: 'hash1',
+                lyrics: testLyrics,
+                activeIndex: 0,
+                showTranslation: false,
+                showRomanization: true,
+                lyricScale: 1.0,
+                isPageVisible: true,
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text('di er ju ge ci'), findsOneWidget);
-    expect(find.text('第一句歌词'), findsNothing);
-  });
+      expect(find.text('di er ju ge ci'), findsOneWidget);
+      expect(find.text('第一句歌词'), findsNothing);
+    },
+  );
 
   testWidgets('Tapping a lyric line triggers seekToAndPlay', (tester) async {
     final player = _FakePlayerController();
@@ -199,7 +202,9 @@ void main() {
     await tester.drag(find.text('First line of lyric'), const Offset(0, -60));
     await tester.pump();
 
-    final seekPointer = find.byKey(const ValueKey('mobile_lyric_seek_pointer_button'));
+    final seekPointer = find.byKey(
+      const ValueKey('mobile_lyric_seek_pointer_button'),
+    );
     expect(seekPointer, findsOneWidget);
 
     // Tapping seek pointer triggers seek

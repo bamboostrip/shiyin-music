@@ -66,12 +66,7 @@ void main() {
     testWidgets('renders disabled when song is null', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(
-            body: PlayerCommentButton(
-              player: null,
-              song: null,
-            ),
-          ),
+          home: Scaffold(body: PlayerCommentButton(player: null, song: null)),
         ),
       );
 
@@ -80,7 +75,9 @@ void main() {
       expect(iconBtn.tooltip, '暂无评论');
     });
 
-    testWidgets('renders disabled when song source is not kugou', (tester) async {
+    testWidgets('renders disabled when song source is not kugou', (
+      tester,
+    ) async {
       const song = Song(
         id: 'local_1',
         hash: 'hash_local',
@@ -91,12 +88,7 @@ void main() {
 
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(
-            body: PlayerCommentButton(
-              player: null,
-              song: song,
-            ),
-          ),
+          home: Scaffold(body: PlayerCommentButton(player: null, song: song)),
         ),
       );
 
@@ -119,10 +111,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PlayerCommentButton(
-              player: player,
-              song: song,
-            ),
+            body: PlayerCommentButton(player: player, song: song),
           ),
         ),
       );
