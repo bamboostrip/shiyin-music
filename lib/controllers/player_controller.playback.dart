@@ -66,6 +66,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
     // 切新歌必须清空歌词并重置歌词行；同一首歌重播/从冷启动恢复播放时保留已有歌词防闪烁
     if (!isSameSong) {
+      // 切换新歌立即暂停旧歌，避免新歌加载/解析期间旧音频继续播放导致音画脱节
+      unawaited(_audioHandler.pause());
+      duration = song.duration ?? Duration.zero;
       lyrics = const [];
       _lastDesktopLyricIndex = -1;
     }
@@ -230,6 +233,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         debugPrint('[时音][player] 失败落错误态前歌曲已切换，跳过: ${song.title}');
         return;
       }
+      unawaited(_audioHandler.pause());
+      duration = song.duration ?? Duration.zero;
+      _pendingInitialPosition = null;
+      _setPositionBase(Duration.zero, playing: false);
+      _lastSmoothPosition = Duration.zero;
+      _emitPosition();
       errorMessage = error.toString();
       isPreparing = false;
       notifyListeners();
@@ -271,10 +280,16 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   void _registerPlaybackFailure(Song song) {
     if (_disposed) return;
     _consecutivePlayFailures++;
-    if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) return;
+    if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) {
+      Toast.error('《${song.title}》暂无可播放音源');
+      return;
+    }
 
     final queueLength = queue.length;
-    if (queueLength <= 1) return;
+    if (queueLength <= 1) {
+      Toast.error('《${song.title}》暂无可播放音源');
+      return;
+    }
     final skipLimit = queueLength < _kMaxAutoSkipsPerStreak
         ? queueLength
         : _kMaxAutoSkipsPerStreak;
@@ -283,6 +298,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         '[时音][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
         '$_autoSkippedInStreak 首（上限 $skipLimit），停止跳转',
       );
+      Toast.error('连续多首歌曲播放失败，已停止播放');
       return;
     }
     _autoSkippedInStreak++;

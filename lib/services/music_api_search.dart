@@ -22,6 +22,18 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
         .toList();
   }
 
+  static bool _isPlayableSearchSong(Map<String, dynamic> json) {
+    final transParam = asMap(json['trans_param']);
+    if (transParam.isNotEmpty) {
+      final cid = asInt(transParam['cid']);
+      final failProcess = asInt(json['FailProcess']);
+      if (cid != null && cid <= 0 && failProcess != null && failProcess == 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Future<List<Song>> searchSongs(
     String keywords, {
     int page = 1,
@@ -43,6 +55,7 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
     }
     return songs
         .whereType<Map<String, dynamic>>()
+        .where(_isPlayableSearchSong)
         .map(Song.fromSearch)
         .where((song) => song.hash.isNotEmpty)
         .toList();
