@@ -175,6 +175,10 @@ class _HomeSongRowState extends State<HomeSongRow> {
                         CoverPlayOverlay(
                           enabled: isDesktop,
                           isHovered: _hovered,
+                          isCurrent: active,
+                          isPlaying: active && widget.player.isPlaying,
+                          onPause: () => widget.player.togglePlay(),
+                          onResume: () => widget.player.togglePlay(),
                           borderRadius: coverRadius,
                           buttonSize: isDesktop ? 28 : 32,
                           iconSize: isDesktop ? 18 : 22,
@@ -188,7 +192,7 @@ class _HomeSongRowState extends State<HomeSongRow> {
                             borderRadius: coverRadius,
                           ),
                         ),
-                        if (active)
+                        if (active && !isDesktop)
                           Positioned(
                             right: 3,
                             bottom: 3,

@@ -16,6 +16,15 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   bool isPlaying = false;
 
+  int togglePlayCount = 0;
+
+  @override
+  Future<void> togglePlay() async {
+    togglePlayCount++;
+    isPlaying = !isPlaying;
+    notifyListeners();
+  }
+
   // 右键菜单构建条目时读取（null = 无下载入口）。
   @override
   DownloadController? get downloadController => null;
@@ -207,6 +216,101 @@ void main() {
       await tester.pumpWidget(wrap(buildRow(onPlay: (_, _) {})));
 
       expect(find.byType(NowPlayingBadge), findsNothing);
+    });
+
+    testWidgets('正在播放歌曲在桌面端封面显示 4 柱跳动音波，点击触发暂停', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isPlaying = true;
+
+      await tester.pumpWidget(
+        wrap(buildRow(onPlay: (_, _) {}, player: player)),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final coverBadgeFinder = find.byWidgetPredicate(
+        (w) =>
+            w is NowPlayingBadge && w.barCount == 4 && w.color == Colors.white,
+      );
+      expect(coverBadgeFinder, findsOneWidget);
+      expect(find.byTooltip('暂停'), findsOneWidget);
+
+      await tester.tap(coverBadgeFinder);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(player.togglePlayCount, 1);
+      expect(player.isPlaying, isFalse);
+    });
+
+    testWidgets('当前歌曲处于暂停态时，桌面端悬停显示「继续播放」，点击触发播放恢复', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = _song
+        ..isPlaying = false;
+
+      await tester.pumpWidget(
+        wrap(buildRow(onPlay: (_, _) {}, player: player)),
+      );
+
+      // 未悬停时不可命中
+      expect(find.byIcon(Icons.play_arrow_rounded).hitTestable(), findsNothing);
+
+      // 模拟鼠标悬停到整行
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.byType(HomeSongRow)));
+      await tester.pumpAndSettle();
+
+      // 悬停后出现播放按钮且 tooltip 为「继续播放」
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      expect(find.byTooltip('继续播放'), findsOneWidget);
+
+      // 点击触发 resume (player.togglePlay)
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(player.togglePlayCount, 1);
+      expect(player.isPlaying, isTrue);
+
+      await gesture.removePointer();
+    });
+
+    testWidgets('非当前歌曲在桌面端悬停封面显示「播放」，点击调用 onPlay', (tester) async {
+      final player = _FakePlayerController()
+        ..currentSong = const Song(
+          id: '2',
+          title: '其他歌曲',
+          artist: 'Other',
+          duration: Duration(minutes: 3),
+          hash: 'hash_other',
+        )
+        ..isPlaying = true;
+      final playedSongs = <Song>[];
+
+      await tester.pumpWidget(
+        wrap(
+          buildRow(
+            player: player,
+            onPlay: (song, queue) {
+              playedSongs.add(song);
+            },
+          ),
+        ),
+      );
+
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.byType(HomeSongRow)));
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      expect(find.byTooltip('播放'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(playedSongs, [_song]);
+      expect(player.togglePlayCount, 0);
+
+      await gesture.removePointer();
     });
   });
 
