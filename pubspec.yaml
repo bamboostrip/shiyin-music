@@ -85,6 +85,17 @@ dependency_overrides:
   # 见上方依赖注释：本地最小补丁副本。
   just_audio_media_kit:
     path: packages/just_audio_media_kit
+  # 本地 vendored 副本（packages/media_kit），修复 Flutter 调试模式 Hot Restart 致命崩溃：
+  # 上游在 non-execmem-restricted（如 Windows）下使用 InitializerNativeCallable 向 libmpv 注册
+  # NativeCallable 回调。Hot Restart ('R') 销毁根 Isolate 时 Dart VM 删除该回调，但 libmpv
+  # 后台线程仍在进程中运行，一旦触发唤醒回调即引发 Dart VM 致命 abort：
+  #   "Callback invoked after it has been deleted" (runtime_entry.cc: 5143)。
+  # 补丁：
+  # 1) !kReleaseMode（调试/性能测试模式）强制回退至 media_kit 原生具备的 InitializerIsolate
+  #    （通过 Isolate.spawn + mpv_wait_event 轮询，不向 libmpv 注册任何 Dart 原生回调函数指针）；
+  # 2) NativeReferenceHolder 热重启清理旧句柄发送 'quit' 之前主动置空 mpv_set_wakeup_callback。
+  media_kit:
+    path: packages/media_kit
 
 flutter:
   uses-material-design: true
