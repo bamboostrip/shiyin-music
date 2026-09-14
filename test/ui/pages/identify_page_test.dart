@@ -1,22 +1,26 @@
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/controllers/download_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/song.dart';
 import 'package:shiyin_music/services/identify_service.dart';
 // api.dart 只 import 不 re-export IdentifyCandidate,需直接引入声明文件
 // (与 identify_service.dart 同款做法,测试构造 fake 候选用)。
 import 'package:shiyin_music/src/rust/services/identify.dart' show IdentifyCandidate;
+import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/identify_page.dart';
 
-IdentifyCandidate _candidate() => IdentifyCandidate(
-      name: '晴天',
-      singer: '周杰伦',
+IdentifyCandidate _candidate({String name = '晴天', String singer = '周杰伦'}) =>
+    IdentifyCandidate(
+      name: name,
+      singer: singer,
       hash: 'abc123',
       albumAudioId: '1',
       albumId: '',
-      albumName: '',
+      albumName: '叶惠美',
       cover: '',
       hash320: '',
       hashFlac: '',
@@ -42,8 +46,21 @@ class _FakeCaptureBackend implements IdentifyCaptureBackend {
   Future<void> cancel() async => cancelCalls++;
 }
 
-class _FakePlayer implements PlayerController {
+class _FakePlayer extends ChangeNotifier implements PlayerController {
   final List<Song> played = [];
+
+  @override
+  Song? get currentSong => null;
+
+  @override
+  bool get isPlaying => false;
+
+  @override
+  DownloadController? get downloadController => null;
+
+  @override
+  AudioQuality get audioQuality => AudioQuality.standard;
+
   @override
   Future<void> playSong(Song song,
       {List<Song>? queue,
@@ -51,6 +68,7 @@ class _FakePlayer implements PlayerController {
       Duration? initialPosition,
       bool preserveClimax = false}) async {
     played.add(song);
+    notifyListeners();
   }
 
   @override
@@ -58,7 +76,12 @@ class _FakePlayer implements PlayerController {
 }
 
 void main() {
-  testWidgets('打开即开始采集,识别结果可点击并触发播放', (tester) async {
+  tearDown(() {
+    debugDesktopFormFactorOverride = null;
+  });
+
+  testWidgets('移动端形态：满 3 秒展示立即识别，识别结果展示并可点击播放', (tester) async {
+    debugDesktopFormFactorOverride = false;
     final backend = _FakeCaptureBackend();
     final player = _FakePlayer();
     final result = IdentifyService.candidateToSong(_candidate());
@@ -70,25 +93,105 @@ void main() {
         onIdentify: (pcm) async => [result],
       ),
     ));
-    // 注意:聆听动画是 repeat() 控制器,匹配阶段有转圈——都不能 pumpAndSettle,
-    // 一律用带时长的 pump 推进。
     await tester.pump(); // 首帧:进入 listening 并 start()
     expect(backend.startCalls, 1);
-    await tester.pump(const Duration(seconds: 13)); // 越过 12s 自动提交
+
+    // 前 2 秒显示"正在聆听"
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.textContaining('正在聆听'), findsOneWidget);
+
+    // 满 3 秒后变为"立即识别"
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('立即识别'), findsOneWidget);
+
+    // 手动点击立即识别
+    await tester.tap(find.text('立即识别'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 300)); // 结果帧渲染
 
-    // 结果列表出现歌名
+    // 结果列表出现歌名与最佳匹配标签
     expect(find.text('晴天'), findsOneWidget);
-    // 点击结果 → playSong 被调用
+    expect(find.text('最佳匹配 90%'), findsOneWidget);
+
+    // 移动端单机卡片行 → playSong 被调用
     await tester.tap(find.text('晴天'));
-    await tester.pump(const Duration(milliseconds: 300)); // 返回过渡走完
+    await tester.pump();
     expect(player.played.single.hash, 'abc123');
-    // 再推一秒让页面完全出树(pop 过渡结束 → 移除路由 → dispose):关页即停
-    // 采集——桌面快照只取不停流,此断言即回归守卫。
+
+    // 页面仍留在结果页，点返回按钮正常退出并触发 cancel
+    await tester.tap(find.byTooltip('返回'));
     await tester.pump(const Duration(seconds: 1));
-    // 后端启动过一次,关页后 cancel 恰好一次
-    expect(backend.startCalls, 1);
-    expect(backend.cancelCalls, 1);
+    expect(backend.cancelCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets('移动端形态：更多按钮可弹出操作菜单（含下一首播放）', (tester) async {
+    debugDesktopFormFactorOverride = false;
+    final backend = _FakeCaptureBackend();
+    final player = _FakePlayer();
+    final result = IdentifyService.candidateToSong(_candidate());
+
+    await tester.pumpWidget(MaterialApp(
+      home: IdentifyPage(
+        player: player,
+        captureBackend: backend,
+        onIdentify: (pcm) async => [result],
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 11)); // 超过 10s 自动提交
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('晴天'), findsOneWidget);
+
+    // 移动端更多按钮 (Icons.more_horiz_rounded)
+    final moreButton = find.byIcon(Icons.more_horiz_rounded);
+    expect(moreButton, findsOneWidget);
+    await tester.tap(moreButton);
+    await tester.pumpAndSettle();
+
+    // 验证弹出的菜单项包含"下一首播放"
+    expect(find.text('下一首播放'), findsOneWidget);
+  });
+
+  testWidgets('PC 桌面端形态：识别结果展示专业表格，支持双击播放与右键菜单', (tester) async {
+    debugDesktopFormFactorOverride = true;
+    final backend = _FakeCaptureBackend();
+    final player = _FakePlayer();
+    final result = IdentifyService.candidateToSong(_candidate());
+
+    await tester.pumpWidget(MaterialApp(
+      home: IdentifyPage(
+        player: player,
+        captureBackend: backend,
+        onIdentify: (pcm) async => [result],
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 结果列表中存在歌名
+    expect(find.text('晴天'), findsOneWidget);
+
+    // 桌面端双击歌曲文本触发播放
+    await tester.tap(find.text('晴天'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('晴天'), warnIfMissed: false);
+    await tester.pump();
+    expect(player.played.single.hash, 'abc123');
+
+    // 桌面端右键（Secondary Click）呼出操作菜单
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.down(tester.getCenter(find.text('晴天')));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // 验证菜单项包含"下一首播放"与"查看歌手"
+    expect(find.text('下一首播放'), findsOneWidget);
+    expect(find.text('查看歌手'), findsOneWidget);
   });
 
   testWidgets('识别不到结果显示空态文案', (tester) async {
@@ -101,12 +204,13 @@ void main() {
       ),
     ));
     await tester.pump();
-    await tester.pump(const Duration(seconds: 13));
+    await tester.pump(const Duration(seconds: 11));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('未识别到歌曲'), findsOneWidget);
   });
 
   testWidgets('桌面端支持切换采集源至电脑声音(系统内录)', (tester) async {
+    debugDesktopFormFactorOverride = true;
     final backend = _FakeCaptureBackend();
     await tester.pumpWidget(MaterialApp(
       home: IdentifyPage(

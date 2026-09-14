@@ -80,6 +80,9 @@ class IdentifyService {
       albumName: c.albumName.isNotEmpty ? c.albumName : null,
       coverUrl: c.cover.isNotEmpty ? _normalizeCover(c.cover) : null,
       duration: c.durationMs > 0 ? Duration(milliseconds: c.durationMs) : null,
+      artists: c.singer.isNotEmpty
+          ? [ArtistRef(id: '', name: c.singer)]
+          : const [],
     );
     return (song: song, confidence: 1.0 - c.dist.clamp(0.0, 1.0));
   }
@@ -108,9 +111,13 @@ class _RustCaptureBackend implements IdentifyCaptureBackend {
   @override
   Future<Uint8List?> stopAndCollect({int durationMs = 10000}) async {
     debugPrint('[IdentifyService] _RustCaptureBackend.stopAndCollect(durationMs: $durationMs)');
-    final pcm = await rust.identifyCaptureSnapshot(durationMs: durationMs);
-    debugPrint('[IdentifyService] _RustCaptureBackend 收到 PCM 大小: ${pcm.length} 字节');
-    return pcm;
+    try {
+      final pcm = await rust.identifyCaptureSnapshot(durationMs: durationMs);
+      debugPrint('[IdentifyService] _RustCaptureBackend 收到 PCM 大小: ${pcm.length} 字节');
+      return pcm;
+    } finally {
+      await rust.identifyCancelCapture();
+    }
   }
 
   @override

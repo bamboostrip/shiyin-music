@@ -325,13 +325,17 @@ class _SearchPageState extends State<SearchPage> {
     widget.player.playSong(song, queue: _results);
   }
 
-  /// 打开听歌识曲页:整屏路由盖住搜索页,识别/播放后自动返回。
+  /// 打开听歌识曲页：PC 桌面嵌入时推入内容区 Navigator，移动端走全屏路由。
   /// 调用点已用 [IdentifyService.isSupported] 把关,不支持平台按钮不渲染。
   void _openIdentify(BuildContext context) {
-    Navigator.of(context, rootNavigator: true).push(
+    Navigator.of(context, rootNavigator: !widget.embedded).push(
       MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => IdentifyPage(player: widget.player),
+        fullscreenDialog: !widget.embedded,
+        builder: (_) => IdentifyPage(
+          player: widget.player,
+          auth: widget.auth,
+          musicApi: widget.api,
+        ),
       ),
     );
   }

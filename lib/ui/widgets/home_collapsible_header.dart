@@ -312,7 +312,11 @@ class HomeSearchBar extends StatelessWidget {
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => IdentifyPage(player: player!),
+        builder: (_) => IdentifyPage(
+          player: player!,
+          auth: auth,
+          musicApi: api,
+        ),
       ),
     );
   }

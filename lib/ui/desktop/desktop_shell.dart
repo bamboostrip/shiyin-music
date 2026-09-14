@@ -336,15 +336,17 @@ class _DesktopShellState extends State<DesktopShell> {
     PlayerPageRoute.open(context, player: widget.player, auth: widget.auth);
   }
 
-  /// 搜索浮层顶部"听歌识曲"入口：先收浮层，再推根 Navigator 整屏
-  /// fullscreenDialog 识曲页（与移动端搜索页入口同款路由）。
+  /// 搜索浮层顶部"听歌识曲"入口：先收浮层，再推入内容区 Navigator
+  /// （保留左侧侧边栏、顶部窗口栏与底部播放栏常驻）。
   /// isSupported 闸门在浮层面板内部——不支持平台不渲染该行。
   void _openIdentify(BuildContext context) {
     _closeSearchPanel(unfocus: true);
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => IdentifyPage(player: widget.player),
+    _pushContent(
+      context,
+      IdentifyPage(
+        player: widget.player,
+        auth: widget.auth,
+        musicApi: widget.api,
       ),
     );
   }

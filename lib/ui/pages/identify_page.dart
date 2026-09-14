@@ -4,11 +4,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../core/rust_api_client.dart';
-import '../../models/song.dart';
+import '../../models/music_models.dart';
 import '../../services/identify_service.dart';
-import '../widgets/artwork.dart';
+import '../../services/music_api.dart';
+import '../widgets/toast.dart';
+import 'artist_detail_page.dart';
+import 'search_song_results.dart';
 
 /// 识曲采集源。桌面(Windows/Linux)两种都支持;Android 只有麦克风,
 /// 切换控件在移动端不显示。
@@ -40,7 +44,7 @@ enum _IdentifyPhase {
 /// 听歌识曲页面:聆听采集 → 上传识别 → 结果列表 → 点击播放。
 ///
 /// 状态机 listening → matching → done/empty/error:
-/// - 打开页面即开始采集,满 12s 自动提交或点"停止识别"手动提交;
+/// - 打开页面即开始采集,满 10s 自动提交或随时点"立即识别"手动提交;
 /// - matching 阶段 `stopAndCollect` 取末段 PCM(空/过短直接空态,不发请求),
 ///   再经 [IdentifyService.identify] 上传识别;
 /// - 空态/错误态给"重试",回 listening 重新采集。
@@ -51,13 +55,25 @@ class IdentifyPage extends StatefulWidget {
   const IdentifyPage({
     super.key,
     required this.player,
+    this.auth,
+    this.musicApi,
+    this.onViewArtist,
     this.api,
     this.captureBackend,
     this.onIdentify,
   });
 
-  /// 点结果行播放用的控制器(播放后整页 pop 回原页面)。
+  /// 点结果行播放用的控制器。
   final PlayerController player;
+
+  /// 用户认证控制器（收藏/加歌单等操作）；缺省时使用内置 fallback。
+  final AuthController? auth;
+
+  /// 音乐 API（查看歌手等操作）。
+  final MusicApi? musicApi;
+
+  /// 查看歌手外部回调（若提供则优先调用）。
+  final void Function(Song song)? onViewArtist;
 
   /// 识别用客户端;缺省用全局单例([RustApiClient.getInstance],内部有缓存)。
   final RustApiClient? api;
@@ -78,8 +94,11 @@ class IdentifyPage extends StatefulWidget {
 
 class _IdentifyPageState extends State<IdentifyPage>
     with SingleTickerProviderStateMixin {
-  /// 自动提交时限:满 12s 仍无人点"停止识别"就自动收尾。
-  static const _autoSubmitDelay = Duration(seconds: 12);
+  /// 自动提交时限:满 10s 仍无人手动点击"立即识别"就自动收尾。
+  static const _autoSubmitDelay = Duration(seconds: 10);
+
+  /// 建议的最短录音时长(3 秒)，达到后主操作按钮变为醒目的"立即识别"。
+  static const _minManualSeconds = 3;
 
   /// 单次提交取末段 PCM 的时长(与 IdentifyCaptureBackend 缺省对齐)。
   static const _collectDurationMs = 10000;
@@ -90,6 +109,7 @@ class _IdentifyPageState extends State<IdentifyPage>
 
   late final IdentifyCaptureBackend _backend;
   late final AnimationController _pulse;
+  late final AuthController _auth = widget.auth ?? _FallbackAuthController();
 
   _IdentifyPhase _phase = _IdentifyPhase.listening;
   _IdentifySource _source = _IdentifySource.mic;
@@ -149,7 +169,7 @@ class _IdentifyPageState extends State<IdentifyPage>
   }
 
   /// 提交识别:停止采集取末段 PCM → 上传识别 → 结果/空态/错误。
-  /// 手动点"停止识别"与 12s 定时器并发触发,靠阶段守卫防重入。
+  /// 手动点"立即识别"与自动定时器并发触发,靠阶段守卫防重入。
   Future<void> _submit() async {
     if (_phase != _IdentifyPhase.listening) return;
     _autoSubmitTimer?.cancel();
@@ -224,11 +244,44 @@ class _IdentifyPageState extends State<IdentifyPage>
     if (mounted && _phase == _IdentifyPhase.listening) _beginListening();
   }
 
-  /// 点结果行:以全部候选为队列播放,然后整页关掉(识曲流程结束)。
-  void _playResult(({Song song, double confidence}) entry) {
+  /// 播放结果歌曲：以全部候选为队列直接交由 player 播放，保持留在识曲结果页内试听。
+  void _playSong(Song song) {
     final queue = _results.map((m) => m.song).toList();
-    widget.player.playSong(entry.song, queue: queue);
-    Navigator.of(context).pop();
+    widget.player.playSong(song, queue: queue);
+  }
+
+  /// 查看歌手主页。
+  void _openArtist(Song song) {
+    if (widget.onViewArtist != null) {
+      widget.onViewArtist!(song);
+      return;
+    }
+    if (song.source != SongSource.kugou) {
+      Toast.info('其他平台歌曲暂不支持查看歌手');
+      return;
+    }
+    final artist = song.artists.firstWhere(
+      (a) => a.name.isNotEmpty,
+      orElse: () => ArtistRef(id: '', name: song.artist),
+    );
+    if (artist.name.isEmpty) {
+      Toast.info('未找到该歌手信息');
+      return;
+    }
+    if (widget.musicApi == null) {
+      Toast.info('暂无法查看歌手主页');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArtistDetailPage(
+          api: widget.musicApi!,
+          auth: _auth,
+          artist: artist,
+          player: widget.player,
+        ),
+      ),
+    );
   }
 
   @override
@@ -393,8 +446,25 @@ class _IdentifyPageState extends State<IdentifyPage>
           const SizedBox(height: 28),
           FilledButton.icon(
             onPressed: _submit,
-            icon: const Icon(Icons.stop_rounded),
-            label: const Text('停止识别'),
+            icon: Icon(
+              _elapsedSeconds >= _minManualSeconds
+                  ? Icons.auto_awesome_rounded
+                  : Icons.graphic_eq_rounded,
+            ),
+            label: Text(
+              _elapsedSeconds >= _minManualSeconds
+                  ? '立即识别'
+                  : '正在聆听 ($_elapsedSeconds 秒)',
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _elapsedSeconds >= _minManualSeconds
+                ? '已录制 $_elapsedSeconds 秒音频，随时可点击“立即识别”'
+                : '建议录制 3 秒以上以获得更准确的匹配结果',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: .75),
+                ),
           ),
         ],
       ),
@@ -426,27 +496,66 @@ class _IdentifyPageState extends State<IdentifyPage>
 
   Widget _buildResultsBody(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _results.length + 1,
-      itemBuilder: (context, index) {
-        // 首行放小标题,后面是候选行(置信度降序,IdentifyService 已排好)。
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-            child: Text(
-              '识别结果(为你找到 ${_results.length} 首)',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+    final songs = _results.map((m) => m.song).toList();
+    final topConfidence = _results.isNotEmpty ? _results.first.confidence : 0.0;
+    final hasHighConfidence = topConfidence >= 0.4;
+    final confidencePct = (topConfidence * 100).toStringAsFixed(0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          child: Row(
+            children: [
+              Text(
+                '识别结果 (为你找到 ${_results.length} 首)',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              if (hasHighConfidence) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
                   ),
-            ),
-          );
-        }
-        return _ResultRow(
-            entry: _results[index - 1],
-            onTap: () => _playResult(_results[index - 1]),
-          );
-      },
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '最佳匹配 $confidencePct%',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _retry,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('重新识别'),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SearchSongResults(
+            songs: songs,
+            onPlay: _playSong,
+            isLiked: (song) => _auth.isLiked(song),
+            onLikeTap: (song) => _auth.toggleLike(song),
+            auth: _auth,
+            player: widget.player,
+            onViewArtist: _openArtist,
+          ),
+        ),
+      ],
     );
   }
 
@@ -560,72 +669,14 @@ class _IdentifyPageState extends State<IdentifyPage>
   }
 }
 
-/// 识别结果行:封面 + 歌名/歌手 + 右侧置信度(≥40% 显示百分比,更低显示"较低")。
-class _ResultRow extends StatelessWidget {
-  const _ResultRow({required this.entry, required this.onTap});
-
-  final ({Song song, double confidence}) entry;
-  final VoidCallback onTap;
+/// 当未传入外部 AuthController 时使用的无操作 Fallback 实现。
+class _FallbackAuthController extends ChangeNotifier implements AuthController {
+  @override
+  bool isLiked(Song song) => false;
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final song = entry.song;
-    // 置信度展示:百分比取整;低于 40% 换成"较低",避免误导用户。
-    final confidence = entry.confidence;
-    final confidenceText = confidence < 0.4
-        ? '较低'
-        : '${(confidence * 100).toStringAsFixed(0)}%';
+  Future<void> toggleLike(Song song) async {}
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          children: [
-            Artwork(url: song.coverUrl, size: 52, borderRadius: 8),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              confidenceText,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: confidence < 0.4
-                        ? colorScheme.onSurfaceVariant
-                        : colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

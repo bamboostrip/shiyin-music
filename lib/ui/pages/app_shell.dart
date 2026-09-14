@@ -451,7 +451,11 @@ class _AppShellState extends State<AppShell> {
                     onTap: () => Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute<void>(
                         fullscreenDialog: true,
-                        builder: (_) => IdentifyPage(player: widget.player),
+                        builder: (_) => IdentifyPage(
+                          player: widget.player,
+                          auth: widget.auth,
+                          musicApi: widget.api,
+                        ),
                       ),
                     ),
                     child: Tooltip(
