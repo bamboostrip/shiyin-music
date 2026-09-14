@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shiyin_music/controllers/auth_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
@@ -47,6 +48,26 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   Future<void> togglePlay() async {
     _isPlaying = !_isPlaying;
+    notifyListeners();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeAuthController extends ChangeNotifier implements AuthController {
+  final Set<String> _likedHashes = {};
+
+  @override
+  bool isLiked(Song song) => _likedHashes.contains(song.hash);
+
+  @override
+  Future<void> toggleLike(Song song) async {
+    if (_likedHashes.contains(song.hash)) {
+      _likedHashes.remove(song.hash);
+    } else {
+      _likedHashes.add(song.hash);
+    }
     notifyListeners();
   }
 
@@ -105,6 +126,9 @@ void main() {
     );
 
     expect(find.text('暂无歌词'), findsOneWidget);
+    // Header still visible in empty state for mobile
+    expect(find.text('Test Song'), findsOneWidget);
+    expect(find.text('Test Artist'), findsOneWidget);
     expect(find.byType(LyricBottomBar), findsNothing);
   });
 
@@ -133,7 +157,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      // Verify MobileLyricList and LyricBottomBar exist
+      // Verify Header, MobileLyricList and LyricBottomBar exist
+      expect(find.text('Test Song'), findsOneWidget);
+      expect(find.text('Test Artist'), findsOneWidget);
       expect(find.byType(MobileLyricList), findsOneWidget);
       expect(find.byType(LyricBottomBar), findsOneWidget);
       expect(find.byType(PlayerCommentButton), findsOneWidget);
@@ -154,6 +180,49 @@ void main() {
 
       // Translation should now be hidden
       expect(find.text('你好世界'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'LyricPlayerPage header supports onArtistTap and renders favorite button when auth provided',
+    (tester) async {
+      final player = _FakePlayerController();
+      player.lyrics = testLyrics;
+      final auth = _FakeAuthController();
+
+      Song? tappedSong;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 380,
+              height: 700,
+              child: LyricPlayerPage(
+                player: player,
+                song: testSong,
+                isPageVisible: true,
+                auth: auth,
+                onArtistTap: (song) => tappedSong = song,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Tap artist name in header
+      await tester.tap(find.text('Test Artist'));
+      await tester.pump();
+      expect(tappedSong, equals(testSong));
+
+      // Like button exists and toggles
+      expect(find.byIcon(Icons.favorite_border_rounded), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.favorite_border_rounded));
+      await tester.pump();
+      expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
     },
   );
 }

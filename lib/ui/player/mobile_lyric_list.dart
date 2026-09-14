@@ -286,6 +286,11 @@ class _MobileLyricListState extends State<MobileLyricList>
       setState(() {});
     }
     _updateFocusedIndex(viewportHeight);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _userHolding) {
+        _updateFocusedIndex(viewportHeight);
+      }
+    });
     _resumeTimer = Timer(_resumeDelay, () {
       if (!mounted) return;
       _resumeNow();
@@ -299,6 +304,11 @@ class _MobileLyricListState extends State<MobileLyricList>
     }
     _resumeTimer?.cancel();
     _updateFocusedIndex(viewportHeight);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _userHolding) {
+        _updateFocusedIndex(viewportHeight);
+      }
+    });
     _resumeTimer = Timer(_resumeDelay, () {
       if (!mounted) return;
       _resumeNow();
@@ -374,7 +384,6 @@ class _MobileLyricListState extends State<MobileLyricList>
                     final line = widget.lyrics[index];
                     final isPlaying = index == _activeLyricIndex;
                     final isFocused = _userHolding && index == _focusedIndex;
-                    final isHighlighted = _userHolding ? isFocused : isPlaying;
                     final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
 
                     final showTrans =
@@ -386,20 +395,27 @@ class _MobileLyricListState extends State<MobileLyricList>
                         line.romanization != null &&
                         line.romanization!.isNotEmpty;
 
+                    // 1. 正在播放（isPlaying）：无论是否滑动，大字号、粗字重
+                    // 2. 滚动到的歌词（isFocused && !isPlaying）：不用变大，保持标准字号与字重
+                    // 3. 其他非播放歌词：标准字号与字重
+                    final double fontSize =
+                        (isPlaying ? 26.0 : 20.0) * widget.lyricScale;
+                    final fontWeight = isPlaying
+                        ? FontWeight.w900
+                        : FontWeight.w700;
+
+                    // 颜色层级：
+                    // - 正在播放：高亮白（若有逐字打点则由 LyricText 动态渐变呈现）
+                    // - 滑动时中心线定位歌词：颜色稍微加深/加亮至 alpha 0.85，清晰醒目但不变大
+                    // - 普通未播放歌词：alpha 0.35 优雅半透明
                     final Color mainColor;
-                    if (isHighlighted) {
+                    if (isPlaying) {
                       mainColor = Colors.white;
-                    } else if (_userHolding && isPlaying) {
-                      mainColor = Colors.white.withValues(alpha: 0.55);
+                    } else if (isFocused) {
+                      mainColor = Colors.white.withValues(alpha: 0.85);
                     } else {
                       mainColor = Colors.white.withValues(alpha: 0.35);
                     }
-
-                    final double fontSize =
-                        (isHighlighted ? 26.0 : 20.0) * widget.lyricScale;
-                    final fontWeight = isHighlighted
-                        ? FontWeight.w900
-                        : FontWeight.w700;
 
                     final mainTextStyle = Theme.of(context)
                         .textTheme
@@ -412,7 +428,8 @@ class _MobileLyricListState extends State<MobileLyricList>
                         );
 
                     Widget mainWidget;
-                    if (isPlaying && line.words.isNotEmpty && !_userHolding) {
+                    // 正在播放且有逐字时间戳：即使滑动中也持续运行逐字卡拉OK动效，样式永不丢失
+                    if (isPlaying && line.words.isNotEmpty) {
                       mainWidget = LyricText(
                         line: line,
                         active: true,
@@ -426,6 +443,24 @@ class _MobileLyricListState extends State<MobileLyricList>
                         style: mainTextStyle,
                         child: Text(line.text),
                       );
+                    }
+
+                    final Color transColor;
+                    if (isPlaying) {
+                      transColor = Colors.white.withValues(alpha: 0.85);
+                    } else if (isFocused) {
+                      transColor = Colors.white.withValues(alpha: 0.70);
+                    } else {
+                      transColor = Colors.white.withValues(alpha: 0.28);
+                    }
+
+                    final Color romColor;
+                    if (isPlaying) {
+                      romColor = Colors.white.withValues(alpha: 0.80);
+                    } else if (isFocused) {
+                      romColor = Colors.white.withValues(alpha: 0.65);
+                    } else {
+                      romColor = Colors.white.withValues(alpha: 0.25);
                     }
 
                     return GestureDetector(
@@ -447,9 +482,7 @@ class _MobileLyricListState extends State<MobileLyricList>
                               Text(
                                 line.translation!,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(
-                                    alpha: isHighlighted ? 0.75 : 0.28,
-                                  ),
+                                  color: transColor,
                                   fontSize: 14.5 * widget.lyricScale,
                                   height: 1.26,
                                   fontWeight: FontWeight.w600,
@@ -461,9 +494,7 @@ class _MobileLyricListState extends State<MobileLyricList>
                               Text(
                                 line.romanization!,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(
-                                    alpha: isHighlighted ? 0.70 : 0.25,
-                                  ),
+                                  color: romColor,
                                   fontSize: 13.5 * widget.lyricScale,
                                   height: 1.24,
                                   fontWeight: FontWeight.w500,

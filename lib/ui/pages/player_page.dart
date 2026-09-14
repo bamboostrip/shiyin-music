@@ -107,15 +107,15 @@ class _PlayerPageState extends State<PlayerPage> {
                     Text(
                       '还没有正在播放的歌曲',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '先去挑选一首喜欢的歌曲吧',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 24),
                     FilledButton.tonal(
@@ -150,12 +150,8 @@ class _PlayerPageState extends State<PlayerPage> {
         ],
       );
     }
-    return ExcludeSemantics(
-      excluding: isDesktopPlatform,
-      child: body,
-    );
+    return ExcludeSemantics(excluding: isDesktopPlatform, child: body);
   }
-
 }
 
 class _PlayerBody extends StatefulWidget {
@@ -196,14 +192,15 @@ class _PlayerBodyState extends State<_PlayerBody>
   void initState() {
     super.initState();
     _dismissAnimation = const AlwaysStoppedAnimation(0.0);
-    _dismissController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    )..addListener(() {
-        setState(() {
-          _dragDistance = _dismissAnimation.value;
+    _dismissController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 250),
+        )..addListener(() {
+          setState(() {
+            _dragDistance = _dismissAnimation.value;
+          });
         });
-      });
   }
 
   @override
@@ -265,13 +262,9 @@ class _PlayerBodyState extends State<_PlayerBody>
 
   void _animateReset() {
     _isDismissing = false;
-    _dismissAnimation = Tween<double>(
-      begin: _dragDistance,
-      end: 0.0,
-    ).animate(CurvedAnimation(
-      parent: _dismissController,
-      curve: Curves.easeOutCubic,
-    ));
+    _dismissAnimation = Tween<double>(begin: _dragDistance, end: 0.0).animate(
+      CurvedAnimation(parent: _dismissController, curve: Curves.easeOutCubic),
+    );
     _dismissController.duration = const Duration(milliseconds: 250);
     _dismissController.forward(from: 0.0);
   }
@@ -326,95 +319,112 @@ class _PlayerBodyState extends State<_PlayerBody>
                           top: isDesktopFormFactor ? 40 : 0,
                         ),
                         child: Column(
-                        children: [
-                          if (!useSplitLayout)
-                            TopBar(
-                              player: widget.player,
-                              auth: widget.auth,
-                              song: widget.song,
-                              onClose: widget.onClose,
-                              onArtistTap: _openArtist,
-                              currentPage: _page,
-                              onPageSelected: (index) =>
-                                  _pageController.animateToPage(
-                                index,
-                                duration: const Duration(milliseconds: 250),
-                                curve: Curves.easeInOut,
-                              ),
-                              onVerticalDragDown: _onVerticalDragDown,
-                              onVerticalDragStart: _onVerticalDragStart,
-                              onVerticalDragUpdate: _onVerticalDragUpdate,
-                              onVerticalDragEnd: _onVerticalDragEnd,
-                              onVerticalDragCancel: _onVerticalDragCancel,
-                            ),
-                          Expanded(
-                            child: useSplitLayout
-                                ? ExcludeSemantics(
-                                    excluding: isDesktopPlatform,
-                                    child: LandscapePlayerContent(
-                                      player: widget.player,
-                                      auth: widget.auth,
-                                      song: widget.song,
-                                      onClose: widget.onClose,
-                                      onQueue: widget.onQueue,
-                                      onArtistTap: _openArtist,
-                                    ),
-                                  )
-                                : HorizontalWheelPageScroll(
-                                    controller: _pageController,
-                                    child: NotificationListener<ScrollNotification>(
-                                      onNotification: _handlePageScrollNotification,
-                                      child: PageView(
-                                        controller: _pageController,
-                                        allowImplicitScrolling: true,
-                                        onPageChanged: (value) =>
-                                            _setPageState(page: value),
-                                        children: [
-                                          PosterPlayerPage(
-                                            key: const PageStorageKey(
-                                              'poster-player-page',
-                                            ),
-                                            player: widget.player,
-                                            song: widget.song,
-                                            onQueue: widget.onQueue,
-                                            auth: widget.auth,
-                                            onArtistTap: _openArtist,
-                                            onCoverTap: () => _showMoreSheet(context),
-                                            onVerticalDragDown: _onVerticalDragDown,
-                                            onVerticalDragStart:
-                                                _onVerticalDragStart,
-                                            onVerticalDragUpdate:
-                                                _onVerticalDragUpdate,
-                                            onVerticalDragEnd: _onVerticalDragEnd,
-                                            onVerticalDragCancel:
-                                                _onVerticalDragCancel,
-                                            onLyricTap: () {
-                                              if (_pageController.hasClients) {
-                                                _pageController.animateToPage(
-                                                  1,
-                                                  duration: const Duration(
-                                                    milliseconds: 250,
-                                                  ),
-                                                  curve: Curves.easeInOut,
-                                                );
-                                              }
-                                            },
-                                          ),
-                                          LyricPlayerPage(
-                                            key: const PageStorageKey(
-                                              'lyric-player-page',
-                                            ),
-                                            player: widget.player,
-                                            song: widget.song,
-                                            isPageVisible: _lyricPageVisible,
-                                          ),
-                                        ],
+                          children: [
+                            if (!useSplitLayout)
+                              TopBar(
+                                player: widget.player,
+                                auth: widget.auth,
+                                song: widget.song,
+                                onClose: widget.onClose,
+                                onArtistTap: _openArtist,
+                                currentPage: _page,
+                                onPageSelected: (index) =>
+                                    _pageController.animateToPage(
+                                      index,
+                                      duration: const Duration(
+                                        milliseconds: 250,
                                       ),
+                                      curve: Curves.easeInOut,
                                     ),
-                                  ),
-                          ),
-                        ],
-                      ),
+                                onVerticalDragDown: _onVerticalDragDown,
+                                onVerticalDragStart: _onVerticalDragStart,
+                                onVerticalDragUpdate: _onVerticalDragUpdate,
+                                onVerticalDragEnd: _onVerticalDragEnd,
+                                onVerticalDragCancel: _onVerticalDragCancel,
+                              ),
+                            Expanded(
+                              child: useSplitLayout
+                                  ? ExcludeSemantics(
+                                      excluding: isDesktopPlatform,
+                                      child: LandscapePlayerContent(
+                                        player: widget.player,
+                                        auth: widget.auth,
+                                        song: widget.song,
+                                        onClose: widget.onClose,
+                                        onQueue: widget.onQueue,
+                                        onArtistTap: _openArtist,
+                                      ),
+                                    )
+                                  : HorizontalWheelPageScroll(
+                                      controller: _pageController,
+                                      child:
+                                          NotificationListener<
+                                            ScrollNotification
+                                          >(
+                                            onNotification:
+                                                _handlePageScrollNotification,
+                                            child: PageView(
+                                              controller: _pageController,
+                                              allowImplicitScrolling: true,
+                                              onPageChanged: (value) =>
+                                                  _setPageState(page: value),
+                                              children: [
+                                                PosterPlayerPage(
+                                                  key: const PageStorageKey(
+                                                    'poster-player-page',
+                                                  ),
+                                                  player: widget.player,
+                                                  song: widget.song,
+                                                  onQueue: widget.onQueue,
+                                                  auth: widget.auth,
+                                                  onArtistTap: _openArtist,
+                                                  onCoverTap: () =>
+                                                      _showMoreSheet(context),
+                                                  onVerticalDragDown:
+                                                      _onVerticalDragDown,
+                                                  onVerticalDragStart:
+                                                      _onVerticalDragStart,
+                                                  onVerticalDragUpdate:
+                                                      _onVerticalDragUpdate,
+                                                  onVerticalDragEnd:
+                                                      _onVerticalDragEnd,
+                                                  onVerticalDragCancel:
+                                                      _onVerticalDragCancel,
+                                                  onLyricTap: () {
+                                                    if (_pageController
+                                                        .hasClients) {
+                                                      _pageController
+                                                          .animateToPage(
+                                                            1,
+                                                            duration:
+                                                                const Duration(
+                                                                  milliseconds:
+                                                                      250,
+                                                                ),
+                                                            curve: Curves
+                                                                .easeInOut,
+                                                          );
+                                                    }
+                                                  },
+                                                ),
+                                                LyricPlayerPage(
+                                                  key: const PageStorageKey(
+                                                    'lyric-player-page',
+                                                  ),
+                                                  player: widget.player,
+                                                  song: widget.song,
+                                                  isPageVisible:
+                                                      _lyricPageVisible,
+                                                  auth: widget.auth,
+                                                  onArtistTap: _openArtist,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                    ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -544,4 +554,3 @@ class _PlayerBodyState extends State<_PlayerBody>
     );
   }
 }
-

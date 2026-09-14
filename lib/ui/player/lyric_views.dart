@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
@@ -19,11 +20,15 @@ class LyricPlayerPage extends StatefulWidget {
     required this.player,
     required this.song,
     required this.isPageVisible,
+    this.auth,
+    this.onArtistTap,
   });
 
   final PlayerController player;
   final Song song;
   final bool isPageVisible;
+  final AuthController? auth;
+  final ValueChanged<Song>? onArtistTap;
 
   @override
   State<LyricPlayerPage> createState() => _LyricPlayerPageState();
@@ -90,6 +95,98 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
     }
   }
 
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 6, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onArtistTap?.call(widget.song),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.song.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ),
+                      if (widget.onArtistTap != null) ...[
+                        const SizedBox(width: 2),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 16,
+                          color: Colors.white70,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (widget.auth != null) ...[
+            const SizedBox(width: 8),
+            ListenableBuilder(
+              listenable: widget.auth!,
+              builder: (context, _) {
+                final liked = widget.auth!.isLiked(widget.song);
+                final likeEnabled = widget.song.source == SongSource.kugou;
+                return SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 24,
+                    tooltip: liked ? '取消喜欢' : '喜欢',
+                    onPressed: likeEnabled
+                        ? () => widget.auth!.toggleLike(widget.song)
+                        : null,
+                    icon: Icon(
+                      liked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: liked
+                          ? Colors.redAccent
+                          : Colors.white.withValues(
+                              alpha: likeEnabled ? .7 : .3,
+                            ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -102,29 +199,36 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
     );
 
     if (lyrics.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              widget.player.isPreparing ? '正在准备音乐...' : '暂无歌词',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
+      return Column(
+        children: [
+          if (!isDesktopFormFactor) _buildHeader(context),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.player.isPreparing ? '正在准备音乐...' : '暂无歌词',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (!widget.player.isPreparing)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: GlassIconButton(
+                        tooltip: '重新加载歌词',
+                        onPressed: () =>
+                            unawaited(widget.player.ensureLyricsLoaded()),
+                        icon: Icons.refresh_rounded,
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (!widget.player.isPreparing)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: GlassIconButton(
-                  tooltip: '重新加载歌词',
-                  onPressed: () =>
-                      unawaited(widget.player.ensureLyricsLoaded()),
-                  icon: Icons.refresh_rounded,
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
@@ -148,6 +252,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
 
     return Column(
       children: [
+        _buildHeader(context),
         Expanded(
           child: ExcludeSemantics(
             excluding: isDesktopPlatform,

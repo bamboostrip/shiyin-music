@@ -213,4 +213,69 @@ void main() {
 
     expect(player.seekCalls, 1);
   });
+
+  testWidgets(
+    'Dragging list preserves active lyric size/style and keeps focused line standard size with heightened color',
+    (tester) async {
+      final longLyrics = List.generate(
+        15,
+        (i) => LyricLine(
+          time: Duration(seconds: i * 5),
+          text: 'Line number $i of lyric song',
+        ),
+      );
+      final player = _FakePlayerController();
+      player.lyrics = longLyrics;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              height: 640,
+              child: MobileLyricList(
+                player: player,
+                songHash: 'hash1',
+                lyrics: longLyrics,
+                activeIndex: 0,
+                showTranslation: false,
+                showRomanization: false,
+                lyricScale: 1.0,
+                isPageVisible: true,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Drag list up so a non-playing line moves into center
+      await tester.drag(
+        find.text('Line number 0 of lyric song'),
+        const Offset(0, -180),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final styleWidgets = tester
+          .widgetList<AnimatedDefaultTextStyle>(
+            find.byType(AnimatedDefaultTextStyle),
+          )
+          .toList();
+
+      final activeStyles = styleWidgets.where((w) => w.style.fontSize == 26.0);
+      expect(activeStyles, isNotEmpty);
+      expect(activeStyles.first.style.fontWeight, FontWeight.w900);
+
+      final focusedStyles = styleWidgets.where(
+        (w) => w.style.fontSize == 20.0 && (w.style.color?.a ?? 0) > 0.8,
+      );
+      expect(focusedStyles, isNotEmpty);
+
+      // Normal non-focused, non-playing lines have size 20.0 and lower opacity (alpha 0.35)
+      final normalStyles = styleWidgets.where(
+        (w) => w.style.fontSize == 20.0 && (w.style.color?.a ?? 0) < 0.5,
+      );
+      expect(normalStyles, isNotEmpty);
+    },
+  );
 }
