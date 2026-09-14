@@ -303,14 +303,32 @@ class _AnchoredPopupPosition extends StatefulWidget {
   State<_AnchoredPopupPosition> createState() => _AnchoredPopupPositionState();
 }
 
-class _AnchoredPopupPositionState extends State<_AnchoredPopupPosition> {
+class _AnchoredPopupPositionState extends State<_AnchoredPopupPosition>
+    with WidgetsBindingObserver {
   final GlobalKey _measureKey = GlobalKey();
   Rect? _menuRect;
+  bool _closedByMetricsChange = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndPlace());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 窗口尺寸/DPI 变化即关闭：锚点是打开瞬间的快照坐标，resize 后按钮
+  /// 位置已变，重放只会得到贴边错位的面板（对齐 Windows 原生菜单行为）。
+  @override
+  void didChangeMetrics() {
+    if (_closedByMetricsChange || !mounted) return;
+    _closedByMetricsChange = true;
+    Navigator.of(context).pop();
   }
 
   void _measureAndPlace() {
@@ -519,7 +537,8 @@ class _DesktopCascadeMenuHost extends StatefulWidget {
       _DesktopCascadeMenuHostState();
 }
 
-class _DesktopCascadeMenuHostState extends State<_DesktopCascadeMenuHost> {
+class _DesktopCascadeMenuHostState extends State<_DesktopCascadeMenuHost>
+    with WidgetsBindingObserver {
   final GlobalKey _primaryMeasureKey = GlobalKey();
   final GlobalKey _submenuMeasureKey = GlobalKey();
 
@@ -530,18 +549,29 @@ class _DesktopCascadeMenuHostState extends State<_DesktopCascadeMenuHost> {
   Timer? _leaveTimer;
   bool _pointerInPrimary = false;
   bool _pointerInSubmenu = false;
+  bool _closedByMetricsChange = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _measurePrimary());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _hoverTimer?.cancel();
     _leaveTimer?.cancel();
     super.dispose();
+  }
+
+  /// 窗口尺寸/DPI 变化即关闭（理由同 [_AnchoredPopupPositionState]）。
+  @override
+  void didChangeMetrics() {
+    if (_closedByMetricsChange || !mounted) return;
+    _closedByMetricsChange = true;
+    Navigator.of(context).pop();
   }
 
   void _measurePrimary() {

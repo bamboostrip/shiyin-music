@@ -75,6 +75,8 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
   final Future<void> Function()? onRefresh;
 
   void _openIdentify(BuildContext context) {
+    // 入口防抖:双击会推出两页抢全局采集(见 IdentifyService.tryConsumeEntry)。
+    if (!IdentifyService.tryConsumeEntry()) return;
     if (onIdentifyTap != null) {
       onIdentifyTap!();
       return;

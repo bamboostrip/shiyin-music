@@ -89,6 +89,51 @@ void main() {
       expect(matches.map((m) => m.song.hash), ['near', 'far']);
       expect(matches.first.confidence, closeTo(0.9, 1e-9));
     });
+
+    test('重复 hash 候选去重,保留首个(置信度最高)', () async {
+      final candidates = [
+        _candidate(hash: 'dup', dist: 0.5),
+        _candidate(hash: 'dup', dist: 0.9),
+        _candidate(hash: 'other', dist: 0.7),
+      ];
+      final api = _FakeRustApiClient(candidates);
+      final matches = await IdentifyService.identify(api, Uint8List(0));
+      expect(matches.map((m) => m.song.hash), ['dup', 'other']);
+    });
+
+    test('死链候选(无 url 且无权限限制)被过滤,VIP 受限与探测失败保留', () async {
+      final candidates = [
+        _candidate(hash: 'dead', dist: 0.1),
+        _candidate(hash: 'vip', dist: 0.2),
+        _candidate(hash: 'ok', dist: 0.3),
+        _candidate(hash: 'probe-error', dist: 0.4),
+      ];
+      final api = _FakeRustApiClient(
+        candidates,
+        urlResponses: {
+          'dead': <String, dynamic>{'url': <String>[], 'priv_status': 0},
+          'vip': <String, dynamic>{'url': <String>[], 'priv_status': 1},
+          'ok': <String, dynamic>{
+            'url': ['http://a/b.mp3'],
+            'priv_status': 0,
+          },
+          // probe-error 不给映射 → get 抛错 → 按可播保留(不误杀)
+        },
+      );
+      final matches = await IdentifyService.identify(api, Uint8List(0));
+      expect(
+        matches.map((m) => m.song.hash),
+        ['vip', 'ok', 'probe-error'],
+      );
+    });
+
+    test('全部候选探测失败时不过滤(网络抖动不误杀)', () async {
+      final candidates = [_candidate(hash: 'a', dist: 0.1)];
+      // 不提供 urlResponses:所有 get 抛错,全部按可播保留。
+      final api = _FakeRustApiClient(candidates);
+      final matches = await IdentifyService.identify(api, Uint8List(0));
+      expect(matches.map((m) => m.song.hash), ['a']);
+    });
   });
 }
 
@@ -111,15 +156,30 @@ rust.IdentifyCandidate _candidate({
 );
 
 /// 注入假客户端:identify 直接回放预置候选,不触发 RustLib;
-/// 其余接口成员(tokens/get/post 等)测试不会触达,noSuchMethod 兜底。
+/// get('/song/url') 按 hash 查 [urlResponses] 回放,未登记的 hash 抛错
+/// (模拟探测失败);其余接口成员测试不会触达,noSuchMethod 兜底。
 class _FakeRustApiClient implements RustApiClient {
-  _FakeRustApiClient(this.candidates);
+  _FakeRustApiClient(this.candidates, {this.urlResponses});
 
   final List<rust.IdentifyCandidate> candidates;
+  final Map<String, Map<String, dynamic>>? urlResponses;
 
   @override
   Future<List<rust.IdentifyCandidate>> identify(Uint8List pcm) async =>
       candidates;
+
+  @override
+  Future<dynamic> get(String path, [Map<String, Object?> query = const {}]) async {
+    if (path != '/song/url') {
+      throw UnimplementedError('测试未登记的接口: $path');
+    }
+    final hash = query['hash'] as String?;
+    final resp = urlResponses?[hash];
+    if (resp == null) {
+      throw Exception('探测失败(测试模拟)');
+    }
+    return resp;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

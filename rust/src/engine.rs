@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 use serde_json::{json, Value};
 
@@ -10,10 +11,21 @@ use crate::services::{
     rank, report, search, song, user, youth,
 };
 
-pub struct KugouEngine {
-    client: reqwest::Client,
+/// 登录态等可变部分。读写均经 [`KugouEngine::state`] 的短锁完成，
+/// 锁从不跨网络 await 持有（见结构体注释）。
+struct EngineState {
     session: KgSession,
     store: FileSessionStore,
+}
+
+pub struct KugouEngine {
+    client: reqwest::Client,
+    /// 内部可变的会话状态：FRB 对 opaque 类型的调用会按参数可变性加
+    /// 读/写锁并跨整个 await 持有。此前 `&mut Engine` 让所有请求（含
+    /// 耗时 2-15s 的识曲上传）串行在一把写锁上，识别期间搜索/歌单/
+    /// 自动下一曲全部排队。改为 `&self` + 内部 RwLock 后 FRB 只拿读锁
+    /// （读读并存），登录态写入只占毫秒级同步段落。
+    state: RwLock<EngineState>,
 }
 
 impl KugouEngine {
@@ -35,13 +47,22 @@ impl KugouEngine {
 
         Self {
             client,
-            session,
-            store,
+            state: RwLock::new(EngineState { session, store }),
         }
     }
 
+    /// 当前会话快照（廉价克隆，纯字符串）。所有读路径拿快照后即刻放锁，
+    /// 后续网络请求期间不持任何锁。
+    fn session_snapshot(&self) -> KgSession {
+        self.state
+            .read()
+            .expect("engine state lock poisoned")
+            .session
+            .clone()
+    }
+
     pub async fn request(
-        &mut self,
+        &self,
         method: &str,
         path: &str,
         query: &str,
@@ -66,33 +87,8 @@ impl KugouEngine {
             }
         }
 
-        let result = self.dispatch(method, path, &params, body).await?;
-        serde_json::to_string(&result).map_err(|e| AppError::Internal(e.to_string()))
-    }
-
-    pub fn set_session_fields(&mut self, userid: &str, token: &str, t1: &str) {
-        if userid.is_empty() || token.is_empty() {
-            self.session.logout();
-        } else {
-            self.session.update_auth(userid, token, "", "", t1);
-        }
-        self.store.save(&self.session);
-    }
-
-    /// 听歌识曲:上传 PCM,返回候选歌曲(JSON 透传,候选解析在 Dart 侧之外
-    /// 统一走 identify::parse_candidates,见 api::identify_music)。
-    pub async fn identify(&self, pcm: Vec<u8>) -> AppResult<Value> {
-        identify::identify_music(&self.client, &self.session, pcm).await
-    }
-
-    async fn dispatch(
-        &mut self,
-        method: &str,
-        path: &str,
-        params: &HashMap<String, String>,
-        body: Option<&str>,
-    ) -> AppResult<Value> {
-        let result = self.dispatch_inner(method, path, params, body).await?;
+        let session = self.session_snapshot();
+        let result = self.dispatch_inner(&session, method, path, &params, body).await?;
 
         // 会话失效（status=0 + 20xxx 错误码）时自动刷新 token 并重放一次。
         // 酷狗 token 会在长期未使用 / 多端登录后被上游作废，车机长时间待机后
@@ -102,20 +98,63 @@ impl KugouEngine {
             || path.starts_with("/login/")
             || path.starts_with("/captcha/")
         {
-            return Ok(result);
+            return Self::encode_result(result);
         }
-        let refreshed = login::refresh_token(&self.client, "", &self.session).await;
-        match refreshed {
+        let refreshed = login::refresh_token(&self.client, "", &session).await;
+        let retry_session = match refreshed {
             Ok(resp) => {
-                self.persist_login(&resp);
+                let session = self.persist_login(&resp);
                 tracing::info!(path, "会话已失效，自动刷新 token 后重试原请求");
-                self.dispatch_inner(method, path, params, body).await
+                Some(session)
             }
             Err(e) => {
-                tracing::warn!(path, error = %e, "会话失效且 token 刷新失败，保持原响应");
-                Ok(result)
+                // 并发请求可能都撞上会话失效：本请求刷新失败时，若期间另一
+                // 请求已刷新成功（会话已变化），直接借新会话重放。
+                let current = self.session_snapshot();
+                if current.token != session.token || current.userid != session.userid {
+                    Some(current)
+                } else {
+                    tracing::warn!(path, error = %e, "会话失效且 token 刷新失败，保持原响应");
+                    None
+                }
             }
+        };
+        let result = match retry_session {
+            Some(session) => {
+                self.dispatch_inner(&session, method, path, &params, body)
+                    .await?
+            }
+            None => result,
+        };
+        Self::encode_result(result)
+    }
+
+    fn encode_result(result: Value) -> AppResult<String> {
+        serde_json::to_string(&result).map_err(|e| AppError::Internal(e.to_string()))
+    }
+
+    pub fn set_session_fields(&self, userid: &str, token: &str, t1: &str) {
+        let mut state = self.state.write().expect("engine state lock poisoned");
+        if userid.is_empty() || token.is_empty() {
+            state.session.logout();
+        } else {
+            state.session.update_auth(userid, token, "", "", t1);
         }
+        state.store.save(&state.session);
+    }
+
+    /// 登出：清会话并持久化（login/logout 端点用）。
+    fn logout_internal(&self) {
+        let mut state = self.state.write().expect("engine state lock poisoned");
+        state.session.logout();
+        state.store.save(&state.session);
+    }
+
+    /// 听歌识曲:上传 PCM,返回候选歌曲(JSON 透传,候选解析在 Dart 侧之外
+    /// 统一走 identify::parse_candidates,见 api::identify_music)。
+    pub async fn identify(&self, pcm: Vec<u8>) -> AppResult<Value> {
+        let session = self.session_snapshot();
+        identify::identify_music(&self.client, &session, pcm).await
     }
 
     /// 判断上游响应是否为"会话失效/需要登录"（status=0 + 20xxx 错误码）。
@@ -133,15 +172,49 @@ impl KugouEngine {
         matches!(code, Some(c) if (20000..20100).contains(&c))
     }
 
+    /// 将登录类响应写入会话并持久化（登录/二维码/token 刷新端点共用）。
+    /// 返回写入后的会话快照，供 token 刷新重放路径复用。
+    fn persist_login(&self, resp: &Value) -> KgSession {
+        let mut state = self.state.write().expect("engine state lock poisoned");
+        let userid = resp
+            .get("userid")
+            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+            .unwrap_or_default();
+        let token = resp
+            .get("token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if userid.is_empty() || userid == "0" || token.is_empty() {
+            return state.session.clone();
+        }
+        let vip_type = resp
+            .get("vip_type")
+            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+            .unwrap_or_else(|| "0".to_string());
+        let vip_token = resp
+            .get("vip_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let t1 = resp
+            .get("t1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        state
+            .session
+            .update_auth(&userid, token, &vip_type, vip_token, t1);
+        state.store.save(&state.session);
+        state.session.clone()
+    }
+
     async fn dispatch_inner(
-        &mut self,
+        &self,
+        session: &KgSession,
         method: &str,
         path: &str,
         params: &HashMap<String, String>,
         body: Option<&str>,
     ) -> AppResult<Value> {
         let client = &self.client;
-        let session = &self.session;
 
         match (method, path) {
             ("POST", "/captcha/sent") => {
@@ -164,8 +237,7 @@ impl KugouEngine {
             }
             ("POST", "/login/logout") => {
                 login::logout(client, "", session).await;
-                self.session.logout();
-                self.store.save(&self.session);
+                self.logout_internal();
                 Ok(json!(null))
             }
             ("GET", "/login/qr/key") => login::get_qr_key(client, session).await,
@@ -618,35 +690,6 @@ impl KugouEngine {
             ))),
         }
     }
-
-    fn persist_login(&mut self, resp: &Value) {
-        let userid = resp
-            .get("userid")
-            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
-            .unwrap_or_default();
-        let token = resp
-            .get("token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if userid.is_empty() || userid == "0" || token.is_empty() {
-            return;
-        }
-        let vip_type = resp
-            .get("vip_type")
-            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
-            .unwrap_or_else(|| "0".to_string());
-        let vip_token = resp
-            .get("vip_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let t1 = resp
-            .get("t1")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        self.session
-            .update_auth(&userid, token, &vip_type, vip_token, t1);
-        self.store.save(&self.session);
-    }
 }
 
 fn first_str(
@@ -841,7 +884,7 @@ mod tests {
                     std::fs::copy(src, dir.join("kg_session.json")).unwrap();
                 }
             }
-            let mut engine = KugouEngine::new(dir.to_string_lossy().to_string()).await;
+            let engine = KugouEngine::new(dir.to_string_lossy().to_string()).await;
 
             let rec = engine
                 .request("GET", "/fm/recommend", "{}", None)

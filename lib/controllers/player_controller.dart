@@ -46,6 +46,11 @@ const int _kAutoSkipFailureThreshold = 3;
 /// 基本是网络/服务端问题，早点停下报错，避免长队列下的跳歌风暴。
 const int _kMaxAutoSkipsPerStreak = 5;
 
+/// 单轮失败 streak 自动跳过的墙钟预算：每次跳过仍要完整走一遍地址解析
+/// （弱网下单首可达 15-20s），仅按次数限制时长队列最坏要 2-3 分钟才停。
+/// 超预算即停止跳转、落错误态，与次数上限双保险。
+const Duration _kAutoSkipWallClockBudget = Duration(seconds: 60);
+
 class AudioEffectPreset {
   const AudioEffectPreset({required this.name, required this.levels});
 
@@ -420,6 +425,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 本轮失败 streak 内已自动跳过的曲数：上限为队列长度——整轮都失败就
   /// 停下报错，不做无限循环（坏源/断网时"跳一次失败一次"会瞬间扫光队列）。
   int _autoSkippedInStreak = 0;
+
+  /// 本轮 streak 第一次自动跳过的时刻：与 [_kAutoSkipWallClockBudget]
+  /// 一起限制整轮跳过的墙钟时长（次数上限之外的另一道保险）。
+  DateTime? _autoSkipStreakSince;
   bool addListeningTimeEnabled = true;
   AudioQuality audioQuality = AudioQuality.standard;
 

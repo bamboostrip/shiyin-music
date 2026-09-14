@@ -230,6 +230,7 @@ void main() {
       tester.view.physicalSize = const Size(800, 600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -252,6 +253,50 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Positioned && w.width == 200.0 && w.height == 100.0,
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('窗口 resize（尺寸变化）时菜单自动关闭', (tester) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showDesktopAnchoredMenu<void>(
+                  context: context,
+                  anchor: const Offset(100, 100),
+                  builder: (_) => const SizedBox(width: 200, height: 100),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Positioned && w.width == 200.0 && w.height == 100.0,
+        ),
+        findsOneWidget,
+      );
+
+      // 模拟窗口 resize：修改测试视口尺寸会触发 didChangeMetrics。
+      tester.view.physicalSize = const Size(1000, 700);
       await tester.pumpAndSettle();
 
       expect(

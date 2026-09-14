@@ -327,7 +327,9 @@ class _SearchPageState extends State<SearchPage> {
 
   /// 打开听歌识曲页：PC 桌面嵌入时推入内容区 Navigator，移动端走全屏路由。
   /// 调用点已用 [IdentifyService.isSupported] 把关,不支持平台按钮不渲染。
+  /// 入口防抖见 [IdentifyService.tryConsumeEntry]:双击会推出两页抢采集。
   void _openIdentify(BuildContext context) {
+    if (!IdentifyService.tryConsumeEntry()) return;
     Navigator.of(context, rootNavigator: !widget.embedded).push(
       MaterialPageRoute<void>(
         fullscreenDialog: !widget.embedded,

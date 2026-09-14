@@ -339,7 +339,9 @@ class _DesktopShellState extends State<DesktopShell> {
   /// 搜索浮层顶部"听歌识曲"入口：先收浮层，再推入内容区 Navigator
   /// （保留左侧侧边栏、顶部窗口栏与底部播放栏常驻）。
   /// isSupported 闸门在浮层面板内部——不支持平台不渲染该行。
+  /// 入口防抖见 [IdentifyService.tryConsumeEntry]:双击会推出两页抢采集。
   void _openIdentify(BuildContext context) {
+    if (!IdentifyService.tryConsumeEntry()) return;
     _closeSearchPanel(unfocus: true);
     _pushContent(
       context,

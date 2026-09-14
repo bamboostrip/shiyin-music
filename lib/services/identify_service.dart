@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../core/rust_api_client.dart';
 import '../models/model_parsing.dart' show normalizeImageUrl;
-import '../models/song.dart';
+import '../models/song.dart' show ArtistRef, PlayUrl, Song;
 import '../src/rust/api.dart' as rust;
 // api.dart 只 import 不 re-export IdentifyCandidate,需直接引入声明文件
 // (与 local_music_controller.dart 引 LocalSongEntry 同款做法)。
@@ -37,6 +37,24 @@ abstract class IdentifyCaptureBackend {
 class IdentifyService {
   IdentifyService._();
 
+  /// 入口防抖窗口:识曲页独占全局采集流(麦克风/系统内录),快速双击入口
+  /// 会推出两个页面互相抢采集——后页的 start/cancel 会掐掉前页的流。
+  static const Duration entryDebounce = Duration(milliseconds: 700);
+
+  static DateTime? _lastEntryAt;
+
+  /// 入口节流:窗口内重复调用返回 false,调用方忽略本次点击。
+  static bool tryConsumeEntry() {
+    final now = DateTime.now();
+    final last = _lastEntryAt;
+    if (last != null && now.difference(last) < entryDebounce) return false;
+    _lastEntryAt = now;
+    return true;
+  }
+
+  /// 死链探测的候选数上限:指纹接口正常只回 1-5 条,上限仅防御异常响应。
+  static const int _deadLinkProbeLimit = 8;
+
   /// Android(原生通道)与桌面(Rust cpal)支持;iOS/macOS/Web 不支持。
   static bool get isSupported {
     if (kIsWeb) return false;
@@ -53,14 +71,65 @@ class IdentifyService {
 
   /// 上传 PCM 识别,返回按置信度降序的歌曲。识别失败(Rust Err/网络)
   /// 直接向上抛异常,由 UI 决定提示方式,这里不做静默兜底。
+  ///
+  /// 返回前按 hash 去重,并并发探测 `/song/url` 过滤死链候选(上游指纹
+  /// 接口不带回可播性字段,死链只能客户端验证):无地址且非 VIP/购买
+  /// 限制的候选视为死链剔除;探测本身失败(网络抖动)则保留该候选,
+  /// 宁可多显示也不误杀。
   static Future<List<({Song song, double confidence})>> identify(
     RustApiClient api,
     Uint8List pcm,
   ) async {
     final candidates = await api.identify(pcm);
-    final matches = candidates.map(candidateToSong).toList()
+    final seenHashes = <String>{};
+    var matches = candidates.map(candidateToSong).where((match) {
+      final hash = match.song.hash;
+      if (hash.isEmpty || seenHashes.contains(hash)) return false;
+      seenHashes.add(hash);
+      return true;
+    }).toList()
       ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    matches = await _dropDeadLinks(api, matches);
     return matches;
+  }
+
+  /// 并发探测候选的可播性,剔除死链(见 [identify] 文档)。
+  static Future<List<({Song song, double confidence})>> _dropDeadLinks(
+    RustApiClient api,
+    List<({Song song, double confidence})> matches,
+  ) async {
+    if (matches.isEmpty) return matches;
+    final probe = matches.take(_deadLinkProbeLimit).toList();
+    final playable = await Future.wait(
+      probe.map((match) => _isPlayable(api, match.song)),
+    );
+    final dead = <int>{};
+    for (var i = 0; i < probe.length; i++) {
+      if (!playable[i]) dead.add(i);
+    }
+    if (dead.isEmpty) return matches;
+    debugPrint('[IdentifyService] 过滤 ${dead.length} 条死链候选');
+    return [
+      for (var i = 0; i < matches.length; i++)
+        if (i >= probe.length || !dead.contains(i)) matches[i],
+    ];
+  }
+
+  /// 单个候选可播性探测:有任意 url 即可播;无 url 但带 VIP/购买限制的
+  /// 不是死链(受限曲库,保留);探测抛异常(网络等)按可播处理(不误杀)。
+  static Future<bool> _isPlayable(RustApiClient api, Song song) async {
+    try {
+      final json = await api.get('/song/url', {
+        'hash': song.hash,
+        'album_id': song.albumId,
+        'album_audio_id': song.albumAudioId,
+      });
+      if (json is! Map) return true;
+      final playUrl = PlayUrl.fromJson(Map<String, dynamic>.from(json));
+      return playUrl.url.isNotEmpty || playUrl.privStatus != 0;
+    } catch (_) {
+      return true;
+    }
   }
 
   /// 候选 → 可播放 Song(纯函数)。置信度 = 1 - dist(dist 是上游匹配

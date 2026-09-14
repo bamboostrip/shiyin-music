@@ -189,6 +189,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 起播成功：连续失败 streak 整体归零（含已自动跳过的计数）。
       _consecutivePlayFailures = 0;
       _autoSkippedInStreak = 0;
+      _autoSkipStreakSince = null;
       // 记录播放历史与本地播放统计（后台执行，不阻塞播放）
       unawaited(_historyService.record(song));
       unawaited(_statsService.recordPlay(song));
@@ -325,6 +326,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   /// - 本轮 streak 内跳过次数上限 = min(队列长度, [_kMaxAutoSkipsPerStreak])：
   ///   连续多首失败说明是网络/服务端问题而非单曲问题，早点停下报错——
   ///   每首都要走一遍自动重试（2s 等待），长队列会变成数分钟的跳歌风暴；
+  /// - 墙钟预算 [_kAutoSkipWallClockBudget]：弱网下每首跳过仍要 15-20s
+  ///   的地址解析，只按次数限制最坏要 2-3 分钟才停，超时即停；
   /// - 任一首成功起播即整体归零（见 playSong 起播后的清零）。
   void _registerPlaybackFailure(Song song) {
     if (_disposed) return;
@@ -342,10 +345,13 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     final skipLimit = queueLength < _kMaxAutoSkipsPerStreak
         ? queueLength
         : _kMaxAutoSkipsPerStreak;
-    if (_autoSkippedInStreak >= skipLimit) {
+    final since = _autoSkipStreakSince ??= DateTime.now();
+    final overBudget = DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
+    if (_autoSkippedInStreak >= skipLimit || overBudget) {
       debugPrint(
         '[时音][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
-        '$_autoSkippedInStreak 首（上限 $skipLimit），停止跳转',
+        '$_autoSkippedInStreak 首（上限 $skipLimit'
+        '${overBudget ? '，已超墙钟预算 $_kAutoSkipWallClockBudget' : ''}），停止跳转',
       );
       Toast.error('连续多首歌曲播放失败，已停止播放');
       return;

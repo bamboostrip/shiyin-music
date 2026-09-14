@@ -228,21 +228,21 @@ fn wire__crate__api__engine_request_impl(
                                 vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
                                     &api_engine,
                                     0,
-                                    true,
+                                    false,
                                 )],
                             );
                         for i in decode_indices_ {
                             match i {
                                 0 => {
                                     api_engine_guard =
-                                        Some(api_engine.lockable_decode_async_ref_mut().await)
+                                        Some(api_engine.lockable_decode_async_ref().await)
                                 }
                                 _ => unreachable!(),
                             }
                         }
-                        let mut api_engine_guard = api_engine_guard.unwrap();
+                        let api_engine_guard = api_engine_guard.unwrap();
                         let output_ok = crate::api::engine_request(
-                            &mut *api_engine_guard,
+                            &*api_engine_guard,
                             api_method,
                             api_path,
                             api_query,
@@ -294,19 +294,19 @@ fn wire__crate__api__engine_set_session_impl(
                             flutter_rust_bridge::for_generated::LockableOrderInfo::new(
                                 &api_engine,
                                 0,
-                                true,
+                                false,
                             ),
                         ]);
                     for i in decode_indices_ {
                         match i {
-                            0 => api_engine_guard = Some(api_engine.lockable_decode_sync_ref_mut()),
+                            0 => api_engine_guard = Some(api_engine.lockable_decode_sync_ref()),
                             _ => unreachable!(),
                         }
                     }
-                    let mut api_engine_guard = api_engine_guard.unwrap();
+                    let api_engine_guard = api_engine_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok({
                         crate::api::engine_set_session(
-                            &mut *api_engine_guard,
+                            &*api_engine_guard,
                             api_userid,
                             api_token,
                             api_t1,
@@ -421,21 +421,21 @@ fn wire__crate__api__identify_music_impl(
                                 vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
                                     &api_engine,
                                     0,
-                                    true,
+                                    false,
                                 )],
                             );
                         for i in decode_indices_ {
                             match i {
                                 0 => {
                                     api_engine_guard =
-                                        Some(api_engine.lockable_decode_async_ref_mut().await)
+                                        Some(api_engine.lockable_decode_async_ref().await)
                                 }
                                 _ => unreachable!(),
                             }
                         }
-                        let mut api_engine_guard = api_engine_guard.unwrap();
+                        let api_engine_guard = api_engine_guard.unwrap();
                         let output_ok =
-                            crate::api::identify_music(&mut *api_engine_guard, api_pcm).await?;
+                            crate::api::identify_music(&*api_engine_guard, api_pcm).await?;
                         Ok(output_ok)
                     })()
                     .await,

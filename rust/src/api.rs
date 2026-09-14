@@ -14,8 +14,11 @@ pub async fn create_engine(data_dir: String) -> Engine {
     Engine(KugouEngine::new(data_dir).await)
 }
 
+/// 引擎并发模型：三个入口均取 `&Engine`（FRB 只加读锁，读读并存）。
+/// 登录态变更经引擎内部 RwLock 的毫秒级同步段落完成，网络请求全程
+/// 不持引擎锁——识曲上传（2-15s）不再阻塞其余 API。
 pub async fn engine_request(
-    engine: &mut Engine,
+    engine: &Engine,
     method: String,
     path: String,
     query: String,
@@ -28,7 +31,7 @@ pub async fn engine_request(
         .map_err(|e| e.to_string())
 }
 
-pub fn engine_set_session(engine: &mut Engine, userid: String, token: String, t1: String) {
+pub fn engine_set_session(engine: &Engine, userid: String, token: String, t1: String) {
     engine.0.set_session_fields(&userid, &token, &t1);
 }
 
@@ -156,8 +159,9 @@ pub fn cancel_local_scan() {
 // Android = 原生 AudioRecord 通道),识别统一走这里。
 
 /// 听歌识曲:上传 8000Hz/16bit/单声道 PCM,按匹配度降序返回候选。
+/// 取 `&Engine`：识别期间不阻塞其他 API（见 engine_request 注释）。
 pub async fn identify_music(
-    engine: &mut Engine,
+    engine: &Engine,
     pcm: Vec<u8>,
 ) -> Result<Vec<IdentifyCandidate>, String> {
     let v = engine.0.identify(pcm).await.map_err(|e| e.to_string())?;

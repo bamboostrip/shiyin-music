@@ -448,16 +448,20 @@ class _AppShellState extends State<AppShell> {
                   ),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () => Navigator.of(context, rootNavigator: true).push(
-                      MaterialPageRoute<void>(
-                        fullscreenDialog: true,
-                        builder: (_) => IdentifyPage(
-                          player: widget.player,
-                          auth: widget.auth,
-                          musicApi: widget.api,
+                    // 入口防抖:双击会推出两页抢全局采集(见 tryConsumeEntry)。
+                    onTap: () {
+                      if (!IdentifyService.tryConsumeEntry()) return;
+                      Navigator.of(context, rootNavigator: true).push(
+                        MaterialPageRoute<void>(
+                          fullscreenDialog: true,
+                          builder: (_) => IdentifyPage(
+                            player: widget.player,
+                            auth: widget.auth,
+                            musicApi: widget.api,
+                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                     child: Tooltip(
                       message: '听歌识曲',
                       child: Padding(

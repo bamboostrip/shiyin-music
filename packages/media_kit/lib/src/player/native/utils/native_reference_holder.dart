@@ -40,7 +40,12 @@ class NativeReferenceHolder {
 
   /// Initializes the instance.
   static void ensureInitialized(NativeReferenceHolderCallback callback) {
-    if (!kDebugMode) return;
+    // LOCAL PATCH: upstream only enables this in debug mode. Profile builds
+    // also support hot restart, and mpv handles are referenced only from the
+    // Dart heap (Finalizers are not guaranteed to run across a hot restart),
+    // so every profile-mode hot restart leaked one mpv core. Release builds
+    // have no hot restart, keep the bookkeeping disabled there.
+    if (kReleaseMode) return;
     if (initialized) return;
     initialized = true;
     instance._ensureInitialized(callback);

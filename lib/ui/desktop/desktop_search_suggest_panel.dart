@@ -33,6 +33,21 @@ class DesktopSearchSuggestPanel extends StatefulWidget {
       _DesktopSearchSuggestPanelState();
 }
 
+/// 热搜 TTL 缓存条目：搜索框每次聚焦都重建本面板,不缓存则每次聚焦都
+/// 重新请求网络并闪一轮加载态。缓存完整(截断前)关键词列表,TTL 内重复
+/// 打开即时命中;失败响应不缓存(保留面板内重试)。
+class _HotKeywordsCacheEntry {
+  _HotKeywordsCacheEntry(this.keywords, this.fetchedAt);
+
+  final List<SearchHotKeyword> keywords;
+  final DateTime fetchedAt;
+
+  bool get isValid => DateTime.now().difference(fetchedAt) < _hotCacheTtl;
+}
+
+const _hotCacheTtl = Duration(minutes: 5);
+_HotKeywordsCacheEntry? _hotKeywordsCache;
+
 class _DesktopSearchSuggestPanelState extends State<DesktopSearchSuggestPanel> {
   final _historyService = SearchHistoryService();
 
@@ -49,6 +64,11 @@ class _DesktopSearchSuggestPanelState extends State<DesktopSearchSuggestPanel> {
   }
 
   Future<void> _loadHot() async {
+    final cache = _hotKeywordsCache;
+    if (cache != null && cache.isValid) {
+      _applyHotKeywords(cache.keywords);
+      return;
+    }
     setState(() {
       _hotLoading = true;
       _hotFailed = false;
@@ -59,13 +79,8 @@ class _DesktopSearchSuggestPanelState extends State<DesktopSearchSuggestPanel> {
           .expand((c) => c.keywords)
           .where((k) => k.keyword.isNotEmpty)
           .toList();
-      if (!mounted) return;
-      setState(() {
-        _hotKeywords = keywords.length > widget.maxHotCount
-            ? keywords.sublist(0, widget.maxHotCount)
-            : keywords;
-        _hotLoading = false;
-      });
+      _hotKeywordsCache = _HotKeywordsCacheEntry(keywords, DateTime.now());
+      if (mounted) _applyHotKeywords(keywords);
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -74,6 +89,16 @@ class _DesktopSearchSuggestPanelState extends State<DesktopSearchSuggestPanel> {
         });
       }
     }
+  }
+
+  void _applyHotKeywords(List<SearchHotKeyword> keywords) {
+    setState(() {
+      _hotKeywords = keywords.length > widget.maxHotCount
+          ? keywords.sublist(0, widget.maxHotCount)
+          : keywords;
+      _hotLoading = false;
+      _hotFailed = false;
+    });
   }
 
   Future<void> _loadHistory() async {

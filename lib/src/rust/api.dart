@@ -11,6 +11,9 @@ import 'services/local_media.dart';
 Future<Engine> createEngine({required String dataDir}) =>
     RustLib.instance.api.crateApiCreateEngine(dataDir: dataDir);
 
+/// 引擎并发模型：三个入口均取 `&Engine`（FRB 只加读锁，读读并存）。
+/// 登录态变更经引擎内部 RwLock 的毫秒级同步段落完成，网络请求全程
+/// 不持引擎锁——识曲上传（2-15s）不再阻塞其余 API。
 Future<String> engineRequest({
   required Engine engine,
   required String method,
@@ -61,6 +64,7 @@ Future<void> cancelLocalScan() =>
     RustLib.instance.api.crateApiCancelLocalScan();
 
 /// 听歌识曲:上传 8000Hz/16bit/单声道 PCM,按匹配度降序返回候选。
+/// 取 `&Engine`：识别期间不阻塞其他 API（见 engine_request 注释）。
 Future<List<IdentifyCandidate>> identifyMusic({
   required Engine engine,
   required List<int> pcm,
