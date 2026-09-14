@@ -196,7 +196,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // 只有一个可见均衡器，且位于内容顶部（头部大卡之上）
+    // 只有一个可见均衡器，且位于内容顶部（头部大卡之上，且与顶栏/Divider 保持 16px 呼吸间距，与排行榜/电台对齐）
     expect(visibleEqualizer(), findsOneWidget);
     final box =
         visibleEqualizer().evaluate().single.findRenderObject() as RenderBox;
@@ -205,6 +205,8 @@ void main() {
         find.text('猜你喜欢').evaluate().single.findRenderObject() as RenderBox;
     final headerDy = headerTop.localToGlobal(Offset.zero).dy;
     expect(top, lessThan(headerDy));
+    // 顶栏高度 72 + 分割线 1 = 73，均衡器距分割线 16px 呼吸间距，对应全局 dy 89（与排行榜/电台严格对齐）
+    expect(top, equals(89.0));
 
     api.dailyGate?.complete(api.releasedDaily);
     api.plGate?.complete(const []);

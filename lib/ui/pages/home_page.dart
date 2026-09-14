@@ -1482,21 +1482,12 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                 ? const ClampingScrollPhysics()
                 : const AlwaysScrollableScrollPhysics(),
             slivers: [
-              // 均衡器置顶（与移动端各 tab 首个 sliver 对齐）：推荐/排行/电台
-              // 刷新时都在内容最顶部展示。之前它藏在推荐 pane 内，被头部大卡
-              // （猜你喜欢 + 统计 pills）顶到首屏之外，看起来像推荐页没有刷新。
-              // 这里只响应首页自身的刷新（推荐）；排行/电台刷新时本标志为 false，
-              // 各自 pane 内的均衡器负责展示，不会重复。
-              SliverToBoxAdapter(
-                child: RefreshEqualizer(
-                  visible: showRefreshEqualizer,
-                ),
-              ),
               SliverToBoxAdapter(
                 child: _RecommendHeader(
                   auth: widget.auth,
                   daily: data.daily,
                   sectionIndex: _sectionIndex,
+                  showRefreshEqualizer: showRefreshEqualizer,
                   onSectionChanged: (value) {
                     if (value == -1) {
                       widget.onTabSwitch?.call(0); // Switch to My tab
@@ -1641,6 +1632,7 @@ class _RecommendHeader extends StatelessWidget {
     required this.onUpdateTap,
     required this.onUpdateClose,
     this.onRefresh,
+    this.showRefreshEqualizer = false,
   });
 
   final AuthController auth;
@@ -1654,6 +1646,9 @@ class _RecommendHeader extends StatelessWidget {
   final AppVersionInfo? updateVersion;
   final VoidCallback onUpdateTap;
   final VoidCallback onUpdateClose;
+
+  /// 顶部刷新均衡器动画可见性（车机模式推荐页与电台/排行榜间距保持一致）。
+  final bool showRefreshEqualizer;
 
   /// 桌面端下拉刷新的替代入口（页头刷新按钮）；移动端 / 车机端不传。
   final Future<void> Function()? onRefresh;
@@ -1690,7 +1685,8 @@ class _RecommendHeader extends StatelessWidget {
                 ),
               ],
               if (sectionIndex == 0) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
+                RefreshEqualizer(visible: showRefreshEqualizer),
                 if (isUltraWide)
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
