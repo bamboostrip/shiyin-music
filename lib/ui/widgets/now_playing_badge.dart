@@ -7,12 +7,14 @@ class NowPlayingBadge extends StatefulWidget {
     required this.playing,
     required this.color,
     this.size = 18,
+    this.barCount = 3,
   });
 
   final bool active;
   final bool playing;
   final Color color;
   final double size;
+  final int barCount;
 
   @override
   State<NowPlayingBadge> createState() => _NowPlayingBadgeState();
@@ -66,9 +68,10 @@ class _NowPlayingBadgeState extends State<NowPlayingBadge>
         animation: _controller,
         builder: (context, _) {
           return CustomPaint(
-            painter: _NowPlayingPainter(
+            painter: NowPlayingPainter(
               progress: widget.playing ? _controller.value : .42,
               color: widget.color,
+              barCount: widget.barCount,
             ),
           );
         },
@@ -77,38 +80,57 @@ class _NowPlayingBadgeState extends State<NowPlayingBadge>
   }
 }
 
-class _NowPlayingPainter extends CustomPainter {
-  const _NowPlayingPainter({required this.progress, required this.color});
+@visibleForTesting
+class NowPlayingPainter extends CustomPainter {
+  const NowPlayingPainter({
+    required this.progress,
+    required this.color,
+    this.barCount = 3,
+  });
 
   final double progress;
   final Color color;
+  final int barCount;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
-    final barWidth = size.width / 5;
-    final gap = barWidth / 2;
-    final values = [
-      .42 + .36 * progress,
-      .72 - .28 * progress,
-      .48 + .44 * (1 - (progress - .5).abs() * 2),
-    ];
+    final count = barCount;
+    final barWidth = size.width / (count + (count - 1) * 0.5);
+    final gap = barWidth * 0.5;
+    final List<double> values;
+    if (count == 4) {
+      values = [
+        .32 + .48 * progress,
+        .88 - .45 * progress,
+        .45 + .50 * (1 - (progress - .5).abs() * 2),
+        .35 + .35 * (progress > .5 ? 1 - progress : progress) * 2,
+      ];
+    } else {
+      values = [
+        .42 + .36 * progress,
+        .72 - .28 * progress,
+        .48 + .44 * (1 - (progress - .5).abs() * 2),
+      ];
+    }
 
     for (var i = 0; i < values.length; i++) {
-      final height = size.height * values[i].clamp(.28, .92);
-      final left = i * (barWidth + gap) + gap / 2;
+      final height = size.height * values[i].clamp(.25, .95);
+      final left = i * (barWidth + gap);
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTWH(left, size.height - height, barWidth, height),
-        Radius.circular(barWidth),
+        Radius.circular(barWidth / 2),
       );
       canvas.drawRRect(rect, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _NowPlayingPainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.color != color;
+  bool shouldRepaint(covariant NowPlayingPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.barCount != barCount;
   }
 }
