@@ -96,6 +96,7 @@ class _IdentifyPageState extends State<IdentifyPage>
   List<({Song song, double confidence})> _results = const [];
   String? _errorText;
   var _elapsedSeconds = 0;
+  var _lastPcmBytes = 0;
   Timer? _autoSubmitTimer;
   Timer? _elapsedTimer;
 
@@ -138,6 +139,7 @@ class _IdentifyPageState extends State<IdentifyPage>
       }
     });
     _pulse.repeat();
+    debugPrint('[IdentifyPage] 开始采集: source=${_source.value}');
     // fire-and-forget:start 失败(如 Android 麦克风权限被拒)转错误态。
     unawaited(
       _backend.start(source: _source.value).catchError((Object error) {
@@ -154,17 +156,23 @@ class _IdentifyPageState extends State<IdentifyPage>
     _elapsedTimer?.cancel();
     _pulse.stop();
     setState(() => _phase = _IdentifyPhase.matching);
+    debugPrint('[IdentifyPage] 提交识别: 采集时长=$_elapsedSeconds 秒, source=${_source.value}');
     try {
       final pcm = await _backend.stopAndCollect(durationMs: _collectDurationMs);
+      _lastPcmBytes = pcm?.length ?? 0;
+      debugPrint('[IdentifyPage] 采集到的 PCM 大小: $_lastPcmBytes 字节 (判定阈值: $_minPcmBytes 字节)');
       // 双兜底:Android 空缓冲回 null,桌面空缓冲回空表;两者及
       // 过短(<0.5s)的 PCM 都不请求网络,直接空态。
       if (pcm == null || pcm.isEmpty || pcm.length < _minPcmBytes) {
+        debugPrint('[IdentifyPage] 采集字节数不足，直接进入空态');
         if (mounted) setState(() => _phase = _IdentifyPhase.empty);
         return;
       }
+      debugPrint('[IdentifyPage] 上传 PCM 请求识别中...');
       final matches =
           await (widget.onIdentify ?? _defaultIdentify)(pcm);
       if (!mounted) return;
+      debugPrint('[IdentifyPage] 识别成功，候选歌曲数: ${matches.length}');
       setState(() {
         if (matches.isEmpty) {
           _phase = _IdentifyPhase.empty;
@@ -174,6 +182,7 @@ class _IdentifyPageState extends State<IdentifyPage>
         }
       });
     } catch (error) {
+      debugPrint('[IdentifyPage] 识别异常: $error');
       if (mounted) _showError(error);
     }
   }
@@ -206,6 +215,7 @@ class _IdentifyPageState extends State<IdentifyPage>
   /// 桌面切源:切换即 cancel 旧源采集 → 以新源重新 start(重新计时)。
   Future<void> _switchSource(_IdentifySource source) async {
     if (_source == source || _phase != _IdentifyPhase.listening) return;
+    debugPrint('[IdentifyPage] 切换采集源: 从 ${_source.value} 切换到 ${source.value}');
     // 先停旧源定时器:await cancel 挂起期间旧源定时器可能到期触发提交(竞态)。
     _autoSubmitTimer?.cancel();
     _elapsedTimer?.cancel();
@@ -240,7 +250,7 @@ class _IdentifyPageState extends State<IdentifyPage>
           // 桌面源切换:麦克风 / 系统内录;仅聆听态可切,Android 不显示。
           if (_showSourceSwitch && _phase == _IdentifyPhase.listening) ...[
             IconButton(
-              tooltip: '识别麦克风声音',
+              tooltip: '使用麦克风 (听周围声音)',
               visualDensity: VisualDensity.compact,
               icon: Icon(
                 Icons.mic_rounded,
@@ -251,7 +261,7 @@ class _IdentifyPageState extends State<IdentifyPage>
               onPressed: () => _switchSource(_IdentifySource.mic),
             ),
             IconButton(
-              tooltip: '识别本机播放的声音',
+              tooltip: '使用电脑声音 (系统内录)',
               visualDensity: VisualDensity.compact,
               icon: Icon(
                 Icons.speaker_rounded,
@@ -283,6 +293,31 @@ class _IdentifyPageState extends State<IdentifyPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          // 桌面端源切换控件(突出显示,方便用户明确当前是麦克风还是系统内录)
+          if (_showSourceSwitch) ...[
+            SegmentedButton<_IdentifySource>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: _IdentifySource.mic,
+                  icon: Icon(Icons.mic_rounded),
+                  label: Text('麦克风声音 (听环境音)'),
+                ),
+                ButtonSegment(
+                  value: _IdentifySource.system,
+                  icon: Icon(Icons.speaker_rounded),
+                  label: Text('电脑声音 (系统内录)'),
+                ),
+              ],
+              selected: {_source},
+              onSelectionChanged: (selected) {
+                if (selected.isNotEmpty) {
+                  _switchSource(selected.first);
+                }
+              },
+            ),
+            const SizedBox(height: 36),
+          ],
           SizedBox(
             width: 168,
             height: 168,
@@ -310,7 +345,7 @@ class _IdentifyPageState extends State<IdentifyPage>
                     child: const SizedBox.expand(),
                   ),
                 ),
-                // 中心圆 + 麦克风图标,随周期轻微缩放。
+                // 中心圆 + 图标(麦克风或扬声器),随周期轻微缩放。
                 AnimatedBuilder(
                   animation: _pulse,
                   builder: (context, child) => Transform.scale(
@@ -325,7 +360,9 @@ class _IdentifyPageState extends State<IdentifyPage>
                       color: colorScheme.primaryContainer,
                     ),
                     child: Icon(
-                      Icons.mic_rounded,
+                      _source == _IdentifySource.mic
+                          ? Icons.mic_rounded
+                          : Icons.speaker_rounded,
                       size: 56,
                       color: colorScheme.onPrimaryContainer,
                     ),
@@ -336,10 +373,9 @@ class _IdentifyPageState extends State<IdentifyPage>
           ),
           const SizedBox(height: 28),
           Text(
-            // 提示语随源切换:桌面系统内录与本机播放声音对应。
             _source == _IdentifySource.mic
-                ? '正在聆听,请靠近音源…'
-                : '正在识别本机播放的声音…',
+                ? '正在通过麦克风聆听…'
+                : '正在捕获电脑当前播放的声音…',
             style: Theme.of(context)
                 .textTheme
                 .titleMedium
@@ -347,7 +383,9 @@ class _IdentifyPageState extends State<IdentifyPage>
           ),
           const SizedBox(height: 8),
           Text(
-            '已聆听 $_elapsedSeconds 秒(12 秒后自动识别)',
+            _source == _IdentifySource.system
+                ? '请确保电脑正在播放音乐（已聆听 $_elapsedSeconds 秒）'
+                : '请靠近音源（已聆听 $_elapsedSeconds 秒）',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -405,9 +443,9 @@ class _IdentifyPageState extends State<IdentifyPage>
           );
         }
         return _ResultRow(
-          entry: _results[index - 1],
-          onTap: () => _playResult(_results[index - 1]),
-        );
+            entry: _results[index - 1],
+            onTap: () => _playResult(_results[index - 1]),
+          );
       },
     );
   }
@@ -416,37 +454,64 @@ class _IdentifyPageState extends State<IdentifyPage>
 
   Widget _buildEmptyBody(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isSystem = _source == _IdentifySource.system;
+    final isTooShort = _lastPcmBytes < _minPcmBytes;
+
+    final String hint;
+    if (isSystem) {
+      if (isTooShort) {
+        hint =
+            '未捕获到电脑声音 (已捕获 $_lastPcmBytes 字节)。\n提示：系统内录需要电脑当前正在通过默认扬声器或耳机播放声音。';
+      } else {
+        hint =
+            '未能识别当前播放的歌曲 (已采集 $_lastPcmBytes 字节)。\n建议播放更长片段或换用音质清晰的段落重试。';
+      }
+    } else {
+      if (isTooShort) {
+        hint =
+            '麦克风未采集到足够的声音 (已捕获 $_lastPcmBytes 字节)。\n请靠近音源或检查麦克风权限后重试。';
+      } else {
+        hint =
+            '未能识别当前歌曲 (已采集 $_lastPcmBytes 字节)。\n请靠近音源后重试。';
+      }
+    }
+
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.music_off_rounded,
-            size: 56,
-            color: colorScheme.onSurfaceVariant.withValues(alpha: .6),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            '未识别到歌曲',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '请靠近音源后重试',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _retry,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('重试'),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.music_off_rounded,
+              size: 56,
+              color: colorScheme.onSurfaceVariant.withValues(alpha: .6),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '未识别到歌曲',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hint,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: _retry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
       ),
     );
   }

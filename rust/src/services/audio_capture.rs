@@ -78,6 +78,9 @@ pub mod desktop {
         start: usize,
         sample_rate: u32,
         channels: u16,
+        total_samples: usize,
+        last_log_sec: usize,
+        interval_peak: f32,
     }
 
     impl Ring {
@@ -85,8 +88,11 @@ pub mod desktop {
             let ch = self.channels.max(1) as usize;
             for frame in data.chunks_exact(ch) {
                 let sum: f32 = frame.iter().sum();
-                self.samples.push(sum / ch as f32);
+                let mono = sum / ch as f32;
+                self.interval_peak = self.interval_peak.max(mono.abs());
+                self.samples.push(mono);
             }
+            self.total_samples += data.len() / ch;
             let cap = RING_SECS * self.sample_rate as usize;
             let len = self.samples.len() - self.start;
             if len > cap {
@@ -96,6 +102,15 @@ pub mod desktop {
                     self.samples.drain(..self.start);
                     self.start = 0;
                 }
+            }
+            let current_sec = self.total_samples / self.sample_rate.max(1) as usize;
+            if current_sec > self.last_log_sec {
+                self.last_log_sec = current_sec;
+                println!(
+                    "[AudioCapture] 采集中: 已累计接收 {} 秒数据 (总采样 {}), 最近 1 秒峰值振幅 = {:.4}",
+                    current_sec, self.total_samples, self.interval_peak
+                );
+                self.interval_peak = 0.0;
             }
         }
 
@@ -121,6 +136,9 @@ pub mod desktop {
             start: 0,
             sample_rate,
             channels,
+            total_samples: 0,
+            last_log_sec: 0,
+            interval_peak: 0.0,
         }))
     }
 
@@ -146,6 +164,7 @@ pub mod desktop {
                     let config = device
                         .default_output_config()
                         .map_err(|e| format!("读取输出混音格式失败: {e}"))?;
+                    println!("[AudioCapture] 已选定 Windows 系统输出回环设备: {device}, 混音配置: {config:?}");
                     Ok((device, config, "system"))
                 }
                 #[cfg(target_os = "linux")]
@@ -154,7 +173,7 @@ pub mod desktop {
                         .input_devices()
                         .map_err(|e| format!("枚举输入设备失败: {e}"))?
                     {
-                        let name = device.name().unwrap_or_default().to_ascii_lowercase();
+                        let name = format!("{device}").to_ascii_lowercase();
                         if name.contains("monitor")
                             || name.contains("loopback")
                             || name.contains("stereo mix")
@@ -162,6 +181,7 @@ pub mod desktop {
                             let config = device
                                 .default_input_config()
                                 .map_err(|e| format!("读取回环设备配置失败: {e}"))?;
+                            println!("[AudioCapture] 已选定 Linux 监视器设备: {device}");
                             return Ok((device, config, "system"));
                         }
                     }
@@ -178,6 +198,7 @@ pub mod desktop {
                 let config = device
                     .default_input_config()
                     .map_err(|e| format!("读取麦克风配置失败: {e}"))?;
+                println!("[AudioCapture] 已选定麦克风输入设备: {device}, 输入配置: {config:?}");
                 Ok((device, config, "mic"))
             }
         }
@@ -187,16 +208,27 @@ pub mod desktop {
     pub fn start(source: &str) -> Result<(), String> {
         let mut guard = CAPTURE.lock().map_err(|_| "采集状态锁不可用")?;
         if guard.is_some() {
+            println!("[AudioCapture] 采集已处于运行状态，无需重复启动");
             return Ok(());
         }
+        println!("[AudioCapture] 开始启动音频采集, source = \"{source}\"");
         let host = cpal::default_host();
-        let (device, config, _) = select_device(&host, source)?;
+        let (device, config, resolved_source) = select_device(&host, source)?;
         // cpal 0.17 起 SampleRate 是 u32 类型别名(不再是 struct),无需取字段。
         let ring = ring_from_config(config.sample_rate(), config.channels());
 
-        let err_fn = |e| tracing::warn!(error = %e, "识曲采集流错误");
+        let err_fn = move |e| {
+            eprintln!("[AudioCapture] 采集流错误: {e}");
+            tracing::warn!(error = %e, "识曲采集流错误");
+        };
         // cpal 0.18 起 build_*_stream 按值收 StreamConfig(不再收引用)。
-        let cfg: cpal::StreamConfig = config.into();
+        let cfg: cpal::StreamConfig = config.clone().into();
+        println!(
+            "[AudioCapture] 正在创建采集流: source=\"{resolved_source}\", 采样率={}Hz, 声道数={}, 格式={:?}",
+            config.sample_rate(),
+            config.channels(),
+            config.sample_format()
+        );
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 cfg,
@@ -242,12 +274,16 @@ pub mod desktop {
             ring,
             _stream: stream,
         });
+        println!("[AudioCapture] 音频采集流启动成功，开始监听...");
         Ok(())
     }
 
     pub fn stop() {
         if let Ok(mut guard) = CAPTURE.lock() {
-            *guard = None; // Stream drop = 停止
+            if guard.is_some() {
+                println!("[AudioCapture] 停止并释放音频采集流");
+                *guard = None; // Stream drop = 停止
+            }
         }
     }
 
@@ -261,13 +297,33 @@ pub mod desktop {
     pub fn snapshot_pcm(duration_ms: u32) -> Result<Vec<u8>, String> {
         let guard = CAPTURE.lock().map_err(|_| "采集状态锁不可用")?;
         let Some(state) = guard.as_ref() else {
+            println!("[AudioCapture] 提取快照失败: 采集尚未启动");
             return Err("采集未启动".into());
         };
-        let (samples, src_rate) = {
+        let (samples, src_rate, total_samples) = {
             let r = state.ring.lock().map_err(|_| "环形缓冲锁不可用")?;
-            (r.tail(duration_ms), r.sample_rate)
+            (r.tail(duration_ms), r.sample_rate, r.total_samples)
         };
-        Ok(mono_f32_to_pcm8k(&samples, src_rate))
+        let peak = samples.iter().copied().fold(0.0f32, |a, b| a.max(b.abs()));
+        println!(
+            "[AudioCapture] 提取 PCM 快照: 请求时长={}ms, 累计接收采样={}, 快照采样数={} (约{:.2}s), 峰值振幅={:.4}",
+            duration_ms,
+            total_samples,
+            samples.len(),
+            samples.len() as f32 / src_rate.max(1) as f32,
+            peak
+        );
+        if total_samples == 0 || samples.is_empty() {
+            println!("[AudioCapture] 警告: 采集缓冲区为空 (0 采样)! 若使用系统内录(system)，请确认系统默认输出设备当前正在播放声音。");
+        } else if peak < 0.001 {
+            println!("[AudioCapture] 提示: 采集到的声音音量接近全静音 (峰值振幅={:.4})", peak);
+        }
+        let pcm = mono_f32_to_pcm8k(&samples, src_rate);
+        println!(
+            "[AudioCapture] PCM 转换完成: 8000Hz/16bit/单声道输出字节数={}",
+            pcm.len()
+        );
+        Ok(pcm)
     }
 
     /// 单声道 f32(源采样率)→ 8000Hz s16le PCM。
@@ -400,6 +456,9 @@ pub mod desktop {
                 start: 0,
                 sample_rate: 48000,
                 channels: 2,
+                total_samples: 0,
+                last_log_sec: 0,
+                interval_peak: 0.0,
             };
             ring.push_interleaved(&[0.2, 0.6, 0.2, 0.6]);
             // f32 求和不精确,用容差断言
@@ -418,10 +477,87 @@ pub mod desktop {
                 start: 0,
                 sample_rate: 48000,
                 channels: 1,
+                total_samples: 48000,
+                last_log_sec: 1,
+                interval_peak: 0.0,
             };
             let tail = ring.tail(500);
             assert_eq!(tail.len(), 24000);
             assert_eq!(tail[0], 24000.0);
+        }
+
+        #[test]
+        fn test_loopback_stream() {
+            use cpal::traits::*;
+            let host = cpal::default_host();
+            let Some(out) = host.default_output_device() else {
+                println!("No output device");
+                return;
+            };
+            println!("Probing loopback on: {out}");
+            let config = match out.default_output_config() {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("Failed to get default_output_config: {e}");
+                    return;
+                }
+            };
+            println!("Config: {config:?}");
+            let cfg: cpal::StreamConfig = config.clone().into();
+
+            // First start an output stream playing a sine wave so WASAPI engine renders audio
+            let sample_rate = config.sample_rate() as f32;
+            let channels = config.channels() as usize;
+            let mut sample_clock = 0f32;
+            let out_stream = out.build_output_stream(
+                cfg.clone(),
+                move |data: &mut [f32], _| {
+                    for frame in data.chunks_mut(channels) {
+                        let value = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin() * 0.3;
+                        sample_clock = (sample_clock + 1.0) % sample_rate;
+                        for sample in frame.iter_mut() {
+                            *sample = value;
+                        }
+                    }
+                },
+                |e| println!("Output stream error: {e}"),
+                None,
+            ).expect("build output stream");
+            out_stream.play().expect("play output stream");
+
+            // Give the render stream a moment to start
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let max_amp = std::sync::Arc::new(std::sync::Mutex::new(0.0f32));
+            let count_clone = count.clone();
+            let max_amp_clone = max_amp.clone();
+            let in_stream = out.build_input_stream(
+                cfg,
+                move |data: &[f32], _| {
+                    let c = count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut local_max = 0.0f32;
+                    for &s in data {
+                        local_max = local_max.max(s.abs());
+                    }
+                    if let Ok(mut g) = max_amp_clone.lock() {
+                        *g = g.max(local_max);
+                    }
+                    if c < 5 {
+                        println!("Loopback frame #{c}: samples={}, max_amp={local_max}", data.len());
+                    }
+                },
+                |e| println!("Loopback stream error: {e}"),
+                None,
+            ).expect("build loopback input stream");
+
+            in_stream.play().expect("play loopback stream");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let total = count.load(std::sync::atomic::Ordering::Relaxed);
+            let peak = *max_amp.lock().unwrap();
+            println!("When audio is playing: total frames in 500ms = {total}, peak amplitude = {peak}");
+            assert!(total > 0, "Expected loopback frames when audio is rendering!");
+            assert!(peak > 0.01, "Expected non-silent audio in loopback!");
         }
     }
 }

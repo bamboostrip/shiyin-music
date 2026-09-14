@@ -100,15 +100,24 @@ class IdentifyService {
 /// Dart 不再包一层 try)。
 class _RustCaptureBackend implements IdentifyCaptureBackend {
   @override
-  Future<void> start({String source = 'mic'}) =>
-      rust.identifyStartCapture(source: source);
+  Future<void> start({String source = 'mic'}) {
+    debugPrint('[IdentifyService] _RustCaptureBackend.start(source: $source)');
+    return rust.identifyStartCapture(source: source);
+  }
 
   @override
-  Future<Uint8List?> stopAndCollect({int durationMs = 10000}) =>
-      rust.identifyCaptureSnapshot(durationMs: durationMs);
+  Future<Uint8List?> stopAndCollect({int durationMs = 10000}) async {
+    debugPrint('[IdentifyService] _RustCaptureBackend.stopAndCollect(durationMs: $durationMs)');
+    final pcm = await rust.identifyCaptureSnapshot(durationMs: durationMs);
+    debugPrint('[IdentifyService] _RustCaptureBackend 收到 PCM 大小: ${pcm.length} 字节');
+    return pcm;
+  }
 
   @override
-  Future<void> cancel() => rust.identifyCancelCapture();
+  Future<void> cancel() {
+    debugPrint('[IdentifyService] _RustCaptureBackend.cancel()');
+    return rust.identifyCancelCapture();
+  }
 }
 
 /// Android 原生 AudioRecord 采集后端(通道实现见

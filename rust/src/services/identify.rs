@@ -72,13 +72,35 @@ pub async fn identify_music(
     session: &KgSession,
     pcm: Vec<u8>,
 ) -> AppResult<Value> {
+    println!(
+        "[Identify] 发送识曲网络请求: PCM 大小 = {} 字节 (时长约 {:.2} 秒), userid = \"{}\"",
+        pcm.len(),
+        pcm.len() as f64 / 16000.0,
+        session.userid
+    );
     let req = build_identify_request(pcm, &session.userid);
-    transport::send(client, session, &req).await
+    let resp = transport::send(client, session, &req).await;
+    match &resp {
+        Ok(v) => {
+            let status = v.get("status").and_then(|s| s.as_i64()).unwrap_or(-1);
+            let errcode = v.get("errcode").and_then(|e| e.as_i64()).unwrap_or(-1);
+            let error = v.get("error").and_then(|e| e.as_str()).unwrap_or("");
+            println!(
+                "[Identify] 酷狗服务端返回: status = {}, errcode = {}, error = \"{}\"",
+                status, errcode, error
+            );
+        }
+        Err(e) => {
+            eprintln!("[Identify] 酷狗识曲网络请求失败: {e}");
+        }
+    }
+    resp
 }
 
 /// 从上游响应提取候选列表并按 dist 升序(dist 小 = 匹配好)。
 pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
     let Some(list) = v.get("data").and_then(|d| d.as_array()) else {
+        println!("[Identify] 服务端未返回候选列表 (data 字段不存在或非数组)");
         return Vec::new();
     };
     let mut out: Vec<IdentifyCandidate> = list
@@ -126,6 +148,18 @@ pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
         })
         .collect();
     out.sort_by(|a, b| a.dist.partial_cmp(&b.dist).unwrap_or(std::cmp::Ordering::Equal));
+    println!("[Identify] 解析出 {} 首候选歌曲", out.len());
+    for (i, c) in out.iter().take(3).enumerate() {
+        println!(
+            "[Identify] 候选 #{}: \"{}\" - \"{}\" (置信度={:.1}%, dist={:.3}, hash={})",
+            i + 1,
+            c.name,
+            c.singer,
+            (1.0 - c.dist) * 100.0,
+            c.dist,
+            c.hash
+        );
+    }
     out
 }
 

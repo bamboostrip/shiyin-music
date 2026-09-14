@@ -105,4 +105,27 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('未识别到歌曲'), findsOneWidget);
   });
+
+  testWidgets('桌面端支持切换采集源至电脑声音(系统内录)', (tester) async {
+    final backend = _FakeCaptureBackend();
+    await tester.pumpWidget(MaterialApp(
+      home: IdentifyPage(
+        player: _FakePlayer(),
+        captureBackend: backend,
+        onIdentify: (pcm) async => [],
+      ),
+    ));
+    await tester.pump();
+    expect(backend.lastSource, 'mic');
+
+    // 找到电脑声音切换按钮并点击
+    final systemButton = find.text('电脑声音 (系统内录)');
+    expect(systemButton, findsOneWidget);
+    await tester.tap(systemButton);
+    await tester.pump();
+
+    // 应该以 system 重新启动后端
+    expect(backend.lastSource, 'system');
+    expect(find.text('正在捕获电脑当前播放的声音…'), findsOneWidget);
+  });
 }
