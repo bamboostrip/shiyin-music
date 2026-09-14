@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/controllers/auth_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/services/identify_service.dart';
+import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/desktop/desktop_title_bar.dart';
+import 'package:shiyin_music/ui/pages/search_page.dart';
 import 'package:shiyin_music/ui/widgets/home_collapsible_header.dart';
 
 class _FakePlayer implements PlayerController {
@@ -10,19 +13,25 @@ class _FakePlayer implements PlayerController {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-void main() {
-  group('HomeSearchBar 识曲入口', () {
-    testWidgets('在支持平台上渲染识曲按钮且点击可触发识曲', (tester) async {
-      if (!IdentifyService.isSupported) return;
+class _FakeMusicApi implements MusicApi {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
+class _FakeAuthController extends ChangeNotifier implements AuthController {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+void main() {
+  group('HomeBrandHeader 顶栏 Logo 识曲入口', () {
+    testWidgets('设置 onTap 时渲染 tooltip 且点击触发回调', (tester) async {
       var identifyTapped = false;
-      final player = _FakePlayer();
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: HomeSearchBar(
-              player: player,
-              onIdentifyTap: () => identifyTapped = true,
+            body: HomeBrandHeader(
+              onTap: () => identifyTapped = true,
             ),
           ),
         ),
@@ -30,7 +39,6 @@ void main() {
 
       final identifyBtn = find.byTooltip('听歌识曲');
       expect(identifyBtn, findsOneWidget);
-      expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
 
       await tester.tap(identifyBtn);
       await tester.pump();
@@ -38,16 +46,73 @@ void main() {
       expect(identifyTapped, isTrue);
     });
 
-    testWidgets('无 player 时不渲染识曲按钮', (tester) async {
+    testWidgets('未设置 onTap 时不渲染按钮 tooltip', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
-            body: HomeSearchBar(),
+            body: HomeBrandHeader(),
           ),
         ),
       );
 
       expect(find.byTooltip('听歌识曲'), findsNothing);
+    });
+
+    testWidgets('HomeSearchBar 不再内置识曲图标，保持纯粹胶囊搜索框', (tester) async {
+      final player = _FakePlayer();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: HomeSearchBar(
+              player: player,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byIcon(Icons.graphic_eq_rounded), findsNothing);
+      expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+    });
+
+    testWidgets('HomeCollapsibleHeaderDelegate 顶栏点击品牌 Logo 触发识曲', (tester) async {
+      if (!IdentifyService.isSupported) return;
+
+      var identifyTapped = false;
+      final player = _FakePlayer();
+      final api = _FakeMusicApi();
+      final auth = _FakeAuthController();
+
+      final delegate = HomeCollapsibleHeaderDelegate(
+        api: api,
+        auth: auth,
+        player: player,
+        sectionIndex: 0,
+        onSectionChanged: (_) {},
+        onIdentifyTap: () => identifyTapped = true,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: [
+                SliverPersistentHeader(
+                  delegate: delegate,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final identifyBtn = find.byTooltip('听歌识曲');
+      expect(identifyBtn, findsOneWidget);
+
+      await tester.tap(identifyBtn);
+      await tester.pump();
+
+      expect(identifyTapped, isTrue);
     });
   });
 
@@ -98,21 +163,27 @@ void main() {
     });
   });
 
-  group('车机顶栏识曲入口', () {
-    testWidgets('车机模式下渲染识曲按钮且图标展示正常', (tester) async {
+  group('SearchPage 搜索页识曲入口', () {
+    testWidgets('移动端搜索页渲染听歌识曲快捷按钮', (tester) async {
       if (!IdentifyService.isSupported) return;
 
       final player = _FakePlayer();
+      final api = _FakeMusicApi();
+      final auth = _FakeAuthController();
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: HomeSearchBar(
+            body: SearchPage(
+              api: api,
+              auth: auth,
               player: player,
             ),
           ),
         ),
       );
+      await tester.pump();
 
+      expect(find.byTooltip('听歌识曲'), findsOneWidget);
       expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
     });
   });

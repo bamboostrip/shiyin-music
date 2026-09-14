@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import '../../core/rust_api_client.dart';
 import '../../models/music_models.dart';
 import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
+import '../form_factor.dart';
+import '../widgets/mini_player.dart';
 import '../widgets/toast.dart';
 import 'artist_detail_page.dart';
 import 'search_song_results.dart';
@@ -120,9 +123,9 @@ class _IdentifyPageState extends State<IdentifyPage>
   Timer? _autoSubmitTimer;
   Timer? _elapsedTimer;
 
-  /// 是否显示 mic/system 源切换(仅桌面;Android 只有麦克风,iOS 等无入口)。
+  /// 是否显示 mic/system 源切换(仅桌面形态;Android/移动形态只有麦克风)。
   bool get _showSourceSwitch =>
-      !kIsWeb && (Platform.isWindows || Platform.isLinux);
+      !kIsWeb && isDesktopFormFactor && (Platform.isWindows || Platform.isLinux);
 
   @override
   void initState() {
@@ -290,9 +293,15 @@ class _IdentifyPageState extends State<IdentifyPage>
     return Scaffold(
       appBar: AppBar(
         title: const Text('听歌识曲'),
+        centerTitle: !isDesktopFormFactor,
         leading: IconButton(
           tooltip: '返回',
-          icon: const Icon(Icons.arrow_back_rounded),
+          icon: Icon(
+            isDesktopFormFactor
+                ? Icons.arrow_back_rounded
+                : Icons.arrow_back_ios_new_rounded,
+            size: 20,
+          ),
           onPressed: () {
             // 关页/返回一律停采集,dispose 再兜底。
             unawaited(_backend.cancel());
@@ -328,145 +337,230 @@ class _IdentifyPageState extends State<IdentifyPage>
           const SizedBox(width: 4),
         ],
       ),
-      body: switch (_phase) {
-        _IdentifyPhase.listening => _buildListeningBody(context),
-        _IdentifyPhase.matching => _buildMatchingBody(context),
-        _IdentifyPhase.done => _buildResultsBody(context),
-        _IdentifyPhase.empty => _buildEmptyBody(context),
-        _IdentifyPhase.error => _buildErrorBody(context),
-      },
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: switch (_phase) {
+              _IdentifyPhase.listening => _buildListeningBody(context),
+              _IdentifyPhase.matching => _buildMatchingBody(context),
+              _IdentifyPhase.done => _buildResultsBody(context),
+              _IdentifyPhase.empty => _buildEmptyBody(context),
+              _IdentifyPhase.error => _buildErrorBody(context),
+            },
+          ),
+          if (!isDesktopFormFactor && _phase == _IdentifyPhase.done)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.paddingOf(context).bottom + 8,
+              child: MiniPlayerSlot(player: widget.player, auth: _auth),
+            ),
+        ],
+      ),
     );
   }
 
   // ---- 聆听态 ----
 
+  Widget _buildRipple(double phaseOffset, Color color) {
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) {
+        final t = (_pulse.value + phaseOffset) % 1.0;
+        final curveValue = Curves.easeOutCubic.transform(t);
+        final scale = 0.65 + curveValue * 0.75;
+        final opacity = ((1.0 - curveValue) * 0.35).clamp(0.0, 1.0);
+        return Opacity(
+          opacity: opacity,
+          child: Transform.scale(
+            scale: scale,
+            child: Container(
+              width: 170,
+              height: 170,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: color,
+                  width: 2.0,
+                ),
+                color: color.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildListeningBody(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 桌面端源切换控件(突出显示,方便用户明确当前是麦克风还是系统内录)
-          if (_showSourceSwitch) ...[
-            SegmentedButton<_IdentifySource>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(
-                  value: _IdentifySource.mic,
-                  icon: Icon(Icons.mic_rounded),
-                  label: Text('麦克风声音 (听环境音)'),
-                ),
-                ButtonSegment(
-                  value: _IdentifySource.system,
-                  icon: Icon(Icons.speaker_rounded),
-                  label: Text('电脑声音 (系统内录)'),
-                ),
-              ],
-              selected: {_source},
-              onSelectionChanged: (selected) {
-                if (selected.isNotEmpty) {
-                  _switchSource(selected.first);
-                }
-              },
-            ),
-            const SizedBox(height: 36),
-          ],
-          SizedBox(
-            width: 168,
-            height: 168,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 涟漪外圈:随 1.2s 周期放大淡出,营造"正在听"的呼吸感。
-                AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, child) {
-                    final t = _pulse.value;
-                    return Opacity(
-                      opacity: (1 - t) * 0.35,
-                      child: Transform.scale(
-                        scale: 1 + t * 0.45,
-                        child: child,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 桌面端源切换控件(突出显示,方便用户明确当前是麦克风还是系统内录)
+            if (_showSourceSwitch) ...[
+              SegmentedButton<_IdentifySource>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: _IdentifySource.mic,
+                    icon: Icon(Icons.mic_rounded),
+                    label: Text('麦克风声音 (听环境音)'),
+                  ),
+                  ButtonSegment(
+                    value: _IdentifySource.system,
+                    icon: Icon(Icons.speaker_rounded),
+                    label: Text('电脑声音 (系统内录)'),
+                  ),
+                ],
+                selected: {_source},
+                onSelectionChanged: (selected) {
+                  if (selected.isNotEmpty) {
+                    _switchSource(selected.first);
+                  }
+                },
+              ),
+              const SizedBox(height: 36),
+            ],
+            SizedBox(
+              width: 220,
+              height: 220,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // 3 层扩散涟漪，随 1.2s 周期错开相位外扩并淡出
+                  _buildRipple(0.0, colorScheme.primary),
+                  _buildRipple(0.33, colorScheme.primary),
+                  _buildRipple(0.66, colorScheme.primary),
+                  // 中心圆 + 渐变与呼吸投影
+                  AnimatedBuilder(
+                    animation: _pulse,
+                    builder: (context, child) => Transform.scale(
+                      scale: 1.0 + math.sin(_pulse.value * math.pi) * 0.04,
+                      child: child,
+                    ),
+                    child: Container(
+                      width: 124,
+                      height: 124,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            colorScheme.primary,
+                            colorScheme.primary.withValues(alpha: 0.82),
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colorScheme.primary.withValues(
+                              alpha: isDark ? 0.45 : 0.3,
+                            ),
+                            blurRadius: 28,
+                            spreadRadius: 2,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: colorScheme.primary.withValues(alpha: .25),
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-                // 中心圆 + 图标(麦克风或扬声器),随周期轻微缩放。
-                AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, child) => Transform.scale(
-                    scale: 1 + _pulse.value * 0.06,
-                    child: child,
-                  ),
-                  child: Container(
-                    width: 128,
-                    height: 128,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: colorScheme.primaryContainer,
-                    ),
-                    child: Icon(
-                      _source == _IdentifySource.mic
-                          ? Icons.mic_rounded
-                          : Icons.speaker_rounded,
-                      size: 56,
-                      color: colorScheme.onPrimaryContainer,
+                      child: Center(
+                        child: Icon(
+                          _source == _IdentifySource.mic
+                              ? Icons.graphic_eq_rounded
+                              : Icons.speaker_rounded,
+                          size: 54,
+                          color: colorScheme.onPrimary,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 28),
-          Text(
-            _source == _IdentifySource.mic
-                ? '正在通过麦克风聆听…'
-                : '正在捕获电脑当前播放的声音…',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _source == _IdentifySource.system
-                ? '请确保电脑正在播放音乐（已聆听 $_elapsedSeconds 秒）'
-                : '请靠近音源（已聆听 $_elapsedSeconds 秒）',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 28),
-          FilledButton.icon(
-            onPressed: _submit,
-            icon: Icon(
+            const SizedBox(height: 32),
+            Text(
+              _source == _IdentifySource.mic
+                  ? '正在识别音乐…'
+                  : '正在捕获电脑当前播放的声音…',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _elapsedSeconds < _minManualSeconds
+                  ? (_source == _IdentifySource.system
+                      ? '请确保电脑正在播放音乐…'
+                      : '请靠近音源并保持安静…')
+                  : '已聆听 $_elapsedSeconds 秒，随时可点击“立即识别”',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
+                  ),
+            ),
+            const SizedBox(height: 32),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              height: 48,
+              child: _elapsedSeconds >= _minManualSeconds
+                  ? FilledButton.icon(
+                      onPressed: _submit,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        shape: const StadiumBorder(),
+                        elevation: 2,
+                      ),
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 20),
+                      label: const Text(
+                        '立即识别',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    )
+                  : FilledButton.tonalIcon(
+                      onPressed: _submit,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        shape: const StadiumBorder(),
+                      ),
+                      icon: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: _elapsedSeconds / _minManualSeconds,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                      label: Text(
+                        '正在聆听 ($_elapsedSeconds 秒)',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Text(
               _elapsedSeconds >= _minManualSeconds
-                  ? Icons.auto_awesome_rounded
-                  : Icons.graphic_eq_rounded,
+                  ? '已录制 $_elapsedSeconds 秒音频，随时可提交'
+                  : '建议录制 3 秒以上以获得更准确的匹配结果',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
             ),
-            label: Text(
-              _elapsedSeconds >= _minManualSeconds
-                  ? '立即识别'
-                  : '正在聆听 ($_elapsedSeconds 秒)',
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            _elapsedSeconds >= _minManualSeconds
-                ? '已录制 $_elapsedSeconds 秒音频，随时可点击“立即识别”'
-                : '建议录制 3 秒以上以获得更准确的匹配结果',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: .75),
-                ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -505,41 +599,52 @@ class _IdentifyPageState extends State<IdentifyPage>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(
             children: [
-              Text(
-                '识别结果 (为你找到 ${_results.length} 首)',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      '识别结果 (为你找到 ${_results.length} 首)',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
-              ),
-              if (hasHighConfidence) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '最佳匹配 $confidencePct%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onPrimaryContainer,
-                    ),
-                  ),
+                    if (hasHighConfidence)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '最佳匹配 $confidencePct%',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-              const Spacer(),
+              ),
+              const SizedBox(width: 8),
               TextButton.icon(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                ),
                 onPressed: _retry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('重新识别'),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('重新识别', style: TextStyle(fontSize: 13)),
               ),
             ],
           ),

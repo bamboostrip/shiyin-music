@@ -232,4 +232,38 @@ void main() {
     expect(backend.lastSource, 'system');
     expect(find.text('正在捕获电脑当前播放的声音…'), findsOneWidget);
   });
+
+  testWidgets('移动端窄屏（360px 与 320px）下结果页排版自适应无溢出', (tester) async {
+    debugDesktopFormFactorOverride = false;
+    final backend = _FakeCaptureBackend();
+    final player = _FakePlayer();
+    final result = IdentifyService.candidateToSong(_candidate());
+
+    for (final width in [360.0, 320.0]) {
+      tester.view.physicalSize = Size(width, 640);
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(MaterialApp(
+        home: IdentifyPage(
+          key: ValueKey(width),
+          player: player,
+          captureBackend: backend,
+          onIdentify: (pcm) async => [result],
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 3));
+      await tester.tap(find.text('立即识别'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('晴天'), findsOneWidget);
+      expect(find.text('重新识别'), findsOneWidget);
+      // 无任何 RenderFlex 溢出异常
+      expect(tester.takeException(), isNull);
+    }
+
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
 }

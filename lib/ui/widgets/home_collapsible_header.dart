@@ -51,6 +51,7 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.onSectionChanged,
     this.pageTracker,
     this.onRefresh,
+    this.onIdentifyTap,
     this.vsync,
     this.topPadding = 0.0,
     this.topMargin = 8.0,
@@ -66,11 +67,29 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
   final PlayerController player;
   final int sectionIndex;
   final ValueChanged<int> onSectionChanged;
+  final VoidCallback? onIdentifyTap;
 
   /// 首页 PageView 的控制器：胶囊指示器直接监听它逐帧联动，
   /// 避免外部为每个像素触发整页 setState。
   final PageController? pageTracker;
   final Future<void> Function()? onRefresh;
+
+  void _openIdentify(BuildContext context) {
+    if (onIdentifyTap != null) {
+      onIdentifyTap!();
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IdentifyPage(
+          player: player,
+          auth: auth,
+          musicApi: api,
+        ),
+      ),
+    );
+  }
 
   /// 浮出吸附动画的 vsync：配合 SliverPersistentHeader 的 floating +
   /// NestedScrollView 的 floatHeaderSlivers，上滑浮现搜索栏后松手自动
@@ -111,6 +130,7 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
         oldDelegate.topMargin != topMargin ||
         oldDelegate.pinnedTopOffset != pinnedTopOffset ||
         oldDelegate.onRefresh != onRefresh ||
+        oldDelegate.onIdentifyTap != onIdentifyTap ||
         oldDelegate.searchBarHeight != searchBarHeight ||
         oldDelegate.tabBarHeight != tabBarHeight ||
         oldDelegate.bottomPadding != bottomPadding ||
@@ -176,7 +196,7 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
         ),
         child: Stack(
           children: [
-            // 顶行：搜索框 + 线稿 Logo（参考 QQ 音乐布局，随滚动平滑淡出并上移）
+            // 顶行：搜索框 + 线稿 Logo（点击 Logo 进入听歌识曲，随滚动平滑淡出并上移）
             Positioned(
               top: topPadding + topMargin - effectiveOffset,
               left: 16,
@@ -197,7 +217,11 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
                         ),
                       ),
                       const SizedBox(width: 14),
-                      const HomeBrandHeader(),
+                      HomeBrandHeader(
+                        onTap: IdentifyService.isSupported
+                            ? () => _openIdentify(context)
+                            : null,
+                      ),
                     ],
                   ),
                 ),
@@ -225,7 +249,7 @@ class HomeCollapsibleHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-/// 首页顶部品牌线稿 Logo（参考 QQ 音乐：无底色、无阴影，随主题变色）。
+/// 首页顶部品牌线稿 Logo（参考 QQ 音乐：无底色、无阴影，随主题变色；可点击进入听歌识曲）。
 ///
 /// SVG 全部描边使用 currentColor，通过 colorFilter 整体着色：
 /// 浅色模式下为深灰墨色，深色模式下为高亮白色。
@@ -233,9 +257,11 @@ class HomeBrandHeader extends StatelessWidget {
   const HomeBrandHeader({
     super.key,
     this.size = 26.0,
+    this.onTap,
   });
 
   final double size;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -247,7 +273,7 @@ class HomeBrandHeader extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.92)
         : colorScheme.onSurface.withValues(alpha: 0.82);
 
-    return SizedBox(
+    Widget icon = SizedBox(
       width: size,
       height: size,
       child: SvgPicture.asset(
@@ -263,6 +289,19 @@ class HomeBrandHeader extends StatelessWidget {
         ),
       ),
     );
+
+    if (onTap != null) {
+      return InkResponse(
+        radius: size - 2,
+        onTap: onTap,
+        child: Tooltip(
+          message: '听歌识曲',
+          child: icon,
+        ),
+      );
+    }
+
+    return icon;
   }
 }
 
@@ -303,29 +342,10 @@ class HomeSearchBar extends StatelessWidget {
     }
   }
 
-  void _openIdentify(BuildContext context) {
-    if (onIdentifyTap != null) {
-      onIdentifyTap!();
-      return;
-    }
-    if (player == null) return;
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => IdentifyPage(
-          player: player!,
-          auth: auth,
-          musicApi: api,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final showIdentify = IdentifyService.isSupported && player != null;
 
     Widget content = Container(
       height: height,
@@ -337,71 +357,39 @@ class HomeSearchBar extends StatelessWidget {
       ),
       child: Material(
         color: Colors.transparent,
-        child: Row(
-          children: [
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.horizontal(
-                  left: Radius.circular(height / 2),
-                  right:
-                      showIdentify ? Radius.zero : Radius.circular(height / 2),
-                ),
-                onTap: () => _handleTap(context),
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    left: 12,
-                    right: showIdentify ? 0 : 12,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (showIdentify) const SizedBox(width: 20),
-                      Icon(
-                        Icons.search_rounded,
-                        size: 16.5,
-                        color: colorScheme.onSurfaceVariant.withValues(
-                          alpha: isDark ? 0.65 : 0.5,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          hintText,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: colorScheme.onSurfaceVariant.withValues(
-                                  alpha: isDark ? 0.7 : 0.6,
-                                ),
-                                fontWeight: FontWeight.w400,
-                                fontSize: 14,
-                              ),
-                        ),
-                      ),
-                    ],
+        child: InkWell(
+          borderRadius: BorderRadius.circular(height / 2),
+          onTap: () => _handleTap(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.search_rounded,
+                  size: 16.5,
+                  color: colorScheme.onSurfaceVariant.withValues(
+                    alpha: isDark ? 0.65 : 0.5,
                   ),
                 ),
-              ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    hintText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: isDark ? 0.7 : 0.6,
+                          ),
+                          fontWeight: FontWeight.w400,
+                          fontSize: 14,
+                        ),
+                  ),
+                ),
+              ],
             ),
-            if (showIdentify)
-              InkResponse(
-                radius: 18,
-                onTap: () => _openIdentify(context),
-                child: Tooltip(
-                  message: '听歌识曲',
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Icon(
-                      Icons.graphic_eq_rounded,
-                      size: 18,
-                      color: colorScheme.onSurfaceVariant.withValues(
-                        alpha: isDark ? 0.8 : 0.7,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+          ),
         ),
       ),
     );
