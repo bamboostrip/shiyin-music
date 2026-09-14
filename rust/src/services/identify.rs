@@ -82,13 +82,17 @@ pub async fn identify_music(
     let resp = transport::send(client, session, &req).await;
     match &resp {
         Ok(v) => {
-            let status = v.get("status").and_then(|s| s.as_i64()).unwrap_or(-1);
-            let errcode = v.get("errcode").and_then(|e| e.as_i64()).unwrap_or(-1);
-            let error = v.get("error").and_then(|e| e.as_str()).unwrap_or("");
-            println!(
-                "[Identify] 酷狗服务端返回: status = {}, errcode = {}, error = \"{}\"",
-                status, errcode, error
-            );
+            if let Some(arr) = v.as_array() {
+                println!("[Identify] 酷狗服务端返回成功: 识别到 {} 个候选条目", arr.len());
+            } else {
+                let status = v.get("status").and_then(|s| s.as_i64()).unwrap_or(-1);
+                let errcode = v.get("error_code").or_else(|| v.get("errcode")).and_then(|e| e.as_i64()).unwrap_or(-1);
+                let error = v.get("error").and_then(|e| e.as_str()).unwrap_or("");
+                println!(
+                    "[Identify] 酷狗服务端返回: status = {}, error_code = {}, error = \"{}\"",
+                    status, errcode, error
+                );
+            }
         }
         Err(e) => {
             eprintln!("[Identify] 酷狗识曲网络请求失败: {e}");
@@ -98,9 +102,15 @@ pub async fn identify_music(
 }
 
 /// 从上游响应提取候选列表并按 dist 升序(dist 小 = 匹配好)。
+/// 注意: transport::send 成功时可能已经把 `data` 数组提升为根节点 (Value::Array),
+/// 故此处双向兼顾 (v 为 Array 或 v.data 为 Array)。
 pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
-    let Some(list) = v.get("data").and_then(|d| d.as_array()) else {
-        println!("[Identify] 服务端未返回候选列表 (data 字段不存在或非数组)");
+    let list = if let Some(arr) = v.as_array() {
+        arr
+    } else if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
+        arr
+    } else {
+        println!("[Identify] 服务端未返回候选列表 (既非数组也无 data 数组)");
         return Vec::new();
     };
     let mut out: Vec<IdentifyCandidate> = list
@@ -129,18 +139,28 @@ pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
                 d.as_f64()
                     .or_else(|| d.as_str().and_then(|s| s.parse().ok()))
             });
+            // 专辑名称兜底：直接字段 或 album[0].albumname
+            let mut album_name = get(item, &["albumname", "album_name"]);
+            if album_name.is_empty() {
+                if let Some(first_album) = item.get("album").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+                    album_name = get(first_album, &["albumname", "album_name"]);
+                }
+            }
+            let duration_ms = item
+                .get("timelength")
+                .or_else(|| item.get("timelength_128"))
+                .or_else(|| item.get("duration"))
+                .and_then(|x| x.as_i64())
+                .unwrap_or(0);
             Some(IdentifyCandidate {
                 name: get(item, &["songname", "song_name", "filename", "name"]),
                 singer: get(item, &["singername", "singer_name", "author_name"]),
                 hash,
                 album_audio_id: get(item, &["album_audio_id", "mixsongid", "audio_id"]),
                 album_id: get(item, &["album_id", "albumid"]),
-                album_name: get(item, &["albumname", "album_name"]),
+                album_name,
                 cover: get(item, &["union_cover", "sizable_cover", "cover", "img"]),
-                duration_ms: item
-                    .get("timelength")
-                    .and_then(|x| x.as_i64())
-                    .unwrap_or(0),
+                duration_ms,
                 dist: dist.unwrap_or(1.0).clamp(0.0, 1.0),
                 hash_320: get(item, &["hash_320"]),
                 hash_flac: get(item, &["hash_flac"]),
@@ -239,5 +259,116 @@ mod tests {
     fn parse_candidates_empty_or_missing_data() {
         assert!(parse_candidates(&json!({"status": 0})).is_empty());
         assert!(parse_candidates(&json!({"status": 1, "data": []})).is_empty());
+        assert!(parse_candidates(&json!([])).is_empty());
+    }
+
+    #[test]
+    fn parse_candidates_handles_promoted_array() {
+        let resp = json!([
+            {
+                "hash_128": "621E57A6478E41A63CBDF89D961FF8A0",
+                "songname": "Da Da Da",
+                "singername": "Tanir & Tyomcha",
+                "mixsongid": 187870696,
+                "album": [{"albumname": "Da Da Da"}],
+                "dist": "0.000",
+                "timelength_128": 198034,
+                "union_cover": "http://imge.kugou.com/cover.jpg"
+            }
+        ]);
+        let got = parse_candidates(&resp);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].hash, "621E57A6478E41A63CBDF89D961FF8A0");
+        assert_eq!(got[0].name, "Da Da Da");
+        assert_eq!(got[0].singer, "Tanir & Tyomcha");
+        assert_eq!(got[0].album_name, "Da Da Da");
+        assert_eq!(got[0].duration_ms, 198034);
+        assert_eq!(got[0].dist, 0.0);
+    }
+
+    #[test]
+    #[ignore = "requires local audio file in temp directory"]
+    fn test_live_identify_response() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            use std::fs::File;
+            use symphonia::core::io::MediaSourceStream;
+            use symphonia::core::probe::Hint;
+            use symphonia::core::formats::FormatOptions;
+            use symphonia::core::codecs::DecoderOptions;
+            use symphonia::core::audio::SampleBuffer;
+
+            let path = format!("{}\\shiyin_play_cache\\Tanir & Tyomcha-Da Da Da.mp3", std::env::var("TEMP").unwrap());
+            let file = match File::open(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("Cannot open test mp3: {e}");
+                    return;
+                }
+            };
+            let mss = MediaSourceStream::new(Box::new(file), Default::default());
+            let mut hint = Hint::new();
+            hint.with_extension("mp3");
+            let probed = symphonia::default::get_probe()
+                .format(&hint, mss, &FormatOptions::default(), &Default::default())
+                .expect("probe");
+            let mut format = probed.format;
+            let track = format.tracks().iter().find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL).unwrap();
+            let track_id = track.id;
+            let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+            let src_rate = track.codec_params.sample_rate.unwrap();
+            let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
+
+            let mut mono_samples = Vec::new();
+            let target_samples = src_rate as usize * 8; // 8 seconds
+            let mut sbuf = None;
+
+            while mono_samples.len() < target_samples {
+                let packet = match format.next_packet() {
+                    Ok(p) => p,
+                    Err(_) => break,
+                };
+                if packet.track_id() != track_id { continue; }
+                let decoded = match decoder.decode(&packet) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let spec = *decoded.spec();
+                let buf = sbuf.get_or_insert_with(|| SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+                buf.copy_interleaved_ref(decoded);
+                let samples = buf.samples();
+                for frame in samples.chunks_exact(channels) {
+                    let sum: f32 = frame.iter().sum();
+                    mono_samples.push(sum / channels as f32);
+                }
+            }
+            println!("Decoded {} mono samples at {}Hz", mono_samples.len(), src_rate);
+
+            let pcm = crate::services::audio_capture::desktop::mono_f32_to_pcm8k(&mono_samples, src_rate);
+            println!("Resampled PCM: {} bytes (duration: {:.2}s)", pcm.len(), pcm.len() as f32 / 16000.0);
+
+            let client = reqwest::Client::new();
+            let session = KgSession::default();
+
+            println!("--- TEST 1: Default (Lite) ---");
+            let res1 = identify_music(&client, &session, pcm.clone()).await;
+            println!("Result 1: {:?}", res1);
+            if let Ok(v) = &res1 {
+                let c = parse_candidates(v);
+                println!("Candidates 1: {}", c.len());
+            }
+
+            println!("--- TEST 2: OfficialAndroid ---");
+            let mut req2 = build_identify_request(pcm.clone(), &session.userid)
+                .param("appid", "1005")
+                .param("clientver", "20489");
+            req2.signature_type = crate::kugou::request::SignatureType::OfficialAndroid;
+            let res2 = crate::kugou::transport::send(&client, &session, &req2).await;
+            println!("Result 2: {:?}", res2);
+            if let Ok(v) = &res2 {
+                let c = parse_candidates(v);
+                println!("Candidates 2: {}", c.len());
+            }
+        });
     }
 }

@@ -327,7 +327,7 @@ pub mod desktop {
     }
 
     /// 单声道 f32(源采样率)→ 8000Hz s16le PCM。
-    fn mono_f32_to_pcm8k(samples: &[f32], src_rate: u32) -> Vec<u8> {
+    pub(crate) fn mono_f32_to_pcm8k(samples: &[f32], src_rate: u32) -> Vec<u8> {
         let resampled = if src_rate == TARGET_RATE || samples.is_empty() {
             samples.to_vec()
         } else {
