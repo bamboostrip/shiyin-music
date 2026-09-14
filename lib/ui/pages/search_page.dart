@@ -6,6 +6,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../../services/network_monitor.dart';
 import '../../services/search_history_service.dart';
@@ -17,6 +18,7 @@ import '../adaptive_layout.dart';
 import '../keyboard_focus_guard.dart';
 import '../player/song_tap_handler.dart';
 import 'artist_detail_page.dart';
+import 'identify_page.dart';
 import 'playlist_detail_page.dart';
 import 'dart:math' as math;
 import '../form_factor.dart';
@@ -323,6 +325,17 @@ class _SearchPageState extends State<SearchPage> {
     widget.player.playSong(song, queue: _results);
   }
 
+  /// 打开听歌识曲页:整屏路由盖住搜索页,识别/播放后自动返回。
+  /// 调用点已用 [IdentifyService.isSupported] 把关,不支持平台按钮不渲染。
+  void _openIdentify(BuildContext context) {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IdentifyPage(player: widget.player),
+      ),
+    );
+  }
+
   void _openArtist(Song song) {
     if (song.source != SongSource.kugou) {
       Toast.info('其他平台歌曲暂不支持查看歌手');
@@ -527,7 +540,25 @@ class _SearchPageState extends State<SearchPage> {
         // 与首页 HomeSearchBar 同款胶囊：同高 36、同圆角、同底色、
         // 同搜索图标与同提示样式，点击首页搜索进入时视觉无断层。
         // 常态无边框无阴影（首页即如此），聚焦时染一圈主色细边框。
-        title: Container(
+        // 胶囊左侧是识曲入口（isSupported 闸门：不支持平台不渲染，
+        // 行内只剩胶囊本身，维持原布局）。
+        title: Row(
+          children: [
+            if (IdentifyService.isSupported) ...[
+              IconButton(
+                // 高度对齐 36 胶囊行：收紧约束与内边距，按钮不撑高标题行。
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(width: 34, height: 36),
+                iconSize: 20,
+                tooltip: '听歌识曲',
+                icon: const Icon(Icons.graphic_eq_rounded),
+                onPressed: () => _openIdentify(context),
+              ),
+              const SizedBox(width: 2),
+            ],
+            Expanded(
+              child: Container(
           height: 36,
           decoration: BoxDecoration(
             color: isDark
@@ -642,6 +673,9 @@ class _SearchPageState extends State<SearchPage> {
               if (_controller.text.isEmpty) const SizedBox(width: 12),
             ],
           ),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(

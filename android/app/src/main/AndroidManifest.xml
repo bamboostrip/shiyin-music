@@ -13,6 +13,8 @@
     <!-- Android 13+ 通知权限声明（媒体通知本身豁免，但歌词悬浮窗 FGS 的
          specialUse 通知在未授权时不可见）。运行时请求尚未接入，待产品决策。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 听歌识曲麦克风采集(仅识曲页使用,运行时动态申请) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
         <!-- 自定义 Application：任何组件（Activity/Service/Receiver）启动前先创建
              通知渠道，防止 audio_service 在车机上以 IMPORTANCE_LOW 预建渠道导致

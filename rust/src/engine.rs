@@ -6,8 +6,8 @@ use crate::error::{AppError, AppResult};
 use crate::kugou::session::KgSession;
 use crate::kugou::session_store::FileSessionStore;
 use crate::services::{
-    album, artist, comment, discover, external_playlist, fm, login, lyric, playlist, rank, report,
-    search, song, user, youth,
+    album, artist, comment, discover, external_playlist, fm, identify, login, lyric, playlist,
+    rank, report, search, song, user, youth,
 };
 
 pub struct KugouEngine {
@@ -77,6 +77,12 @@ impl KugouEngine {
             self.session.update_auth(userid, token, "", "", t1);
         }
         self.store.save(&self.session);
+    }
+
+    /// 听歌识曲:上传 PCM,返回候选歌曲(JSON 透传,候选解析在 Dart 侧之外
+    /// 统一走 identify::parse_candidates,见 api::identify_music)。
+    pub async fn identify(&self, pcm: Vec<u8>) -> AppResult<Value> {
+        identify::identify_music(&self.client, &self.session, pcm).await
     }
 
     async fn dispatch(

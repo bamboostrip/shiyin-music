@@ -687,6 +687,12 @@ class MainActivity : AudioServiceActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 听歌识曲麦克风采集(PCM 8000Hz/16bit/单声道,见 AudioCaptureHandler)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shiyin_music/audio_capture")
+            .setMethodCallHandler { call, result ->
+                AudioCaptureHandler.handle(call, result, this)
+            }
     }
 
     private fun readAudioPermission(): String {
@@ -722,6 +728,7 @@ class MainActivity : AudioServiceActivity() {
             pendingPermissionResult?.success(granted)
             pendingPermissionResult = null
         }
+        AudioCaptureHandler.onRequestPermissionsResult(requestCode, grantResults)
     }
 
     private fun queryLocalSongs(): List<Map<String, Any?>> {

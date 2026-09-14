@@ -5,6 +5,7 @@
 
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'services/identify.dart';
 import 'services/local_media.dart';
 
 Future<Engine> createEngine({required String dataDir}) =>
@@ -58,6 +59,27 @@ Stream<ScanEvent> scanLocalMedia({required List<String> roots}) =>
 /// 取消在途的本地音乐扫描。
 Future<void> cancelLocalScan() =>
     RustLib.instance.api.crateApiCancelLocalScan();
+
+/// 听歌识曲:上传 8000Hz/16bit/单声道 PCM,按匹配度降序返回候选。
+Future<List<IdentifyCandidate>> identifyMusic({
+  required Engine engine,
+  required List<int> pcm,
+}) => RustLib.instance.api.crateApiIdentifyMusic(engine: engine, pcm: pcm);
+
+/// 听歌识曲采集(桌面真实实现,其余平台为错误桩):source = "mic" | "system"。
+/// 幂等,已在采集中时再次调用直接成功。
+Future<void> identifyStartCapture({required String source}) =>
+    RustLib.instance.api.crateApiIdentifyStartCapture(source: source);
+
+/// 取末尾 duration_ms 的采集音频,转 8000Hz/16bit/单声道 PCM(识曲格式)。
+Future<Uint8List> identifyCaptureSnapshot({required int durationMs}) => RustLib
+    .instance
+    .api
+    .crateApiIdentifyCaptureSnapshot(durationMs: durationMs);
+
+/// 停止并释放采集(取消识别 / 页面关闭时调用)。
+Future<void> identifyCancelCapture() =>
+    RustLib.instance.api.crateApiIdentifyCancelCapture();
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Engine>>
 abstract class Engine implements RustOpaqueInterface {}

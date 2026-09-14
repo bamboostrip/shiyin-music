@@ -1,9 +1,11 @@
 pub mod album;
 pub mod artist;
+pub mod audio_capture;
 pub mod comment;
 pub mod discover;
 pub mod external_playlist;
 pub mod fm;
+pub mod identify;
 pub mod local_media;
 pub mod login;
 pub mod loudness;

@@ -1,22 +1,31 @@
 import 'package:flutter/material.dart';
 
 import '../../models/music_models.dart';
+import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../../services/search_history_service.dart';
 
 /// 顶栏搜索聚焦时的 QQ 音乐式下拉：左侧热门搜索，右侧历史 + 清空。
 ///
 /// 仅桌面端使用；移动端继续走 [SearchPage] 全页。
+/// 顶部第一行是"听歌识曲"入口（仅支持识曲的平台渲染，
+/// 见 [IdentifyService.isSupported]；macOS 桌面等不支持即整行隐藏）。
 class DesktopSearchSuggestPanel extends StatefulWidget {
   const DesktopSearchSuggestPanel({
     super.key,
     required this.api,
     required this.onKeywordTap,
+    required this.onOpenIdentify,
     this.maxHotCount = 10,
   });
 
   final MusicApi api;
   final ValueChanged<String> onKeywordTap;
+
+  /// "听歌识曲"入口回调：shell 负责收起浮层并整屏推入识曲页
+  /// （与移动端搜索页同款 fullscreenDialog 路由）。
+  final VoidCallback onOpenIdentify;
+
   final int maxHotCount;
 
   @override
@@ -90,19 +99,35 @@ class _DesktopSearchSuggestPanelState extends State<DesktopSearchSuggestPanel> {
         width: 520,
         constraints: const BoxConstraints(maxHeight: 360),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        child: Row(
+        // 外层 Column 容纳顶部的识曲入口行；两栏区包 Flexible：
+        // 入口行占掉一截高度后，热门/历史列表仍被 360 总高钳制不溢出。
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(child: _buildHotColumn(context)),
-            Container(
-              width: 1,
-              height: 280,
-              margin: const EdgeInsets.symmetric(horizontal: 14),
-              color: colorScheme.outlineVariant.withValues(
-                alpha: isDark ? .35 : .55,
+            // 识曲入口行:isSupported 闸门——不支持平台整行不渲染,
+            // 浮层保持原两栏布局不变。
+            if (IdentifyService.isSupported) ...[
+              _IdentifyEntryRow(onTap: widget.onOpenIdentify),
+              const SizedBox(height: 10),
+            ],
+            Flexible(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _buildHotColumn(context)),
+                  Container(
+                    width: 1,
+                    height: 280,
+                    margin: const EdgeInsets.symmetric(horizontal: 14),
+                    color: colorScheme.outlineVariant.withValues(
+                      alpha: isDark ? .35 : .55,
+                    ),
+                  ),
+                  Expanded(child: _buildHistoryColumn(context)),
+                ],
               ),
             ),
-            Expanded(child: _buildHistoryColumn(context)),
           ],
         ),
       ),
@@ -320,6 +345,74 @@ class _SuggestRowState extends State<_SuggestRow> {
               ),
             ),
             if (widget.trailing != null) widget.trailing!,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 浮层顶部"听歌识曲"入口行：与建议行同款 hover 高亮;
+/// 左侧 tonal 图标 + 文案,右侧"播放中的歌也能识别"提示小字。
+class _IdentifyEntryRow extends StatefulWidget {
+  const _IdentifyEntryRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_IdentifyEntryRow> createState() => _IdentifyEntryRowState();
+}
+
+class _IdentifyEntryRowState extends State<_IdentifyEntryRow> {
+  var _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return InkWell(
+      onTap: widget.onTap,
+      onHover: (h) => setState(() => _hovering = h),
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: _hovering
+              ? colorScheme.onSurface.withValues(alpha: .06)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: colorScheme.primary.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.graphic_eq_rounded,
+                size: 16,
+                color: colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '听歌识曲',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '播放中的歌也能识别',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant.withValues(alpha: .7),
+              ),
+            ),
           ],
         ),
       ),

@@ -40,6 +40,13 @@ tracing = "0.1"
 regex = "1"
 url = "2"
 
+# 桌面端听歌识曲音频采集:cpal 抓麦克风 / WASAPI loopback(系统内录,
+# cpal 0.17+ 对默认输出设备开 input stream 即回环),rubato 重采样到
+# 识曲要求的 8000Hz。仅桌面 target,Android 构建不编译这些依赖。
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+cpal = "0.18"
+rubato = "0.16"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(frb_expand)"] }
 

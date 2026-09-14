@@ -7,6 +7,9 @@ import 'package:path_provider/path_provider.dart';
 
 import '../src/rust/api.dart';
 import '../src/rust/frb_generated.dart';
+// api.dart 只 import 不 re-export IdentifyCandidate,需直接引入声明文件
+// (与 local_music_controller.dart 引 LocalSongEntry 同款做法)。
+import '../src/rust/services/identify.dart' show IdentifyCandidate;
 import 'api_client.dart';
 import 'api_client_interface.dart';
 
@@ -137,6 +140,12 @@ class RustApiClient implements ApiClientInterface {
       t1: t1 ?? '',
     );
   }
+
+  /// 听歌识曲:上传 8000Hz/16bit/单声道 PCM,返回按匹配度降序的候选。
+  /// 透传 Rust identifyMusic(Err 会抛异常,由上层处理),不包 try、不加
+  /// 超时——指纹上传比对耗时远超普通请求,复用 _requestTimeout(20s)会误杀。
+  Future<List<IdentifyCandidate>> identify(Uint8List pcm) =>
+      identifyMusic(engine: _engine, pcm: pcm);
 
   @override
   void close() {}

@@ -14,6 +14,7 @@ import '../pages/artist_detail_page.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../pages/downloaded_songs_page.dart';
 import '../pages/home_page.dart';
+import '../pages/identify_page.dart';
 import '../pages/library_page.dart';
 import '../pages/search_page.dart';
 import '../pages/settings_page.dart';
@@ -334,6 +335,19 @@ class _DesktopShellState extends State<DesktopShell> {
     PlayerPageRoute.open(context, player: widget.player, auth: widget.auth);
   }
 
+  /// 搜索浮层顶部"听歌识曲"入口：先收浮层，再推根 Navigator 整屏
+  /// fullscreenDialog 识曲页（与移动端搜索页入口同款路由）。
+  /// isSupported 闸门在浮层面板内部——不支持平台不渲染该行。
+  void _openIdentify(BuildContext context) {
+    _closeSearchPanel(unfocus: true);
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IdentifyPage(player: widget.player),
+      ),
+    );
+  }
+
   int get _sidebarIndex {
     return switch (_section) {
       _DesktopSection.home => _homeTab,
@@ -554,6 +568,7 @@ class _DesktopShellState extends State<DesktopShell> {
                       child: DesktopSearchSuggestPanel(
                         api: widget.api,
                         onKeywordTap: _submitSearch,
+                        onOpenIdentify: () => _openIdentify(context),
                       ),
                     ),
                   ),
