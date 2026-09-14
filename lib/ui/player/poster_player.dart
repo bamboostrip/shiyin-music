@@ -16,6 +16,7 @@ import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import 'lyric_views.dart';
+import 'player_comment_button.dart';
 import 'player_controls.dart';
 
 class PosterPlayerPage extends StatefulWidget {
@@ -352,27 +353,11 @@ class PosterActionRail extends StatelessWidget {
         _buildDownloadButton(context),
 
         // 4. 评论
-        IconButton(
-          iconSize: 24,
-          tooltip: isKugou ? '评论' : '暂无评论',
-          icon: const Icon(Icons.chat_bubble_outline_rounded),
-          color: isKugou
-              ? Colors.white.withValues(alpha: .85)
-              : Colors.white.withValues(alpha: .24),
-          onPressed: isKugou
-              ? () {
-                  final mixsongid = song.albumAudioId ?? song.id;
-                  if (mixsongid.isEmpty) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => CommentPage(
-                        api: player.api,
-                        mixsongid: mixsongid,
-                      ),
-                    ),
-                  );
-                }
-              : null,
+        PlayerCommentButton(
+          player: player,
+          song: song,
+          iconSize: 22,
+          iconColor: Colors.white.withValues(alpha: .85),
         ),
       ],
     );
