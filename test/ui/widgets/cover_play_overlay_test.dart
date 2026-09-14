@@ -194,6 +194,14 @@ void main() {
       expect(pauseTaps, 1);
       expect(playTaps, 0);
       expect(coverTaps, 0);
+
+      // 点击徽章外部边缘区域透传到底层封面（卡片单击行为不变）
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(CoverPlayOverlay)) + const Offset(10, 10),
+      );
+      await tester.pump();
+      expect(coverTaps, 1);
+      expect(pauseTaps, 1);
     });
 
     testWidgets('isCurrent && isPlaying：hover 时展示「暂停」Tooltip，若未提供 onPause 则回退触发 onPlay', (tester) async {
