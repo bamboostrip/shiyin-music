@@ -4,6 +4,7 @@ import '../../controllers/player_controller.dart';
 import '../../services/desktop_lyrics_service.dart';
 import '../desktop/lyrics_karaoke_line.dart';
 import '../form_factor.dart';
+import '../widgets/toast.dart';
 import 'desktop_lyrics_color_picker.dart';
 
 class DesktopLyricsSettingsPage extends StatefulWidget {
@@ -64,14 +65,8 @@ class _DesktopLyricsSettingsPageState
   void _resetToDefaults() {
     // 只恢复外观（配色/字号/行数/对齐/透明度）；锁定与触摸穿透保持不变。
     _update((s) => s.withDefaultAppearance());
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('已恢复默认外观（锁定状态不变）'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+    // PC 播放栏常驻窗口底部，SnackBar 会压在播放栏上；改用悬浮 Toast。
+    Toast.show('已恢复默认外观（锁定状态不变）', type: ToastType.success);
   }
 
   /// 打开取色弹窗；确定后回写颜色，取消不动设置。

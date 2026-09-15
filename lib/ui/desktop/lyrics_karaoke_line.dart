@@ -154,56 +154,73 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
   Widget build(BuildContext context) {
     final safeOpacity = widget.textOpacity.clamp(0.0, 1.0);
 
-    // 阴影只作浅色桌面上的可读性兜底，浓度压低：过重的黑影会让歌词
-    // 发闷发脏（用户反馈）。两档均为轻描边 + 大半径柔光。
-    final unplayedShadows = [
-      Shadow(
-        color: Colors.black.withValues(alpha: (0.40 * safeOpacity).clamp(0.0, 1.0)),
-        blurRadius: 6,
-        offset: const Offset(0, 1),
-      ),
-      Shadow(
-        color: Colors.black.withValues(alpha: (0.22 * safeOpacity).clamp(0.0, 1.0)),
-        blurRadius: 14,
-      ),
-    ];
-
-    final playedShadows = [
-      Shadow(
-        color: Colors.black.withValues(alpha: (0.45 * safeOpacity).clamp(0.0, 1.0)),
-        blurRadius: 6,
-        offset: const Offset(0, 1),
-      ),
-      Shadow(
-        color: widget.playedColor.withValues(alpha: (0.25 * safeOpacity).clamp(0.0, 1.0)),
-        blurRadius: 12,
-      ),
-    ];
-
-    final textStyle = TextStyle(
-      decoration: TextDecoration.none,
-      fontSize: widget.fontSize,
-      fontWeight: widget.fontWeight,
-    );
-
     final textWidth = _textWidth;
     final isOverflow = textWidth > widget.availableWidth;
+
+    // 可读性方案对齐 QQ 音乐桌面歌词：不用重阴影（浅色桌面上发闷），
+    // 而是「同色系深色细描边 + 单层轻投影」——描边保证字形边缘在任何
+    // 底色上都锐利，轻投影只做分离度兜底。
+    final baseShadow = Shadow(
+      color: Colors.black.withValues(alpha: 0.30 * safeOpacity),
+      blurRadius: 4,
+      offset: const Offset(0, 1.5),
+    );
+    // 描边宽度随字号缩放，钳制在细线范围。
+    final strokeWidth = (widget.fontSize * 0.075).clamp(1.4, 3.2);
+
+    Paint outlinePaintFor(Color color) {
+      final hsl = HSLColor.fromColor(color);
+      // 同色系深色：降亮度得到描边色，alpha 跟随本层文字。
+      final outline = hsl
+          .withLightness((hsl.lightness * 0.42).clamp(0.0, 1.0))
+          .toColor()
+          .withValues(alpha: color.a);
+      return Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeJoin = StrokeJoin.round
+        ..color = outline;
+    }
+
+    Widget lyricLayer(Color color) {
+      final baseStyle = TextStyle(
+        decoration: TextDecoration.none,
+        fontSize: widget.fontSize,
+        fontWeight: widget.fontWeight,
+      );
+      return Stack(
+        fit: StackFit.passthrough,
+        children: [
+          // 描边层（附轻投影）
+          Text(
+            widget.text,
+            maxLines: 1,
+            softWrap: false,
+            style: baseStyle.copyWith(
+              foreground: outlinePaintFor(color),
+              shadows: [baseShadow],
+            ),
+          ),
+          // 填充层
+          Text(
+            widget.text,
+            maxLines: 1,
+            softWrap: false,
+            style: baseStyle.copyWith(color: color),
+          ),
+        ],
+      );
+    }
 
     final karaokeStack = Stack(
       fit: StackFit.loose,
       children: [
         // Base Layer (unplayed)
-        Text(
-          widget.text,
-          maxLines: 1,
-          softWrap: false,
-          style: textStyle.copyWith(
-            // 传入颜色自身的 alpha 参与合成（相乘而非覆盖）：
-            // 双行模式靠它区分当前句与下一句（1.0 vs 0.85）。
-            color: widget.unplayedColor.withValues(
-              alpha: widget.unplayedColor.a * safeOpacity,
-            ),
-            shadows: unplayedShadows,
+        // 传入颜色自身的 alpha 参与合成（相乘而非覆盖）：
+        // 双行模式靠它区分当前句与下一句（1.0 vs 0.85）。
+        lyricLayer(
+          widget.unplayedColor.withValues(
+            alpha: widget.unplayedColor.a * safeOpacity,
           ),
         ),
         // Top Highlight Layer (played)
@@ -212,15 +229,9 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
             progress: widget.progress.clamp(0.0, 1.0),
             textWidth: textWidth,
           ),
-          child: Text(
-            widget.text,
-            maxLines: 1,
-            softWrap: false,
-            style: textStyle.copyWith(
-              color: widget.playedColor.withValues(
-                alpha: widget.playedColor.a * safeOpacity,
-              ),
-              shadows: playedShadows,
+          child: lyricLayer(
+            widget.playedColor.withValues(
+              alpha: widget.playedColor.a * safeOpacity,
             ),
           ),
         ),

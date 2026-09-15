@@ -135,7 +135,8 @@ void main() {
       );
 
       final texts = tester.widgetList<Text>(find.byType(Text)).toList();
-      expect(texts.length, 2);
+      // 每层 = 描边 + 填充 两个 Text，双层共 4 个
+      expect(texts.length, 4);
       for (final t in texts) {
         expect(t.style?.decoration, TextDecoration.none);
       }
@@ -157,22 +158,29 @@ void main() {
       );
 
       final texts = tester.widgetList<Text>(find.byType(Text)).toList();
-      expect(texts.length, 2);
+      // 每层 = 描边 + 填充 两个 Text：[未播放描边, 未播放填充, 已播放描边, 已播放填充]
+      expect(texts.length, 4);
 
-      final baseText = texts[0];
-      final highlightText = texts[1];
+      final baseStroke = texts[0];
+      final baseFill = texts[1];
+      final highlightStroke = texts[2];
+      final highlightFill = texts[3];
 
       // Base unplayed text
-      expect(baseText.data, '双层歌词测试');
-      expect(baseText.style?.color, const Color(0xFFFFFFFF));
-      expect(baseText.style?.shadows, isNotNull);
-      expect(baseText.style?.shadows!.length, 2);
+      expect(baseFill.data, '双层歌词测试');
+      expect(baseFill.style?.color, const Color(0xFFFFFFFF));
+      // 描边层：stroke 绘制 + 同色系深色 + 附带 1 层轻投影
+      expect(baseStroke.style?.foreground?.style, PaintingStyle.stroke);
+      expect(baseStroke.style?.foreground?.strokeWidth, closeTo(28 * 0.075, 0.01));
+      expect((baseStroke.style!.foreground!.color!.a * 255).round(), 255);
+      expect(baseStroke.style?.shadows, isNotNull);
+      expect(baseStroke.style!.shadows.length, 1);
 
       // Highlight played text
-      expect(highlightText.data, '双层歌词测试');
-      expect(highlightText.style?.color, const Color(0xFF00FFCC));
-      expect(highlightText.style?.shadows, isNotNull);
-      expect(highlightText.style?.shadows!.length, 2);
+      expect(highlightFill.data, '双层歌词测试');
+      expect(highlightFill.style?.color, const Color(0xFF00FFCC));
+      expect(highlightStroke.style?.foreground?.style, PaintingStyle.stroke);
+      expect(highlightFill.style?.shadows, isNull);
 
       // ClipRect wraps highlight text with ProgressClipper
       final clipFinder = find.descendant(
@@ -306,7 +314,8 @@ void main() {
 
       expect(tester.takeException(), isNull);
       final texts = tester.widgetList<Text>(find.byType(Text));
-      expect(texts.length, 2);
+      // 每层 = 描边 + 填充 两个 Text，双层共 4 个
+      expect(texts.length, 4);
     });
 
     testWidgets('handles very long strings without crashing', (tester) async {
@@ -345,13 +354,19 @@ void main() {
       );
 
       final texts = tester.widgetList<Text>(find.byType(Text)).toList();
-      final baseText = texts[0];
-      final highlightText = texts[1];
+      final baseStroke = texts[0];
+      final baseFill = texts[1];
+      final highlightFill = texts[3];
 
-      // Base unplayed text opacity
-      expect(baseText.style?.color?.a, closeTo(0.5, 0.01));
+      // Base unplayed text opacity（textOpacity 与颜色 alpha 相乘）
+      expect(baseFill.style?.color?.a, closeTo(0.5, 0.01));
       // Highlight played text opacity
-      expect(highlightText.style?.color?.a, closeTo(0.5, 0.01));
+      expect(highlightFill.style?.color?.a, closeTo(0.5, 0.01));
+      // 描边层 alpha 同样跟随 textOpacity
+      expect(baseStroke.style?.foreground?.color?.a, closeTo(0.5, 0.01));
+      // 投影浓度随 textOpacity 缩放
+      final shadow = baseStroke.style!.shadows.single;
+      expect(shadow.color.a, closeTo(0.30 * 0.5, 0.01));
     });
 
     testWidgets('updates smoothly when progress changes and re-measures on text/fontSize changes', (tester) async {
