@@ -61,28 +61,29 @@ class WindowsDesktopLyricsBridge {
 
   /// 悬浮窗固定尺寸（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
   ///
-  /// 窗口纵向分两带：[0, lyricsTopInset] 是工具栏/解锁胶囊的**专属带**，
-  /// [lyricsTopInset, overlayHeight] 是歌词带（== 历史 88px 窗口的高度）。
-  /// 历史版本只有 88px 单带，30px 按钮（top:2 → y2~36）与双行歌词实际渲染区
-  /// （约 y20~74）重叠约 16px，无论怎么调按钮位置都躲不开——加高 36px 让两者
-  /// 各占一带，是"按钮不再压歌词"的唯一解（不动高度就只能压缩歌词带，
-  /// 双行大字号会被 FittedBox 等比缩小）。
-  /// 默认停靠位置公式（[_initialFrame]）同步前移 lyricsTopInset，
-  /// 歌词视觉位置与历史版本完全一致。
+  /// 窗口纵向分三带：[0, overlayMenuPanelHeight] 是**常驻菜单带**（平时
+  /// 透明且穿透，快捷菜单展开时菜单淡入于此），之下 [overlayWindowHeight
+  /// - overlayHeight, overlayWindowHeight] 是卡片带（= 历史 124px 窗口的
+  /// 全部内容：工具栏/解锁胶囊专属带 + 歌词带）。
+  ///
+  /// 历史版本窗口只有卡片带高度（124），快捷菜单展开/收起时原生
+  /// setBounds 在 124↔296 间切换——Windows DWM 在 Flutter 新帧产出前会用
+  /// 旧帧内容拉伸合成新尺寸（透明无框窗尤甚，Alacritty#7898 /
+  /// framelesshelper#29 同源问题），即用户看到的"点设置歌词闪一下"。
+  /// 现窗口常驻展开高度、菜单收展改为纯 Flutter 动画，从根上消除
+  /// resize 中间帧；代价是上方菜单带平时必须穿透（见悬浮窗侧光标轮询），
+  /// 否则会挡住下方应用的点击。
   static const double overlayWidth = 780;
   static const double lyricsTopInset = 36;
   static const double overlayLyricsHeight = 88;
   static const double overlayHeight = lyricsTopInset + overlayLyricsHeight;
 
-  /// 快捷设置菜单面板高度：展开时窗口向上/向下扩展这么多（历史 172）。
+  /// 快捷设置菜单面板高度：菜单带高度（历史 172）。
   static const double overlayMenuPanelHeight = 172;
 
-  /// 展开态窗口高度（歌词带 + 菜单面板）。
-  static const double overlayExpandedHeight =
+  /// 窗口常驻总高度（菜单带 + 卡片带）。窗口不再随菜单收展改变尺寸。
+  static const double overlayWindowHeight =
       overlayHeight + overlayMenuPanelHeight;
-
-  /// 向上弹出所需的最小上方空间（面板高度 + 8px 余量；历史 180）。
-  static const double overlayMenuUpwardMinTop = overlayMenuPanelHeight + 8;
 
   /// 悬浮窗拖动位置的持久化键（子窗 window_manager 逻辑坐标；
   /// 主窗侧钳制后回写，子窗启动时读取恢复）。
@@ -94,6 +95,13 @@ class WindowsDesktopLyricsBridge {
   /// 一次性减去该偏移，否则升级后歌词整体下沉 36px。
   static const String windowInsetMigratedPrefKey =
       'desktop_lyrics.window.inset_migrated';
+
+  /// 位置语义迁移标记（二）：常驻高度改造之前，记忆的 top 是 124 高
+  /// 卡片带窗口的顶边；现在窗口顶边之上多了常驻菜单带，存量位置必须
+  /// 一次性减去 [overlayMenuPanelHeight]，否则升级后歌词整体下沉
+  /// 172px。必须先于 createWindow 落盘——子窗启动时直接读 prefs。
+  static const String windowTallMigratedPrefKey =
+      'desktop_lyrics.window.tall_migrated';
 
   /// 钳制时至少保留的可见像素（与主窗 kMinVisibleEdge 语义一致）。
   static const double _kMinVisibleEdge = 80;
@@ -155,7 +163,10 @@ class WindowsDesktopLyricsBridge {
 
   Future<void> hide() => _enqueue(_hideInner);
 
-  Future<bool> _showInner({required String title, required String artist}) async {
+  Future<bool> _showInner({
+    required String title,
+    required String artist,
+  }) async {
     if (_visible && _window != null) {
       // 已在展示：复用旧窗，仅补发缓存内容（标题/歌手 v1 不上屏）。
       // 此处不得重置 _overlayReady：复用路径里子引擎不会重新上报
@@ -281,8 +292,8 @@ class WindowsDesktopLyricsBridge {
     final playStateFlipped = isPlaying != _lastSentIsPlaying;
     final isLineReset =
         _lastSentProgress > 0.5 && progress < 0.5 && !playStateFlipped;
-    final intervalElapsed = now.difference(_lastProgressSentAt) >=
-        _kProgressMinSendInterval;
+    final intervalElapsed =
+        now.difference(_lastProgressSentAt) >= _kProgressMinSendInterval;
     if (!playStateFlipped &&
         !isLineReset &&
         (!intervalElapsed || progressDelta < _kProgressSendEpsilon)) {
@@ -332,7 +343,10 @@ class WindowsDesktopLyricsBridge {
   void _ensureMethodHandler() {
     if (_handlerRegistered) return;
     _handlerRegistered = true;
-    DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
+    DesktopMultiWindow.setMethodHandler((
+      MethodCall call,
+      int fromWindowId,
+    ) async {
       // 只信任当前子窗的消息：热重启等路径下可能存在桥接已失忆的旧子窗，
       // 旧窗迟到的 windowClosed 会把指向新窗的 _window 清空、_visible 清
       // 假，造成"新窗歌词冻结/开关状态错乱"。
@@ -428,13 +442,15 @@ class WindowsDesktopLyricsBridge {
           ),
       ];
       scaleFactor = (primary.scaleFactor ?? 1.0).toDouble();
+      // 默认停靠：卡片带底部距主屏底边 80px（与历史版本一致），窗口顶边
+      // 之上再多留常驻菜单带的高度。
       origin = Offset(
-        primaryArea.left +
-            (primaryArea.width - overlayWidth) / 2,
+        primaryArea.left + (primaryArea.width - overlayWidth) / 2,
         primaryArea.top +
             primaryArea.height -
             overlayHeight -
-            80,
+            80 -
+            overlayMenuPanelHeight,
       );
     } on Exception catch (e) {
       debugPrint('[桌面歌词主窗] 获取显示器信息失败，用固定位置: $e');
@@ -442,30 +458,41 @@ class WindowsDesktopLyricsBridge {
     }
     try {
       final prefs = await SharedPreferences.getInstance();
-      final left = prefs.getDouble(windowLeftPrefKey);
-      final top = prefs.getDouble(windowTopPrefKey);
+      var left = prefs.getDouble(windowLeftPrefKey);
+      var top = prefs.getDouble(windowTopPrefKey);
       if (left != null && top != null) {
-        // 一次性语义迁移：88px 高时代窗口顶边 == 歌词带顶边；现在顶边之上
-        // 多了 [lyricsTopInset] 的工具栏带，存量值需减去该偏移，否则升级后
-        // 歌词整体下沉。必须先于 createWindow 落盘——子窗启动时直接读 prefs。
+        // 一次性语义迁移（一）：88px 高时代窗口顶边 == 歌词带顶边；后来
+        // 顶边之上多了 [lyricsTopInset] 的工具栏带，存量值需减去该偏移。
+        // 每步迁移立即落盘：中途中断（如随后取显示器信息失败）不能让
+        // 下次启动重复减一遍。
         final insetMigrated =
             prefs.getBool(windowInsetMigratedPrefKey) ?? false;
-        final restoredTop = insetMigrated ? top : top - lyricsTopInset;
         if (!insetMigrated) {
+          top -= lyricsTopInset;
           await prefs.setBool(windowInsetMigratedPrefKey, true);
-          await prefs.setDouble(windowTopPrefKey, restoredTop);
+          await prefs.setDouble(windowTopPrefKey, top);
+        }
+        // 一次性语义迁移（二）：常驻高度改造前记忆的 top 是 124 高窗口
+        // 顶边 == 卡片带顶边；现在顶边之上多了常驻菜单带，再减去
+        // [overlayMenuPanelHeight] 保歌词屏幕位置不变。
+        final tallMigrated = prefs.getBool(windowTallMigratedPrefKey) ?? false;
+        if (!tallMigrated) {
+          top -= overlayMenuPanelHeight;
+          await prefs.setBool(windowTallMigratedPrefKey, true);
+          await prefs.setDouble(windowTopPrefKey, top);
         }
         final clamped = clampOverlayOriginToVisibleAreas(
-          Offset(left, restoredTop),
+          Offset(left, top),
           visibleAreas,
           fallback: origin,
         );
-        if (clamped.dx != left || clamped.dy != restoredTop) {
+        if (clamped.dx != left || clamped.dy != top) {
           await prefs.setDouble(windowLeftPrefKey, clamped.dx);
           await prefs.setDouble(windowTopPrefKey, clamped.dy);
         }
         origin = clamped;
-        scaleFactor = scaleForLogicalOrigin(displayScales, origin) ?? scaleFactor;
+        scaleFactor =
+            scaleForLogicalOrigin(displayScales, origin) ?? scaleFactor;
       }
     } on Exception catch (e) {
       debugPrint('[桌面歌词主窗] 读取/钳制记忆位置失败，用默认位置: $e');
@@ -474,7 +501,7 @@ class WindowsDesktopLyricsBridge {
     // 而 screen_retriever/window_manager 记忆位置都是逻辑坐标：必须按
     // **窗口最终落点所在显示器**的缩放换算（见 scaleForLogicalOrigin）。
     return Offset(origin.dx * scaleFactor, origin.dy * scaleFactor) &
-        Size(overlayWidth * scaleFactor, overlayHeight * scaleFactor);
+        Size(overlayWidth * scaleFactor, overlayWindowHeight * scaleFactor);
   }
 
   /// 取逻辑原点所在显示器的缩放比（纯函数，供单测）。
@@ -513,7 +540,8 @@ class WindowsDesktopLyricsBridge {
     required Offset fallback,
   }) {
     if (visibleAreas.isEmpty) return fallback;
-    final windowRect = origin & const Size(overlayWidth, overlayHeight);
+    // 钳制按常驻窗口（含菜单带）的完整矩形判定可见性。
+    final windowRect = origin & const Size(overlayWidth, overlayWindowHeight);
     for (final area in visibleAreas) {
       final intersection = area.intersect(windowRect);
       if (intersection.width >= _kMinVisibleEdge &&
@@ -523,16 +551,10 @@ class WindowsDesktopLyricsBridge {
     }
     final area = visibleAreas.first;
     final clampedLeft = origin.dx
-        .clamp(
-          area.left,
-          math.max(area.left, area.right - _kMinVisibleEdge),
-        )
+        .clamp(area.left, math.max(area.left, area.right - _kMinVisibleEdge))
         .toDouble();
     final clampedTop = origin.dy
-        .clamp(
-          area.top,
-          math.max(area.top, area.bottom - _kMinVisibleEdge),
-        )
+        .clamp(area.top, math.max(area.top, area.bottom - _kMinVisibleEdge))
         .toDouble();
     return Offset(clampedLeft, clampedTop);
   }

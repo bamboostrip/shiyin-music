@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,21 +6,28 @@ import 'package:shiyin_music/services/windows_desktop_lyrics_bridge.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_overlay_window.dart';
 
+/// 快捷菜单测试假具：窗口 780x400 画布、窗口原点 (0,0)，
+/// hover 由光标轮询 mock 驱动（未锁定态命中测试不再走 MouseRegion）。
+class _QuickSettingsHarness {
+  _QuickSettingsHarness({required this.moveCursor});
+  final void Function(Offset pos) moveCursor;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('WindowsDesktopLyricsBridge dimensions', () {
-    test('悬浮窗尺寸为宽 780、高 124（工具栏带 36 + 歌词带 88）', () {
+    test('悬浮窗尺寸为宽 780、常驻高 296（菜单带 172 + 卡片带 124）', () {
       expect(WindowsDesktopLyricsBridge.overlayWidth, 780);
       // 历史 88 高度下 30px 按钮（y2~36）与双行歌词（约 y20~74）恒重叠
-      // 约 16px，故顶部辟出工具栏专属带，窗口加高到 124。
+      // 约 16px，故卡片带顶部辟出工具栏专属带（36 + 88 = 124）。
       expect(WindowsDesktopLyricsBridge.lyricsTopInset, 36);
       expect(WindowsDesktopLyricsBridge.overlayLyricsHeight, 88);
       expect(WindowsDesktopLyricsBridge.overlayHeight, 124);
-      // 派生常量：展开高度 = 歌词带 + 菜单面板。
+      // 常驻菜单带 + 卡片带 = 窗口常驻总高度：菜单收展纯 Flutter 动画，
+      // 窗口不再 resize（消除 DWM 拉伸中间帧导致的"点设置闪一下"）。
       expect(WindowsDesktopLyricsBridge.overlayMenuPanelHeight, 172);
-      expect(WindowsDesktopLyricsBridge.overlayExpandedHeight, 296);
-      expect(WindowsDesktopLyricsBridge.overlayMenuUpwardMinTop, 180);
+      expect(WindowsDesktopLyricsBridge.overlayWindowHeight, 296);
     });
   });
 
@@ -80,51 +86,54 @@ void main() {
       expect(restored, original);
     });
 
-    test('兼容旧持久化字段：passthrough 保留，缺失字段取默认值，unplayedTextColor 回退到 textColor', () {
-      // 旧版本 JSON：locked + passthrough 同时存在。
-      final legacy = DesktopLyricsSettings.fromMap(const {
-        'opacity': 0.5,
-        'locked': true,
-        'passthrough': true,
-        'fontSize': 20.0,
-      });
-      expect(legacy.locked, isTrue);
-      expect(legacy.passthrough, isTrue);
-      expect(legacy.opacity, 0.5);
-      expect(legacy.fontSize, 20.0);
-      expect(legacy.singleLine, isTrue);
-      expect(legacy.alignment, DesktopLyricsAlignment.split);
-      expect(legacy.textOpacity, 1.0);
-      expect(legacy.playedTextColor, 0xFFFFD700);
-      expect(legacy.unplayedTextColor, 0xFF00BFFF);
+    test(
+      '兼容旧持久化字段：passthrough 保留，缺失字段取默认值，unplayedTextColor 回退到 textColor',
+      () {
+        // 旧版本 JSON：locked + passthrough 同时存在。
+        final legacy = DesktopLyricsSettings.fromMap(const {
+          'opacity': 0.5,
+          'locked': true,
+          'passthrough': true,
+          'fontSize': 20.0,
+        });
+        expect(legacy.locked, isTrue);
+        expect(legacy.passthrough, isTrue);
+        expect(legacy.opacity, 0.5);
+        expect(legacy.fontSize, 20.0);
+        expect(legacy.singleLine, isTrue);
+        expect(legacy.alignment, DesktopLyricsAlignment.split);
+        expect(legacy.textOpacity, 1.0);
+        expect(legacy.playedTextColor, 0xFFFFD700);
+        expect(legacy.unplayedTextColor, 0xFF00BFFF);
 
-      // 旧配置仅含 textColor：unplayedTextColor 自动回退并同步 textColor
-      final legacyTextColor = DesktopLyricsSettings.fromMap(const {
-        'textColor': 0xFF123456,
-      });
-      expect(legacyTextColor.unplayedTextColor, 0xFF123456);
-      expect(legacyTextColor.textColor, 0xFF123456);
+        // 旧配置仅含 textColor：unplayedTextColor 自动回退并同步 textColor
+        final legacyTextColor = DesktopLyricsSettings.fromMap(const {
+          'textColor': 0xFF123456,
+        });
+        expect(legacyTextColor.unplayedTextColor, 0xFF123456);
+        expect(legacyTextColor.textColor, 0xFF123456);
 
-      // 同时包含 unplayedTextColor 与 textColor 时，unplayedTextColor 优先
-      final dualColorMap = DesktopLyricsSettings.fromMap(const {
-        'textColor': 0xFF111111,
-        'unplayedTextColor': 0xFF222222,
-      });
-      expect(dualColorMap.unplayedTextColor, 0xFF222222);
-      expect(dualColorMap.textColor, 0xFF222222);
+        // 同时包含 unplayedTextColor 与 textColor 时，unplayedTextColor 优先
+        final dualColorMap = DesktopLyricsSettings.fromMap(const {
+          'textColor': 0xFF111111,
+          'unplayedTextColor': 0xFF222222,
+        });
+        expect(dualColorMap.unplayedTextColor, 0xFF222222);
+        expect(dualColorMap.textColor, 0xFF222222);
 
-      // 字段全缺失时不抛异常，逐项取默认值。
-      final minimal = DesktopLyricsSettings.fromMap(const {'locked': true});
-      expect(minimal.locked, isTrue);
-      expect(minimal.passthrough, isFalse);
-      expect(minimal.opacity, 0.0);
-      expect(minimal.fontSize, 24.0);
-      expect(minimal.singleLine, isTrue);
-      expect(minimal.alignment, DesktopLyricsAlignment.split);
-      expect(minimal.textOpacity, 1.0);
-      expect(minimal.playedTextColor, 0xFFFFD700);
-      expect(minimal.unplayedTextColor, 0xFF00BFFF);
-    });
+        // 字段全缺失时不抛异常，逐项取默认值。
+        final minimal = DesktopLyricsSettings.fromMap(const {'locked': true});
+        expect(minimal.locked, isTrue);
+        expect(minimal.passthrough, isFalse);
+        expect(minimal.opacity, 0.0);
+        expect(minimal.fontSize, 24.0);
+        expect(minimal.singleLine, isTrue);
+        expect(minimal.alignment, DesktopLyricsAlignment.split);
+        expect(minimal.textOpacity, 1.0);
+        expect(minimal.playedTextColor, 0xFFFFD700);
+        expect(minimal.unplayedTextColor, 0xFF00BFFF);
+      },
+    );
 
     test('相等性与 copyWith 完整覆盖所有新旧字段', () {
       const base = DesktopLyricsSettings();
@@ -133,10 +142,19 @@ void main() {
       expect(base.copyWith(singleLine: false).singleLine, isFalse);
       expect(base.copyWith(alignment: 'right').alignment, 'right');
       expect(base.copyWith(textOpacity: 0.5).textOpacity, 0.5);
-      expect(base.copyWith(playedTextColor: 0xFF123456).playedTextColor, 0xFF123456);
-      expect(base.copyWith(unplayedTextColor: 0xFF654321).unplayedTextColor, 0xFF654321);
+      expect(
+        base.copyWith(playedTextColor: 0xFF123456).playedTextColor,
+        0xFF123456,
+      );
+      expect(
+        base.copyWith(unplayedTextColor: 0xFF654321).unplayedTextColor,
+        0xFF654321,
+      );
       expect(base.copyWith(textColor: 0xFF778899).textColor, 0xFF778899);
-      expect(base.copyWith(textColor: 0xFF778899).unplayedTextColor, 0xFF778899);
+      expect(
+        base.copyWith(textColor: 0xFF778899).unplayedTextColor,
+        0xFF778899,
+      );
 
       // 相等性对比
       final modifiedSingleLine = base.copyWith(singleLine: false);
@@ -155,14 +173,18 @@ void main() {
       expect(modifiedPlayedColor, isNot(base));
       expect(modifiedPlayedColor.hashCode, isNot(base.hashCode));
 
-      final modifiedUnplayedColor = base.copyWith(unplayedTextColor: 0xFF222222);
+      final modifiedUnplayedColor = base.copyWith(
+        unplayedTextColor: 0xFF222222,
+      );
       expect(modifiedUnplayedColor, isNot(base));
       expect(modifiedUnplayedColor.hashCode, isNot(base.hashCode));
 
       const locked = DesktopLyricsSettings(locked: true);
       expect(const DesktopLyricsSettings(locked: true), locked);
-      expect(const DesktopLyricsSettings(locked: false, passthrough: true),
-          isNot(locked));
+      expect(
+        const DesktopLyricsSettings(locked: false, passthrough: true),
+        isNot(locked),
+      );
 
       final unlocked = locked.copyWith(locked: false);
       expect(unlocked.locked, isFalse);
@@ -228,7 +250,8 @@ void main() {
       });
 
       // 模拟平台通道下发播控事件
-      final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final binding =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       const codec = StandardMethodCodec();
 
       await binding.handlePlatformMessage(
@@ -238,7 +261,9 @@ void main() {
       );
       await binding.handlePlatformMessage(
         channel.name,
-        codec.encodeMethodCall(const MethodCall('controlPlayback', 'togglePlay')),
+        codec.encodeMethodCall(
+          const MethodCall('controlPlayback', 'togglePlay'),
+        ),
         (ByteData? data) {},
       );
       await binding.handlePlatformMessage(
@@ -284,31 +309,40 @@ void main() {
     //   （主->子 invokeMethod；子->主经 setMethodHandler 分发，
     //   入站信封为 {fromWindowId, arguments}）。
     const multiWindowChannel = MethodChannel('mixin.one/flutter_multi_window');
-    const windowEventChannel =
-        MethodChannel('mixin.one/flutter_multi_window_channel');
+    const windowEventChannel = MethodChannel(
+      'mixin.one/flutter_multi_window_channel',
+    );
     const fakeWindowId = 42;
 
     /// 记录主窗 -> 子窗的全部消息（即被门控的推送路径）。
     final outgoing = <MethodCall>[];
 
     void setUpMultiWindowMocks(TestDefaultBinaryMessengerBinding binding) {
-      binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(multiWindowChannel, (call) async {
-        // createWindow 返回固定窗口ID，其余窗口控制调用一律成功。
-        return call.method == 'createWindow' ? fakeWindowId : null;
-      });
-      binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowEventChannel, (call) async {
-        outgoing.add(call);
-        return null;
-      });
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        multiWindowChannel,
+        (call) async {
+          // createWindow 返回固定窗口ID，其余窗口控制调用一律成功。
+          return call.method == 'createWindow' ? fakeWindowId : null;
+        },
+      );
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        windowEventChannel,
+        (call) async {
+          outgoing.add(call);
+          return null;
+        },
+      );
     }
 
     void clearMultiWindowMocks(TestDefaultBinaryMessengerBinding binding) {
-      binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(multiWindowChannel, null);
-      binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowEventChannel, null);
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        multiWindowChannel,
+        null,
+      );
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        windowEventChannel,
+        null,
+      );
       outgoing.clear();
     }
 
@@ -322,10 +356,12 @@ void main() {
       const codec = StandardMethodCodec();
       await binding.defaultBinaryMessenger.handlePlatformMessage(
         windowEventChannel.name,
-        codec.encodeMethodCall(MethodCall(method, <String, dynamic>{
-          'fromWindowId': fakeWindowId,
-          'arguments': arguments,
-        })),
+        codec.encodeMethodCall(
+          MethodCall(method, <String, dynamic>{
+            'fromWindowId': fakeWindowId,
+            'arguments': arguments,
+          }),
+        ),
         (ByteData? data) {},
       );
     }
@@ -336,8 +372,7 @@ void main() {
     dynamic pushPayload(MethodCall call) =>
         (call.arguments as Map)['arguments'] as Map;
 
-    test('overlayReady 之前 updateLyrics 不 invoke 通道，就绪后补发缓存歌词与设置',
-        () async {
+    test('overlayReady 之前 updateLyrics 不 invoke 通道，就绪后补发缓存歌词与设置', () async {
       final binding = TestDefaultBinaryMessengerBinding.instance;
       setUpMultiWindowMocks(binding);
       addTearDown(() => clearMultiWindowMocks(binding));
@@ -374,8 +409,10 @@ void main() {
 
       final settingsPushes = pushesOf('updateSettings');
       expect(settingsPushes, hasLength(1));
-      expect((pushPayload(settingsPushes.single)['fontSize'] as num).toDouble(),
-          28.0);
+      expect(
+        (pushPayload(settingsPushes.single)['fontSize'] as num).toDouble(),
+        28.0,
+      );
     });
 
     test('windowClosed 复位门控，重建子窗需新一轮 overlayReady 握手', () async {
@@ -474,8 +511,7 @@ void main() {
       expect(pushPayload(pushesOf('updateLyric').single)['isPlaying'], isFalse);
     });
 
-    test('setLyricsLocked 转发回调；主窗处理后的 updateSettings 回推子窗',
-        () async {
+    test('setLyricsLocked 转发回调；主窗处理后的 updateSettings 回推子窗', () async {
       final binding = TestDefaultBinaryMessengerBinding.instance;
       setUpMultiWindowMocks(binding);
       addTearDown(() => clearMultiWindowMocks(binding));
@@ -502,45 +538,46 @@ void main() {
       expect(reported, [true, false]);
     });
 
-    test('updateKaraokeProgress 就绪时推送 updateProgress，未就绪时缓存并由 overlayReady 补发',
-        () async {
-      final binding = TestDefaultBinaryMessengerBinding.instance;
-      setUpMultiWindowMocks(binding);
-      addTearDown(() => clearMultiWindowMocks(binding));
+    test(
+      'updateKaraokeProgress 就绪时推送 updateProgress，未就绪时缓存并由 overlayReady 补发',
+      () async {
+        final binding = TestDefaultBinaryMessengerBinding.instance;
+        setUpMultiWindowMocks(binding);
+        addTearDown(() => clearMultiWindowMocks(binding));
 
-      final bridge = WindowsDesktopLyricsBridge();
-      await bridge.show(title: '标题', artist: '歌手');
+        final bridge = WindowsDesktopLyricsBridge();
+        await bridge.show(title: '标题', artist: '歌手');
 
-      // 未就绪时调用 updateKaraokeProgress：只更新缓存，不推送
-      await bridge.updateKaraokeProgress(
-        progress: 0.35,
-        lineDuration: const Duration(seconds: 4),
-        isPlaying: true,
-      );
-      expect(pushesOf('updateProgress'), isEmpty);
+        // 未就绪时调用 updateKaraokeProgress：只更新缓存，不推送
+        await bridge.updateKaraokeProgress(
+          progress: 0.35,
+          lineDuration: const Duration(seconds: 4),
+          isPlaying: true,
+        );
+        expect(pushesOf('updateProgress'), isEmpty);
 
-      // overlayReady 握手后补发缓存进度
-      await simulateChildMessage(binding, 'overlayReady');
-      final progressPushes = pushesOf('updateProgress');
-      expect(progressPushes, hasLength(1));
-      final payload = pushPayload(progressPushes.single);
-      expect(payload['progress'], 0.35);
-      expect(payload['isPlaying'], isTrue);
+        // overlayReady 握手后补发缓存进度
+        await simulateChildMessage(binding, 'overlayReady');
+        final progressPushes = pushesOf('updateProgress');
+        expect(progressPushes, hasLength(1));
+        final payload = pushPayload(progressPushes.single);
+        expect(payload['progress'], 0.35);
+        expect(payload['isPlaying'], isTrue);
 
-      // 就绪后再次调用：立即推送
-      await bridge.updateKaraokeProgress(
-        progress: 0.75,
-        lineDuration: const Duration(seconds: 4),
-        isPlaying: false,
-      );
-      expect(pushesOf('updateProgress'), hasLength(2));
-      final nextPayload = pushPayload(pushesOf('updateProgress').last);
-      expect(nextPayload['progress'], 0.75);
-      expect(nextPayload['isPlaying'], isFalse);
-    });
+        // 就绪后再次调用：立即推送
+        await bridge.updateKaraokeProgress(
+          progress: 0.75,
+          lineDuration: const Duration(seconds: 4),
+          isPlaying: false,
+        );
+        expect(pushesOf('updateProgress'), hasLength(2));
+        final nextPayload = pushPayload(pushesOf('updateProgress').last);
+        expect(nextPayload['progress'], 0.75);
+        expect(nextPayload['isPlaying'], isFalse);
+      },
+    );
 
-    test('子窗发送 updateOverlaySettings 触发 onSettingsChanged 回调且正确反序列化',
-        () async {
+    test('子窗发送 updateOverlaySettings 触发 onSettingsChanged 回调且正确反序列化', () async {
       final binding = TestDefaultBinaryMessengerBinding.instance;
       setUpMultiWindowMocks(binding);
       addTearDown(() => clearMultiWindowMocks(binding));
@@ -621,8 +658,7 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('锁定：只渲染歌词文字与悬浮解锁胶囊，无播控工具栏',
-        (tester) async {
+    testWidgets('锁定：只渲染歌词文字与悬浮解锁胶囊，无播控工具栏', (tester) async {
       await pumpContent(
         tester,
         settings: const DesktopLyricsSettings(locked: true, singleLine: false),
@@ -665,8 +701,7 @@ void main() {
       expect(opacityWidget.opacity, 0.0);
     });
 
-    testWidgets('未锁定：保留工具栏与锁按钮（悬停 UI 只属于非锁定态）',
-        (tester) async {
+    testWidgets('未锁定：保留工具栏与锁按钮（悬停 UI 只属于非锁定态）', (tester) async {
       await pumpContent(tester, settings: const DesktopLyricsSettings());
 
       expect(find.text('第一句歌词'), findsWidgets);
@@ -679,19 +714,25 @@ void main() {
   group('applyDesktopLyricsPassthrough 锁定即穿透', () {
     const windowManagerChannel = MethodChannel('window_manager');
 
-    test('locked ⇒ setIgnoreMouseEvents(true)；解锁恢复 false', () async {
+    test('locked ⇒ setIgnoreMouseEvents(true)；解锁不整体开启（交由区域轮询）', () async {
       final binding = TestDefaultBinaryMessengerBinding.instance;
       final ignoreCalls = <bool>[];
-      binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowManagerChannel, (call) async {
-        if (call.method == 'setIgnoreMouseEvents') {
-          final args = call.arguments as Map;
-          ignoreCalls.add(args['ignore'] as bool);
-        }
-        return null;
-      });
-      addTearDown(() => binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowManagerChannel, null));
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        windowManagerChannel,
+        (call) async {
+          if (call.method == 'setIgnoreMouseEvents') {
+            final args = call.arguments as Map;
+            ignoreCalls.add(args['ignore'] as bool);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          windowManagerChannel,
+          null,
+        ),
+      );
 
       // 锁定即全穿透：不再受旧 passthrough 字段影响。
       await applyDesktopLyricsPassthrough(
@@ -700,12 +741,13 @@ void main() {
       await applyDesktopLyricsPassthrough(
         const DesktopLyricsSettings(locked: true, passthrough: true),
       );
-      // 解锁恢复鼠标事件。
+      // 解锁：不再整体开启接收 —— 窗口常驻展开高度后上方菜单带平时必须
+      // 穿透（不挡下层应用点击），命中区域由未锁定态的光标轮询管理。
       await applyDesktopLyricsPassthrough(
         const DesktopLyricsSettings(locked: false),
       );
 
-      expect(ignoreCalls, [true, true, false]);
+      expect(ignoreCalls, [true, true]);
     });
   });
 
@@ -758,7 +800,7 @@ void main() {
     }) async {
       tester.view.physicalSize = const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
+        WindowsDesktopLyricsBridge.overlayWindowHeight,
       );
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -769,7 +811,7 @@ void main() {
           data: MediaQueryData(
             size: const Size(
               WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayHeight,
+              WindowsDesktopLyricsBridge.overlayWindowHeight,
             ),
             textScaler: TextScaler.linear(textScale),
           ),
@@ -810,8 +852,7 @@ void main() {
       expect(find.text('当前句歌词内容'), findsWidgets);
     });
 
-    testWidgets('未锁定态悬停卡片内同样不溢出（48sp + 1.5 倍缩放）',
-        (tester) async {
+    testWidgets('未锁定态悬停卡片内同样不溢出（48sp + 1.5 倍缩放）', (tester) async {
       await pumpOverlay(
         tester,
         settings: const DesktopLyricsSettings(locked: false, fontSize: 48),
@@ -820,8 +861,9 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('锁定态歌词文字无双黄下划线（decoration 为 none 且具备 Material 祖先）',
-        (tester) async {
+    testWidgets('锁定态歌词文字无双黄下划线（decoration 为 none 且具备 Material 祖先）', (
+      tester,
+    ) async {
       await pumpOverlay(
         tester,
         settings: const DesktopLyricsSettings(locked: true),
@@ -843,7 +885,7 @@ void main() {
     }) async {
       tester.view.physicalSize = const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
+        WindowsDesktopLyricsBridge.overlayWindowHeight,
       );
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -866,6 +908,18 @@ void main() {
       await tester.pump();
     }
 
+    /// 歌词主体所在的 Column（限定在卡片带内：菜单常驻菜单带后，
+    /// 树里还有菜单自己的 Column，不能直接按类型找）。
+    final lyricsColumnFinder = find.descendant(
+      of: find.byWidgetPredicate(
+        (w) =>
+            w is Positioned &&
+            w.height == WindowsDesktopLyricsBridge.overlayHeight &&
+            w.bottom == 0.0,
+      ),
+      matching: find.byType(Column),
+    );
+
     testWidgets('单行模式 (singleLine: true)：仅渲染当前句，不渲染下一句', (tester) async {
       await pumpCustomOverlay(
         tester,
@@ -876,7 +930,9 @@ void main() {
       expect(find.text('当前句歌词内容'), findsWidgets);
       expect(find.text('下一句歌词内容'), findsNothing);
 
-      final karaokeLines = tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine)).toList();
+      final karaokeLines = tester
+          .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+          .toList();
       expect(karaokeLines.length, 1);
       expect(karaokeLines.first.text, '当前句歌词内容');
       expect(karaokeLines.first.fontWeight, FontWeight.bold);
@@ -892,7 +948,9 @@ void main() {
       expect(find.text('当前句歌词内容'), findsWidgets);
       expect(find.text('下一句歌词内容'), findsWidgets);
 
-      final karaokeLines = tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine)).toList();
+      final karaokeLines = tester
+          .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+          .toList();
       expect(karaokeLines.length, 2);
 
       final currentLine = karaokeLines[0];
@@ -906,7 +964,7 @@ void main() {
       expect(nextLine.alignment, TextAlign.right);
       expect(nextLine.progress, 0.0);
 
-      final column = tester.widget<Column>(find.byType(Column));
+      final column = tester.widget<Column>(lyricsColumnFinder);
       final line1Align = column.children[0] as Align;
       final line2Align = column.children[2] as Align;
       expect(line1Align.alignment, Alignment.centerLeft);
@@ -917,12 +975,17 @@ void main() {
       const fontSize = 24.0;
       await pumpCustomOverlay(
         tester,
-        settings: const DesktopLyricsSettings(singleLine: false, fontSize: fontSize),
+        settings: const DesktopLyricsSettings(
+          singleLine: false,
+          fontSize: fontSize,
+        ),
         current: '当前句歌词内容',
         next: '下一句歌词内容',
       );
 
-      final karaokeLines = tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine)).toList();
+      final karaokeLines = tester
+          .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+          .toList();
       expect(karaokeLines.length, 2);
       final currentLine = karaokeLines[0];
       final nextLine = karaokeLines[1];
@@ -943,8 +1006,7 @@ void main() {
       expect(nextLine.textOpacity, 1.0);
     });
 
-    testWidgets('双行交替高亮：当前句在下行时，上行让位给下一句（文字不搬家）',
-        (tester) async {
+    testWidgets('双行交替高亮：当前句在下行时，上行让位给下一句（文字不搬家）', (tester) async {
       await pumpCustomOverlay(
         tester,
         settings: const DesktopLyricsSettings(singleLine: false),
@@ -954,9 +1016,9 @@ void main() {
         activeOnBottom: true,
       );
 
-      final karaokeLines =
-          tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
-              .toList();
+      final karaokeLines = tester
+          .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+          .toList();
       expect(karaokeLines.length, 2);
 
       // 上行 = 下一句（未播放、轻度弱化、无进度），下行 = 当前句（带动画进度）
@@ -970,7 +1032,7 @@ void main() {
       expect(bottomLine.unplayedColor.a, closeTo(1.0, 0.001));
 
       // 交错锚点不随高亮位置变化：上行恒居左、下行恒居右
-      final column = tester.widget<Column>(find.byType(Column).first);
+      final column = tester.widget<Column>(lyricsColumnFinder);
       expect((column.children[0] as Align).alignment, Alignment.centerLeft);
       expect((column.children[2] as Align).alignment, Alignment.centerRight);
 
@@ -983,16 +1045,15 @@ void main() {
         progress: 0.9,
         activeOnBottom: true,
       );
-      final afterScroll =
-          tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
-              .toList();
+      final afterScroll = tester
+          .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+          .toList();
       expect(afterScroll.length, 2);
       expect(afterScroll[1].text, '当前句歌词内容');
       expect(afterScroll[1].progress, 0.9);
     });
 
-    testWidgets('双行对齐：居中/左/右时两行同侧锚点；split 时上下分居两侧',
-        (tester) async {
+    testWidgets('双行对齐：居中/左/右时两行同侧锚点；split 时上下分居两侧', (tester) async {
       Future<void> expectDualAnchors({
         required String alignment,
         required Alignment expectedTop,
@@ -1009,13 +1070,13 @@ void main() {
           current: '当前句歌词内容',
           next: '下一句歌词内容',
         );
-        final lines =
-            tester.widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
-                .toList();
+        final lines = tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .toList();
         expect(lines.length, 2);
         expect(lines[0].alignment, expectedTopText);
         expect(lines[1].alignment, expectedBottomText);
-        final column = tester.widget<Column>(find.byType(Column).first);
+        final column = tester.widget<Column>(lyricsColumnFinder);
         expect((column.children[0] as Align).alignment, expectedTop);
         expect((column.children[2] as Align).alignment, expectedBottom);
       }
@@ -1050,8 +1111,9 @@ void main() {
       );
     });
 
-    testWidgets('歌词带顶部预留工具栏专属带：padding.top == lyricsTopInset，按钮区与歌词不重叠',
-        (tester) async {
+    testWidgets('歌词带顶部预留工具栏专属带：padding.top == lyricsTopInset，按钮区与歌词不重叠', (
+      tester,
+    ) async {
       await pumpCustomOverlay(
         tester,
         settings: const DesktopLyricsSettings(singleLine: false),
@@ -1083,7 +1145,9 @@ void main() {
       );
     });
 
-    testWidgets('修改 progress 更新 DesktopLyricsOverlayContent 变色进度', (tester) async {
+    testWidgets('修改 progress 更新 DesktopLyricsOverlayContent 变色进度', (
+      tester,
+    ) async {
       await pumpCustomOverlay(
         tester,
         settings: const DesktopLyricsSettings(singleLine: true),
@@ -1092,7 +1156,9 @@ void main() {
         progress: 0.25,
       );
 
-      var karaokeLine = tester.widget<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine));
+      var karaokeLine = tester.widget<LyricsKaraokeLine>(
+        find.byType(LyricsKaraokeLine),
+      );
       expect(karaokeLine.progress, 0.25);
 
       await pumpCustomOverlay(
@@ -1103,7 +1169,9 @@ void main() {
         progress: 0.75,
       );
 
-      karaokeLine = tester.widget<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine));
+      karaokeLine = tester.widget<LyricsKaraokeLine>(
+        find.byType(LyricsKaraokeLine),
+      );
       expect(karaokeLine.progress, 0.75);
     });
 
@@ -1114,11 +1182,16 @@ void main() {
             : (alignStr == 'right' ? TextAlign.right : TextAlign.center);
         await pumpCustomOverlay(
           tester,
-          settings: DesktopLyricsSettings(singleLine: true, alignment: alignStr),
+          settings: DesktopLyricsSettings(
+            singleLine: true,
+            alignment: alignStr,
+          ),
           current: '对齐测试',
           next: '',
         );
-        final line = tester.widget<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine));
+        final line = tester.widget<LyricsKaraokeLine>(
+          find.byType(LyricsKaraokeLine),
+        );
         expect(line.alignment, expected);
       }
     });
@@ -1137,7 +1210,7 @@ void main() {
     testWidgets('双行模式下 48sp 与 2.0 textScale 同样不溢出', (tester) async {
       tester.view.physicalSize = const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
+        WindowsDesktopLyricsBridge.overlayWindowHeight,
       );
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -1147,13 +1220,16 @@ void main() {
           data: const MediaQueryData(
             size: Size(
               WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayHeight,
+              WindowsDesktopLyricsBridge.overlayWindowHeight,
             ),
             textScaler: TextScaler.linear(2.0),
           ),
           child: MaterialApp(
             home: DesktopLyricsOverlayContent(
-              settings: const DesktopLyricsSettings(singleLine: false, fontSize: 48),
+              settings: const DesktopLyricsSettings(
+                singleLine: false,
+                fontSize: 48,
+              ),
               current: '超大字号当前句歌词内容',
               next: '超大字号下一句歌词内容',
               isPlaying: true,
@@ -1171,7 +1247,7 @@ void main() {
   });
 
   group('悬浮工具栏快捷调节菜单（字号、配色、单双行）', () {
-    Future<TestGesture> pumpQuickSettings(
+    Future<_QuickSettingsHarness> pumpQuickSettings(
       WidgetTester tester, {
       required Widget child,
       Future<dynamic>? Function(MethodCall call)? windowManagerHandler,
@@ -1183,49 +1259,58 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
+      var cursor = const Offset(390, 240);
       const windowManagerChannel = MethodChannel('window_manager');
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-        windowManagerChannel,
-        (call) async {
-          if (windowManagerHandler != null) {
-            final result = await windowManagerHandler(call);
-            if (result != null) return result;
-          }
-          if (call.method == 'getBounds' || call.method == 'getPosition') {
-            return {
-              'x': 0.0,
-              'y': 0.0,
-              'width': WindowsDesktopLyricsBridge.overlayWidth,
-              'height': WindowsDesktopLyricsBridge.overlayHeight,
-            };
-          }
-          return null;
-        },
+          .setMockMethodCallHandler(windowManagerChannel, (call) async {
+            if (windowManagerHandler != null) {
+              final result = await windowManagerHandler(call);
+              if (result != null) return result;
+            }
+            if (call.method == 'getCursorScreenPoint') {
+              // vendored window_manager 返回 dx/dy/scale（scale=1 → 逻辑坐标原样）。
+              return {'dx': cursor.dx, 'dy': cursor.dy, 'scale': 1.0};
+            }
+            if (call.method == 'getBounds' || call.method == 'getPosition') {
+              return {
+                'x': 0.0,
+                'y': 0.0,
+                'width': WindowsDesktopLyricsBridge.overlayWidth,
+                'height': 400.0,
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(windowManagerChannel, null),
       );
-      addTearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(windowManagerChannel, null));
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             backgroundColor: Colors.transparent,
-            body: Align(
-              alignment: Alignment.topLeft,
-              child: child,
-            ),
+            body: Align(alignment: Alignment.topLeft, child: child),
           ),
         ),
       );
-      await tester.pump();
-
-      // 悬停以唤出工具栏
-      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await gesture.addPointer(location: Offset.zero);
-      addTearDown(gesture.removePointer);
-      await gesture.moveTo(const Offset(390, 44));
+      // 首个轮询拍（80ms）让光标命中生效、工具栏淡入完成。
+      await tester.pump(const Duration(milliseconds: 80));
       await tester.pumpAndSettle();
-      return gesture;
+
+      return _QuickSettingsHarness(moveCursor: (pos) => cursor = pos);
+    }
+
+    /// 菜单可见性 = 菜单带内「字体大小」文本所在 AnimatedOpacity 的值
+    /// （菜单常驻菜单带、收起时以 opacity 0 隐藏）。
+    double menuOpacity(WidgetTester tester) {
+      final finder = find
+          .ancestor(
+            of: find.text('字体大小'),
+            matching: find.byType(AnimatedOpacity),
+          )
+          .first;
+      return tester.widget<AnimatedOpacity>(finder).opacity;
     }
 
     testWidgets('工具栏包含设置按钮 (Icons.settings_rounded)', (tester) async {
@@ -1244,7 +1329,7 @@ void main() {
       expect(find.byIcon(Icons.settings_rounded), findsOneWidget);
     });
 
-    testWidgets('工具栏去背景装饰且位置上提，按钮尺寸扩大为 30x30 且图标尺寸为 20', (tester) async {
+    testWidgets('工具栏在卡片顶专属带内右下锚定，按钮尺寸扩大为 30x30 且图标尺寸为 20', (tester) async {
       await pumpQuickSettings(
         tester,
         child: DesktopLyricsOverlayContent(
@@ -1258,26 +1343,36 @@ void main() {
         ),
       );
 
-      // 工具栏位置 top 为 2
+      // 工具栏专属带贴卡片顶（窗口底上 88 = 专属带底边），高 36。
       final positionedToolbar = tester.widget<Positioned>(
-        find.ancestor(
-          of: find.byIcon(Icons.settings_rounded),
-          matching: find.byType(Positioned),
-        ).first,
+        find
+            .ancestor(
+              of: find.byIcon(Icons.settings_rounded),
+              matching: find.byType(Positioned),
+            )
+            .first,
       );
-      expect(positionedToolbar.top, 2.0);
+      expect(
+        positionedToolbar.bottom,
+        WindowsDesktopLyricsBridge.overlayLyricsHeight,
+      );
+      expect(
+        positionedToolbar.height,
+        WindowsDesktopLyricsBridge.lyricsTopInset,
+      );
 
-      // 工具栏在 IgnorePointer 内直接是 Padding，不再有外层 DecoratedBox 半透黑色胶囊背景
-      final toolbarRow = find.ancestor(
-        of: find.byIcon(Icons.settings_rounded),
-        matching: find.byType(Row),
-      ).first;
-      final ignorePointer = find.ancestor(
-        of: toolbarRow,
-        matching: find.byType(IgnorePointer),
-      ).first;
+      // 工具栏在 IgnorePointer 内直接是 Align，不再有外层 DecoratedBox 半透黑色胶囊背景
+      final toolbarRow = find
+          .ancestor(
+            of: find.byIcon(Icons.settings_rounded),
+            matching: find.byType(Row),
+          )
+          .first;
+      final ignorePointer = find
+          .ancestor(of: toolbarRow, matching: find.byType(IgnorePointer))
+          .first;
       final ignorePointerWidget = tester.widget<IgnorePointer>(ignorePointer);
-      expect(ignorePointerWidget.child, isA<Padding>());
+      expect(ignorePointerWidget.child, isA<Align>());
       expect(
         find.descendant(
           of: ignorePointer,
@@ -1307,17 +1402,14 @@ void main() {
 
       // 工具栏播控与设置按钮默认图标统一为 20
       final icons = tester.widgetList<Icon>(
-        find.descendant(
-          of: toolbarRow,
-          matching: find.byType(Icon),
-        ),
+        find.descendant(of: toolbarRow, matching: find.byType(Icon)),
       );
       for (final icon in icons) {
         expect(icon.size, 20.0);
       }
     });
 
-    testWidgets('点击设置按钮展开快捷调节菜单，再次点击或点击遮罩收起', (tester) async {
+    testWidgets('点击设置按钮展开快捷调节菜单，再次点击或点击菜单带空白收起', (tester) async {
       await pumpQuickSettings(
         tester,
         child: DesktopLyricsOverlayContent(
@@ -1331,24 +1423,21 @@ void main() {
         ),
       );
 
-      // 初始未展开菜单
-      expect(find.text('字体大小'), findsNothing);
-      expect(find.text('歌词配色'), findsNothing);
+      // 初始未展开：菜单常驻菜单带但隐藏（opacity 0）。
+      expect(menuOpacity(tester), 0.0);
 
       // 点击设置按钮展开
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
 
-      expect(find.text('字体大小'), findsOneWidget);
-      expect(find.text('歌词配色'), findsOneWidget);
+      expect(menuOpacity(tester), 1.0);
       expect(find.text('更多设置'), findsOneWidget);
 
-      // 点击遮罩外部（如左上角）收起菜单
+      // 点击菜单带空白（窗口左上角属于菜单带）收起菜单
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
 
-      expect(find.text('字体大小'), findsNothing);
-      expect(find.text('歌词配色'), findsNothing);
+      expect(menuOpacity(tester), 0.0);
     });
 
     testWidgets('点击 [+] 或 [-] 触发字号调节回调并钳制在 [16, 40]', (tester) async {
@@ -1359,7 +1448,8 @@ void main() {
         child: StatefulBuilder(
           builder: (context, setState) {
             return DesktopLyricsOverlayContent(
-              settings: updatedSettings ??
+              settings:
+                  updatedSettings ??
                   const DesktopLyricsSettings(locked: false, fontSize: 24.0),
               current: '测试歌词',
               next: '',
@@ -1400,8 +1490,8 @@ void main() {
         child: StatefulBuilder(
           builder: (context, setState) {
             return DesktopLyricsOverlayContent(
-              settings: updatedSettings ??
-                  const DesktopLyricsSettings(locked: false),
+              settings:
+                  updatedSettings ?? const DesktopLyricsSettings(locked: false),
               current: '测试歌词',
               next: '',
               isPlaying: true,
@@ -1453,7 +1543,8 @@ void main() {
         child: StatefulBuilder(
           builder: (context, setState) {
             return DesktopLyricsOverlayContent(
-              settings: updatedSettings ??
+              settings:
+                  updatedSettings ??
                   const DesktopLyricsSettings(locked: false, singleLine: true),
               current: '测试歌词',
               next: '',
@@ -1509,23 +1600,23 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(openedDetailed, isTrue);
-      // 菜单已关闭
-      expect(find.text('更多设置'), findsNothing);
+      // 菜单已淡出收起
+      expect(menuOpacity(tester), 0.0);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('展开快捷菜单时动态调整原生窗口高度为 296（124 + 菜单面板），收起或销毁时复位为 124', (tester) async {
-      final windowSizes = <Size>[];
+    testWidgets('菜单展开/收起零原生窗口几何调用（常驻高度，纯 Flutter 动画——防 DWM 拉伸闪帧回归）', (
+      tester,
+    ) async {
+      final geometryCalls = <String>[];
 
       await pumpQuickSettings(
         tester,
         windowManagerHandler: (call) async {
-          if (call.method == 'setSize' || call.method == 'setBounds') {
-            final args = (call.arguments as Map).cast<String, dynamic>();
-            windowSizes.add(Size(
-              (args['width'] as num).toDouble(),
-              (args['height'] as num).toDouble(),
-            ));
+          if (call.method == 'setSize' ||
+              call.method == 'setBounds' ||
+              call.method == 'setPosition') {
+            geometryCalls.add(call.method);
           }
           return null;
         },
@@ -1539,66 +1630,31 @@ void main() {
           onClose: () {},
         ),
       );
+      geometryCalls.clear();
 
-      // 初始未展开菜单，未触发快捷菜单引起的 setSize
-      expect(windowSizes, isEmpty);
-
-      // 1. 点击设置按钮展开菜单 -> 窗口高度扩展为歌词带 + 菜单面板
+      // 1. 展开菜单：不得触碰窗口几何（历史实现 setBounds 124↔296，
+      //    DWM 拉伸旧帧即"点设置闪一下"的根因）。
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
-      expect(windowSizes.isNotEmpty, isTrue);
-      expect(
-        windowSizes.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayExpandedHeight,
-        ),
-      );
+      expect(menuOpacity(tester), 1.0);
+      expect(geometryCalls, isEmpty);
 
-      // 2. 点击空白遮罩收起菜单 -> 窗口高度复位为歌词带高度
+      // 2. 收起：同样零几何调用。
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
-      expect(
-        windowSizes.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
+      expect(menuOpacity(tester), 0.0);
+      expect(geometryCalls, isEmpty);
 
-      // 3. 再次点击设置按钮展开
+      // 3. 再展开后销毁组件：亦无防御性还原调用（窗口几何从未改变）。
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
-      expect(
-        windowSizes.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayExpandedHeight,
-        ),
-      );
-
-      // 4. 菜单展开状态下组件销毁（如被移除或关闭）-> dispose 防御性重置窗口尺寸
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
-      expect(
-        windowSizes.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
+      expect(geometryCalls, isEmpty);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('当窗口顶部 >= 180 时快捷菜单向上弹出：窗口上移一个菜单面板高度、高度扩展、菜单位于卡片上方；收起时位置与尺寸恢复', (tester) async {
-      Offset currentPos = const Offset(100, 500);
-      Size currentSize = const Size(
-        WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
-      );
-      final positionLogs = <Offset>[];
-      final sizeLogs = <Size>[];
-
+    testWidgets('常驻高度布局：卡片贴窗口底、菜单带在卡片上方、锚点与窗口总高无关', (tester) async {
       await pumpQuickSettings(
         tester,
         child: DesktopLyricsOverlayContent(
@@ -1609,63 +1665,25 @@ void main() {
           onControlPlayback: (_) {},
           onToggleLock: (_) {},
           onClose: () {},
-          windowPositionGetter: () async => currentPos,
-          windowBoundsSetter: (bounds) async {
-            if (bounds.topLeft != currentPos) {
-              currentPos = bounds.topLeft;
-              positionLogs.add(bounds.topLeft);
-            }
-            if (bounds.size != currentSize) {
-              currentSize = bounds.size;
-              sizeLogs.add(bounds.size);
-            }
-          },
         ),
       );
 
-      // 1. 点击设置按钮展开菜单 -> 向上弹出
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
 
-      // 窗口上移 172：500 - 172 = 328
-      expect(positionLogs, [const Offset(100, 328)]);
-      expect(currentPos, const Offset(100, 328));
-
-      // 窗口高度扩展为歌词带 + 菜单面板（向上弹出时窗口同时上移面板高度）
-      expect(
-        sizeLogs,
-        [
-          const Size(
-            WindowsDesktopLyricsBridge.overlayWidth,
-            WindowsDesktopLyricsBridge.overlayExpandedHeight,
-          ),
-        ],
-      );
-      expect(
-        currentSize,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayExpandedHeight,
+      // 根容器恒为常驻窗口高度（不读 MediaQuery，杜绝 metrics 竞态中间帧）。
+      final rootSizedBox = tester.widget<SizedBox>(
+        find.descendant(
+          of: find.byType(HoverableOverlay),
+          matching: find.byType(SizedBox).first,
         ),
       );
-
-      // 快捷菜单渲染在卡片上方（卡片贴窗口底，故 bottom 偏移恒为
-      // 歌词带高度 + 4px 间隙，与窗口实际高度无关）
-      final menuFinder = find.descendant(
-        of: find.byType(HoverableOverlay),
-        matching: find.byWidgetPredicate(
-          (w) => w is Positioned && w.child is OverlayQuickSettingsMenu,
-        ),
-      );
-      expect(menuFinder, findsOneWidget);
-      final menuPositioned = tester.widget<Positioned>(menuFinder);
       expect(
-        menuPositioned.bottom,
-        WindowsDesktopLyricsBridge.overlayHeight + 4,
+        rootSizedBox.height,
+        WindowsDesktopLyricsBridge.overlayWindowHeight,
       );
-      expect(menuPositioned.top, isNull);
 
-      // 歌词卡片渲染在底部 (bottom: 0)
+      // 歌词卡片贴窗口底（bottom: 0），高度恒 124。
       final lyricsCardFinder = find.descendant(
         of: find.byType(HoverableOverlay),
         matching: find.byWidgetPredicate(
@@ -1677,191 +1695,22 @@ void main() {
       );
       expect(lyricsCardFinder, findsOneWidget);
 
-      // 2. 点击空白遮罩收起菜单 -> 恢复原始位置与歌词带高度
-      await tester.tapAt(const Offset(10, 10));
-      await tester.pumpAndSettle();
-
-      expect(
-        sizeLogs.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
-      expect(positionLogs.last, const Offset(100, 500));
-      expect(currentPos, const Offset(100, 500));
-      expect(find.byType(OverlayQuickSettingsMenu), findsNothing);
-    });
-
-    testWidgets('当窗口顶部 < 180 时快捷菜单向下弹出：窗口位置保持、高度扩展、菜单位于工具栏下方；收起时尺寸恢复', (tester) async {
-      Offset currentPos = const Offset(100, 50);
-      Size currentSize = const Size(
-        WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
-      );
-      final positionLogs = <Offset>[];
-      final sizeLogs = <Size>[];
-
-      await pumpQuickSettings(
-        tester,
-        child: DesktopLyricsOverlayContent(
-          settings: const DesktopLyricsSettings(locked: false),
-          current: '测试歌词',
-          next: '',
-          isPlaying: true,
-          onControlPlayback: (_) {},
-          onToggleLock: (_) {},
-          onClose: () {},
-          windowPositionGetter: () async => currentPos,
-          windowBoundsSetter: (bounds) async {
-            if (bounds.topLeft != currentPos) {
-              currentPos = bounds.topLeft;
-              positionLogs.add(bounds.topLeft);
-            }
-            if (bounds.size != currentSize) {
-              currentSize = bounds.size;
-              sizeLogs.add(bounds.size);
-            }
-          },
-        ),
-      );
-
-      // 1. 点击设置按钮展开菜单 -> 向下弹出
-      await tester.tap(find.byIcon(Icons.settings_rounded));
-      await tester.pumpAndSettle();
-
-      // 窗口位置保持不变
-      expect(positionLogs, isEmpty);
-      expect(currentPos, const Offset(100, 50));
-
-      // 窗口高度扩展为歌词带 + 菜单面板（位置不动）
-      expect(
-        sizeLogs,
-        [
-          const Size(
-            WindowsDesktopLyricsBridge.overlayWidth,
-            WindowsDesktopLyricsBridge.overlayExpandedHeight,
-          ),
-        ],
-      );
-      expect(
-        currentSize,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayExpandedHeight,
-        ),
-      );
-
-      // 快捷菜单挂在工具栏下方（歌词带上沿 + 2）
-      final menuFinder = find.descendant(
-        of: find.byType(HoverableOverlay),
-        matching: find.byWidgetPredicate(
-          (w) => w is Positioned && w.child is OverlayQuickSettingsMenu,
-        ),
-      );
-      expect(menuFinder, findsOneWidget);
-      final menuPositioned = tester.widget<Positioned>(menuFinder);
-      expect(
-        menuPositioned.top,
-        WindowsDesktopLyricsBridge.lyricsTopInset + 2,
-      );
-      expect(menuPositioned.bottom, isNull);
-
-      // 歌词卡片渲染在顶部 (top: 0)
-      final lyricsCardFinder = find.descendant(
+      // 菜单带恒占窗口顶部 172（top: 0、height: 菜单面板高度）。
+      final menuBandFinder = find.descendant(
         of: find.byType(HoverableOverlay),
         matching: find.byWidgetPredicate(
           (w) =>
               w is Positioned &&
-              w.height == WindowsDesktopLyricsBridge.overlayHeight &&
-              w.top == 0.0,
+              w.top == 0.0 &&
+              w.height == WindowsDesktopLyricsBridge.overlayMenuPanelHeight,
         ),
       );
-      expect(lyricsCardFinder, findsOneWidget);
-
-      // 2. 点击空白遮罩收起菜单 -> 尺寸复位，位置未调整
-      await tester.tapAt(const Offset(10, 10));
-      await tester.pumpAndSettle();
-
-      expect(
-        sizeLogs.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
-      expect(positionLogs, isEmpty);
-      expect(find.byType(OverlayQuickSettingsMenu), findsNothing);
+      expect(menuBandFinder, findsOneWidget);
+      // 菜单内容在带内（淡入动画容器）。
+      expect(find.byType(OverlayQuickSettingsMenu), findsOneWidget);
     });
 
-    testWidgets('快捷菜单向上弹出状态下组件销毁时，dispose 防御性恢复窗口位置与尺寸', (tester) async {
-      Offset currentPos = const Offset(100, 500);
-      Size currentSize = const Size(
-        WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
-      );
-      final positionLogs = <Offset>[];
-      final sizeLogs = <Size>[];
-
-      await pumpQuickSettings(
-        tester,
-        child: DesktopLyricsOverlayContent(
-          settings: const DesktopLyricsSettings(locked: false),
-          current: '测试歌词',
-          next: '',
-          isPlaying: true,
-          onControlPlayback: (_) {},
-          onToggleLock: (_) {},
-          onClose: () {},
-          windowPositionGetter: () async => currentPos,
-          windowBoundsSetter: (bounds) async {
-            if (bounds.topLeft != currentPos) {
-              currentPos = bounds.topLeft;
-              positionLogs.add(bounds.topLeft);
-            }
-            if (bounds.size != currentSize) {
-              currentSize = bounds.size;
-              sizeLogs.add(bounds.size);
-            }
-          },
-        ),
-      );
-
-      // 打开菜单向上弹出
-      await tester.tap(find.byIcon(Icons.settings_rounded));
-      await tester.pumpAndSettle();
-
-      expect(currentPos, const Offset(100, 328));
-      expect(
-        currentSize,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayExpandedHeight,
-        ),
-      );
-
-      // 组件销毁
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-
-      expect(
-        sizeLogs.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
-      expect(positionLogs.last, const Offset(100, 500));
-      expect(currentPos, const Offset(100, 500));
-    });
-
-    testWidgets('菜单展开后本窗失去前台焦点（点击别的软件）自动收起并复位窗口', (tester) async {
-      Offset currentPos = const Offset(100, 500);
-      Size currentSize = const Size(
-        WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
-      );
-      final sizeLogs = <Size>[];
+    testWidgets('菜单展开后本窗失去前台焦点（点击别的软件）自动收起', (tester) async {
       var focused = true;
 
       await pumpQuickSettings(
@@ -1874,47 +1723,29 @@ void main() {
           onControlPlayback: (_) {},
           onToggleLock: (_) {},
           onClose: () {},
-          windowPositionGetter: () async => currentPos,
-          windowBoundsSetter: (bounds) async {
-            currentPos = bounds.topLeft;
-            if (bounds.size != currentSize) {
-              currentSize = bounds.size;
-              sizeLogs.add(bounds.size);
-            }
-          },
           appFocusedProvider: () async => focused,
         ),
       );
 
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
-      expect(find.byType(OverlayQuickSettingsMenu), findsOneWidget);
+      expect(menuOpacity(tester), 1.0);
 
       // 第一轮轮询观察到"本窗是前台窗口"→ 武装失焦判定。
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
-      expect(find.byType(OverlayQuickSettingsMenu), findsOneWidget);
+      expect(menuOpacity(tester), 1.0);
 
       // 用户点了别的软件：本窗不再是前台窗口 → 菜单自动收起。
       focused = false;
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
-      expect(find.byType(OverlayQuickSettingsMenu), findsNothing);
-      expect(
-        sizeLogs.last,
-        const Size(
-          WindowsDesktopLyricsBridge.overlayWidth,
-          WindowsDesktopLyricsBridge.overlayHeight,
-        ),
-      );
-      expect(currentPos, const Offset(100, 500));
+      expect(menuOpacity(tester), 0.0);
     });
 
     testWidgets('窗口从未获得前台焦点时不被误关，鼠标离开窗口超时后兜底收起', (tester) async {
-      Offset currentPos = const Offset(100, 500);
-
-      final gesture = await pumpQuickSettings(
+      final harness = await pumpQuickSettings(
         tester,
         child: DesktopLyricsOverlayContent(
           settings: const DesktopLyricsSettings(locked: false),
@@ -1924,10 +1755,6 @@ void main() {
           onControlPlayback: (_) {},
           onToggleLock: (_) {},
           onClose: () {},
-          windowPositionGetter: () async => currentPos,
-          windowBoundsSetter: (bounds) async {
-            currentPos = bounds.topLeft;
-          },
           // 恒为 false：悬浮窗在不抢焦点的环境下 isFocused 永远不成立。
           appFocusedProvider: () async => false,
         ),
@@ -1939,15 +1766,59 @@ void main() {
       // 多轮轮询后菜单仍在（没有被误判为"已失焦"而立刻关掉）。
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
-      expect(find.byType(OverlayQuickSettingsMenu), findsOneWidget);
+      expect(menuOpacity(tester), 1.0);
 
       // 鼠标移出整个窗口：兜底计时器 800ms 后收起。
-      await gesture.moveTo(const Offset(1500, 300));
-      await tester.pump();
+      harness.moveCursor(const Offset(1500, 300));
+      await tester.pump(const Duration(milliseconds: 80));
       await tester.pump(const Duration(milliseconds: 900));
       await tester.pumpAndSettle();
 
-      expect(find.byType(OverlayQuickSettingsMenu), findsNothing);
+      expect(menuOpacity(tester), 0.0);
+    });
+
+    testWidgets('未锁定态命中区域轮询：卡片带解除穿透，菜单带平时穿透、展开期间可交互', (tester) async {
+      final ignoreCalls = <bool>[];
+
+      final harness = await pumpQuickSettings(
+        tester,
+        child: DesktopLyricsOverlayContent(
+          settings: const DesktopLyricsSettings(locked: false),
+          current: '测试歌词',
+          next: '',
+          isPlaying: true,
+          onControlPlayback: (_) {},
+          onToggleLock: (_) {},
+          onClose: () {},
+          ignoreMouseEventsSetter: (ignore) async => ignoreCalls.add(ignore),
+        ),
+      );
+      ignoreCalls.clear();
+
+      // 光标移出窗口 → 恢复穿透（菜单带不挡下层应用点击）。
+      harness.moveCursor(const Offset(1500, 300));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(ignoreCalls, isNotEmpty);
+      expect(ignoreCalls.last, isTrue);
+
+      // 光标回到卡片带 → 解除穿透（hover 卡片/工具栏/拖动）。
+      harness.moveCursor(const Offset(390, 240));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(ignoreCalls.last, isFalse);
+
+      // 光标进入菜单带（菜单收起）→ 仍穿透。
+      harness.moveCursor(const Offset(390, 100));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(ignoreCalls.last, isTrue);
+
+      // 菜单展开期间，光标在菜单带内也保持可交互（能点到菜单项）。
+      harness.moveCursor(const Offset(390, 240));
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pumpAndSettle();
+      harness.moveCursor(const Offset(390, 100));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(ignoreCalls.last, isFalse);
     });
   });
 
@@ -1957,20 +1828,20 @@ void main() {
     test('主屏内可见位置原样返回', () {
       final origin =
           WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-        const Offset(500, 900),
-        [primary],
-        fallback: const Offset(100, 100),
-      );
+            const Offset(500, 900),
+            [primary],
+            fallback: const Offset(100, 100),
+          );
       expect(origin, const Offset(500, 900));
     });
 
     test('位置在已拔掉的副屏（屏幕外）→ 钳回主屏右下可见区', () {
       final origin =
           WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-        const Offset(3840, 2000),
-        [primary],
-        fallback: const Offset(100, 100),
-      );
+            const Offset(3840, 2000),
+            [primary],
+            fallback: const Offset(100, 100),
+          );
       // 右/下至少留 80px 可见。
       expect(origin.dx, primary.right - 80);
       expect(origin.dy, primary.bottom - 80);
@@ -1980,10 +1851,10 @@ void main() {
       // 窗口宽 780：左沿 1915 只剩 5px 可见。
       final origin =
           WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-        const Offset(1915, 500),
-        [primary],
-        fallback: const Offset(100, 100),
-      );
+            const Offset(1915, 500),
+            [primary],
+            fallback: const Offset(100, 100),
+          );
       expect(origin.dx, primary.right - 80);
       expect(origin.dy, 500);
     });
@@ -1991,10 +1862,10 @@ void main() {
     test('无显示器信息时返回 fallback（无从钳制）', () {
       final origin =
           WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-        const Offset(-5000, -5000),
-        const <Rect>[],
-        fallback: const Offset(100, 100),
-      );
+            const Offset(-5000, -5000),
+            const <Rect>[],
+            fallback: const Offset(100, 100),
+          );
       expect(origin, const Offset(100, 100));
     });
 
@@ -2002,10 +1873,10 @@ void main() {
       const secondary = Rect.fromLTWH(1920, 0, 1920, 1080);
       final origin =
           WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-        const Offset(2500, 900),
-        [primary, secondary],
-        fallback: const Offset(100, 100),
-      );
+            const Offset(2500, 900),
+            [primary, secondary],
+            fallback: const Offset(100, 100),
+          );
       expect(origin, const Offset(2500, 900));
     });
   });
@@ -2069,8 +1940,8 @@ void main() {
       );
       expect(tester.widget<AnimatedOpacity>(opacityFinder).opacity, 0.0);
 
-      // 光标移入窗口内部（非胶囊区，例如 (200, 120)）
-      cursorPos = const Offset(200, 120);
+      // 光标移入卡片带内（窗口底部 124 高：y272~396，非胶囊区 (200, 300)）
+      cursorPos = const Offset(200, 300);
       await tester.pump(const Duration(milliseconds: 80));
       // 推进 AnimatedOpacity 动画 180ms
       await tester.pump(const Duration(milliseconds: 180));
@@ -2078,7 +1949,7 @@ void main() {
       expect(tester.widget<AnimatedOpacity>(opacityFinder).opacity, 1.0);
     });
 
-    testWidgets('胶囊位置上提至 top: 2.0，高度 24.0 且防遮挡', (tester) async {
+    testWidgets('解锁胶囊锚定卡片顶专属带（bottom: 歌词带高度，高 36）且防遮挡', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -2093,13 +1964,18 @@ void main() {
       );
       addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
 
-      final positionedFinder = find.descendant(
+      // 胶囊所在 Positioned = 卡片顶专属带：贴卡片顶（bottom = 歌词带高度 88），
+      // 带高 lyricsTopInset(36)。
+      final pillBandFinder = find.descendant(
         of: find.byType(LockedLyricsBody),
-        matching: find.byType(Positioned),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Positioned &&
+              w.bottom == WindowsDesktopLyricsBridge.overlayLyricsHeight &&
+              w.height == WindowsDesktopLyricsBridge.lyricsTopInset,
+        ),
       );
-      expect(positionedFinder, findsOneWidget);
-      final positioned = tester.widget<Positioned>(positionedFinder);
-      expect(positioned.top, 2.0);
+      expect(pillBandFinder, findsOneWidget);
 
       final containerFinder = find.descendant(
         of: find.byType(LockedLyricsBody),
@@ -2117,7 +1993,7 @@ void main() {
     });
 
     testWidgets('光标悬浮在胶囊上时触发 setIgnoreMouseEvents(false)', (tester) async {
-      Offset? cursorPos = const Offset(200, 120);
+      Offset? cursorPos = const Offset(200, 300);
       const windowPos = Offset(100, 100);
       final mouseEventsCalls = <bool>[];
 
@@ -2131,7 +2007,8 @@ void main() {
               onToggleLock: (_) {},
               cursorPositionProvider: () async => cursorPos,
               windowPositionProvider: () async => windowPos,
-              ignoreMouseEventsSetter: (ignore) async => mouseEventsCalls.add(ignore),
+              ignoreMouseEventsSetter: (ignore) async =>
+                  mouseEventsCalls.add(ignore),
             ),
           ),
         ),
@@ -2141,22 +2018,24 @@ void main() {
       await tester.pump(const Duration(milliseconds: 80));
       expect(mouseEventsCalls, isEmpty);
 
-      // 胶囊水平居中：pillLeft = 100 + (780 - 84)/2 = 448, pillTop = 100 + 2 = 102, pillHeight = 24 (bottom = 126)
-      // 光标移入胶囊矩形内 (450, 103)
-      cursorPos = const Offset(450, 103);
+      // 胶囊水平居中于卡片带顶：pillLeft = 100 + (780 - 84)/2 = 448,
+      // 卡片带顶 = 100 + 172 = 272，pillTop = 272 + 2 = 274, pillHeight = 24
+      // 光标移入胶囊矩形内 (450, 275)
+      cursorPos = const Offset(450, 275);
       await tester.pump(const Duration(milliseconds: 80));
 
       expect(mouseEventsCalls, contains(false));
       expect(mouseEventsCalls.last, isFalse);
 
-      // 光标在胶囊上方但在窗口内 (450, 101) 恢复穿透 (windowPos.dy = 100 <= 101 < pillTop = 102)
-      cursorPos = const Offset(450, 101);
+      // 光标在胶囊上方但在卡片带内 (450, 273) 恢复穿透
+      // （卡片带顶 272 <= 273 < pillTop = 274）
+      cursorPos = const Offset(450, 273);
       await tester.pump(const Duration(milliseconds: 80));
       expect(mouseEventsCalls.last, isTrue);
     });
 
     testWidgets('设置外部重推后胶囊悬浮可恢复（穿透死锁回归）', (tester) async {
-      Offset? cursorPos = const Offset(450, 103);
+      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
       final mouseEventsCalls = <bool>[];
 
@@ -2194,7 +2073,7 @@ void main() {
     });
 
     testWidgets('点击胶囊触发 onToggleLock(false)', (tester) async {
-      Offset? cursorPos = const Offset(450, 103);
+      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
       bool? toggledLock;
 
@@ -2225,7 +2104,7 @@ void main() {
     });
 
     testWidgets('光标离开窗口时胶囊淡出且恢复 setIgnoreMouseEvents(true)', (tester) async {
-      Offset? cursorPos = const Offset(450, 103);
+      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
       final mouseEventsCalls = <bool>[];
 
@@ -2239,7 +2118,8 @@ void main() {
               onToggleLock: (_) {},
               cursorPositionProvider: () async => cursorPos,
               windowPositionProvider: () async => windowPos,
-              ignoreMouseEventsSetter: (ignore) async => mouseEventsCalls.add(ignore),
+              ignoreMouseEventsSetter: (ignore) async =>
+                  mouseEventsCalls.add(ignore),
             ),
           ),
         ),
@@ -2268,4 +2148,3 @@ void main() {
     });
   });
 }
-

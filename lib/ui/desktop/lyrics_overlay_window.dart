@@ -40,23 +40,20 @@ const Duration _kPersistDebounce = Duration(milliseconds: 500);
 /// preventClose 拦截后转入漏斗）并发触发，只执行一次。
 bool _overlayCloseInFlight = false;
 
-/// 快捷菜单展开期间窗口被原生加高；向上弹出时 top 还上移了
-/// [WindowsDesktopLyricsBridge.overlayMenuPanelHeight]。展开态任何时机的
-/// 位置落盘（WM_MOVE 防抖、关闭前补存）都必须记"收起态等效 top"：
-/// 直接存展开态 top 的话，展开时点关闭/退出应用，下次打开整体上飘
-/// 一截，逐次累积漂移。
-double _overlayExpandedTopAdjust = 0.0;
-
 /// 立即持久化当前窗口位置（防抖取消失效时与关闭前补存共用）。
+///
+/// 窗口常驻固定高度（菜单收展不再移动/缩放窗口），top 直接落盘即可。
 Future<void> persistOverlayWindowPosition() async {
   try {
     final position = await windowManager.getPosition();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(
-        WindowsDesktopLyricsBridge.windowLeftPrefKey, position.dx);
+      WindowsDesktopLyricsBridge.windowLeftPrefKey,
+      position.dx,
+    );
     await prefs.setDouble(
       WindowsDesktopLyricsBridge.windowTopPrefKey,
-      position.dy + _overlayExpandedTopAdjust,
+      position.dy,
     );
   } on Exception {
     // 位置持久化失败不影响展示。
@@ -179,7 +176,7 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     await windowManager.setSize(
       const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
+        WindowsDesktopLyricsBridge.overlayWindowHeight,
       ),
     );
   } catch (e) {
@@ -219,7 +216,10 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   // 尽早注册消息处理，缩短主窗早期消息的丢失窗口期
   // （主窗 createWindow 后立即推送初始内容）。
   try {
-    DesktopMultiWindow.setMethodHandler((MethodCall call, int fromWindowId) async {
+    DesktopMultiWindow.setMethodHandler((
+      MethodCall call,
+      int fromWindowId,
+    ) async {
       switch (call.method) {
         case 'updateLyric':
           final message = (call.arguments as Map?)?.cast<String, dynamic>();
@@ -228,8 +228,7 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
               ..current = message['current'] as String? ?? model.current
               ..next = message['next'] as String? ?? model.next
               ..isPlaying = message['isPlaying'] as bool? ?? model.isPlaying
-              ..activeOnBottom =
-                  message['activeOnBottom'] as bool? ?? false
+              ..activeOnBottom = message['activeOnBottom'] as bool? ?? false
               // 换句即重置逐字进度：新句从 0 开始（进度由随后的
               // updateProgress 帧驱动）。
               ..progress = 0.0;
@@ -274,7 +273,9 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   // （binding 在根 zone 初始化，换 zone 会触发 Zone mismatch 断言）。
   final flutterOnError = FlutterError.onError;
   FlutterError.onError = (details) {
-    debugPrint('[桌面歌词悬浮窗] FlutterError: ${details.exception}\n${details.stack}');
+    debugPrint(
+      '[桌面歌词悬浮窗] FlutterError: ${details.exception}\n${details.stack}',
+    );
     flutterOnError?.call(details);
   };
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
@@ -303,15 +304,25 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
 }
 
 /// 锁定即全穿透（QQ 音乐式基准）：locked ⇒ setIgnoreMouseEvents(true)，
-/// 歌词纯文字常显、窗口不接收任何鼠标事件；解锁（locked=false）恢复接收。
+/// 歌词纯文字常显、窗口不接收任何鼠标事件；解锁（locked=false）的命中
+/// 测试不再在此整体开启 —— 窗口常驻展开高度后上方菜单带平时必须穿透
+/// （否则挡下层应用点击），由未锁定态的光标轮询按区域切换（见
+/// _HoverableOverlayState._pollCursor）。
 /// 旧持久化字段 passthrough 仅保留兼容解析，不再参与穿透判定
 /// （"触摸穿透"开关的语义已被锁定吸收）。
 /// 公开为顶层函数以便单测固定锁定/解锁的穿透行为。
 ///
 /// ⚠️ 只允许在窗口已经显示后调用（见 [schedulePassthroughAfterShown]）。
-Future<void> applyDesktopLyricsPassthrough(DesktopLyricsSettings settings) async {
+Future<void> applyDesktopLyricsPassthrough(
+  DesktopLyricsSettings settings,
+) async {
+  if (!settings.locked) {
+    // 解锁：区域穿透由 _HoverableOverlay 的轮询接管（子树 initState
+    // 首拍即校准），此处直接整体开启接收会让菜单带挡住下层点击。
+    return;
+  }
   try {
-    await windowManager.setIgnoreMouseEvents(settings.locked);
+    await windowManager.setIgnoreMouseEvents(true);
   } on Exception {
     // setIgnoreMouseEvents 失败不影响歌词展示。
   }
@@ -363,7 +374,9 @@ class OverlayPassthroughScheduler {
 OverlayPassthroughScheduler? _overlayPassthroughScheduler;
 
 /// 窗口显示前的穿透登记入口（供启动流程与 updateSettings 消息复用）。
-Future<void> schedulePassthroughAfterShown(DesktopLyricsSettings settings) async {
+Future<void> schedulePassthroughAfterShown(
+  DesktopLyricsSettings settings,
+) async {
   await _overlayPassthroughScheduler?.apply(settings);
 }
 
@@ -624,8 +637,6 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
     this.cursorPositionProvider,
     this.windowPositionProvider,
     this.ignoreMouseEventsSetter,
-    this.windowPositionGetter,
-    this.windowBoundsSetter,
     this.appFocusedProvider,
   });
 
@@ -647,8 +658,6 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
   final Future<Offset?> Function()? cursorPositionProvider;
   final Future<Offset?> Function()? windowPositionProvider;
   final Future<void> Function(bool ignore)? ignoreMouseEventsSetter;
-  final Future<Offset> Function()? windowPositionGetter;
-  final Future<void> Function(Rect bounds)? windowBoundsSetter;
   final Future<bool> Function()? appFocusedProvider;
 
   @override
@@ -677,14 +686,12 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
             onClose: onClose,
             onUpdateSettings: onUpdateSettings,
             onOpenDetailedSettings: onOpenDetailedSettings,
-            windowPositionGetter: windowPositionGetter,
-            windowBoundsSetter: windowBoundsSetter,
+            cursorPositionProvider: cursorPositionProvider,
+            windowPositionProvider: windowPositionProvider,
+            ignoreMouseEventsSetter: ignoreMouseEventsSetter,
             appFocusedProvider: appFocusedProvider,
           );
-    return Material(
-      type: MaterialType.transparency,
-      child: child,
-    );
+    return Material(type: MaterialType.transparency, child: child);
   }
 }
 
@@ -793,17 +800,22 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
 
       if (!mounted || cursorPos == null || windowPos == null) return;
 
+      // 命中判定只认卡片带（窗口底部 overlayHeight 高）：常驻菜单带在
+      // 锁定态无内容且穿透，光标扫过菜单带不应触发解锁胶囊淡入。
+      final cardBandTop =
+          windowPos.dy + WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
       final winRect = Rect.fromLTWH(
         windowPos.dx,
-        windowPos.dy,
+        cardBandTop,
         WindowsDesktopLyricsBridge.overlayWidth,
         WindowsDesktopLyricsBridge.overlayHeight,
       );
       const pillWidth = 84.0;
       const pillHeight = 24.0;
-      final pillLeft = windowPos.dx +
+      final pillLeft =
+          windowPos.dx +
           (WindowsDesktopLyricsBridge.overlayWidth - pillWidth) / 2;
-      final pillTop = windowPos.dy + 2.0;
+      final pillTop = cardBandTop + 2.0;
       final pillRect = Rect.fromLTWH(pillLeft, pillTop, pillWidth, pillHeight);
 
       if (winRect.contains(cursorPos)) {
@@ -845,63 +857,81 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        buildOverlayLyricsBody(
-          settings: widget.settings,
-          current: widget.current,
-          next: widget.next,
-          progress: widget.progress,
-          activeOnBottom: widget.activeOnBottom,
-        ),
-        Positioned(
-          top: 2.0,
-          left: 0.0,
-          right: 0.0,
-          child: Center(
-            child: AnimatedOpacity(
-              opacity: _isHoveringWindow ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 180),
-              child: IgnorePointer(
-                ignoring: !_isHoveringWindow,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => widget.onToggleLock(false),
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: Container(
-                      width: 84.0,
-                      height: 24.0,
-                      decoration: BoxDecoration(
-                        color: const Color(0xCC333333),
-                        borderRadius: BorderRadius.circular(12.0),
-                        border: Border.all(
-                          color: Colors.white.withValues(
-                            alpha: _isHoveringPill ? 0.35 : 0.15,
-                          ),
-                          width: 0.5,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.lock_rounded,
-                            size: 13.0,
-                            color: Colors.white,
-                          ),
-                          SizedBox(width: 4.0),
-                          Text(
-                            '解锁',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12.0,
-                              fontWeight: FontWeight.w500,
-                              decoration: TextDecoration.none,
+    return SizedBox(
+      width: WindowsDesktopLyricsBridge.overlayWidth,
+      height: WindowsDesktopLyricsBridge.overlayWindowHeight,
+      child: Stack(
+        children: [
+          // 歌词主体限定在卡片带（窗口底部 124 高）：窗口常驻展开高度后
+          // 不能再任由其填满整窗（上方是常驻菜单带，锁定态无内容）。
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: WindowsDesktopLyricsBridge.overlayHeight,
+            child: buildOverlayLyricsBody(
+              settings: widget.settings,
+              current: widget.current,
+              next: widget.next,
+              progress: widget.progress,
+              activeOnBottom: widget.activeOnBottom,
+            ),
+          ),
+          // 解锁胶囊：卡片顶之上的专属带内顶部居中（与未锁定态工具栏同带）。
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: WindowsDesktopLyricsBridge.overlayLyricsHeight,
+            height: WindowsDesktopLyricsBridge.lyricsTopInset,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2.0),
+                child: AnimatedOpacity(
+                  opacity: _isHoveringWindow ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 180),
+                  child: IgnorePointer(
+                    ignoring: !_isHoveringWindow,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => widget.onToggleLock(false),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Container(
+                          width: 84.0,
+                          height: 24.0,
+                          decoration: BoxDecoration(
+                            color: const Color(0xCC333333),
+                            borderRadius: BorderRadius.circular(12.0),
+                            border: Border.all(
+                              color: Colors.white.withValues(
+                                alpha: _isHoveringPill ? 0.35 : 0.15,
+                              ),
+                              width: 0.5,
                             ),
                           ),
-                        ],
+                          alignment: Alignment.center,
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.lock_rounded,
+                                size: 13.0,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 4.0),
+                              Text(
+                                '解锁',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12.0,
+                                  fontWeight: FontWeight.w500,
+                                  decoration: TextDecoration.none,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -909,8 +939,8 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -918,7 +948,12 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
 @visibleForTesting
 typedef HoverableOverlay = _HoverableOverlay;
 
-/// 未锁定态：悬停淡入暗色卡片 + 顶部工具栏，整卡可拖动。
+/// 未锁定态：卡片带贴窗口底常显，悬停淡入暗色卡片 + 顶部工具栏，整卡可拖动；
+/// 快捷菜单在卡片上方的常驻菜单带内淡入/滑出（窗口尺寸不变，零原生
+/// resize —— 消除 DWM 拉伸中间帧导致的"闪一下"）。
+///
+/// 命中测试（穿透）由光标轮询驱动：菜单带平时整带穿透（不挡下层应用
+/// 点击），光标进入卡片带或菜单展开期间进入窗口才解除穿透。
 class _HoverableOverlay extends StatefulWidget {
   const _HoverableOverlay({
     required this.settings,
@@ -932,8 +967,9 @@ class _HoverableOverlay extends StatefulWidget {
     required this.onClose,
     this.onUpdateSettings,
     this.onOpenDetailedSettings,
-    this.windowPositionGetter,
-    this.windowBoundsSetter,
+    this.cursorPositionProvider,
+    this.windowPositionProvider,
+    this.ignoreMouseEventsSetter,
     this.appFocusedProvider,
   });
 
@@ -948,11 +984,15 @@ class _HoverableOverlay extends StatefulWidget {
   final VoidCallback onClose;
   final ValueChanged<DesktopLyricsSettings>? onUpdateSettings;
   final VoidCallback? onOpenDetailedSettings;
-  final Future<Offset> Function()? windowPositionGetter;
 
-  /// 一次性修改窗口位置+尺寸。必须原子（底层 setBounds → 单次 SetWindowPos）：
-  /// 拆成"先移动再改高"会多出一个中间帧，卡片按新位置+旧高度渲染 → 肉眼可见闪跳。
-  final Future<void> Function(Rect bounds)? windowBoundsSetter;
+  /// 光标屏幕坐标（默认 windowManager.getCursorScreenPoint）。
+  final Future<Offset?> Function()? cursorPositionProvider;
+
+  /// 窗口逻辑坐标（默认 windowManager.getPosition）。
+  final Future<Offset?> Function()? windowPositionProvider;
+
+  /// 设置整窗穿透（默认 windowManager.setIgnoreMouseEvents）。
+  final Future<void> Function(bool ignore)? ignoreMouseEventsSetter;
 
   /// 本窗口是否为系统前台窗口（默认 windowManager.isFocused()）。
   final Future<bool> Function()? appFocusedProvider;
@@ -962,11 +1002,18 @@ class _HoverableOverlay extends StatefulWidget {
 }
 
 class _HoverableOverlayState extends State<_HoverableOverlay> {
+  /// 光标位于卡片带内（驱动卡片背景与工具栏淡入）。
   bool _hovering = false;
+
+  /// 快捷菜单展开中。
   bool _showSettingsMenu = false;
-  bool _menuPopsUpward = false;
-  double? _originalWindowTop;
-  bool _isTogglingSettingsMenu = false;
+
+  /// 当前窗口是否处于"接收鼠标"状态（false = 整窗穿透）。
+  /// 光标轮询驱动：卡片带命中或菜单展开期间命中窗口即解除穿透。
+  bool _windowInteractive = false;
+
+  bool _polling = false;
+  Timer? _pollTimer;
 
   /// 菜单展开期间是否至少观察到一次"本窗是前台窗口"。
   /// 悬浮窗在不抢焦点的环境下 isFocused 恒为 false，不能据此直接关菜单，
@@ -975,141 +1022,140 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
   Timer? _menuFocusTimer;
   Timer? _mouseOutCloseTimer;
 
-  Future<Offset> Function()? windowPositionGetter;
-  Future<void> Function(Rect bounds)? windowBoundsSetter;
+  /// 光标轮询间隔：命中区域判定（穿透切换、hover、移出收起）的节拍。
+  /// 与锁定态解锁胶囊轮询同款（80ms 在交互延迟与通道开销间折中）。
+  static const Duration _kPollInterval = Duration(milliseconds: 80);
+
+  /// 菜单展开后光标移出整窗多久自动收起（覆盖失焦判定失效的环境）。
+  static const Duration _kMenuMouseOutCloseDelay = Duration(milliseconds: 800);
+
+  /// 快捷菜单淡入/滑出时长：纯 Flutter 隐式动画（窗口几何不动）。
+  static const Duration _kMenuTransition = Duration(milliseconds: 160);
 
   @override
   void initState() {
     super.initState();
-    windowPositionGetter = widget.windowPositionGetter;
-    windowBoundsSetter = widget.windowBoundsSetter;
+    // 只用周期轮询、不做 initState 首拍：子窗启动路径上窗口尚未 show()，
+    // 隐藏期施加 setIgnoreMouseEvents(true) 会给窗口加 WS_EX_LAYERED，
+    // 导致 DComp 内容面永久空白（见 OverlayPassthroughScheduler 注释）。
+    // show() 在首帧后的 postFrameCallback 里完成，远早于 80ms 后的
+    // 首个轮询拍，穿透校准不受影响。
+    _pollTimer = Timer.periodic(_kPollInterval, (_) {
+      unawaited(_pollCursor());
+    });
   }
 
   @override
-  void didUpdateWidget(covariant _HoverableOverlay oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.windowPositionGetter != null) {
-      windowPositionGetter = widget.windowPositionGetter;
-    }
-    if (widget.windowBoundsSetter != null) {
-      windowBoundsSetter = widget.windowBoundsSetter;
-    }
+  void dispose() {
+    _stopMenuDismissWatch();
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
-  /// 失败返回 null：调用方必须放弃后续几何操作——历史实现失败时返回
-  /// Offset.zero，restore 会把窗口"还原"到屏幕左上角 (0,0)。
-  Future<Offset?> _getWindowPosition() async {
+  Future<Offset?> _getCursorPosition() async {
     try {
-      final getter = windowPositionGetter ?? widget.windowPositionGetter;
-      if (getter != null) {
-        return await getter();
-      }
-      return await windowManager.getPosition();
-    } catch (e) {
-      debugPrint('[桌面歌词悬浮窗] 获取窗口位置失败: $e');
+      final provider = widget.cursorPositionProvider;
+      if (provider != null) return await provider();
+      return await windowManager.getCursorScreenPoint();
+    } on Exception {
       return null;
     }
   }
 
-  /// 原子更新窗口位置与尺寸（底层 setBounds：单次 SetWindowPos 同时带
-  /// SWP 移动+尺寸，不存在"已移动但未改高"的中间态）。
-  Future<void> _setWindowBounds(Rect bounds) async {
+  Future<Offset?> _getWindowPosition() async {
     try {
-      final setter = windowBoundsSetter ?? widget.windowBoundsSetter;
-      if (setter != null) {
-        await setter(bounds);
-      } else {
-        await windowManager.setBounds(bounds);
-      }
-    } catch (e) {
-      debugPrint('[桌面歌词悬浮窗] 调整窗口几何失败: $e');
+      final provider = widget.windowPositionProvider;
+      if (provider != null) return await provider();
+      return await windowManager.getPosition();
+    } on Exception {
+      return null;
     }
   }
 
-  Future<void> _setSettingsMenuVisible(bool visible) async {
-    if (_showSettingsMenu == visible || _isTogglingSettingsMenu) return;
-    _isTogglingSettingsMenu = true;
+  Future<void> _setIgnoreMouseEvents(bool ignore) async {
     try {
-      if (visible) {
-        final pos = await _getWindowPosition();
-        if (pos == null) {
-          // 取位失败：放弃本次展开，维持收起态几何（比误操作窗口安全）。
-          return;
-        }
-        _originalWindowTop = pos.dy;
-        final popsUpward = pos.dy >=
-            WindowsDesktopLyricsBridge.overlayMenuUpwardMinTop;
-        if (popsUpward) {
-          // 向上弹出：先切"贴窗口底"锚点。此时窗口还是歌词带高度，
-          // 卡片贴底 == 原位，视觉零变化；再一次性平移+加高窗口，
-          // 原生 resize 落地后卡片自然停在原屏幕位置（不闪、不跳）。
-          if (!mounted) return;
-          setState(() {
-            _menuPopsUpward = true;
-            _showSettingsMenu = true;
-          });
-          await WidgetsBinding.instance.endOfFrame;
-          // 窗口即将上移 menuPanelHeight：展开期间一切位置落盘都要按
-          // 收起态等效 top 记账（见 _overlayExpandedTopAdjust 注释）。
-          _overlayExpandedTopAdjust =
-              WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
-          await _setWindowBounds(
-            Rect.fromLTWH(
-              pos.dx,
-              pos.dy - WindowsDesktopLyricsBridge.overlayMenuPanelHeight,
-              WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayExpandedHeight,
-            ),
-          );
-        } else {
-          // 向下弹出：卡片锚点不变，先把窗口加高再显示菜单，
-          // 否则菜单会在旧高度里露出一截被裁掉的边。
-          await _setWindowBounds(
-            Rect.fromLTWH(
-              pos.dx,
-              pos.dy,
-              WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayExpandedHeight,
-            ),
-          );
-          if (!mounted) return;
-          setState(() {
-            _menuPopsUpward = false;
-            _showSettingsMenu = true;
-          });
-        }
-        _startMenuDismissWatch();
+      final setter = widget.ignoreMouseEventsSetter;
+      if (setter != null) {
+        await setter(ignore);
       } else {
-        final restoreTop = _originalWindowTop;
-        final popsUpward = _menuPopsUpward;
-        _stopMenuDismissWatch();
-        // 收起：先按原锚点还原几何（向上弹出时卡片仍贴底 → 视觉不跳），
-        // 再翻状态位把锚点切回"贴顶"，此时窗口已回到歌词带高度，
-        // 两种锚点渲染完全一致。
-        final pos = await _getWindowPosition();
-        if (pos == null) {
-          // 取位失败：跳过还原，保持当前几何（还原到 (0,0) 是更糟的选项）。
-          return;
-        }
-        await _setWindowBounds(
-          Rect.fromLTWH(
-            pos.dx,
-            popsUpward && restoreTop != null ? restoreTop : pos.dy,
-            WindowsDesktopLyricsBridge.overlayWidth,
-            WindowsDesktopLyricsBridge.overlayHeight,
-          ),
-        );
-        _menuPopsUpward = false;
-        _originalWindowTop = null;
-        // 几何已还原为收起态，位置记账同步复位（还原触发的 WM_MOVE
-        // 防抖落盘会以真实 top 写入）。
-        _overlayExpandedTopAdjust = 0.0;
+        await windowManager.setIgnoreMouseEvents(ignore);
+      }
+    } on Exception {
+      // 穿透设置失败不影响展示（与锁定态胶囊同策略）。
+    }
+  }
+
+  /// 光标轮询：命中测试 + hover + 移出收起。
+  ///
+  /// 命中区域（窗口逻辑坐标）：
+  /// - 卡片带 = [top + menuPanelHeight, top + overlayWindowHeight]（底部
+  ///   [overlayHeight] 高）—— 恒为交互区（hover 卡片/工具栏/拖动）；
+  /// - 菜单带 = 卡片带上方 —— 仅在菜单展开时并入交互区（点菜单项）。
+  Future<void> _pollCursor() async {
+    if (_polling) return;
+    _polling = true;
+    try {
+      final cursorPos = await _getCursorPosition();
+      final windowPos = await _getWindowPosition();
+      if (!mounted || cursorPos == null || windowPos == null) return;
+
+      final cardBandTop =
+          windowPos.dy + WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
+      final inCard =
+          cursorPos.dy >= cardBandTop &&
+          cursorPos.dy <=
+              windowPos.dy + WindowsDesktopLyricsBridge.overlayWindowHeight &&
+          cursorPos.dx >= windowPos.dx &&
+          cursorPos.dx <=
+              windowPos.dx + WindowsDesktopLyricsBridge.overlayWidth;
+      final inWindow =
+          cursorPos.dy >= windowPos.dy &&
+          cursorPos.dy <=
+              windowPos.dy + WindowsDesktopLyricsBridge.overlayWindowHeight &&
+          cursorPos.dx >= windowPos.dx &&
+          cursorPos.dx <=
+              windowPos.dx + WindowsDesktopLyricsBridge.overlayWidth;
+
+      // 菜单展开期间整窗可交互（菜单在菜单带）；收起后仅卡片带可交互，
+      // 菜单带恢复穿透，不挡下层应用点击。
+      final wantInteractive = inCard || (_showSettingsMenu && inWindow);
+      if (wantInteractive != _windowInteractive) {
+        _windowInteractive = wantInteractive;
+        await _setIgnoreMouseEvents(!wantInteractive);
         if (!mounted) return;
-        setState(() => _showSettingsMenu = false);
+      }
+
+      if (inCard != _hovering) {
+        setState(() => _hovering = inCard);
+      }
+
+      // 移出收起：菜单展开且光标已离开整窗一段时间。
+      if (_showSettingsMenu && !inWindow) {
+        _mouseOutCloseTimer ??= Timer(_kMenuMouseOutCloseDelay, () {
+          _mouseOutCloseTimer = null;
+          if (!mounted || _hovering || !_showSettingsMenu) return;
+          _setSettingsMenuVisible(false);
+        });
+      } else {
+        _mouseOutCloseTimer?.cancel();
+        _mouseOutCloseTimer = null;
       }
     } finally {
-      _isTogglingSettingsMenu = false;
+      _polling = false;
     }
+  }
+
+  void _setSettingsMenuVisible(bool visible) {
+    if (_showSettingsMenu == visible) return;
+    setState(() => _showSettingsMenu = visible);
+    if (visible) {
+      _startMenuDismissWatch();
+    } else {
+      _stopMenuDismissWatch();
+    }
+    // 菜单收展改变命中区域（整窗 ↔ 仅卡片带）：立即轮询一拍，不等下个
+    // 周期，收起瞬间菜单带即刻恢复穿透。
+    unawaited(_pollCursor());
   }
 
   /// 菜单展开期间的关闭看门狗：
@@ -1144,7 +1190,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
       return;
     }
     if (_menuSawFocus) {
-      unawaited(_setSettingsMenuVisible(false));
+      _setSettingsMenuVisible(false);
     }
   }
 
@@ -1158,54 +1204,6 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
       debugPrint('[桌面歌词悬浮窗] 前台状态查询失败: $e');
       return true;
     }
-  }
-
-  void _handleMouseEnter() {
-    _mouseOutCloseTimer?.cancel();
-    _mouseOutCloseTimer = null;
-    if (!_hovering) {
-      setState(() => _hovering = true);
-    }
-  }
-
-  void _handleMouseExit() {
-    if (_hovering) {
-      setState(() => _hovering = false);
-    }
-    if (!_showSettingsMenu) return;
-    _mouseOutCloseTimer?.cancel();
-    _mouseOutCloseTimer = Timer(const Duration(milliseconds: 800), () {
-      if (!mounted || _hovering || !_showSettingsMenu) return;
-      unawaited(_setSettingsMenuVisible(false));
-    });
-  }
-
-  @override
-  void dispose() {
-    _stopMenuDismissWatch();
-    if (_showSettingsMenu) {
-      // 防御性还原：菜单展开时窗口是加高态，直接销毁会留下一个
-      // 透明的加高置顶窗继续吃掉下方点击。
-      final restoreTop = _originalWindowTop;
-      final popsUpward = _menuPopsUpward;
-      () async {
-        final pos = await _getWindowPosition();
-        // 取位失败（窗口可能已销毁）时跳过还原，绝不能落到 (0,0)。
-        if (pos == null) return;
-        await _setWindowBounds(
-          Rect.fromLTWH(
-            pos.dx,
-            popsUpward && restoreTop != null ? restoreTop : pos.dy,
-            WindowsDesktopLyricsBridge.overlayWidth,
-            WindowsDesktopLyricsBridge.overlayHeight,
-          ),
-        );
-      }();
-    }
-    // 本 State 销毁后（如锁定态切换子树）记账标志不再有人复位：
-    // 残留非零值会让后续正常拖动的落盘整体偏移一个菜单高度。
-    _overlayExpandedTopAdjust = 0.0;
-    super.dispose();
   }
 
   void _updateSettings(DesktopLyricsSettings newSettings) {
@@ -1222,16 +1220,13 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     final cardColor = _hovering
         ? const Color(0xCC141823)
         : (settings.opacity > 0
-            ? Color(settings.backgroundColor).withValues(
-                alpha: settings.opacity.clamp(0.0, 1.0),
-              )
-            : Colors.transparent);
+              ? Color(
+                  settings.backgroundColor,
+                ).withValues(alpha: settings.opacity.clamp(0.0, 1.0))
+              : Colors.transparent);
 
     final cardBorder = _hovering
-        ? Border.all(
-            color: Colors.white.withValues(alpha: 0.12),
-            width: 1.0,
-          )
+        ? Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1.0)
         : null;
 
     final cardShadows = _hovering
@@ -1246,112 +1241,120 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 
     final showToolbar = _hovering || _showSettingsMenu;
 
-    // 容器高度 == 真实窗口高度（原生 resize 后 MediaQuery 立即跟随）。
-    // 这是"展开/收起不闪"的关键：菜单展开时窗口被原生加高，卡片贴底
-    // 就能跟着涨高，不会出现"卡片换了锚点、窗口却还没长高"的错位帧
-    // （历史实现用 `_showSettingsMenu ? 260 : 88` 推导容器高度，配合
-    // "先移动+改尺寸、最后才 setState"，中间帧会把整条歌词抛上去再落下）。
-    final double boxHeight =
-        MediaQuery.sizeOf(context).height.clamp(
-          0.0,
-          double.infinity,
-        ).toDouble();
-    final double cardTop = _menuPopsUpward
-        ? (boxHeight - WindowsDesktopLyricsBridge.overlayHeight)
-            .clamp(0.0, double.infinity)
-            .toDouble()
-        : 0.0;
-
+    // 布局契约：窗口常驻展开高度（菜单带 + 卡片带），卡片带贴窗口底，
+    // 全部锚点以窗口底边为基准 —— 与 MediaQuery 无关，彻底杜绝
+    // "窗口几何与 metrics 到达时序不同步"的中间帧（历史实现读
+    // MediaQuery.sizeOf，resize 落地与 metrics 更新之间的任何 rebuild
+    // 都会按旧高度推卡片位置，跳一帧）。
     return SizedBox(
       width: WindowsDesktopLyricsBridge.overlayWidth,
-      height: boxHeight,
-      child: MouseRegion(
-        hitTestBehavior: HitTestBehavior.opaque,
-        onEnter: (_) => _handleMouseEnter(),
-        onExit: (_) => _handleMouseExit(),
-        child: Material(
-          type: MaterialType.transparency,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                top: _menuPopsUpward ? null : 0,
-                bottom: _menuPopsUpward ? 0 : null,
-                left: 0,
-                right: 0,
-                height: WindowsDesktopLyricsBridge.overlayHeight,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  decoration: BoxDecoration(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    border: cardBorder,
-                    boxShadow: cardShadows,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: DragToMoveArea(
-                      child: Container(
-                        color: Colors.transparent,
-                        child: buildOverlayLyricsBody(
-                          settings: settings,
-                          current: widget.current,
-                          next: widget.next,
-                          progress: widget.progress,
-                          activeOnBottom: widget.activeOnBottom,
+      height: WindowsDesktopLyricsBridge.overlayWindowHeight,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // 菜单带（卡片带上方）：快捷菜单在此淡入/滑出。收起态整带
+            // 透明且 IgnorePointer + 原生穿透（见 _pollCursor），不挡
+            // 下层应用点击；展开态点带内空白即收起。
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: WindowsDesktopLyricsBridge.overlayMenuPanelHeight,
+              child: IgnorePointer(
+                ignoring: !_showSettingsMenu,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _setSettingsMenuVisible(false),
+                  child: AnimatedOpacity(
+                    opacity: _showSettingsMenu ? 1.0 : 0.0,
+                    duration: _kMenuTransition,
+                    child: AnimatedSlide(
+                      offset: _showSettingsMenu
+                          ? Offset.zero
+                          : const Offset(0, -0.15),
+                      duration: _kMenuTransition,
+                      curve: Curves.easeOutCubic,
+                      child: Align(
+                        alignment: Alignment.bottomRight,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 4, right: 8),
+                          child: _OverlayQuickSettingsMenu(
+                            settings: settings,
+                            onUpdateSettings: (newSettings) {
+                              _updateSettings(newSettings);
+                            },
+                            onOpenDetailedSettings: () {
+                              // 先让主窗把设置页带起来（用户注意力随之
+                              // 切走），再淡出菜单 —— 收起动作在背后完成。
+                              widget.onOpenDetailedSettings?.call();
+                              _setSettingsMenuVisible(false);
+                            },
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-              if (_showSettingsMenu)
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _setSettingsMenuVisible(false),
-                  ),
+            ),
+            // 卡片带：贴窗口底（恒定 124 高，菜单收展不影响其几何）。
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: WindowsDesktopLyricsBridge.overlayHeight,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: cardBorder,
+                  boxShadow: cardShadows,
                 ),
-              Positioned(
-                // 工具栏恒位于卡片顶部的专属带内（卡片顶部 + 2）。
-                top: cardTop + 2,
-                right: 8,
-                child: AnimatedOpacity(
-                  opacity: showToolbar ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeInOut,
-                  child: IgnorePointer(
-                    ignoring: !showToolbar,
-                    child: _buildOverlayToolbar(context),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: DragToMoveArea(
+                    child: Container(
+                      color: Colors.transparent,
+                      child: buildOverlayLyricsBody(
+                        settings: settings,
+                        current: widget.current,
+                        next: widget.next,
+                        progress: widget.progress,
+                        activeOnBottom: widget.activeOnBottom,
+                      ),
+                    ),
                   ),
                 ),
               ),
-              if (_showSettingsMenu)
-                Positioned(
-                  // 向下弹出：菜单挂在工具栏下方（歌词带上沿 + 2）；
-                  // 向上弹出：菜单底边距卡片顶边 4px —— 卡片贴窗口底时
-                  // 该偏移恒等于 overlayHeight + 4，与窗口实际高度无关。
-                  top: _menuPopsUpward
-                      ? null
-                      : WindowsDesktopLyricsBridge.lyricsTopInset + 2,
-                  bottom: _menuPopsUpward
-                      ? WindowsDesktopLyricsBridge.overlayHeight + 4
-                      : null,
-                  right: 8,
-                  child: _OverlayQuickSettingsMenu(
-                    settings: settings,
-                    onUpdateSettings: (newSettings) {
-                      _updateSettings(newSettings);
-                    },
-                    onOpenDetailedSettings: () {
-                      _setSettingsMenuVisible(false);
-                      widget.onOpenDetailedSettings?.call();
-                    },
+            ),
+            // 工具栏专属带：卡片顶之上 [lyricsTopInset] 高的带子，右下锚定
+            // （右 8、底 2 = 历史的卡片顶 +2）。
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: WindowsDesktopLyricsBridge.overlayLyricsHeight,
+              height: WindowsDesktopLyricsBridge.lyricsTopInset,
+              child: AnimatedOpacity(
+                opacity: showToolbar ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeInOut,
+                child: IgnorePointer(
+                  ignoring: !showToolbar,
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8, bottom: 2),
+                      child: _buildOverlayToolbar(context),
+                    ),
                   ),
                 ),
-            ],
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1406,8 +1409,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
             tooltip: '桌面歌词设置',
             iconSize: 20,
             isActive: _showSettingsMenu,
-            onPressed: () =>
-                _setSettingsMenuVisible(!_showSettingsMenu),
+            onPressed: () => _setSettingsMenuVisible(!_showSettingsMenu),
           ),
           const SizedBox(width: 2),
           _ToolbarButton(
@@ -1558,10 +1560,7 @@ Widget buildOverlayLyricsBody({
         child: Center(
           child: FittedBox(
             fit: BoxFit.scaleDown,
-            child: SizedBox(
-              width: contentWidth,
-              child: body,
-            ),
+            child: SizedBox(width: contentWidth, child: body),
           ),
         ),
       ),
@@ -1609,7 +1608,9 @@ class _ToolbarButtonState extends State<_ToolbarButton> {
             height: 30,
             decoration: BoxDecoration(
               color: (widget.isActive || _hovered)
-                  ? Colors.white.withValues(alpha: widget.isActive ? 0.28 : 0.18)
+                  ? Colors.white.withValues(
+                      alpha: widget.isActive ? 0.28 : 0.18,
+                    )
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
             ),
@@ -1672,10 +1673,7 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
             children: [
               const Text(
                 '字体大小',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.white70, fontSize: 12),
               ),
               const Spacer(),
               _buildStepButton(
@@ -1722,10 +1720,7 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
             children: [
               const Text(
                 '歌词配色',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.white70, fontSize: 12),
               ),
               const Spacer(),
               Row(
@@ -1767,10 +1762,7 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     settings.singleLine ? '切换双行' : '切换单行',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ],
               ),
@@ -1789,18 +1781,11 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
               padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.tune_rounded,
-                    size: 16,
-                    color: Colors.white70,
-                  ),
+                  Icon(Icons.tune_rounded, size: 16, color: Colors.white70),
                   SizedBox(width: 8),
                   Text(
                     '更多设置',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   Spacer(),
                   Icon(
@@ -1893,4 +1878,3 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
     );
   }
 }
-
