@@ -32,6 +32,12 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# windows-latest 镜像的新版 MSVC（VS18 / 14.5x）把 <experimental/coroutine>
+# 的废弃提示升级为硬错误 STL1011，而 audio_service_win 0.0.3（SMTC 系统媒体
+# 集成）仍用 /await + 实验协程头编译。按 MSVC 提示定义过渡静默宏；旧工具链
+# 上为无副作用的空操作。目录级定义随其后 add_subdirectory 的插件子目录继承。
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
