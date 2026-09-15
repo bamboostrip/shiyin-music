@@ -172,9 +172,9 @@ void main() {
       // 描边层：stroke 绘制 + 同色系深色 + 附带 1 层轻投影
       expect(baseStroke.style?.foreground?.style, PaintingStyle.stroke);
       expect(baseStroke.style?.foreground?.strokeWidth, closeTo(28 * 0.075, 0.01));
-      expect((baseStroke.style!.foreground!.color!.a * 255).round(), 255);
+      expect((baseStroke.style!.foreground!.color.a * 255).round(), 255);
       expect(baseStroke.style?.shadows, isNotNull);
-      expect(baseStroke.style!.shadows.length, 1);
+      expect(baseStroke.style!.shadows!.length, 1);
 
       // Highlight played text
       expect(highlightFill.data, '双层歌词测试');
@@ -363,9 +363,9 @@ void main() {
       // Highlight played text opacity
       expect(highlightFill.style?.color?.a, closeTo(0.5, 0.01));
       // 描边层 alpha 同样跟随 textOpacity
-      expect(baseStroke.style?.foreground?.color?.a, closeTo(0.5, 0.01));
+      expect(baseStroke.style?.foreground?.color.a, closeTo(0.5, 0.01));
       // 投影浓度随 textOpacity 缩放
-      final shadow = baseStroke.style!.shadows.single;
+      final shadow = baseStroke.style!.shadows!.single;
       expect(shadow.color.a, closeTo(0.30 * 0.5, 0.01));
     });
 
