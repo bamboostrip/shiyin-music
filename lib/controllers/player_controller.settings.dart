@@ -140,6 +140,10 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (pre.fromCache) {
         _pendingGainDb = pre.gainDb;
         unawaited(_applyLoudnessGain(instant: true));
+      } else {
+        // 未命中(清过缓存等罕见场景):与 playSong 同语义,先中性化旧增益,
+        // 真实增益分析出来前按原始响度播放。
+        _resetStaleLoudnessGain();
       }
       unawaited(_analyzeAndApplyLoudness(song: song, url: url));
       await _audioHandler.loadSong(
@@ -356,8 +360,10 @@ mixin _PlayerSettings on _PlayerControllerBase {
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
-    userVolume =
-        (prefs.getDouble(_userVolumeSettingKey) ?? userVolume).clamp(0.0, 1.0);
+    userVolume = (prefs.getDouble(_userVolumeSettingKey) ?? userVolume).clamp(
+      0.0,
+      1.0,
+    );
     desktopLyricsEnabled =
         prefs.getBool(_desktopLyricsEnabledSettingKey) ?? desktopLyricsEnabled;
     final dlVersion = prefs.getInt(_desktopLyricsSettingsVersionKey) ?? 0;

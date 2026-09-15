@@ -385,6 +385,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Duration? _pendingIdlePosition;
   Duration? _pendingInitialPosition;
   bool _disposed = false;
+
   /// 进行中的歌词拉取（按歌曲 hash 去重），防止进页兜底与并发触发重复请求。
   String? _lyricsFetchInFlightHash;
 
@@ -632,4 +633,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   });
 
   Future<void> _applyLoudnessGain({bool instant = false});
+
+  /// 切歌缓存未命中时中性化残留的旧响度增益（effects 分片实现）。
+  void _resetStaleLoudnessGain();
 }

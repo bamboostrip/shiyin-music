@@ -293,6 +293,21 @@ mixin _PlayerEffects on _PlayerControllerBase {
     }
   }
 
+  /// 缓存未命中的新歌:上一首的增益不再适用,先中性化(渐变回用户音量),
+  /// 真实增益分析出来前按原始响度播放。PC 网络源需下载/流式分析,窗口比
+  /// 手机长,残留旧增益会被明显听成"切歌瞬间忽大忽小"。
+  ///
+  /// 仅在已启用且确有旧增益时动作;未启用/已中性时 no-op。
+  @override
+  void _resetStaleLoudnessGain() {
+    if (!_loudness.isEnabled || _pendingGainDb == null) return;
+    LoudnessService.log(
+      'controller 切歌缓存未命中 → 中性化旧增益 ${_pendingGainDb!.toStringAsFixed(2)}dB',
+    );
+    _pendingGainDb = null;
+    unawaited(_applyLoudnessGain(instant: false));
+  }
+
   /// 应用当前歌曲的响度增益(sessionId 变化或分析完成时调用)。
   /// [instant]=true 直接设置(缓存命中首播/用户调音量);false 走渐变。
   /// 用户音量恒参与合成，响度永远只动自己的系数通道。

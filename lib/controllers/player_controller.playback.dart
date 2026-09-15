@@ -163,6 +163,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       if (pre.fromCache) {
         _pendingGainDb = pre.gainDb;
         unawaited(_applyLoudnessGain(instant: true));
+      } else {
+        // 未命中:新歌增益未知,上一首的增益先中性化(渐变回用户音量),
+        // 杜绝新歌开头带着旧增益播放(分析完成后会再渐变到真实值)。
+        _resetStaleLoudnessGain();
       }
       unawaited(_analyzeAndApplyLoudness(song: song, url: url));
       await _audioHandler.loadSong(
@@ -346,7 +350,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         ? queueLength
         : _kMaxAutoSkipsPerStreak;
     final since = _autoSkipStreakSince ??= DateTime.now();
-    final overBudget = DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
+    final overBudget =
+        DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
     if (_autoSkippedInStreak >= skipLimit || overBudget) {
       debugPrint(
         '[时音][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
