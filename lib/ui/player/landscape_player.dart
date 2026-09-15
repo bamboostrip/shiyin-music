@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_lyric/flutter_lyric.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -20,9 +21,16 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import 'desktop_lyric_list.dart';
 import 'lyric_display_mode.dart';
+import 'lyric_views.dart'
+    show kLyricShowRomanizationPrefKey, kLyricShowTranslationPrefKey;
 import 'player_controls.dart';
 
-class LandscapePlayerContent extends StatelessWidget {
+/// PC / 车机分栏播放页主体。
+///
+/// 译/音显示开关状态挂在这里：封面左下的切换按钮（[LandscapeLyricToggleColumn]）
+/// 与右侧歌词面板分属两棵子树，由本组件统一持有并持久化
+/// （与移动端歌词页共用 [kLyricShowTranslationPrefKey] / [kLyricShowRomanizationPrefKey]）。
+class LandscapePlayerContent extends StatefulWidget {
   const LandscapePlayerContent({
     super.key,
     required this.player,
@@ -41,23 +49,63 @@ class LandscapePlayerContent extends StatelessWidget {
   final ValueChanged<Song> onArtistTap;
 
   @override
+  State<LandscapePlayerContent> createState() => _LandscapePlayerContentState();
+}
+
+class _LandscapePlayerContentState extends State<LandscapePlayerContent> {
+  bool _showTranslation = true;
+  bool _showRomanization = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _showTranslation = prefs.getBool(kLyricShowTranslationPrefKey) ?? true;
+      _showRomanization = prefs.getBool(kLyricShowRomanizationPrefKey) ?? false;
+    });
+  }
+
+  Future<void> _setShowTranslation(bool show) async {
+    setState(() => _showTranslation = show);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kLyricShowTranslationPrefKey, show);
+  }
+
+  Future<void> _setShowRomanization(bool show) async {
+    setState(() => _showRomanization = show);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kLyricShowRomanizationPrefKey, show);
+  }
+
+  @override
   Widget build(BuildContext context) {
     // PC（QQ 音乐 PC 正在播放页式）：页面最底是那条与主界面同源的常驻播放栏
     // （封面/歌名/操作 + 控制/进度 + 音质/音效/桌面词/队列），最左「收起」返回。
     // 车机横屏没有鼠标语义，保持原「右栏内进度+控制」，不套这层。
     final useBottomBar = isDesktopFormFactor;
+    final lyrics = widget.player.lyrics;
+    final hasTranslation = lyrics.any((l) => l.translation?.isNotEmpty == true);
+    final hasRomanization = lyrics.any(
+      (l) => l.romanization?.isNotEmpty == true,
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 350;
         final content = Column(
           children: [
             LandscapeHeader(
-              player: player,
-              auth: auth,
-              song: song,
-              onClose: onClose,
+              player: widget.player,
+              auth: widget.auth,
+              song: widget.song,
+              onClose: widget.onClose,
               compact: compact,
-              onArtistTap: onArtistTap,
+              onArtistTap: widget.onArtistTap,
             ),
             SizedBox(height: compact ? 2 : 10),
             Expanded(
@@ -66,23 +114,31 @@ class LandscapePlayerContent extends StatelessWidget {
                   Expanded(
                     flex: 9,
                     child: LandscapeArtworkShowcase(
-                      player: player,
-                      song: song,
+                      player: widget.player,
+                      song: widget.song,
                       compact: compact,
+                      showTranslation: _showTranslation,
+                      showRomanization: _showRomanization,
+                      hasTranslation: hasTranslation,
+                      hasRomanization: hasRomanization,
+                      onToggleTranslation: _setShowTranslation,
+                      onToggleRomanization: _setShowRomanization,
                     ),
                   ),
                   SizedBox(width: compact ? 18 : 34),
                   Expanded(
                     flex: 12,
                     child: LandscapeRightPanel(
-                      player: player,
-                      auth: auth,
-                      song: song,
-                      onQueue: onQueue,
+                      player: widget.player,
+                      auth: widget.auth,
+                      song: widget.song,
+                      onQueue: widget.onQueue,
                       compact: compact,
                       // 进度/控制已下沉到页面底部常驻播放栏时，右栏只留歌名 + 歌词，
                       // 歌词区域顺势吃满剩余高度。
                       showTransport: !useBottomBar,
+                      showTranslation: _showTranslation,
+                      showRomanization: _showRomanization,
                     ),
                   ),
                 ],
@@ -118,11 +174,11 @@ class LandscapePlayerContent extends StatelessWidget {
             ),
             // 播放页内复用常驻底栏：禁止再进一层播放页，最左加「收起」返回主界面。
             DesktopPlayerBar(
-              player: player,
-              auth: auth,
+              player: widget.player,
+              auth: widget.auth,
               overlayDark: true,
               openPlayerPageEnabled: false,
-              onCollapse: onClose,
+              onCollapse: widget.onClose,
             ),
           ],
         );
@@ -340,11 +396,23 @@ class LandscapeArtworkShowcase extends StatefulWidget {
     required this.player,
     required this.song,
     required this.compact,
+    required this.showTranslation,
+    required this.showRomanization,
+    required this.hasTranslation,
+    required this.hasRomanization,
+    required this.onToggleTranslation,
+    required this.onToggleRomanization,
   });
 
   final PlayerController player;
   final Song song;
   final bool compact;
+  final bool showTranslation;
+  final bool showRomanization;
+  final bool hasTranslation;
+  final bool hasRomanization;
+  final ValueChanged<bool> onToggleTranslation;
+  final ValueChanged<bool> onToggleRomanization;
 
   @override
   State<LandscapeArtworkShowcase> createState() =>
@@ -402,91 +470,116 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
           widget.player.previous();
         }
       },
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final available = math.min(
-            constraints.maxWidth,
-            constraints.maxHeight,
-          );
-          final discSize = (available * (widget.compact ? .84 : .9))
-              .clamp(150.0, 330.0)
-              .toDouble();
-          final coverSize = discSize * (widget.compact ? .58 : .70);
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final available = math.min(
+                  constraints.maxWidth,
+                  constraints.maxHeight,
+                );
+                final discSize = (available * (widget.compact ? .84 : .9))
+                    .clamp(150.0, 330.0)
+                    .toDouble();
+                final coverSize = discSize * (widget.compact ? .58 : .70);
 
-          return Center(
-            // 旋转唱片是纯装饰动画，仅桌面 Windows 排除语义树
-            // （AXTree 竞态），移动端保留
-            child: ExcludeSemantics(
-              excluding: isDesktopPlatform,
-              child: SizedBox.square(
-                dimension: discSize,
-                child: AnimatedBuilder(
-                  animation: _rotationController,
-                  builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _rotationController.value * math.pi * 2,
-                      child: child,
-                    );
-                  },
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: .88),
-                              Colors.white.withValues(alpha: .58),
-                              Colors.white.withValues(alpha: .22),
-                            ],
-                            stops: const [0, .62, 1],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: .26),
-                              blurRadius: 30,
-                              offset: const Offset(0, 18),
+                return Center(
+                  // 旋转唱片是纯装饰动画，仅桌面 Windows 排除语义树
+                  // （AXTree 竞态），移动端保留
+                  child: ExcludeSemantics(
+                    excluding: isDesktopPlatform,
+                    child: SizedBox.square(
+                      dimension: discSize,
+                      child: AnimatedBuilder(
+                        animation: _rotationController,
+                        builder: (context, child) {
+                          return Transform.rotate(
+                            angle: _rotationController.value * math.pi * 2,
+                            child: child,
+                          );
+                        },
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: .88),
+                                    Colors.white.withValues(alpha: .58),
+                                    Colors.white.withValues(alpha: .22),
+                                  ],
+                                  stops: const [0, .62, 1],
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: .26),
+                                    blurRadius: 30,
+                                    offset: const Offset(0, 18),
+                                  ),
+                                ],
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
+                            for (final ratio in const [.36, .52, .68, .82])
+                              SizedBox.square(
+                                dimension: discSize * ratio,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: .16,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ClipOval(
+                              child: Artwork(
+                                url: widget.song.coverUrl,
+                                size: coverSize,
+                                borderRadius: coverSize,
+                              ),
+                            ),
+                            SizedBox.square(
+                              dimension: discSize * .08,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white.withValues(alpha: .82),
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                        child: const SizedBox.expand(),
                       ),
-                      for (final ratio in const [.36, .52, .68, .82])
-                        SizedBox.square(
-                          dimension: discSize * ratio,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: .16),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ClipOval(
-                        child: Artwork(
-                          url: widget.song.coverUrl,
-                          size: coverSize,
-                          borderRadius: coverSize,
-                        ),
-                      ),
-                      SizedBox.square(
-                        dimension: discSize * .08,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withValues(alpha: .82),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
-          );
-        },
+          ),
+          // 封面左下角：译/音显示切换按钮（截图红框位置）。
+          // 按钮放在拖拽切歌手势层之上，点按不触发切歌。
+          Positioned(
+            left: 2,
+            bottom: 4,
+            child: LandscapeLyricToggleColumn(
+              showTranslation: widget.showTranslation,
+              showRomanization: widget.showRomanization,
+              hasTranslation: widget.hasTranslation,
+              hasRomanization: widget.hasRomanization,
+              onToggleTranslation: widget.onToggleTranslation,
+              onToggleRomanization: widget.onToggleRomanization,
+              buttonSize: widget.compact
+                  ? 32.0
+                  : (isDesktopFormFactor ? 36.0 : 52.0),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -501,6 +594,8 @@ class LandscapeRightPanel extends StatelessWidget {
     required this.onQueue,
     required this.compact,
     this.showTransport = true,
+    this.showTranslation = true,
+    this.showRomanization = false,
   });
 
   final PlayerController player;
@@ -514,6 +609,10 @@ class LandscapeRightPanel extends StatelessWidget {
   /// PC 播放页已把这些下沉到页面底部的常驻播放栏，故传 false；
   /// 车机横屏没有常驻播放栏，保持 true。
   final bool showTransport;
+
+  /// 歌词是否显示翻译/音译（由 [LandscapePlayerContent] 持有的开关传入）。
+  final bool showTranslation;
+  final bool showRomanization;
 
   @override
   Widget build(BuildContext context) {
@@ -563,6 +662,8 @@ class LandscapeRightPanel extends StatelessWidget {
                 songHash: currentSong?.hash ?? '',
                 lyrics: player.lyrics,
                 compact: compact || veryTight,
+                showTranslation: showTranslation,
+                showRomanization: showRomanization,
               ),
             ),
             if (showTransport) ...[
@@ -593,12 +694,19 @@ class LandscapeLyricPanel extends StatefulWidget {
     required this.songHash,
     required this.lyrics,
     required this.compact,
+    this.showTranslation = true,
+    this.showRomanization = false,
   });
 
   final PlayerController player;
   final String songHash;
   final List<LyricLine> lyrics;
   final bool compact;
+
+  /// 歌词是否显示翻译/音译。桌面分支换算 [LyricDisplayMode]，
+  /// 车机分支透传给 flutter_lyric 模型（两者切换都会触发歌词重建）。
+  final bool showTranslation;
+  final bool showRomanization;
 
   @override
   State<LandscapeLyricPanel> createState() => _LandscapeLyricPanelState();
@@ -630,6 +738,8 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   void didUpdateWidget(covariant LandscapeLyricPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.songHash != widget.songHash ||
+        oldWidget.showTranslation != widget.showTranslation ||
+        oldWidget.showRomanization != widget.showRomanization ||
         !_sameLyricContent(oldWidget.lyrics, widget.lyrics)) {
       _syncLyrics();
     }
@@ -652,7 +762,11 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   void _syncLyrics() {
     final lyrics = widget.lyrics;
     if (lyrics.isNotEmpty) {
-      final model = convertToFlutterLyricModel(lyrics);
+      final model = convertToFlutterLyricModel(
+        lyrics,
+        showTranslation: widget.showTranslation,
+        showRomanization: widget.showRomanization,
+      );
       _lyricController.loadLyricModel(model);
       // 重载后立即用当前播放位置校准，避免用陈旧 progress(0) 闪回开头。
       final current = widget.player.smoothPosition;
@@ -723,7 +837,10 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
           songHash: widget.songHash,
           lyrics: lyrics,
           activeIndex: player.activeLyricIndex,
-          displayMode: LyricDisplayMode.lyricsOnly,
+          displayMode: lyricDisplayModeOf(
+            showTranslation: widget.showTranslation,
+            showRomanization: widget.showRomanization,
+          ),
           lyricScale: widget.compact ? 0.85 : 1.0,
         ),
       );
@@ -759,6 +876,122 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
           textAlign: TextAlign.left,
           contentAlignment: CrossAxisAlignment.start,
           activeHighlightColor: Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+/// 封面左下角的译/音显示切换按钮列。
+///
+/// 视觉对齐移动端歌词页的开关语义（同一份持久化设置），按钮为竖排
+/// 圆角方形描边样式：开启时主题色描边 + 淡色衬底高亮，关闭时灰色
+/// 无高亮；仅在当前歌词确有翻译/音译内容时渲染对应按钮。
+class LandscapeLyricToggleColumn extends StatelessWidget {
+  const LandscapeLyricToggleColumn({
+    super.key,
+    required this.showTranslation,
+    required this.showRomanization,
+    required this.hasTranslation,
+    required this.hasRomanization,
+    required this.onToggleTranslation,
+    required this.onToggleRomanization,
+    this.buttonSize = 36,
+  });
+
+  final bool showTranslation;
+  final bool showRomanization;
+  final bool hasTranslation;
+  final bool hasRomanization;
+  final ValueChanged<bool> onToggleTranslation;
+  final ValueChanged<bool> onToggleRomanization;
+
+  /// 按钮边长：桌面取 36（对齐移动端药丸宽度量级），车机触控取 52，
+  /// 紧凑高度取 32。
+  final double buttonSize;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!hasTranslation && !hasRomanization) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasTranslation)
+          _LandscapeSquareToggle(
+            label: '译',
+            size: buttonSize,
+            isOn: showTranslation,
+            tooltip: '翻译 (${showTranslation ? '已开启' : '已关闭'})',
+            onToggle: () => onToggleTranslation(!showTranslation),
+          ),
+        if (hasTranslation && hasRomanization)
+          SizedBox(height: buttonSize * .24),
+        if (hasRomanization)
+          _LandscapeSquareToggle(
+            label: '音',
+            size: buttonSize,
+            isOn: showRomanization,
+            tooltip: '拼音/音译 (${showRomanization ? '已开启' : '已关闭'})',
+            onToggle: () => onToggleRomanization(!showRomanization),
+          ),
+      ],
+    );
+  }
+}
+
+class _LandscapeSquareToggle extends StatelessWidget {
+  const _LandscapeSquareToggle({
+    required this.label,
+    required this.size,
+    required this.isOn,
+    required this.tooltip,
+    required this.onToggle,
+  });
+
+  final String label;
+  final double size;
+  final bool isOn;
+  final String tooltip;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    // 播放页底是封面背景，按钮用主题强调色点亮（深色主题下为提亮后的
+    // 主题色），关闭态仅保留低透明度描边，不与背景抢视线。
+    final accent = Theme.of(context).colorScheme.primary;
+    final borderColor = isOn ? accent : Colors.white.withValues(alpha: .30);
+    final foreground = isOn ? accent : Colors.white.withValues(alpha: .55);
+
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onToggle,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(size * .26),
+              border: Border.all(color: borderColor, width: 1.4),
+              color: isOn ? accent.withValues(alpha: .14) : null,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: size * .42,
+                fontWeight: FontWeight.w700,
+                color: foreground,
+                height: 1,
+              ),
+            ),
+          ),
         ),
       ),
     );

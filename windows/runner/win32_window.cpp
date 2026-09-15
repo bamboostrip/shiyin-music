@@ -29,6 +29,23 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
 
+// 窗口原生擦除底色：默认与浅色主题页面底色一致（白色），Dart 启动后按
+// 当前主题经 shiyin_music/window 通道同步（见 FlutterWindow::OnCreate）。
+static COLORREF g_erase_background_color = RGB(255, 255, 255);
+
+// 擦除差异快照：上一帧内容所在的客户区屏幕矩形。顶层窗口与 FLUTTERVIEW
+// 子窗口共用（子窗擦除通常先到，填充差异并推进快照后，顶层的擦除为空操作）。
+static RECT g_erase_snapshot_client = {0, 0, 0, 0};
+
+RECT ClientScreenRect(HWND hwnd) {
+  RECT rect;
+  GetClientRect(hwnd, &rect);
+  POINT origin = {0, 0};
+  ClientToScreen(hwnd, &origin);
+  OffsetRect(&rect, origin.x, origin.y);
+  return rect;
+}
+
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
 // Scale helper to convert logical scaler values to physical using passed in
@@ -187,6 +204,20 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_WINDOWPOSCHANGING:
+      // 尺寸变化前快照客户区（此消息到达时窗口仍是旧几何），供
+      // WM_ERASEBKGND 计算"新暴露区域"。不 return，继续默认处理。
+      SyncEraseSnapshotOnWindowPosChanging(
+          hwnd, reinterpret_cast<WINDOWPOS*>(lparam));
+      break;
+
+    case WM_ERASEBKGND:
+      // 窗口类无刷底（hbrBackground = 0）：最大化/缩放过渡期新暴露的边缘
+      // 在 Flutter 下一帧呈现前会闪黑。只填新暴露的差异带、保留旧画面
+      // （整幅重刷会把旧内容盖成底色，表现为整屏闪白/闪黑）。
+      FillExposedEdgesOnErase(hwnd, reinterpret_cast<HDC>(wparam));
+      return 1;
+
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
@@ -261,6 +292,65 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetEraseBackgroundColor(COLORREF color) {
+  g_erase_background_color = color;
+}
+
+void Win32Window::SyncEraseSnapshotOnWindowPosChanging(HWND hwnd,
+                                                       WINDOWPOS* pos) {
+  if (pos->flags & SWP_NOSIZE) {
+    if (pos->flags & SWP_NOMOVE) {
+      return;
+    }
+    // 纯移动：内容随窗口整体平移，不产生新暴露区域，快照随之平移，
+    // 保持"上一帧内容所在矩形"语义。
+    RECT window_rect;
+    GetWindowRect(hwnd, &window_rect);
+    OffsetRect(&g_erase_snapshot_client, pos->x - window_rect.left,
+               pos->y - window_rect.top);
+    return;
+  }
+  // 尺寸将变：记录变化前的客户区屏幕矩形。
+  g_erase_snapshot_client = ClientScreenRect(hwnd);
+}
+
+void Win32Window::FillExposedEdgesOnErase(HWND hwnd, HDC hdc) {
+  const RECT cur = ClientScreenRect(hwnd);
+  // 快照换算到当前客户区坐标系（擦除 DC 为客户区坐标）。
+  RECT prev = g_erase_snapshot_client;
+  OffsetRect(&prev, -cur.left, -cur.top);
+  const LONG cur_w = cur.right - cur.left;
+  const LONG cur_h = cur.bottom - cur.top;
+
+  // 顶/底整条横带 + 左/右竖带（纵向截到快照范围，避免重复填充四角），
+  // 四条带拼起来恰为"当前客户区 ∖ 快照"，覆盖移动 + 缩放任意组合下
+  // 新暴露的区域。窗口缩小时差异为空、全部不填，旧画面由 Flutter 重绘。
+  HBRUSH brush = CreateSolidBrush(g_erase_background_color);
+  RECT band;
+  if (prev.top > 0) {
+    band = {0, 0, cur_w, prev.top > cur_h ? cur_h : prev.top};
+    FillRect(hdc, &band, brush);
+  }
+  if (prev.bottom < cur_h) {
+    band = {0, prev.bottom < 0 ? 0 : prev.bottom, cur_w, cur_h};
+    FillRect(hdc, &band, brush);
+  }
+  const LONG v_top = prev.top < 0 ? 0 : prev.top;
+  const LONG v_bottom = prev.bottom > cur_h ? cur_h : prev.bottom;
+  if (v_bottom > v_top) {
+    if (prev.left > 0) {
+      band = {0, v_top, prev.left > cur_w ? cur_w : prev.left, v_bottom};
+      FillRect(hdc, &band, brush);
+    }
+    if (prev.right < cur_w) {
+      band = {prev.right < 0 ? 0 : prev.right, v_top, cur_w, v_bottom};
+      FillRect(hdc, &band, brush);
+    }
+  }
+  DeleteObject(brush);
+  g_erase_snapshot_client = cur;
 }
 
 bool Win32Window::OnCreate() {

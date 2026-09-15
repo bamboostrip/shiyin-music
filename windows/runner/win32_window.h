@@ -52,6 +52,29 @@ class Win32Window {
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
+  // 设置窗口原生擦除底色（最大化/缩放过渡期新暴露区域的填充色）。
+  //
+  // 窗口类 hbrBackground 为 0 且内容是异步绘制的 Flutter 画面，过渡期
+  // 新暴露的边缘默认会闪黑；Dart 侧按当前主题经 shiyin_music/window 通道
+  // 同步底色。顶层窗口与 FLUTTERVIEW 子窗口共用一份。
+  static void SetEraseBackgroundColor(COLORREF color);
+
+  // WM_WINDOWPOSCHANGING 时同步擦除快照：尺寸将变时记录变化前的客户区
+  // 屏幕矩形；纯移动时快照随窗口平移（移动不产生新暴露区域）。
+  // 供 FillExposedEdgesOnErase 计算"新暴露区域"。
+  static void SyncEraseSnapshotOnWindowPosChanging(HWND hwnd, WINDOWPOS* pos);
+
+  // 用当前擦除底色填充本次变化"新暴露"的客户区区域：屏幕坐标系下当前
+  // 客户矩形减去快照矩形（最多四条边带），并把快照推进为当前矩形。
+  //
+  // 必须按屏幕坐标算差异而不是客户区右/下增长带：最大化时窗口原点同时
+  // 移动（如从屏幕中部跳到全屏），旧画面停留在原屏幕位置，暴露的是
+  // 上/左/右/下四侧；只填差异带可保留旧画面，整幅填充则会在 Flutter
+  // 下一帧到达前把全部旧内容盖成底色，表现为最大化/还原时整屏闪色。
+  // 顶层窗口与 FLUTTERVIEW 子窗口共用同一份快照：首个到达的擦除填充
+  // 差异并推进快照，后续擦除差异为空、自然空操作。
+  static void FillExposedEdgesOnErase(HWND hwnd, HDC hdc);
+
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 

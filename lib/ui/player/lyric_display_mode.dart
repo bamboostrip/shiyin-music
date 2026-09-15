@@ -29,6 +29,19 @@ List<LyricDisplayMode> availableLyricDisplayModes(List<LyricLine> lyrics) {
   return modes;
 }
 
+/// 由译/音开关换算歌词显示模式。
+///
+/// 优先级与移动端歌词页一致：翻译开启时优先显示翻译，
+/// 否则开了音译显示音译，都没开则仅歌词。
+LyricDisplayMode lyricDisplayModeOf({
+  required bool showTranslation,
+  required bool showRomanization,
+}) {
+  if (showTranslation) return LyricDisplayMode.lyricsWithTranslation;
+  if (showRomanization) return LyricDisplayMode.lyricsWithRomanization;
+  return LyricDisplayMode.lyricsOnly;
+}
+
 String lyricDisplayModeLabel(LyricDisplayMode mode) {
   return switch (mode) {
     LyricDisplayMode.lyricsWithTranslation => '歌词 + 翻译',

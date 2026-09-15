@@ -316,6 +316,29 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangePlatformBrightness() {
+    // 主题跟随系统（ThemeMode.system）：系统深浅色切换时同步主窗原生擦除
+    // 底色，避免窗口最大化/缩放过渡边缘闪出旧主题色（ MaterialApp 内部
+    // 自行响应亮度重建，这里无需 setState）。
+    _syncWindowEraseBackground();
+  }
+
+  /// 主窗原生擦除底色与当前主题页面底色保持一致。
+  ///
+  /// 取值与 AppTheme 的 scaffoldBackgroundColor（非透明背景分支）一致：
+  /// 深色 0xFF06070A / 浅色纯白。
+  void _syncWindowEraseBackground() {
+    final dark =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    unawaited(
+      DesktopWindow.syncEraseBackground(
+        dark ? const Color(0xFF06070A) : Colors.white,
+      ),
+    );
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     switch (state) {
@@ -345,6 +368,8 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     _theme.applyOrientations(AdaptiveLayout.isTablet(context));
+    // 启动时（及主题相关重建时）同步主窗原生擦除底色；内部同值去重。
+    _syncWindowEraseBackground();
     return AnimatedBuilder(
       animation: _theme,
       builder: (context, _) {

@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io' show Platform, exit;
 import 'dart:math' as math;
-// window_manager 未重新导出 dart:ui 类型，Size/Offset 需自行引入。
-import 'dart:ui' show Offset, Rect, Size;
+// window_manager 未重新导出 dart:ui 类型，Size/Offset/Color 需自行引入。
+import 'dart:ui' show Color, Offset, Rect, Size;
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -221,6 +222,31 @@ class DesktopWindow {
   /// 读取最大化记忆：true → 上次退出时窗口处于最大化，启动后应还原。
   static bool maximizedPreferred(SharedPreferences prefs) =>
       prefs.getBool(kMaximizedPrefKey) ?? false;
+
+  /// 主窗原生配置通道（runner 侧注册，见 windows/runner/flutter_window.cpp）。
+  static const MethodChannel _windowChannel = MethodChannel(
+    'shiyin_music/window',
+  );
+
+  static int? _lastEraseBackground;
+
+  /// 同步主窗原生擦除底色（最大化/缩放过渡期新暴露区域的填充色）。
+  ///
+  /// 过渡期窗口新暴露的边缘在 Flutter 下一帧呈现前由原生先铺这层底色，
+  /// 避免闪出黑边；按当前主题底色调用。同值去重，重复调用无副作用。
+  static Future<void> syncEraseBackground(Color color) async {
+    if (!isDesktopPlatform) return;
+    final value = color.toARGB32() & 0xFFFFFF;
+    if (_lastEraseBackground == value) return;
+    _lastEraseBackground = value;
+    try {
+      await _windowChannel.invokeMethod<void>('setEraseBackground', value);
+    } on MissingPluginException {
+      // 旧 runner（未注册该通道）或测试环境：忽略。
+    } on PlatformException {
+      // 同步失败不影响功能。
+    }
+  }
 
   /// 立即持久化当前窗口几何（取消防抖）。
   ///

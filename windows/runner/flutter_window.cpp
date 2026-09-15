@@ -2,7 +2,35 @@
 
 #include <optional>
 
+#include <flutter/encodable_value.h>
+#include <flutter/method_result.h>
+#include <flutter/standard_method_codec.h>
+
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+// FLUTTERVIEW（引擎子窗口）实例子类化：其窗口类同样无刷底，最大化/缩放
+// 过渡期子窗新暴露的边缘在 Flutter 下一帧呈现前也会闪黑。与顶层窗口
+// （Win32Window::MessageHandler 的 WM_ERASEBKGND）共用同一份擦除快照，
+// 只填"新暴露"的差异带并保留旧画面，避免整屏闪色；首个到达的擦除填充
+// 差异并推进快照，后续擦除自然为空操作。
+WNDPROC g_flutter_view_original_proc = nullptr;
+
+LRESULT CALLBACK FlutterViewEraseBkgndProc(HWND hwnd,
+                                           UINT const message,
+                                           WPARAM const wparam,
+                                           LPARAM const lparam) noexcept {
+  if (message == WM_ERASEBKGND && g_flutter_view_original_proc != nullptr) {
+    Win32Window::FillExposedEdgesOnErase(
+        hwnd, reinterpret_cast<HDC>(wparam));
+    return 1;
+  }
+  return CallWindowProc(g_flutter_view_original_proc, hwnd, message, wparam,
+                        lparam);
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -26,6 +54,46 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // shiyin_music/window 通道：Dart 按当前主题同步最大化/缩放过渡期的
+  // 原生擦除底色（setEraseBackground，参数 0x00RRGGBB），消除窗口边缘
+  // 闪黑；顶层与 FLUTTERVIEW 子窗口共用该底色。
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "shiyin_music/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() == "setEraseBackground") {
+          const auto* arguments = call.arguments();
+          int64_t color = 0;
+          if (arguments != nullptr) {
+            if (const auto* v32 = std::get_if<int32_t>(arguments)) {
+              color = *v32;
+            } else if (const auto* v64 = std::get_if<int64_t>(arguments)) {
+              color = *v64;
+            }
+          }
+          // Dart 传 0x00RRGGBB；COLORREF 内存布局为 0x00BBGGRR。
+          Win32Window::SetEraseBackgroundColor(RGB(
+              static_cast<int>((color >> 16) & 0xFF),
+              static_cast<int>((color >> 8) & 0xFF),
+              static_cast<int>(color & 0xFF)));
+          result->Success();
+        } else {
+          result->NotImplemented();
+        }
+      });
+
+  // FLUTTERVIEW 子窗口擦底子类化（仅主窗视图一次）。
+  HWND flutter_view = flutter_controller_->view()->GetNativeWindow();
+  if (flutter_view != nullptr && g_flutter_view_original_proc == nullptr) {
+    g_flutter_view_original_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
+        flutter_view, GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(FlutterViewEraseBkgndProc)));
+  }
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

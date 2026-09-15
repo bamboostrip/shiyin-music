@@ -15,6 +15,10 @@ import 'player_controls.dart';
 
 export 'lyric_karaoke_text.dart';
 
+/// 译/音显示开关持久化键（移动端歌词页与 PC/车机分栏播放页共用同一份设置）。
+const String kLyricShowTranslationPrefKey = 'settings.lyric_show_translation';
+const String kLyricShowRomanizationPrefKey = 'settings.lyric_show_romanization';
+
 class LyricPlayerPage extends StatefulWidget {
   const LyricPlayerPage({
     super.key,
@@ -38,8 +42,8 @@ class LyricPlayerPage extends StatefulWidget {
 class _LyricPlayerPageState extends State<LyricPlayerPage>
     with AutomaticKeepAliveClientMixin {
   static const _lyricScaleKey = 'settings.lyric_scale';
-  static const _showTranslationKey = 'settings.lyric_show_translation';
-  static const _showRomanizationKey = 'settings.lyric_show_romanization';
+  static const _showTranslationKey = kLyricShowTranslationPrefKey;
+  static const _showRomanizationKey = kLyricShowRomanizationPrefKey;
 
   double _lyricScale = 1.0;
   bool _showTranslation = true;
@@ -241,11 +245,10 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
           songHash: widget.song.hash,
           lyrics: lyrics,
           activeIndex: widget.player.activeLyricIndex,
-          displayMode: _showTranslation
-              ? LyricDisplayMode.lyricsWithTranslation
-              : (_showRomanization
-                    ? LyricDisplayMode.lyricsWithRomanization
-                    : LyricDisplayMode.lyricsOnly),
+          displayMode: lyricDisplayModeOf(
+            showTranslation: _showTranslation,
+            showRomanization: _showRomanization,
+          ),
           lyricScale: _lyricScale,
         ),
       );
@@ -333,4 +336,3 @@ class LyricViewport extends StatelessWidget {
     );
   }
 }
-
