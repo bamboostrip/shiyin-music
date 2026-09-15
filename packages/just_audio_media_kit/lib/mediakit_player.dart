@@ -8,6 +8,7 @@ import 'package:just_audio_platform_interface/just_audio_platform_interface.dart
 import 'package:logging/logging.dart';
 import 'package:media_kit/media_kit.dart';
 import 'src/set_property.dart';
+import 'src/volume_scale.dart';
 
 /// An [AudioPlayerPlatform] which wraps `package:media_kit`'s [Player]
 class MediaKitPlayer extends AudioPlayerPlatform {
@@ -66,9 +67,9 @@ class MediaKitPlayer extends AudioPlayerPlatform {
       setProperty(_player, 'prefetch-playlist', 'yes');
     }
 
-    // LOCAL PATCH: mpv 默认 volume-max=130（约 +2.3dB 放大上限），响度均衡
-    // 需要最多 +6dB（just_audio volume 2.0 = mpv volume 200）的余量，
-    // 抬高上限到 +12dB。失败静默（非 NativePlayer 平台 no-op）。
+    // LOCAL PATCH: mpv 默认 volume-max=130。volume 为立方刻度，+6dB 仅需
+    // ≈126，默认已基本够用；抬到 400 仅作防御性余量（防 mpv 上游默认变更
+    // 或未来放宽 Dart 侧 +6dB 钳制）。失败静默（非 NativePlayer 平台 no-op）。
     unawaited(setProperty(_player, 'volume-max', '400').catchError((_) {}));
 
     _streamSubscriptions = [
@@ -137,7 +138,10 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _updatePlaybackEvent();
       }),
       _player.stream.volume.listen((volume) {
-        _dataController.add(PlayerDataMessage(volume: volume / 100.0));
+        // mpv volume（立方刻度）回读 → just_audio 线性语义；不换算的话
+        // just_audio 内部音量状态会漂移（0.5 被回读成 0.79）。
+        _dataController
+            .add(PlayerDataMessage(volume: linearFromMpvVolume(volume)));
       }),
       _player.stream.completed.listen((completed) {
         _bufferedPosition = _position = Duration.zero;
@@ -313,8 +317,13 @@ class MediaKitPlayer extends AudioPlayerPlatform {
 
   @override
   Future<SetVolumeResponse> setVolume(SetVolumeRequest request) {
+    // LOCAL PATCH: just_audio 的 volume 是线性幅度（1.0=原幅度），而 mpv 的
+    // volume 属性是立方刻度（实际增益=(volume/100)³，见 mpv player/audio.c
+    // audio_get_gain）。直接 ×100 会把一切增益的 dB 值放大 3 倍（0.5→-18dB
+    // 而非 -6dB；2.0→+18dB 而非 +6dB），响度均衡/用户音量双双失真。
+    // 按立方根换算保证 just_audio 语义精确成立：2.0→≈126(+6dB)、0.5→≈79.4(-6dB)。
     return _player
-        .setVolume(request.volume * 100.0)
+        .setVolume(mpvVolumeFromLinear(request.volume))
         .then((value) => SetVolumeResponse());
   }
 

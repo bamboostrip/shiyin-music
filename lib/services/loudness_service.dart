@@ -500,8 +500,8 @@ class LoudnessService {
     } else if (!kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.windows)) {
-      // mpv: just_audio volume 1.0 = mpv volume 100; 放大即 >100
-      //（vendored just_audio_media_kit 已抬高 volume-max）。
+      // mpv: vendored 适配层已把 just_audio 线性 volume 换算到 mpv 立方
+      // 刻度（实际增益=(volume/100)³），setVolume(2.0) → mpv≈126 = 精确 +6dB。
       final volume = (user * pow(10, clampedGain / 20)).toDouble().clamp(
         0.0,
         _mpvMaxBoostVolume,
@@ -522,8 +522,9 @@ class LoudnessService {
     await audioPlayer.setVolume(user);
   }
 
-  /// mpv 后端放大上限（mpv 音量标量）。+6dB = 2.0；vendored 适配层把
-  /// mpv volume-max 抬到 400（=4.0/+12dB），留出钳制后的安全余量。
+  /// mpv 后端放大上限（just_audio 线性音量标量）。+6dB = 2.0；vendored
+  /// 适配层换算到 mpv 立方刻度 volume≈126，默认 volume-max=130 已够，
+  /// 400 仅为防御性余量。
   static const double _mpvMaxBoostVolume = 2.0;
 
   /// 平台音量上限（ramp 插值时的 clamp 边界）。mpv 后端（Linux/Windows）

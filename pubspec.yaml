@@ -22,15 +22,16 @@ dependencies:
   # docs/superpowers/specs/2026-09-11-windows-media-kit-migration-design.md）。
   # Linux 运行期依赖系统 libmpv2（发行版维护）；Windows 二进制由
   # media_kit_libs_windows_audio 构建期提供（见下）。
-  # 本地 vendored 副本（packages/just_audio_media_kit），含四处补丁：
+  # 本地 vendored 副本（packages/just_audio_media_kit），含五处补丁：
   # 1) load() 时清空 _setPosition（上游 2.1.0 跨歌残留 seek 目标 bug）；
-  # 2) 构造时设置 volume-max=400（响度均衡 +12dB 余量，配套
-  #    loudness_service 的 _mpvMaxBoostVolume=2.0 钳制）；
+  # 2) 新增线性→mpv 立方刻度的 setVolume/回读换算（mpv volume 实际
+  #    增益=(volume/100)³，直接 ×100 会把增益 dB 放大 3 倍），另构造时
+  #    设 volume-max=400 仅作防御性余量；
   # 3) error 流对 _loadCompleter completeError（上游 load 失败无人
   #    complete，死链路要挂满上层 15s 超时才报错）；
   # 4) buffering 流不再把 idle 错误态掩盖回 ready / 清错误码（失败被
   #    伪装成已就绪，队列无声冻结在当前歌）。
-  # 升级上游版本时四处都需确认是否已包含/需重新移植。
+  # 升级上游版本时五处都需确认是否已包含/需重新移植。
   just_audio_media_kit: ^2.1.0
   media_kit_libs_linux: ^1.2.1
   # Windows libmpv 二进制（audio-only 构建，libmpv-2.dll 约 15MB）：构建期
