@@ -50,7 +50,8 @@ enum _IdentifyPhase {
 /// - 打开页面即开始采集,满 10s 自动提交或随时点"立即识别"手动提交;
 /// - matching 阶段 `stopAndCollect` 取末段 PCM(空/过短直接空态,不发请求),
 ///   再经 [IdentifyService.identify] 上传识别;
-/// - 空态/错误态给"重试",回 listening 重新采集。
+/// - 空态/错误态给"再试一次",回 listening 重新采集;失败页文案保持
+///   友好口语化,不向用户暴露字节/异常等技术细节(细节只进日志)。
 ///
 /// 平台支持范围(Android/Windows/Linux,见 [IdentifyService.isSupported])
 /// 由入口按钮的显示与否把关:入口隐藏即闸门,本页内部不再兜底。
@@ -117,7 +118,6 @@ class _IdentifyPageState extends State<IdentifyPage>
   _IdentifyPhase _phase = _IdentifyPhase.listening;
   _IdentifySource _source = _IdentifySource.mic;
   List<({Song song, double confidence})> _results = const [];
-  String? _errorText;
   var _elapsedSeconds = 0;
   var _lastPcmBytes = 0;
   Timer? _autoSubmitTimer;
@@ -284,10 +284,9 @@ class _IdentifyPageState extends State<IdentifyPage>
   void _showError(Object error) {
     // 错误态不再聆听:停掉脉冲,否则错误页以 60fps 空转到关闭。
     _pulse.stop();
-    setState(() {
-      _phase = _IdentifyPhase.error;
-      _errorText = error.toString();
-    });
+    // 原始异常只进日志;页面文案见 _buildErrorBody(不向用户暴露细节)。
+    debugPrint('[IdentifyPage] 识别异常: $error');
+    setState(() => _phase = _IdentifyPhase.error);
   }
 
   /// 空态/错误态"重试":清结果回聆听态,重新采集重新计时。
@@ -295,7 +294,6 @@ class _IdentifyPageState extends State<IdentifyPage>
     setState(() {
       _phase = _IdentifyPhase.listening;
       _results = const [];
-      _errorText = null;
     });
     _beginListening();
   }
@@ -732,44 +730,32 @@ class _IdentifyPageState extends State<IdentifyPage>
 
   // ---- 空态 / 错误态 ----
 
-  Widget _buildEmptyBody(BuildContext context) {
+  /// 空态/错误态共用的柔和版式：圆形浅色底 + 图标 + 一句话说明 + 重试按钮。
+  /// 面向用户的文案不出现任何技术细节（字节数/异常堆栈等）。
+  Widget _buildFriendlyStatusBody(
+    BuildContext context, {
+    required IconData icon,
+    required Color iconColor,
+    required Color circleColor,
+    required String title,
+    required String hint,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
-    final isSystem = _source == _IdentifySource.system;
-    final isTooShort = _lastPcmBytes < _minPcmBytes;
-
-    final String hint;
-    if (isSystem) {
-      if (isTooShort) {
-        hint =
-            '未捕获到电脑声音 (已捕获 $_lastPcmBytes 字节)。\n提示：系统内录需要电脑当前正在通过默认扬声器或耳机播放声音。';
-      } else {
-        hint =
-            '未能识别当前播放的歌曲 (已采集 $_lastPcmBytes 字节)。\n建议播放更长片段或换用音质清晰的段落重试。';
-      }
-    } else {
-      if (isTooShort) {
-        hint =
-            '麦克风未采集到足够的声音 (已捕获 $_lastPcmBytes 字节)。\n请靠近音源或检查麦克风权限后重试。';
-      } else {
-        hint =
-            '未能识别当前歌曲 (已采集 $_lastPcmBytes 字节)。\n请靠近音源后重试。';
-      }
-    }
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.music_off_rounded,
-              size: 56,
-              color: colorScheme.onSurfaceVariant.withValues(alpha: .6),
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: circleColor),
+              child: Icon(icon, size: 44, color: iconColor),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 20),
             Text(
-              '未识别到歌曲',
+              title,
               style: Theme.of(context)
                   .textTheme
                   .titleMedium
@@ -784,11 +770,14 @@ class _IdentifyPageState extends State<IdentifyPage>
                     height: 1.5,
                   ),
             ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
+            const SizedBox(height: 24),
+            FilledButton(
               onPressed: _retry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('重试'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                shape: const StadiumBorder(),
+              ),
+              child: const Text('再试一次'),
             ),
           ],
         ),
@@ -796,46 +785,42 @@ class _IdentifyPageState extends State<IdentifyPage>
     );
   }
 
+  Widget _buildEmptyBody(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSystem = _source == _IdentifySource.system;
+    final isTooShort = _lastPcmBytes < _minPcmBytes;
+
+    final String hint;
+    if (isSystem) {
+      hint = isTooShort
+          ? '没有听到电脑正在播放的声音\n请确认电脑正在播放音乐后再试'
+          : '没有认出这首歌\n换一段更清晰的歌曲片段试试吧';
+    } else {
+      hint = isTooShort
+          ? '周围好像没什么声音\n请靠近音源，多听几秒再试'
+          : '这首歌没有听出来\n离音源近一点，避开嘈杂环境再试试';
+    }
+
+    return _buildFriendlyStatusBody(
+      context,
+      icon: Icons.music_off_rounded,
+      iconColor: colorScheme.onSurfaceVariant,
+      circleColor: colorScheme.surfaceContainerHighest.withValues(alpha: .6),
+      title: '没听出这首歌',
+      hint: hint,
+    );
+  }
+
   Widget _buildErrorBody(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline_rounded,
-              size: 56,
-              color: colorScheme.error,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              '识别失败',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _errorText ?? '出错了,请重试',
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _retry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
-      ),
+    // 原始异常只进日志，不展示给用户。
+    return _buildFriendlyStatusBody(
+      context,
+      icon: Icons.cloud_off_rounded,
+      iconColor: colorScheme.error.withValues(alpha: .85),
+      circleColor: colorScheme.errorContainer.withValues(alpha: .45),
+      title: '识别失败了',
+      hint: '可能是网络不太顺畅\n请稍后再试一次',
     );
   }
 }

@@ -62,6 +62,29 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// 测量某行文本相对列表视口中心的纵向位置（用于断言 38% 焦点线对齐）。
+double _lineCenterDy(WidgetTester tester, Key listKey, String text) {
+  final listBox = tester.renderObject<RenderBox>(find.byKey(listKey));
+  final lineBox = tester.renderObject<RenderBox>(find.text(text));
+  return lineBox.localToGlobal(
+    lineBox.size.center(Offset.zero),
+    ancestor: listBox,
+  ).dy;
+}
+
+List<LyricLine> _generateLyrics(int count) => List.generate(
+  count,
+  (i) => LyricLine(time: Duration(seconds: i * 5), text: 'Lyric line number $i'),
+);
+
+const _listKey = ValueKey('mobile_lyric_list');
+
+Widget _wrap(MobileLyricList child) => MaterialApp(
+  home: Scaffold(
+    body: SizedBox(width: 360, height: 640, child: child),
+  ),
+);
+
 void main() {
   final testLyrics = [
     const LyricLine(
@@ -278,4 +301,153 @@ void main() {
       expect(normalStyles, isNotEmpty);
     },
   );
+
+  group('active line positioning', () {
+    testWidgets(
+      'mid-song entry centers active line on the 38% focus line',
+      (tester) async {
+        final lyrics = _generateLyrics(40);
+        final player = _FakePlayerController();
+        player.lyrics = lyrics;
+        player.activeLyricIndex = 25;
+
+        await tester.pumpWidget(
+          _wrap(
+            MobileLyricList(
+              key: _listKey,
+              player: player,
+              songHash: 'hash1',
+              lyrics: lyrics,
+              activeIndex: 25,
+              showTranslation: false,
+              showRomanization: false,
+              lyricScale: 1.0,
+              isPageVisible: true,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          _lineCenterDy(tester, _listKey, 'Lyric line number 25'),
+          closeTo(640 * 0.38, 30),
+        );
+      },
+    );
+
+    testWidgets(
+      'isPageVisible false -> true transition centers active line',
+      (tester) async {
+        final lyrics = _generateLyrics(40);
+        final player = _FakePlayerController();
+        player.lyrics = lyrics;
+        player.activeLyricIndex = 25;
+
+        MobileLyricList build(bool visible) => MobileLyricList(
+          key: _listKey,
+          player: player,
+          songHash: 'hash1',
+          lyrics: lyrics,
+          activeIndex: 25,
+          showTranslation: false,
+          showRomanization: false,
+          lyricScale: 1.0,
+          isPageVisible: visible,
+        );
+
+        await tester.pumpWidget(_wrap(build(false)));
+        await tester.pump();
+        await tester.pumpWidget(_wrap(build(true)));
+        await tester.pump();
+
+        expect(
+          _lineCenterDy(tester, _listKey, 'Lyric line number 25'),
+          closeTo(640 * 0.38, 30),
+        );
+      },
+    );
+
+    testWidgets(
+      'deep index in a long list still centers despite row-height estimate drift',
+      (tester) async {
+        // 150 行且翻译开关打开但行内无翻译数据：固定行高估算(68px)与
+        // 真实行高(~43px)偏差随索引线性放大，定位必须靠收敛逻辑兜底。
+        final lyrics = _generateLyrics(150);
+        final player = _FakePlayerController();
+        player.lyrics = lyrics;
+        player.activeLyricIndex = 110;
+
+        await tester.pumpWidget(
+          _wrap(
+            MobileLyricList(
+              key: _listKey,
+              player: player,
+              songHash: 'hash1',
+              lyrics: lyrics,
+              activeIndex: 110,
+              showTranslation: true,
+              showRomanization: false,
+              lyricScale: 1.0,
+              isPageVisible: true,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          _lineCenterDy(tester, _listKey, 'Lyric line number 110'),
+          closeTo(640 * 0.38, 30),
+        );
+      },
+    );
+
+    testWidgets(
+      'auto-resume after user scrolls far away and stays idle 3.5s',
+      (tester) async {
+        final lyrics = _generateLyrics(150);
+        final player = _FakePlayerController();
+        player.lyrics = lyrics;
+        player.activeLyricIndex = 0;
+
+        await tester.pumpWidget(
+          _wrap(
+            MobileLyricList(
+              key: _listKey,
+              player: player,
+              songHash: 'hash1',
+              lyrics: lyrics,
+              activeIndex: 0,
+              showTranslation: false,
+              showRomanization: false,
+              lyricScale: 1.0,
+              isPageVisible: true,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // 远离正在播放的第 0 行
+        await tester.fling(
+          find.text('Lyric line number 0'),
+          const Offset(0, -3000),
+          4000,
+        );
+        await tester.pumpAndSettle();
+
+        // 歌曲继续播放，切到下一行
+        player.updatePosition(const Duration(seconds: 5), 1);
+        await tester.pump();
+
+        // 停留超过 3.5s，等待自动恢复 + 恢复动画完成
+        await tester.pump(const Duration(seconds: 4));
+        await tester.pumpAndSettle();
+        await tester.pump();
+
+        expect(
+          _lineCenterDy(tester, _listKey, 'Lyric line number 1'),
+          closeTo(640 * 0.38, 30),
+        );
+      },
+    );
+  });
 }

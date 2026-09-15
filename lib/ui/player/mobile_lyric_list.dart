@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -52,6 +53,9 @@ class _MobileLyricListState extends State<MobileLyricList>
   int? _focusedIndex;
   Duration _smoothPosition = Duration.zero;
   late final Ticker _ticker;
+
+  /// 自动定位令牌：每次 [_scrollToActive] 自增，使旧的收敛回调自我作废。
+  int _revealToken = 0;
 
   @override
   void initState() {
@@ -199,49 +203,105 @@ class _MobileLyricListState extends State<MobileLyricList>
     return clamped * rowHeight;
   }
 
+  /// 取目标行的 RenderBox；行未构建（在 ListView 构建窗口之外）时为 null。
+  RenderBox? _rowBox(int index) {
+    final ctx = _rowKeys[index]?.currentContext;
+    if (ctx == null || !ctx.mounted) return null;
+    final box = ctx.findRenderObject();
+    return (box is RenderBox && box.hasSize) ? box : null;
+  }
+
+  /// 判断目标行相对当前构建窗口的方向：1 = 在下方（需向下滚），-1 = 在上方。
+  /// ListView 按连续区间构建行，与视口相交的行必然已构建，因此用它们的
+  /// 索引范围即可可靠推断未构建目标的方向。
+  int _directionToIndex(int target) {
+    final viewportBox = context.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) return 0;
+    int? minAlive;
+    int? maxAlive;
+    for (final entry in _rowKeys.entries) {
+      final ctx = entry.value.currentContext;
+      if (ctx == null || !ctx.mounted) continue;
+      final box = ctx.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) continue;
+      final top = box.localToGlobal(Offset.zero, ancestor: viewportBox).dy;
+      final bottom = top + box.size.height;
+      if (bottom < -100 || top > viewportBox.size.height + 100) continue;
+      minAlive = (minAlive == null) ? entry.key : math.min(minAlive, entry.key);
+      maxAlive = (maxAlive == null) ? entry.key : math.max(maxAlive, entry.key);
+    }
+    if (minAlive == null || maxAlive == null) return 0;
+    if (target > maxAlive) return 1;
+    if (target < minAlive) return -1;
+    return 0;
+  }
+
+  /// 把目标行居中对齐到 38% 焦点线（按行中心而非行顶，长句换行时视觉更准）。
+  void _alignRowToFocus(RenderBox rowBox, {required bool animate}) {
+    final viewportBox = context.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) return;
+    final rowCenter = rowBox.localToGlobal(
+      rowBox.size.center(Offset.zero),
+      ancestor: viewportBox,
+    );
+    final targetY = viewportBox.size.height * 0.38;
+    final position = _scrollController.position;
+    final target =
+        (position.pixels + rowCenter.dy - targetY).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+    if ((target - position.pixels).abs() < 0.5) return;
+    if (animate) {
+      position.animateTo(
+        target,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      position.jumpTo(target);
+    }
+  }
+
   void _scrollToActive({required bool animate}) {
     if (!mounted ||
         !widget.isPageVisible ||
         _activeLyricIndex < 0 ||
-        widget.lyrics.isEmpty) {
+        widget.lyrics.isEmpty ||
+        !_scrollController.hasClients) {
       return;
     }
-    if (!_scrollController.hasClients) {
-      return;
-    }
+    final token = ++_revealToken;
+    _revealPass(token, animate: animate, passesLeft: 16);
+  }
 
-    final key = _rowKeys[_activeLyricIndex];
-    final rowContext = key?.currentContext;
-    final renderBox = rowContext?.findRenderObject();
-    if (renderBox != null && renderBox is RenderBox && rowContext!.mounted) {
-      _scrollController.position.ensureVisible(
-        renderBox,
-        alignment: 0.38,
-        duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
-        curve: Curves.easeOutCubic,
-      );
+  /// 定位当前行。目标行未构建时（深列表 + 行高估算偏差，估算落点可能离
+  /// 目标成百上千像素）不能只试一次：按已构建行的分布逐帧向目标方向跳
+  /// 约一个视口，直到进入构建窗口再精确对齐。[passesLeft] 兜底防止死循环。
+  void _revealPass(int token, {required bool animate, required int passesLeft}) {
+    if (token != _revealToken || !mounted || !widget.isPageVisible) return;
+    if (_userHolding || !_scrollController.hasClients) return;
+
+    final index = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
+    final box = _rowBox(index);
+    if (box != null) {
+      _alignRowToFocus(box, animate: animate);
       return;
     }
+    if (passesLeft <= 0) return;
 
-    final approxOffset = _estimateOffsetForIndex(_activeLyricIndex);
-    _scrollController.jumpTo(
-      approxOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+    final direction = _directionToIndex(index);
+    if (direction == 0) return;
+    final position = _scrollController.position;
+    final step = math.max(position.viewportDimension, 200) * 1.2;
+    position.jumpTo(
+      (position.pixels + direction * step).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !widget.isPageVisible) return;
-      final retryContext = _rowKeys[_activeLyricIndex]?.currentContext;
-      final retryBox = retryContext?.findRenderObject();
-      if (retryBox != null &&
-          retryBox is RenderBox &&
-          retryContext!.mounted &&
-          _scrollController.hasClients) {
-        _scrollController.position.ensureVisible(
-          retryBox,
-          alignment: 0.38,
-          duration: animate ? const Duration(milliseconds: 280) : Duration.zero,
-          curve: Curves.easeOutCubic,
-        );
-      }
+      _revealPass(token, animate: animate, passesLeft: passesLeft - 1);
     });
   }
 

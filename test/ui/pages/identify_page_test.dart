@@ -239,7 +239,7 @@ void main() {
     expect(find.text('查看歌手'), findsOneWidget);
   });
 
-  testWidgets('识别不到结果显示空态文案', (tester) async {
+  testWidgets('识别不到结果显示友好空态，不暴露技术细节', (tester) async {
     final backend = _FakeCaptureBackend();
     await tester.pumpWidget(MaterialApp(
       home: IdentifyPage(
@@ -251,7 +251,34 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 11));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('未识别到歌曲'), findsOneWidget);
+    expect(find.text('没听出这首歌'), findsOneWidget);
+    expect(find.text('再试一次'), findsOneWidget);
+    // 不向用户暴露字节数等技术细节
+    expect(find.textContaining('字节'), findsNothing);
+  });
+
+  testWidgets('识别异常时展示友好错误文案，不暴露原始异常信息', (tester) async {
+    final backend = _FakeCaptureBackend();
+    await tester.pumpWidget(MaterialApp(
+      home: IdentifyPage(
+        player: _FakePlayer(),
+        captureBackend: backend,
+        onIdentify: (pcm) async =>
+            throw Exception('SocketException: Failed host lookup (err=0xdead)'),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('识别失败了'), findsOneWidget);
+    expect(find.text('再试一次'), findsOneWidget);
+    // 原始异常与技术细节不得出现在界面上
+    expect(find.textContaining('SocketException'), findsNothing);
+    expect(find.textContaining('字节'), findsNothing);
+    // 点击重试回到聆听态
+    await tester.tap(find.text('再试一次'));
+    await tester.pump();
+    expect(find.textContaining('正在聆听'), findsOneWidget);
   });
 
   testWidgets('桌面端支持切换采集源至电脑声音(系统内录)', (tester) async {
