@@ -1,7 +1,12 @@
 use serde_json::{json, Value};
 
 use crate::error::AppResult;
-use crate::kugou::{config, crypto, request::{KgRequest, SignatureType}, session::KgSession, signer, transport};
+use crate::kugou::{
+    config, crypto,
+    request::{KgRequest, SignatureType},
+    session::KgSession,
+    signer, transport,
+};
 
 pub async fn album_shop(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
     let req = KgRequest::get("/zhuanjidata/v3/album_shop_v2/get_classify_data")
@@ -44,7 +49,11 @@ pub async fn album_info(
 }
 
 #[allow(dead_code)]
-pub async fn album_detail(client: &reqwest::Client, session: &KgSession, album_id: &str) -> AppResult<Value> {
+pub async fn album_detail(
+    client: &reqwest::Client,
+    session: &KgSession,
+    album_id: &str,
+) -> AppResult<Value> {
     let body = json!({
         "data": [{ "album_id": album_id }],
         "is_buy": 0,

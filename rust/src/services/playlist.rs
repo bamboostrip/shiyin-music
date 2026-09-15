@@ -5,8 +5,7 @@ use crate::kugou::{
     config, crypto,
     request::{KgRequest, SignatureType},
     session::KgSession,
-    signer,
-    transport,
+    signer, transport,
 };
 
 fn require_login(session: &KgSession) -> AppResult<()> {
@@ -74,7 +73,8 @@ pub async fn delete_playlist(
     require_login(session)?;
     let client_time = chrono::Utc::now().timestamp();
 
-    let data_map = json!({ "listid": listid.parse::<i64>().unwrap_or(0), "total_ver": 0, "type": 1 });
+    let data_map =
+        json!({ "listid": listid.parse::<i64>().unwrap_or(0), "total_ver": 0, "type": 1 });
     let aes = crypto::playlist_aes_encrypt(&data_map.to_string());
 
     let key_data = json!({ "aes": aes.temp_key, "uid": session.userid, "token": session.token });
@@ -103,7 +103,9 @@ pub async fn delete_playlist(
         .or_else(|| resp.get("data").and_then(|v| v.as_str()))
         .or_else(|| resp.as_str());
     if let Some(enc) = encrypted.filter(|s| !s.is_empty()) {
-        if let Ok(dec) = serde_json::from_str::<Value>(&crypto::playlist_aes_decrypt(enc, &aes.temp_key)) {
+        if let Ok(dec) =
+            serde_json::from_str::<Value>(&crypto::playlist_aes_decrypt(enc, &aes.temp_key))
+        {
             return Ok(dec);
         }
     }
@@ -123,12 +125,14 @@ pub async fn add_tracks(
     let client_time = chrono::Utc::now().timestamp();
     let data: Vec<Value> = songs
         .iter()
-        .map(|s| json!({
-            "number": 1, "name": s.name, "hash": s.hash, "size": 0, "sort": 0,
-            "timelen": 0, "bitrate": 0,
-            "album_id": s.album_id.parse::<i64>().unwrap_or(0),
-            "mixsongid": s.mix_song_id.parse::<i64>().unwrap_or(0)
-        }))
+        .map(|s| {
+            json!({
+                "number": 1, "name": s.name, "hash": s.hash, "size": 0, "sort": 0,
+                "timelen": 0, "bitrate": 0,
+                "album_id": s.album_id.parse::<i64>().unwrap_or(0),
+                "mixsongid": s.mix_song_id.parse::<i64>().unwrap_or(0)
+            })
+        })
         .collect();
 
     let body = json!({
@@ -153,7 +157,10 @@ pub async fn remove_tracks(
     file_ids: &[i64],
 ) -> AppResult<Value> {
     require_login(session)?;
-    let data: Vec<Value> = file_ids.iter().map(|fid| json!({ "fileid": fid })).collect();
+    let data: Vec<Value> = file_ids
+        .iter()
+        .map(|fid| json!({ "fileid": fid }))
+        .collect();
     let body = json!({
         "listid": listid, "userid": session.userid, "data": data,
         "type": 0, "token": session.token, "list_ver": 0
@@ -176,7 +183,11 @@ pub struct AddSongItem {
 }
 
 #[allow(dead_code)]
-pub async fn sheet_collection(client: &reqwest::Client, session: &KgSession, position: i64) -> AppResult<Value> {
+pub async fn sheet_collection(
+    client: &reqwest::Client,
+    session: &KgSession,
+    position: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/miniyueku/v1/opern_square/get_home_module_config")
         .param("srcappid", "2919")
         .param("position", position.to_string())
@@ -185,7 +196,12 @@ pub async fn sheet_collection(client: &reqwest::Client, session: &KgSession, pos
 }
 
 #[allow(dead_code)]
-pub async fn sheet_collection_detail(client: &reqwest::Client, session: &KgSession, collection_id: &str, page: i64) -> AppResult<Value> {
+pub async fn sheet_collection_detail(
+    client: &reqwest::Client,
+    session: &KgSession,
+    collection_id: &str,
+    page: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/miniyueku/v1/opern_square/collection_detail")
         .param("srcappid", "2919")
         .param("page", page.to_string())
@@ -195,7 +211,12 @@ pub async fn sheet_collection_detail(client: &reqwest::Client, session: &KgSessi
 }
 
 #[allow(dead_code)]
-pub async fn sheet_detail(client: &reqwest::Client, session: &KgSession, id: &str, source: &str) -> AppResult<Value> {
+pub async fn sheet_detail(
+    client: &reqwest::Client,
+    session: &KgSession,
+    id: &str,
+    source: &str,
+) -> AppResult<Value> {
     let req = KgRequest::get("/v1/opern/detail")
         .base_url("https://miniyueku.kugou.com")
         .param("id", id)
@@ -205,7 +226,11 @@ pub async fn sheet_detail(client: &reqwest::Client, session: &KgSession, id: &st
 }
 
 #[allow(dead_code)]
-pub async fn sheet_hot(client: &reqwest::Client, session: &KgSession, opern_type: i64) -> AppResult<Value> {
+pub async fn sheet_hot(
+    client: &reqwest::Client,
+    session: &KgSession,
+    opern_type: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/miniyueku/v1/opern_square/get_home_hot_opern")
         .param("srcappid", "2919")
         .param("opern_type", opern_type.to_string())
@@ -214,7 +239,14 @@ pub async fn sheet_hot(client: &reqwest::Client, session: &KgSession, opern_type
 }
 
 #[allow(dead_code)]
-pub async fn sheet_list(client: &reqwest::Client, session: &KgSession, album_audio_id: &str, opern_type: i64, page: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn sheet_list(
+    client: &reqwest::Client,
+    session: &KgSession,
+    album_audio_id: &str,
+    opern_type: i64,
+    page: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/miniyueku/v1/opern/list")
         .param("album_audio_id", album_audio_id)
         .param("opern_type", opern_type.to_string())
@@ -224,7 +256,11 @@ pub async fn sheet_list(client: &reqwest::Client, session: &KgSession, album_aud
     transport::send(client, session, &req).await
 }
 
-pub async fn playlist_info(client: &reqwest::Client, session: &KgSession, playlist_id: &str) -> AppResult<Value> {
+pub async fn playlist_info(
+    client: &reqwest::Client,
+    session: &KgSession,
+    playlist_id: &str,
+) -> AppResult<Value> {
     let body = json!({
         "data": [{ "global_collection_id": playlist_id }],
         "userid": session.userid, "token": session.token
@@ -254,7 +290,13 @@ pub async fn playlist_tags(client: &reqwest::Client, session: &KgSession) -> App
     transport::send(client, session, &req).await
 }
 
-pub async fn playlist_tracks(client: &reqwest::Client, session: &KgSession, playlist_id: &str, begin_idx: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn playlist_tracks(
+    client: &reqwest::Client,
+    session: &KgSession,
+    playlist_id: &str,
+    begin_idx: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/pubsongs/v2/get_other_list_file_nofilt")
         .param("area_code", "1")
         .param("begin_idx", begin_idx.to_string())
@@ -270,7 +312,13 @@ pub async fn playlist_tracks(client: &reqwest::Client, session: &KgSession, play
 }
 
 #[allow(dead_code)]
-pub async fn playlist_tracks_new(client: &reqwest::Client, session: &KgSession, list_id: &str, page: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn playlist_tracks_new(
+    client: &reqwest::Client,
+    session: &KgSession,
+    list_id: &str,
+    page: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let body = json!({
         "listid": list_id, "userid": session.userid, "area_code": 1, "show_relate_goods": 0,
         "pagesize": pagesize, "allplatform": 1, "show_cover": 1, "type": 0,
@@ -284,10 +332,17 @@ pub async fn playlist_tracks_new(client: &reqwest::Client, session: &KgSession, 
     transport::send(client, session, &req).await
 }
 
-pub async fn playlist_similar(client: &reqwest::Client, session: &KgSession, ids: &str) -> AppResult<Value> {
+pub async fn playlist_similar(
+    client: &reqwest::Client,
+    session: &KgSession,
+    ids: &str,
+) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
-    let data: Vec<Value> = ids.split(',').filter(|s| !s.trim().is_empty())
-        .map(|id| json!({ "global_collection_id": id.trim() })).collect();
+    let data: Vec<Value> = ids
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|id| json!({ "global_collection_id": id.trim() }))
+        .collect();
     let body = json!({
         "appid": config::APP_ID, "clientver": config::CLIENT_VER, "clienttime": client_time_ms,
         "key": signer::calc_login_key(client_time_ms), "userid": session.userid,
@@ -301,7 +356,12 @@ pub async fn playlist_similar(client: &reqwest::Client, session: &KgSession, ids
 }
 
 #[allow(dead_code)]
-pub async fn playlist_effect(client: &reqwest::Client, session: &KgSession, page: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn playlist_effect(
+    client: &reqwest::Client,
+    session: &KgSession,
+    page: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let body = json!({ "page": page, "pagesize": pagesize });
     let req = KgRequest::get("/pubsongs/v1/get_sound_effect_list")
         .method(reqwest::Method::POST)

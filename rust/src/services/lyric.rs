@@ -50,7 +50,10 @@ pub async fn get_lyric(
         .signature_type(SignatureType::Default);
     let raw = transport::send(client, session, &req).await?;
 
-    let raw_content = raw.get("content").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let raw_content = raw
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let (decoded_content, decoded_trans) = if decode {
         let content_type = raw.get("contenttype").and_then(|v| v.as_i64()).unwrap_or(0);
         let decoded_content = raw_content.as_deref().and_then(|b64| {
@@ -84,6 +87,8 @@ pub async fn get_lyric(
 }
 
 fn base64_decode_utf8(s: &str) -> Result<String, ()> {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(s).map_err(|_| ())?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|_| ())?;
     String::from_utf8(bytes).map_err(|_| ())
 }

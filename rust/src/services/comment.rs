@@ -3,7 +3,12 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::error::AppResult;
-use crate::kugou::{config, request::{KgRequest, SignatureType}, session::KgSession, transport};
+use crate::kugou::{
+    config,
+    request::{KgRequest, SignatureType},
+    session::KgSession,
+    transport,
+};
 
 const CODE_SONG: &str = config::COMMENT_SONG_CODE;
 #[allow(dead_code)]
@@ -141,11 +146,14 @@ pub async fn floor_comments(
     p: &FloorCommentsParams<'_>,
 ) -> AppResult<Value> {
     let normalized = p.resource_type.to_lowercase();
-    let resolved_code = p.code.filter(|s| !s.trim().is_empty()).unwrap_or(match normalized.as_str() {
-        "playlist" => CODE_PLAYLIST,
-        "album" => CODE_ALBUM,
-        _ => CODE_SONG,
-    });
+    let resolved_code =
+        p.code
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(match normalized.as_str() {
+                "playlist" => CODE_PLAYLIST,
+                "album" => CODE_ALBUM,
+                _ => CODE_SONG,
+            });
     let use_service = normalized == "playlist"
         || normalized == "album"
         || resolved_code == CODE_PLAYLIST

@@ -93,11 +93,16 @@ pub async fn get_play_info(
     free_part: bool,
 ) -> AppResult<PlayUrlData> {
     let v = get_play_url(
-        client, session, hash, quality, album_id, album_audio_id, free_part,
+        client,
+        session,
+        hash,
+        quality,
+        album_id,
+        album_audio_id,
+        free_part,
     )
     .await?;
-    let data: PlayUrlData = serde_json::from_value(v).map_err(|e| {
-        crate::error::AppError::Internal(format!("解析播放链接结果失败: {e}"))
-    })?;
+    let data: PlayUrlData = serde_json::from_value(v)
+        .map_err(|e| crate::error::AppError::Internal(format!("解析播放链接结果失败: {e}")))?;
     Ok(data)
 }

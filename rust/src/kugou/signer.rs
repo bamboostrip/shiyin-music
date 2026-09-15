@@ -60,8 +60,8 @@ pub fn calc_post_signature_binary(
     binary_body: &[u8],
     salt: &str,
 ) -> String {
-    use md5::Md5;
     use digest::Digest;
+    use md5::Md5;
 
     let mut hasher = Md5::new();
     hasher.update(salt.as_bytes());
@@ -80,7 +80,14 @@ pub fn calc_post_signature_binary(
 /// `md5(hash + V5KeySalt + AppId + mid + userid)`。
 /// 这个 key 和 signature 是两个独立的查询参数。
 pub fn calc_v5_key(hash: &str, userid: &str, mid: &str) -> String {
-    let raw = format!("{}{}{}{}{}", hash, config::V5_KEY_SALT, config::APP_ID, mid, userid);
+    let raw = format!(
+        "{}{}{}{}{}",
+        hash,
+        config::V5_KEY_SALT,
+        config::APP_ID,
+        mid,
+        userid
+    );
     crypto::md5_str(&raw)
 }
 
@@ -102,7 +109,13 @@ pub fn calc_web_qr_signature(params: &BTreeMap<String, String>) -> String {
 /// - `login_by_mobile` 传**毫秒**（与 clienttime_ms 字段一致）
 /// - `user_cloud` 传**秒**（与 .NET RawUserApi.GetCloudAsync 一致）
 pub fn calc_login_key(clienttime: i64) -> String {
-    let raw = format!("{}{}{}{}", config::APP_ID, config::LITE_SALT, config::CLIENT_VER, clienttime);
+    let raw = format!(
+        "{}{}{}{}",
+        config::APP_ID,
+        config::LITE_SALT,
+        config::CLIENT_VER,
+        clienttime
+    );
     crypto::md5_str(&raw)
 }
 
@@ -166,7 +179,11 @@ mod tests {
         let key = calc_v5_key("abc123", "user1", "mid456");
         let expected = crypto::md5_str(&format!(
             "{}{}{}{}{}",
-            "abc123", config::V5_KEY_SALT, config::APP_ID, "mid456", "user1"
+            "abc123",
+            config::V5_KEY_SALT,
+            config::APP_ID,
+            "mid456",
+            "user1"
         ));
         assert_eq!(key, expected);
         assert_eq!(key.len(), 32);
@@ -179,7 +196,8 @@ mod tests {
         let sig = calc_web_qr_signature(&params);
         let expected_input = format!(
             "{}key=qrcode_value{}",
-            config::WEB_SIGNATURE_SALT, config::WEB_SIGNATURE_SALT
+            config::WEB_SIGNATURE_SALT,
+            config::WEB_SIGNATURE_SALT
         );
         assert_eq!(sig, crypto::md5_str(&expected_input));
     }
@@ -205,8 +223,8 @@ mod tests {
         manual.extend_from_slice(b"a=1");
         manual.extend_from_slice(body);
         manual.extend_from_slice(config::LITE_SALT.as_bytes());
-        use md5::Md5;
         use digest::Digest;
+        use md5::Md5;
         let mut h = Md5::new();
         h.update(&manual);
         assert_eq!(sig_bin, hex::encode(h.finalize()));
@@ -227,7 +245,10 @@ mod tests {
         let k = calc_login_key(ms);
         let expected = crypto::md5_str(&format!(
             "{}{}{}{}",
-            config::APP_ID, config::LITE_SALT, config::CLIENT_VER, ms
+            config::APP_ID,
+            config::LITE_SALT,
+            config::CLIENT_VER,
+            ms
         ));
         assert_eq!(k, expected);
     }
@@ -238,7 +259,10 @@ mod tests {
         let k = calc_official_key(ms);
         let expected = crypto::md5_str(&format!(
             "{}{}{}{}",
-            config::OFFICIAL_APP_ID, config::OFFICIAL_SALT, config::OFFICIAL_CLIENT_VER, ms
+            config::OFFICIAL_APP_ID,
+            config::OFFICIAL_SALT,
+            config::OFFICIAL_CLIENT_VER,
+            ms
         ));
         assert_eq!(k, expected);
         // 与 Lite 身份的 key 不同（salt/appid/clientver 均不同）

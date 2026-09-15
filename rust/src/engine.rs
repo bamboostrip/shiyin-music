@@ -88,7 +88,9 @@ impl KugouEngine {
         }
 
         let session = self.session_snapshot();
-        let result = self.dispatch_inner(&session, method, path, &params, body).await?;
+        let result = self
+            .dispatch_inner(&session, method, path, &params, body)
+            .await?;
 
         // 会话失效（status=0 + 20xxx 错误码）时自动刷新 token 并重放一次。
         // 酷狗 token 会在长期未使用 / 多端登录后被上游作废，车机长时间待机后
@@ -178,27 +180,26 @@ impl KugouEngine {
         let mut state = self.state.write().expect("engine state lock poisoned");
         let userid = resp
             .get("userid")
-            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+            .and_then(|v| {
+                v.as_i64()
+                    .map(|i| i.to_string())
+                    .or_else(|| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_default();
-        let token = resp
-            .get("token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let token = resp.get("token").and_then(|v| v.as_str()).unwrap_or("");
         if userid.is_empty() || userid == "0" || token.is_empty() {
             return state.session.clone();
         }
         let vip_type = resp
             .get("vip_type")
-            .and_then(|v| v.as_i64().map(|i| i.to_string()).or_else(|| v.as_str().map(|s| s.to_string())))
+            .and_then(|v| {
+                v.as_i64()
+                    .map(|i| i.to_string())
+                    .or_else(|| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_else(|| "0".to_string());
-        let vip_token = resp
-            .get("vip_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let t1 = resp
-            .get("t1")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let vip_token = resp.get("vip_token").and_then(|v| v.as_str()).unwrap_or("");
+        let t1 = resp.get("t1").and_then(|v| v.as_str()).unwrap_or("");
         state
             .session
             .update_auth(&userid, token, &vip_type, vip_token, t1);
@@ -284,8 +285,16 @@ impl KugouEngine {
                     .get("free_part")
                     .map(|s| s == "1" || s == "true")
                     .unwrap_or(false);
-                song::get_play_url(client, session, hash, quality, album_id, album_audio_id, free_part)
-                    .await
+                song::get_play_url(
+                    client,
+                    session,
+                    hash,
+                    quality,
+                    album_id,
+                    album_audio_id,
+                    free_part,
+                )
+                .await
             }
 
             ("GET", "/song/climax") => {
@@ -381,15 +390,20 @@ impl KugouEngine {
             }
             ("GET", "/recommend/songs") => discover::recommend_songs(client, session).await,
             ("GET", "/ai/recommend") => {
-                let album_audio_ids =
-                    params.get("album_audio_ids").map(|s| s.as_str()).unwrap_or("");
+                let album_audio_ids = params
+                    .get("album_audio_ids")
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 discover::ai_recommend(client, session, album_audio_ids).await
             }
             ("GET", "/personal/fm") => {
                 let hash = params.get("hash").map(|s| s.as_str());
                 let songid = params.get("songid").map(|s| s.as_str());
                 let playtime = params.get("playtime").and_then(|s| s.parse().ok());
-                let action = params.get("action").map(|s| s.as_str()).unwrap_or("refresh");
+                let action = params
+                    .get("action")
+                    .map(|s| s.as_str())
+                    .unwrap_or("refresh");
                 let mode = params.get("mode").map(|s| s.as_str()).unwrap_or("normal");
                 let song_pool_id = params
                     .get("song_pool_id")
@@ -520,7 +534,8 @@ impl KugouEngine {
                 let ids = params.get("ids").map(|s| s.as_str()).unwrap_or("");
                 playlist::playlist_similar(client, session, ids).await
             }
-            ("GET", "/playlist/detail") => {                // Dart: ids；兼容 id
+            ("GET", "/playlist/detail") => {
+                // Dart: ids；兼容 id
                 let id = params
                     .get("ids")
                     .or_else(|| params.get("id"))
@@ -540,10 +555,13 @@ impl KugouEngine {
                     .get("begin_idx")
                     .and_then(|s| s.parse().ok())
                     .or_else(|| {
-                        params.get("page").and_then(|s| s.parse::<i64>().ok()).map(|page| {
-                            let p = if page < 1 { 1 } else { page };
-                            (p - 1) * pagesize
-                        })
+                        params
+                            .get("page")
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .map(|page| {
+                                let p = if page < 1 { 1 } else { page };
+                                (p - 1) * pagesize
+                            })
                     })
                     .unwrap_or(0i64);
                 playlist::playlist_tracks(client, session, id, begin_idx, pagesize).await
@@ -566,12 +584,8 @@ impl KugouEngine {
                 // Dart 走 query: name / type；兼容 body: name / is_pri
                 let body_val: Value =
                     serde_json::from_str(body.unwrap_or("{}")).unwrap_or_default();
-                let name = first_str(
-                    &[&body_val],
-                    params,
-                    &["name"],
-                )
-                .unwrap_or_else(|| "新歌单".into());
+                let name =
+                    first_str(&[&body_val], params, &["name"]).unwrap_or_else(|| "新歌单".into());
                 let is_pri = first_i64(&[&body_val], params, &["is_pri", "type"]).unwrap_or(0);
                 playlist::create_playlist(client, session, &name, is_pri).await
             }
@@ -692,11 +706,7 @@ impl KugouEngine {
     }
 }
 
-fn first_str(
-    bodies: &[&Value],
-    params: &HashMap<String, String>,
-    keys: &[&str],
-) -> Option<String> {
+fn first_str(bodies: &[&Value], params: &HashMap<String, String>, keys: &[&str]) -> Option<String> {
     for key in keys {
         for body in bodies {
             if let Some(v) = body.get(*key) {
@@ -722,11 +732,7 @@ fn first_str(
     None
 }
 
-fn first_i64(
-    bodies: &[&Value],
-    params: &HashMap<String, String>,
-    keys: &[&str],
-) -> Option<i64> {
+fn first_i64(bodies: &[&Value], params: &HashMap<String, String>, keys: &[&str]) -> Option<i64> {
     for key in keys {
         for body in bodies {
             if let Some(v) = body.get(*key) {
@@ -891,7 +897,10 @@ mod tests {
                 .await
                 .expect("fm/recommend failed");
             let rec_v: serde_json::Value = serde_json::from_str(&rec).unwrap();
-            println!("== /fm/recommend 顶层键: {:?}", rec_v.as_object().map(|m| m.keys().collect::<Vec<_>>()));
+            println!(
+                "== /fm/recommend 顶层键: {:?}",
+                rec_v.as_object().map(|m| m.keys().collect::<Vec<_>>())
+            );
 
             // 递归收集带 fmid 的对象作为电台候选
             fn collect_stations(v: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
@@ -921,7 +930,9 @@ mod tests {
                     s.get("fmid"),
                     s.get("fmname"),
                     s.get("fmtype").or_else(|| s.get("type")),
-                    s.get("rcmdlist").and_then(|l| l.as_array()).map(|a| a.len())
+                    s.get("rcmdlist")
+                        .and_then(|l| l.as_array())
+                        .map(|a| a.len())
                 );
             }
             assert!(!stations.is_empty(), "推荐电台为空，结构可能变化");
@@ -931,10 +942,7 @@ mod tests {
                 match v {
                     serde_json::Value::Object(map) => {
                         if map.contains_key("hash") {
-                            return (
-                                1,
-                                Some(map.keys().cloned().collect::<Vec<_>>()),
-                            );
+                            return (1, Some(map.keys().cloned().collect::<Vec<_>>()));
                         }
                         let mut total = 0;
                         let mut keys = None;
@@ -995,7 +1003,11 @@ mod tests {
                 println!("== /fm/songs size=20 => 歌曲数 {}", n);
                 max_count = max_count.max(n);
             }
-            assert!(max_count > 1, "电台歌曲应多于 1 首，实际最多 {} 首", max_count);
+            assert!(
+                max_count > 1,
+                "电台歌曲应多于 1 首，实际最多 {} 首",
+                max_count
+            );
 
             // /fm/class：分类电台分组
             let class = engine

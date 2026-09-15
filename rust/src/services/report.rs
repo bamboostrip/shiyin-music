@@ -5,14 +5,16 @@ use crate::kugou::{
     config, crypto,
     request::{KgRequest, SignatureType},
     session::KgSession,
-    signer,
-    transport,
+    signer, transport,
 };
 
 #[allow(dead_code)]
 pub async fn upload_play_history(
-    client: &reqwest::Client, session: &KgSession,
-    mix_song_id: i64, timestamp: Option<i64>, play_count: i64,
+    client: &reqwest::Client,
+    session: &KgSession,
+    mix_song_id: i64,
+    timestamp: Option<i64>,
+    play_count: i64,
 ) -> AppResult<Value> {
     let body = json!({
         "songs": [{ "mxid": mix_song_id, "op": 1, "ot": timestamp.unwrap_or_else(|| chrono::Utc::now().timestamp()), "pc": play_count }],
@@ -27,7 +29,11 @@ pub async fn upload_play_history(
 }
 
 #[allow(dead_code)]
-pub async fn latest_songs(client: &reqwest::Client, session: &KgSession, pagesize: i64) -> AppResult<Value> {
+pub async fn latest_songs(
+    client: &reqwest::Client,
+    session: &KgSession,
+    pagesize: i64,
+) -> AppResult<Value> {
     let body = json!({
         "area_code": "1", "sources": ["pc", "mobile", "tv", "car"],
         "userid": session.userid.parse::<i64>().unwrap_or(0), "ret_info": 1,

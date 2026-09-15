@@ -9,7 +9,9 @@ use crate::kugou::{
 
 fn require_login(session: &KgSession) -> AppResult<()> {
     if !session.is_logged_in() {
-        return Err(crate::error::AppError::Unauthorized("此接口需要登录".into()));
+        return Err(crate::error::AppError::Unauthorized(
+            "此接口需要登录".into(),
+        ));
     }
     Ok(())
 }
@@ -19,7 +21,12 @@ fn today_str() -> String {
 }
 
 #[allow(dead_code)]
-pub async fn channel_all(client: &reqwest::Client, session: &KgSession, page: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn channel_all(
+    client: &reqwest::Client,
+    session: &KgSession,
+    page: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/youth/v2/channel/channel_all_list")
         .param("page", page.to_string())
         .param("pagesize", pagesize.to_string())
@@ -29,7 +36,11 @@ pub async fn channel_all(client: &reqwest::Client, session: &KgSession, page: i6
 }
 
 #[allow(dead_code)]
-pub async fn channel_amway(client: &reqwest::Client, session: &KgSession, global_collection_id: &str) -> AppResult<Value> {
+pub async fn channel_amway(
+    client: &reqwest::Client,
+    session: &KgSession,
+    global_collection_id: &str,
+) -> AppResult<Value> {
     let req = KgRequest::get("/youth/api/amway/v2/index")
         .param("global_collection_id", global_collection_id)
         .signature_type(SignatureType::Default);
@@ -37,7 +48,11 @@ pub async fn channel_amway(client: &reqwest::Client, session: &KgSession, global
 }
 
 #[allow(dead_code)]
-pub async fn channel_detail(client: &reqwest::Client, session: &KgSession, global_collection_ids: &str) -> AppResult<Value> {
+pub async fn channel_detail(
+    client: &reqwest::Client,
+    session: &KgSession,
+    global_collection_ids: &str,
+) -> AppResult<Value> {
     let data: Vec<Value> = global_collection_ids
         .split(',')
         .map(|s| s.trim())
@@ -52,7 +67,11 @@ pub async fn channel_detail(client: &reqwest::Client, session: &KgSession, globa
 }
 
 #[allow(dead_code)]
-pub async fn channel_similar(client: &reqwest::Client, session: &KgSession, channel_id: &str) -> AppResult<Value> {
+pub async fn channel_similar(
+    client: &reqwest::Client,
+    session: &KgSession,
+    channel_id: &str,
+) -> AppResult<Value> {
     let vip_type: i64 = session.vip_type.parse().unwrap_or(0);
     let req = KgRequest::get("/youth/v1/channel/get_friendly_channel")
         .method(reqwest::Method::POST)
@@ -131,12 +150,17 @@ pub async fn dynamic(client: &reqwest::Client, session: &KgSession) -> AppResult
 
 #[allow(dead_code)]
 pub async fn dynamic_recent(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
-    let req = KgRequest::get("/youth/v3/user/recent_dynamic").signature_type(SignatureType::Default);
+    let req =
+        KgRequest::get("/youth/v3/user/recent_dynamic").signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
 }
 
 #[allow(dead_code)]
-pub async fn report_listen_song(client: &reqwest::Client, session: &KgSession, mixsongid: i64) -> AppResult<Value> {
+pub async fn report_listen_song(
+    client: &reqwest::Client,
+    session: &KgSession,
+    mixsongid: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/youth/v2/report/listen_song")
         .method(reqwest::Method::POST)
         .param("clientver", "10566")
@@ -195,7 +219,10 @@ pub async fn report_vip_ad_play(client: &reqwest::Client, session: &KgSession) -
     transport::send(client, session, &req).await
 }
 
-pub async fn receive_one_day_vip(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
+pub async fn receive_one_day_vip(
+    client: &reqwest::Client,
+    session: &KgSession,
+) -> AppResult<Value> {
     require_login(session)?;
     let req = KgRequest::get("/youth/v1/recharge/receive_vip_listen_song")
         .method(reqwest::Method::POST)

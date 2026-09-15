@@ -109,7 +109,9 @@ fn collect_audio_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     };
     for entry in entries.flatten() {
         // file_type() 对符号链接返回链接自身，is_symlink 跳过（防环）。
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if file_type.is_symlink() {
             continue;
         }
@@ -139,13 +141,9 @@ fn probe_entry(path: &Path) -> Option<LocalSongEntry> {
         hint.with_extension(ext);
     }
 
-    let probed = symphonia::default::get_probe().format(
-        &hint,
-        mss,
-        &FormatOptions::default(),
-        &Default::default(),
-    )
-    .ok()?;
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &Default::default())
+        .ok()?;
     let mut format = probed.format;
 
     // 必须有音轨（纯视频/损坏文件排除）。
@@ -159,9 +157,7 @@ fn probe_entry(path: &Path) -> Option<LocalSongEntry> {
         .codec_params
         .time_base
         .zip(track.codec_params.n_frames)
-        .map(|(tb, frames)| {
-            ((frames as u128 * tb.numer as u128 * 1000) / tb.denom as u128) as i64
-        })
+        .map(|(tb, frames)| ((frames as u128 * tb.numer as u128 * 1000) / tb.denom as u128) as i64)
         .filter(|&ms| ms > 0)
         .unwrap_or(0);
 

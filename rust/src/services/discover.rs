@@ -5,8 +5,7 @@ use crate::kugou::{
     config, crypto,
     request::{KgRequest, SignatureType},
     session::KgSession,
-    signer,
-    transport,
+    signer, transport,
 };
 
 const FAKE_M_PERSONAL: &str = "ca981cfc583a4c37f28d2d49000013c16a0a";
@@ -14,7 +13,10 @@ const FAKE_M_PERSONAL: &str = "ca981cfc583a4c37f28d2d49000013c16a0a";
 const FAKE_M_CARD: &str = "60f7ebf1f812edbac3c63a7310001701760f";
 
 pub async fn recommend_playlists(
-    client: &reqwest::Client, session: &KgSession, category_id: i64, page: i64,
+    client: &reqwest::Client,
+    session: &KgSession,
+    category_id: i64,
+    page: i64,
 ) -> AppResult<Value> {
     let client_time = chrono::Utc::now().timestamp();
     let body = json!({
@@ -38,7 +40,12 @@ pub async fn recommend_playlists(
     transport::send(client, session, &req).await
 }
 
-pub async fn new_songs(client: &reqwest::Client, session: &KgSession, rank_id: i64, page: i64) -> AppResult<Value> {
+pub async fn new_songs(
+    client: &reqwest::Client,
+    session: &KgSession,
+    rank_id: i64,
+    page: i64,
+) -> AppResult<Value> {
     let body = json!({
         "rank_id": rank_id, "userid": session.userid, "page": page, "pagesize": 30, "tags": []
     });
@@ -70,10 +77,15 @@ pub async fn recommend_style(client: &reqwest::Client, session: &KgSession) -> A
     transport::send(client, session, &req).await
 }
 
-pub async fn ai_recommend(client: &reqwest::Client, session: &KgSession, album_audio_ids: &str) -> AppResult<Value> {
+pub async fn ai_recommend(
+    client: &reqwest::Client,
+    session: &KgSession,
+    album_audio_ids: &str,
+) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
     let rec_source: Vec<Value> = album_audio_ids
-        .split(',').filter(|s| !s.trim().is_empty())
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
         .filter_map(|id| id.trim().parse::<i64>().ok().map(|i| json!({ "ID": i })))
         .collect();
     let body = json!({
@@ -97,8 +109,11 @@ pub async fn ai_recommend(client: &reqwest::Client, session: &KgSession, album_a
 pub async fn yueku(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
     let req = KgRequest::get("/v1/yueku/recommend_v2")
         .router("service.mobile.kugou.com")
-        .param("operator", "7").param("plat", "0").param("type", "11")
-        .param("area_code", "1").param("req_multi", "1")
+        .param("operator", "7")
+        .param("plat", "0")
+        .param("type", "11")
+        .param("area_code", "1")
+        .param("req_multi", "1")
         .signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
 }
@@ -121,13 +136,21 @@ pub async fn yueku_banner(client: &reqwest::Client, session: &KgSession) -> AppR
 pub async fn yueku_fm(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
     let req = KgRequest::get("/v1/time_fm_info")
         .router("fm.service.kugou.com")
-        .param("operator", "7").param("plat", "0").param("type", "11")
-        .param("area_code", "1").param("req_multi", "1")
+        .param("operator", "7")
+        .param("plat", "0")
+        .param("type", "11")
+        .param("area_code", "1")
+        .param("req_multi", "1")
         .signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
 }
 
-pub async fn top_album(client: &reqwest::Client, session: &KgSession, page: i64, pagesize: i64) -> AppResult<Value> {
+pub async fn top_album(
+    client: &reqwest::Client,
+    session: &KgSession,
+    page: i64,
+    pagesize: i64,
+) -> AppResult<Value> {
     let body = json!({
         "apiver": 20, "token": session.token, "page": page, "pagesize": pagesize, "withpriv": 1
     });
@@ -139,7 +162,11 @@ pub async fn top_album(client: &reqwest::Client, session: &KgSession, page: i64,
 }
 
 #[allow(dead_code)]
-pub async fn top_card(client: &reqwest::Client, session: &KgSession, card_id: i64) -> AppResult<Value> {
+pub async fn top_card(
+    client: &reqwest::Client,
+    session: &KgSession,
+    card_id: i64,
+) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
     let body = json!({
         "appid": config::APP_ID, "clientver": config::CLIENT_VER, "platform": "android",
@@ -183,7 +210,12 @@ pub async fn pc_diantai(client: &reqwest::Client, session: &KgSession) -> AppRes
 }
 
 #[allow(dead_code)]
-pub async fn brush(client: &reqwest::Client, session: &KgSession, song_pool_id: i64, mode: &str) -> AppResult<Value> {
+pub async fn brush(
+    client: &reqwest::Client,
+    session: &KgSession,
+    song_pool_id: i64,
+    mode: &str,
+) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
     let pr = json!({
         "userid": session.userid, "appid": config::APP_ID, "playlist_ver": 2,
@@ -203,8 +235,11 @@ pub async fn brush(client: &reqwest::Client, session: &KgSession, song_pool_id: 
     });
     let req = KgRequest::get("/genesisapi/v1/newepoch_song_rec/feed")
         .method(reqwest::Method::POST)
-        .param("sort_type", "1").param("platform", "ios").param("page", "1")
-        .param("content_ver", "4").param("clientver", "11850")
+        .param("sort_type", "1")
+        .param("platform", "ios")
+        .param("page", "1")
+        .param("content_ver", "4")
+        .param("clientver", "11850")
         .json_body(body)
         .signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
@@ -212,8 +247,12 @@ pub async fn brush(client: &reqwest::Client, session: &KgSession, song_pool_id: 
 
 #[allow(dead_code)]
 pub async fn everyday_history(
-    client: &reqwest::Client, session: &KgSession,
-    mode: &str, platform: &str, history_name: Option<&str>, date: Option<&str>,
+    client: &reqwest::Client,
+    session: &KgSession,
+    mode: &str,
+    platform: &str,
+    history_name: Option<&str>,
+    date: Option<&str>,
 ) -> AppResult<Value> {
     let mut req = KgRequest::get("/everyday/api/v1/get_history")
         .method(reqwest::Method::POST)
@@ -232,9 +271,16 @@ pub async fn everyday_history(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn personal_fm(
-    client: &reqwest::Client, session: &KgSession,
-    hash: Option<&str>, songid: Option<&str>, playtime: Option<i64>,
-    action: &str, mode: &str, song_pool_id: i64, is_overplay: bool, remain_song_cnt: i64,
+    client: &reqwest::Client,
+    session: &KgSession,
+    hash: Option<&str>,
+    songid: Option<&str>,
+    playtime: Option<i64>,
+    action: &str,
+    mode: &str,
+    song_pool_id: i64,
+    is_overplay: bool,
+    remain_song_cnt: i64,
 ) -> AppResult<Value> {
     let client_time_ms = chrono::Utc::now().timestamp_millis();
     let mut body = json!({
@@ -250,11 +296,21 @@ pub async fn personal_fm(
         body["userid"] = json!(session.userid.parse::<i64>().unwrap_or(0));
         body["kguid"] = json!(session.userid.parse::<i64>().unwrap_or(0));
     }
-    if !session.token.is_empty() { body["token"] = json!(session.token); }
-    if !session.vip_type.is_empty() { body["vip_type"] = json!(session.vip_type.parse::<i64>().unwrap_or(0)); }
-    if let Some(h) = hash.filter(|s| !s.is_empty()) { body["hash"] = json!(h); }
-    if let Some(s) = songid.filter(|s| !s.is_empty()) { body["songid"] = json!(s); }
-    if let Some(p) = playtime { body["playtime"] = json!(p); }
+    if !session.token.is_empty() {
+        body["token"] = json!(session.token);
+    }
+    if !session.vip_type.is_empty() {
+        body["vip_type"] = json!(session.vip_type.parse::<i64>().unwrap_or(0));
+    }
+    if let Some(h) = hash.filter(|s| !s.is_empty()) {
+        body["hash"] = json!(h);
+    }
+    if let Some(s) = songid.filter(|s| !s.is_empty()) {
+        body["songid"] = json!(s);
+    }
+    if let Some(p) = playtime {
+        body["playtime"] = json!(p);
+    }
 
     let req = KgRequest::get("/v2/personal_recommend")
         .method(reqwest::Method::POST)

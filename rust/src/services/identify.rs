@@ -83,10 +83,17 @@ pub async fn identify_music(
     match &resp {
         Ok(v) => {
             if let Some(arr) = v.as_array() {
-                println!("[Identify] 酷狗服务端返回成功: 识别到 {} 个候选条目", arr.len());
+                println!(
+                    "[Identify] 酷狗服务端返回成功: 识别到 {} 个候选条目",
+                    arr.len()
+                );
             } else {
                 let status = v.get("status").and_then(|s| s.as_i64()).unwrap_or(-1);
-                let errcode = v.get("error_code").or_else(|| v.get("errcode")).and_then(|e| e.as_i64()).unwrap_or(-1);
+                let errcode = v
+                    .get("error_code")
+                    .or_else(|| v.get("errcode"))
+                    .and_then(|e| e.as_i64())
+                    .unwrap_or(-1);
                 let error = v.get("error").and_then(|e| e.as_str()).unwrap_or("");
                 println!(
                     "[Identify] 酷狗服务端返回: status = {}, error_code = {}, error = \"{}\"",
@@ -142,7 +149,11 @@ pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
             // 专辑名称兜底：直接字段 或 album[0].albumname
             let mut album_name = get(item, &["albumname", "album_name"]);
             if album_name.is_empty() {
-                if let Some(first_album) = item.get("album").and_then(|a| a.as_array()).and_then(|a| a.first()) {
+                if let Some(first_album) = item
+                    .get("album")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                {
                     album_name = get(first_album, &["albumname", "album_name"]);
                 }
             }
@@ -167,7 +178,11 @@ pub fn parse_candidates(v: &Value) -> Vec<IdentifyCandidate> {
             })
         })
         .collect();
-    out.sort_by(|a, b| a.dist.partial_cmp(&b.dist).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| {
+        a.dist
+            .partial_cmp(&b.dist)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     println!("[Identify] 解析出 {} 首候选歌曲", out.len());
     for (i, c) in out.iter().take(3).enumerate() {
         println!(
@@ -292,13 +307,16 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             use std::fs::File;
+            use symphonia::core::audio::SampleBuffer;
+            use symphonia::core::codecs::DecoderOptions;
+            use symphonia::core::formats::FormatOptions;
             use symphonia::core::io::MediaSourceStream;
             use symphonia::core::probe::Hint;
-            use symphonia::core::formats::FormatOptions;
-            use symphonia::core::codecs::DecoderOptions;
-            use symphonia::core::audio::SampleBuffer;
 
-            let path = format!("{}\\shiyin_play_cache\\Tanir & Tyomcha-Da Da Da.mp3", std::env::var("TEMP").unwrap());
+            let path = format!(
+                "{}\\shiyin_play_cache\\Tanir & Tyomcha-Da Da Da.mp3",
+                std::env::var("TEMP").unwrap()
+            );
             let file = match File::open(&path) {
                 Ok(f) => f,
                 Err(e) => {
@@ -313,9 +331,15 @@ mod tests {
                 .format(&hint, mss, &FormatOptions::default(), &Default::default())
                 .expect("probe");
             let mut format = probed.format;
-            let track = format.tracks().iter().find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL).unwrap();
+            let track = format
+                .tracks()
+                .iter()
+                .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+                .unwrap();
             let track_id = track.id;
-            let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+            let mut decoder = symphonia::default::get_codecs()
+                .make(&track.codec_params, &DecoderOptions::default())
+                .unwrap();
             let src_rate = track.codec_params.sample_rate.unwrap();
             let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
 
@@ -328,13 +352,17 @@ mod tests {
                     Ok(p) => p,
                     Err(_) => break,
                 };
-                if packet.track_id() != track_id { continue; }
+                if packet.track_id() != track_id {
+                    continue;
+                }
                 let decoded = match decoder.decode(&packet) {
                     Ok(d) => d,
                     Err(_) => continue,
                 };
                 let spec = *decoded.spec();
-                let buf = sbuf.get_or_insert_with(|| SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+                let buf = sbuf.get_or_insert_with(|| {
+                    SampleBuffer::<f32>::new(decoded.capacity() as u64, spec)
+                });
                 buf.copy_interleaved_ref(decoded);
                 let samples = buf.samples();
                 for frame in samples.chunks_exact(channels) {
@@ -342,10 +370,19 @@ mod tests {
                     mono_samples.push(sum / channels as f32);
                 }
             }
-            println!("Decoded {} mono samples at {}Hz", mono_samples.len(), src_rate);
+            println!(
+                "Decoded {} mono samples at {}Hz",
+                mono_samples.len(),
+                src_rate
+            );
 
-            let pcm = crate::services::audio_capture::desktop::mono_f32_to_pcm8k(&mono_samples, src_rate);
-            println!("Resampled PCM: {} bytes (duration: {:.2}s)", pcm.len(), pcm.len() as f32 / 16000.0);
+            let pcm =
+                crate::services::audio_capture::desktop::mono_f32_to_pcm8k(&mono_samples, src_rate);
+            println!(
+                "Resampled PCM: {} bytes (duration: {:.2}s)",
+                pcm.len(),
+                pcm.len() as f32 / 16000.0
+            );
 
             let client = reqwest::Client::new();
             let session = KgSession::default();

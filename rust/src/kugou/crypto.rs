@@ -74,7 +74,9 @@ pub fn decode_lyrics(base64_str: &str) -> String {
         return String::new();
     }
 
-    let en_key: [u8; 16] = [64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105];
+    let en_key: [u8; 16] = [
+        64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105,
+    ];
 
     let krc: Vec<u8> = bytes[4..]
         .iter()
@@ -125,7 +127,8 @@ pub fn aes_encrypt(data: &str, key: Option<&str>, iv: Option<&str>) -> AesEncryp
         }
     };
 
-    let cipher = cbc_encrypt::<Aes256>(data.as_bytes(), actual_key.as_bytes(), actual_iv.as_bytes());
+    let cipher =
+        cbc_encrypt::<Aes256>(data.as_bytes(), actual_key.as_bytes(), actual_iv.as_bytes());
     AesEncryptResult {
         cipher_text: hex::encode(cipher),
         temp_key,
@@ -182,7 +185,10 @@ fn pkcs7_pad(data: &[u8]) -> Vec<u8> {
 /// PKCS7 去填充（失败 panic，与 .NET TransformFinalBlock 一致）。
 fn pkcs7_unpad(data: &[u8]) -> Vec<u8> {
     let pad = *data.last().expect("PKCS7 去填充：空数据") as usize;
-    assert!(pad > 0 && pad <= BLOCK_SIZE, "PKCS7 去填充：非法填充值 {pad}");
+    assert!(
+        pad > 0 && pad <= BLOCK_SIZE,
+        "PKCS7 去填充：非法填充值 {pad}"
+    );
     data[..data.len() - pad].to_vec()
 }
 

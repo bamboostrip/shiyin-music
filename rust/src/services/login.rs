@@ -5,8 +5,7 @@ use crate::kugou::{
     crypto,
     request::{KgRequest, SignatureType},
     session::KgSession,
-    signer,
-    transport,
+    signer, transport,
 };
 
 const LITE_T1_KEY: &str = "5e4ef500e9597fe004bd09a46d8add98";
@@ -23,7 +22,9 @@ const LOGIN_RETRY_HOST: &str = "https://loginserviceretry.kugou.com";
 const WEB_HOST: &str = "https://login-user.kugou.com";
 
 fn try_decrypt_response(response: Value, aes_key: Option<&str>) -> Value {
-    let Some(aes_key) = aes_key else { return response };
+    let Some(aes_key) = aes_key else {
+        return response;
+    };
     let secu = match response.get("secu_params").and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => s,
         _ => return response,
@@ -46,7 +47,11 @@ fn try_decrypt_response(response: Value, aes_key: Option<&str>) -> Value {
     root
 }
 
-pub async fn send_sms_code(client: &reqwest::Client, session: &KgSession, mobile: &str) -> AppResult<Value> {
+pub async fn send_sms_code(
+    client: &reqwest::Client,
+    session: &KgSession,
+    mobile: &str,
+) -> AppResult<Value> {
     let body = json!({ "businessid": 5, "mobile": mobile, "plat": 3 });
     let req = KgRequest::get("/v7/send_mobile_code")
         .method(reqwest::Method::POST)
@@ -70,8 +75,10 @@ pub async fn login_by_mobile(
     let t1_raw = format!("|{date_ms}");
     let t1_enc = crypto::aes_encrypt(&t1_raw, Some(LITE_T1_KEY), Some(LITE_T1_IV)).cipher_text;
 
-    let t2_raw = format!("{}|{T2_FIXED_HASH}|{}|{}|{date_ms}",
-        session.install_guid, session.install_mac, session.install_dev);
+    let t2_raw = format!(
+        "{}|{T2_FIXED_HASH}|{}|{}|{date_ms}",
+        session.install_guid, session.install_mac, session.install_dev
+    );
     let t2_enc = crypto::aes_encrypt(&t2_raw, Some(LITE_T2_KEY), Some(LITE_T2_IV)).cipher_text;
 
     let aes_payload = json!({ "mobile": mobile, "code": code });
@@ -82,7 +89,11 @@ pub async fn login_by_mobile(
 
     let masked = if mobile.chars().count() > 10 {
         let chars: Vec<char> = mobile.chars().collect();
-        format!("{}*****{}", chars[..2].iter().collect::<String>(), chars[10])
+        format!(
+            "{}*****{}",
+            chars[..2].iter().collect::<String>(),
+            chars[10]
+        )
     } else {
         mobile.to_string()
     };
@@ -129,7 +140,10 @@ pub async fn get_qr_key(client: &reqwest::Client, session: &KgSession) -> AppRes
         .param("type", "1")
         .param("plat", "4")
         .param("srcappid", "2919")
-        .param("qrcode_txt", "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=3116&")
+        .param(
+            "qrcode_txt",
+            "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=3116&",
+        )
         .signature_type(SignatureType::Web);
     transport::send(client, session, &req).await
 }
@@ -171,12 +185,15 @@ pub async fn refresh_token(
     };
     let t1_enc = crypto::aes_encrypt(&t1_raw, Some(LITE_T1_KEY), Some(LITE_T1_IV)).cipher_text;
 
-    let t2_raw = format!("{}|{T2_FIXED_HASH}|{}|{}|{date_ms}",
-        session.install_guid, session.install_mac, session.install_dev);
+    let t2_raw = format!(
+        "{}|{T2_FIXED_HASH}|{}|{}|{date_ms}",
+        session.install_guid, session.install_mac, session.install_dev
+    );
     let t2_enc = crypto::aes_encrypt(&t2_raw, Some(LITE_T2_KEY), Some(LITE_T2_IV)).cipher_text;
 
     let p3_data = json!({ "clienttime": clienttime_sec, "token": session.token });
-    let p3_enc = crypto::aes_encrypt(&p3_data.to_string(), Some(LITE_APP_KEY), Some(LITE_APP_IV)).cipher_text;
+    let p3_enc = crypto::aes_encrypt(&p3_data.to_string(), Some(LITE_APP_KEY), Some(LITE_APP_IV))
+        .cipher_text;
 
     let params_enc = crypto::aes_encrypt("{}", None, None);
 

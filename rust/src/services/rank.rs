@@ -5,7 +5,11 @@ use crate::kugou::request::{KgRequest, SignatureType};
 use crate::kugou::session::KgSession;
 use crate::kugou::transport;
 
-pub async fn rank_list(client: &reqwest::Client, session: &KgSession, withsong: i64) -> AppResult<Value> {
+pub async fn rank_list(
+    client: &reqwest::Client,
+    session: &KgSession,
+    withsong: i64,
+) -> AppResult<Value> {
     let req = KgRequest::get("/ocean/v6/rank/list")
         .param("plat", "2")
         .param("withsong", withsong.to_string())

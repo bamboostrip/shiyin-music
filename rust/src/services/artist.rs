@@ -1,7 +1,12 @@
 use serde_json::{json, Value};
 
 use crate::error::AppResult;
-use crate::kugou::{config, crypto, request::{KgRequest, SignatureType}, session::KgSession, signer, transport};
+use crate::kugou::{
+    config, crypto,
+    request::{KgRequest, SignatureType},
+    session::KgSession,
+    signer, transport,
+};
 
 #[allow(dead_code)]
 pub async fn artist_lists(
@@ -65,7 +70,11 @@ pub async fn artist_videos(
     transport::send(client, session, &req).await
 }
 
-pub async fn artist_detail(client: &reqwest::Client, session: &KgSession, id: &str) -> AppResult<Value> {
+pub async fn artist_detail(
+    client: &reqwest::Client,
+    session: &KgSession,
+    id: &str,
+) -> AppResult<Value> {
     let body = json!({ "author_id": id });
     let req = KgRequest::get("/kmr/v3/author")
         .method(reqwest::Method::POST)

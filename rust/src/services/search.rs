@@ -108,14 +108,15 @@ pub async fn search_suggest(
 }
 
 #[allow(dead_code)]
-pub async fn search_mixed(client: &reqwest::Client, session: &KgSession, keyword: &str) -> AppResult<Value> {
+pub async fn search_mixed(
+    client: &reqwest::Client,
+    session: &KgSession,
+    keyword: &str,
+) -> AppResult<Value> {
     let time_ms = chrono::Utc::now().timestamp_millis();
     let requestid = format!(
         "{}_0",
-        crypto::md5_str(&format!(
-            "bdaa53d04e7475feb9024164a47032f9{}",
-            time_ms
-        ))
+        crypto::md5_str(&format!("bdaa53d04e7475feb9024164a47032f9{}", time_ms))
     );
 
     let req = KgRequest::get("/v3/search/mixed")

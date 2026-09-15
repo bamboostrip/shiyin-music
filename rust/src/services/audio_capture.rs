@@ -215,8 +215,9 @@ pub mod desktop {
             eprintln!("[AudioCapture] 采集流错误: {e}");
             tracing::warn!(error = %e, "识曲采集流错误");
         };
-        // cpal 0.18 起 build_*_stream 按值收 StreamConfig(不再收引用)。
-        let cfg: cpal::StreamConfig = config.clone().into();
+        // cpal 0.18 起 build_*_stream 按值收 StreamConfig(不再收引用)；
+        // SupportedStreamConfig 实现 Copy，直接取值即可。
+        let cfg: cpal::StreamConfig = config.into();
         println!(
             "[AudioCapture] 正在创建采集流: source=\"{resolved_source}\", 采样率={}Hz, 声道数={}, 格式={:?}",
             config.sample_rate(),
@@ -317,7 +318,10 @@ pub mod desktop {
         if total_samples == 0 || samples.is_empty() {
             println!("[AudioCapture] 警告: 采集缓冲区为空 (0 采样)! 若使用系统内录(system)，请确认系统默认输出设备当前正在播放声音。");
         } else if peak < 0.001 {
-            println!("[AudioCapture] 提示: 采集到的声音音量接近全静音 (峰值振幅={:.4})", peak);
+            println!(
+                "[AudioCapture] 提示: 采集到的声音音量接近全静音 (峰值振幅={:.4})",
+                peak
+            );
         }
         let pcm = mono_f32_to_pcm8k(&samples, src_rate);
         println!(
@@ -346,16 +350,11 @@ pub mod desktop {
     /// 识曲指纹对高频混叠不敏感,可用性优先。
     fn resample_fft(samples: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
         use rubato::{FftFixedIn, Resampler};
-        let expected =
-            (samples.len() as u64 * dst_rate as u64 / src_rate as u64).max(1) as usize;
+        let expected = (samples.len() as u64 * dst_rate as u64 / src_rate as u64).max(1) as usize;
         let chunk = 8192usize;
-        let Ok(mut resampler) = FftFixedIn::<f32>::new(
-            src_rate as usize,
-            dst_rate as usize,
-            chunk,
-            4,
-            1,
-        ) else {
+        let Ok(mut resampler) =
+            FftFixedIn::<f32>::new(src_rate as usize, dst_rate as usize, chunk, 4, 1)
+        else {
             return resample_linear(samples, src_rate, dst_rate);
         };
         let mut out = Vec::with_capacity(expected);
@@ -384,8 +383,7 @@ pub mod desktop {
     }
 
     fn resample_linear(samples: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
-        let expected =
-            (samples.len() as u64 * dst_rate as u64 / src_rate as u64).max(1) as usize;
+        let expected = (samples.len() as u64 * dst_rate as u64 / src_rate as u64).max(1) as usize;
         let mut out = Vec::with_capacity(expected);
         let step = src_rate as f64 / dst_rate as f64;
         for i in 0..expected {
@@ -428,11 +426,7 @@ pub mod desktop {
             let src = sine(440.0, 48000, 1000);
             let pcm = mono_f32_to_pcm8k(&src, 48000);
             // 1s@8k → 16000 字节(±1% 容忍整除舍入)
-            assert!(
-                (pcm.len() as i64 - 16000).abs() < 160,
-                "len={}",
-                pcm.len()
-            );
+            assert!((pcm.len() as i64 - 16000).abs() < 160, "len={}", pcm.len());
             // s16le 解回 f32,能量应大体保留
             let mut back = Vec::with_capacity(pcm.len() / 2);
             for pair in pcm.chunks_exact(2) {
@@ -508,20 +502,25 @@ pub mod desktop {
             let sample_rate = config.sample_rate() as f32;
             let channels = config.channels() as usize;
             let mut sample_clock = 0f32;
-            let out_stream = out.build_output_stream(
-                cfg.clone(),
-                move |data: &mut [f32], _| {
-                    for frame in data.chunks_mut(channels) {
-                        let value = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin() * 0.3;
-                        sample_clock = (sample_clock + 1.0) % sample_rate;
-                        for sample in frame.iter_mut() {
-                            *sample = value;
+            let out_stream = out
+                .build_output_stream(
+                    cfg.clone(),
+                    move |data: &mut [f32], _| {
+                        for frame in data.chunks_mut(channels) {
+                            let value = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI
+                                / sample_rate)
+                                .sin()
+                                * 0.3;
+                            sample_clock = (sample_clock + 1.0) % sample_rate;
+                            for sample in frame.iter_mut() {
+                                *sample = value;
+                            }
                         }
-                    }
-                },
-                |e| println!("Output stream error: {e}"),
-                None,
-            ).expect("build output stream");
+                    },
+                    |e| println!("Output stream error: {e}"),
+                    None,
+                )
+                .expect("build output stream");
             out_stream.play().expect("play output stream");
 
             // Give the render stream a moment to start
@@ -531,31 +530,41 @@ pub mod desktop {
             let max_amp = std::sync::Arc::new(std::sync::Mutex::new(0.0f32));
             let count_clone = count.clone();
             let max_amp_clone = max_amp.clone();
-            let in_stream = out.build_input_stream(
-                cfg,
-                move |data: &[f32], _| {
-                    let c = count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let mut local_max = 0.0f32;
-                    for &s in data {
-                        local_max = local_max.max(s.abs());
-                    }
-                    if let Ok(mut g) = max_amp_clone.lock() {
-                        *g = g.max(local_max);
-                    }
-                    if c < 5 {
-                        println!("Loopback frame #{c}: samples={}, max_amp={local_max}", data.len());
-                    }
-                },
-                |e| println!("Loopback stream error: {e}"),
-                None,
-            ).expect("build loopback input stream");
+            let in_stream = out
+                .build_input_stream(
+                    cfg,
+                    move |data: &[f32], _| {
+                        let c = count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let mut local_max = 0.0f32;
+                        for &s in data {
+                            local_max = local_max.max(s.abs());
+                        }
+                        if let Ok(mut g) = max_amp_clone.lock() {
+                            *g = g.max(local_max);
+                        }
+                        if c < 5 {
+                            println!(
+                                "Loopback frame #{c}: samples={}, max_amp={local_max}",
+                                data.len()
+                            );
+                        }
+                    },
+                    |e| println!("Loopback stream error: {e}"),
+                    None,
+                )
+                .expect("build loopback input stream");
 
             in_stream.play().expect("play loopback stream");
             std::thread::sleep(std::time::Duration::from_millis(500));
             let total = count.load(std::sync::atomic::Ordering::Relaxed);
             let peak = *max_amp.lock().unwrap();
-            println!("When audio is playing: total frames in 500ms = {total}, peak amplitude = {peak}");
-            assert!(total > 0, "Expected loopback frames when audio is rendering!");
+            println!(
+                "When audio is playing: total frames in 500ms = {total}, peak amplitude = {peak}"
+            );
+            assert!(
+                total > 0,
+                "Expected loopback frames when audio is rendering!"
+            );
             assert!(peak > 0.01, "Expected non-silent audio in loopback!");
         }
     }

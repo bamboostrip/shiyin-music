@@ -22,7 +22,11 @@ pub enum ParsedResponse {
     /// 成功：携带提升后的节点（成功且有 data 则是 data，否则是整个 root）
     Success(Value),
     /// 失败：root 的 status/error_code 与原始 root（便于上层报错）
-    Failure { status: Option<i64>, err_code: Option<i64>, root: Value },
+    Failure {
+        status: Option<i64>,
+        err_code: Option<i64>,
+        root: Value,
+    },
 }
 
 fn replace_size_placeholders(val: &mut Value) {
@@ -118,7 +122,10 @@ mod tests {
     fn success_promotes_data() {
         let root = json!({ "status": 1, "error_code": 0, "data": { "lists": [1, 2, 3] } });
         match parse(root) {
-            ParsedResponse::Success(v) => assert_eq!(v, json!({ "lists": [1, 2, 3], "status": 1, "error_code": 0 })),
+            ParsedResponse::Success(v) => assert_eq!(
+                v,
+                json!({ "lists": [1, 2, 3], "status": 1, "error_code": 0 })
+            ),
             _ => panic!("应成功"),
         }
     }
@@ -136,7 +143,9 @@ mod tests {
     fn failure_with_error_code() {
         let root = json!({ "status": 0, "error_code": 9001, "err": "缺参" });
         match parse(root) {
-            ParsedResponse::Failure { status, err_code, .. } => {
+            ParsedResponse::Failure {
+                status, err_code, ..
+            } => {
                 assert_eq!(status, Some(0));
                 assert_eq!(err_code, Some(9001));
             }
@@ -178,7 +187,13 @@ mod tests {
     #[test]
     fn status_2_is_failure() {
         let root = json!({ "status": 2 });
-        assert!(matches!(parse(root), ParsedResponse::Failure { status: Some(2), .. }));
+        assert!(matches!(
+            parse(root),
+            ParsedResponse::Failure {
+                status: Some(2),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -199,7 +214,10 @@ mod tests {
         match parse(root) {
             ParsedResponse::Success(v) => {
                 assert_eq!(v["pic"], "http://img.kugou.com/cover/400/a.jpg");
-                assert_eq!(v["nested"]["avatar"], "http://img.kugou.com/avatar/400/b.jpg");
+                assert_eq!(
+                    v["nested"]["avatar"],
+                    "http://img.kugou.com/avatar/400/b.jpg"
+                );
                 assert_eq!(v["array"][0], "http://img.kugou.com/array/400/c.jpg");
             }
             _ => panic!("应成功"),

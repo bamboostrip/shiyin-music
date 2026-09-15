@@ -40,7 +40,10 @@ impl ExternalPlaylistResult {
     }
 }
 
-pub async fn parse(client: &reqwest::Client, source_text: &str) -> AppResult<ExternalPlaylistResult> {
+pub async fn parse(
+    client: &reqwest::Client,
+    source_text: &str,
+) -> AppResult<ExternalPlaylistResult> {
     if source_text.trim().is_empty() {
         return Ok(ExternalPlaylistResult::err("链接不能为空。"));
     }
@@ -53,10 +56,16 @@ pub async fn parse(client: &reqwest::Client, source_text: &str) -> AppResult<Ext
 
     if host.ends_with("music.163.com") || host == "y.music.163.com" || host == "163cn.tv" {
         Ok(netease::parse(client, parsed_url).await)
-    } else if host.contains("y.qq.com") || host.contains("qqmusic.qq.com") || host.contains("music.qq.com") || host.contains("c.y.qq.com") {
+    } else if host.contains("y.qq.com")
+        || host.contains("qqmusic.qq.com")
+        || host.contains("music.qq.com")
+        || host.contains("c.y.qq.com")
+    {
         Ok(qq::parse(client, parsed_url).await)
     } else {
-        Ok(ExternalPlaylistResult::err("暂只支持网易云和QQ音乐歌单链接。"))
+        Ok(ExternalPlaylistResult::err(
+            "暂只支持网易云和QQ音乐歌单链接。",
+        ))
     }
 }
 
@@ -102,10 +111,7 @@ mod tests {
     #[test]
     fn extract_url_finds_http_link_in_text() {
         let text = "分享歌单 https://music.163.com/playlist?id=123 快来听";
-        assert_eq!(
-            extract_url(text),
-            "https://music.163.com/playlist?id=123"
-        );
+        assert_eq!(extract_url(text), "https://music.163.com/playlist?id=123");
         assert_eq!(extract_url("not a url"), "not a url");
     }
 }
@@ -145,12 +151,20 @@ mod netease {
             Some(p) => p,
             None => return ExternalPlaylistResult::err("网易云响应格式异常，未找到歌单信息。"),
         };
-        let name = playlist.get("name").and_then(|v| v.as_str()).unwrap_or("导入歌单").to_string();
+        let name = playlist
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("导入歌单")
+            .to_string();
 
         let track_ids: Vec<i64> = playlist
             .get("trackIds")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|t| t.get("id").and_then(|i| i.as_i64())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.get("id").and_then(|i| i.as_i64()))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let songs = if !track_ids.is_empty() {
@@ -159,20 +173,38 @@ mod netease {
             playlist
                 .get("tracks")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| {
+                            t.get("name")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.trim().to_string())
+                        })
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default()
         };
 
         let mut seen = std::collections::HashSet::new();
-        let songs: Vec<String> = songs.into_iter().filter(|s| !s.is_empty() && seen.insert(s.clone())).collect();
+        let songs: Vec<String> = songs
+            .into_iter()
+            .filter(|s| !s.is_empty() && seen.insert(s.clone()))
+            .collect();
         if songs.is_empty() {
-            return ExternalPlaylistResult::err("网易云歌单未解析到歌曲名称，可能是私密歌单或接口受限。");
+            return ExternalPlaylistResult::err(
+                "网易云歌单未解析到歌曲名称，可能是私密歌单或接口受限。",
+            );
         }
         ExternalPlaylistResult::ok("网易云", name, songs)
     }
 
     async fn resolve_short_link(client: &reqwest::Client, uri: url::Url) -> url::Url {
-        if uri.host_str().map(|h| h.eq_ignore_ascii_case("163cn.tv")).unwrap_or(false) {
+        if uri
+            .host_str()
+            .map(|h| h.eq_ignore_ascii_case("163cn.tv"))
+            .unwrap_or(false)
+        {
             if let Ok(resp) = client.get(uri.as_str()).send().await {
                 if let Ok(loc) = resp.url().as_str().parse() {
                     return loc;
@@ -192,7 +224,9 @@ mod netease {
             let f = frag.trim_start_matches('/');
             if let Some(q_idx) = f.find('?') {
                 let fq = &f[q_idx + 1..];
-                if let Some((_, id)) = url::form_urlencoded::parse(fq.as_bytes()).find(|(k, _)| k == "id") {
+                if let Some((_, id)) =
+                    url::form_urlencoded::parse(fq.as_bytes()).find(|(k, _)| k == "id")
+                {
                     if !id.is_empty() {
                         return Some(id.into_owned());
                     }
@@ -209,10 +243,21 @@ mod netease {
         for chunk in track_ids.chunks(400) {
             let payload = format!(
                 "[{}]",
-                chunk.iter().map(|id| format!("{{\"id\":{id}}}")).collect::<Vec<_>>().join(",")
+                chunk
+                    .iter()
+                    .map(|id| format!("{{\"id\":{id}}}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
             );
             let form = [("c", payload.as_str())];
-            let resp = match client.post(SONG_DETAIL_API).header("Referer", "https://music.163.com/").header("User-Agent", UA).form(&form).send().await {
+            let resp = match client
+                .post(SONG_DETAIL_API)
+                .header("Referer", "https://music.163.com/")
+                .header("User-Agent", UA)
+                .form(&form)
+                .send()
+                .await
+            {
                 Ok(r) => r,
                 Err(_) => continue,
             };
@@ -241,7 +286,15 @@ mod qq {
     const QQ_API: &str = "https://u6.y.qq.com/cgi-bin/musics.fcg";
     const PAGE_SIZE: i64 = 30;
     const MAX_SONGS: i64 = 10000;
-    const PLATFORMS: &[&str] = &["-1", "android", "iphone", "h5", "wxfshare", "iphone_wx", "windows"];
+    const PLATFORMS: &[&str] = &[
+        "-1",
+        "android",
+        "iphone",
+        "h5",
+        "wxfshare",
+        "iphone_wx",
+        "windows",
+    ];
 
     pub async fn parse(client: &reqwest::Client, uri: url::Url) -> ExternalPlaylistResult {
         let playlist_id = match extract_playlist_id(&uri) {
@@ -256,7 +309,11 @@ mod qq {
         if first.song_names.is_empty() && first.total <= 0 {
             return ExternalPlaylistResult::err("QQ音乐歌单数据获取失败，请稍后重试。");
         }
-        let playlist_name = if first.title.is_empty() { "导入歌单".to_string() } else { first.title.clone() };
+        let playlist_name = if first.title.is_empty() {
+            "导入歌单".to_string()
+        } else {
+            first.title.clone()
+        };
         let total = first.total.min(MAX_SONGS);
 
         let mut all = first.song_names;
@@ -273,7 +330,10 @@ mod qq {
         }
 
         let mut seen = std::collections::HashSet::new();
-        let all: Vec<String> = all.into_iter().filter(|s| !s.is_empty() && seen.insert(s.clone())).collect();
+        let all: Vec<String> = all
+            .into_iter()
+            .filter(|s| !s.is_empty() && seen.insert(s.clone()))
+            .collect();
         if all.is_empty() {
             return ExternalPlaylistResult::err("QQ音乐歌单未解析到歌曲名称。");
         }
@@ -304,12 +364,26 @@ mod qq {
         song_names: Vec<String>,
     }
 
-    async fn fetch_page(client: &reqwest::Client, playlist_id: i64, begin: i64, num: i64) -> Option<PageData> {
+    async fn fetch_page(
+        client: &reqwest::Client,
+        playlist_id: i64,
+        begin: i64,
+        num: i64,
+    ) -> Option<PageData> {
         for platform in PLATFORMS {
             let body = build_request_json(playlist_id, platform, begin, num);
             let sign = build_qq_sign(&body);
-            let url = format!("{QQ_API}?sign={sign}&_={}", chrono::Utc::now().timestamp_millis());
-            let resp = match client.post(&url).header("Content-Type", "application/x-www-form-urlencoded").body(body.clone()).send().await {
+            let url = format!(
+                "{QQ_API}?sign={sign}&_={}",
+                chrono::Utc::now().timestamp_millis()
+            );
+            let resp = match client
+                .post(&url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body.clone())
+                .send()
+                .await
+            {
                 Ok(r) => r,
                 Err(_) => continue,
             };
@@ -332,7 +406,11 @@ mod qq {
         let data = root.get("req_0")?.get("data")?;
         let (title, total) = if let Some(dirinfo) = data.get("dirinfo") {
             (
-                dirinfo.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                dirinfo
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 dirinfo.get("songnum").and_then(|v| v.as_i64()).unwrap_or(0),
             )
         } else {
@@ -341,9 +419,22 @@ mod qq {
         let songs = data
             .get("songlist")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|s| s.get("name").and_then(|n| n.as_str()).map(|n| n.trim().to_string()).filter(|n| !n.is_empty())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|s| {
+                        s.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|n| n.trim().to_string())
+                            .filter(|n| !n.is_empty())
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        Some(PageData { title, total, song_names: songs })
+        Some(PageData {
+            title,
+            total,
+            song_names: songs,
+        })
     }
 
     fn build_request_json(playlist_id: i64, platform: &str, begin: i64, num: i64) -> String {
@@ -353,7 +444,9 @@ mod qq {
     }
 
     fn build_qq_sign(param: &str) -> String {
-        let l1 = [212, 45, 80, 68, 195, 163, 163, 203, 157, 220, 254, 91, 204, 79, 104, 6];
+        let l1 = [
+            212, 45, 80, 68, 195, 163, 163, 203, 157, 220, 254, 91, 204, 79, 104, 6,
+        ];
         const T: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
         let md5_bytes = md5_upper(param);
@@ -384,7 +477,10 @@ mod qq {
                 ls3.push(bytes[x7 as usize]);
             }
         }
-        let t2 = ls3.chars().filter(|&c| c != '/' && c != '+').collect::<String>();
+        let t2 = ls3
+            .chars()
+            .filter(|&c| c != '/' && c != '+')
+            .collect::<String>();
         format!("zzb{}", (t1 + &t2 + &t3).to_lowercase())
     }
 

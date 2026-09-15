@@ -20,8 +20,7 @@ use reqwest::{Client, Method};
 
 use crate::error::{AppError, AppResult};
 use crate::kugou::{
-    api_response,
-    config,
+    api_response, config,
     request::{KgRequest, SignatureType},
     session::KgSession,
     signer,
@@ -70,7 +69,11 @@ fn percent_encode_rfc3986(s: &str) -> String {
 ///
 /// 对应 .NET 的 `KgHttpTransport.SendAsync` + `KgSignatureHandler.SendAsync` 合体。
 /// `client` 是共享的 reqwest 连接池，`session` 是当前调用方的会话。
-pub async fn send(client: &Client, session: &KgSession, req: &KgRequest) -> AppResult<serde_json::Value> {
+pub async fn send(
+    client: &Client,
+    session: &KgSession,
+    req: &KgRequest,
+) -> AppResult<serde_json::Value> {
     let now = now_secs();
 
     // ===== 步骤 1：解析设备身份 =====
@@ -120,9 +123,15 @@ pub async fn send(client: &Client, session: &KgSession, req: &KgRequest) -> AppR
     // ===== 步骤 3：V5 额外 key 参数 =====
     if req.signature_type == SignatureType::V5 && merged.contains_key("hash") {
         let param_mid = merged.get("mid").cloned().unwrap_or_else(|| mid.clone());
-        let param_userid = merged.get("userid").cloned().unwrap_or_else(|| userid.clone());
+        let param_userid = merged
+            .get("userid")
+            .cloned()
+            .unwrap_or_else(|| userid.clone());
         let hash = merged.get("hash").cloned().unwrap_or_default();
-        merged.insert("key".into(), signer::calc_v5_key(&hash, &param_userid, &param_mid));
+        merged.insert(
+            "key".into(),
+            signer::calc_v5_key(&hash, &param_userid, &param_mid),
+        );
     }
 
     // ===== 步骤 4：重建 body 作为签名输入 =====
@@ -186,9 +195,7 @@ pub async fn send(client: &Client, session: &KgSession, req: &KgRequest) -> AppR
     if !has_custom_ua {
         builder = builder.header("User-Agent", config::USER_AGENT);
     }
-    builder = builder
-        .header("dfid", &dfid)
-        .header("mid", &mid);
+    builder = builder.header("dfid", &dfid).header("mid", &mid);
     if let Some(ct) = merged.get("clienttime") {
         builder = builder.header("clienttime", ct);
     }
@@ -247,7 +254,11 @@ pub async fn send(client: &Client, session: &KgSession, req: &KgRequest) -> AppR
 
     Ok(match api_response::parse(root) {
         api_response::ParsedResponse::Success(v) => v,
-        api_response::ParsedResponse::Failure { status, err_code, root } => {
+        api_response::ParsedResponse::Failure {
+            status,
+            err_code,
+            root,
+        } => {
             tracing::warn!(
                 path = %req.path,
                 status = ?status,
