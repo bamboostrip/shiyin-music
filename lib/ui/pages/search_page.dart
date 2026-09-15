@@ -439,7 +439,36 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        if (IdentifyService.isSupported) ...[
+          const SizedBox(width: 10),
+          SizedBox(
+            height: 46,
+            child: FilledButton.tonalIcon(
+              onPressed: () => _openIdentify(context),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(23),
+                ),
+              ),
+              icon: Icon(
+                Icons.graphic_eq_rounded,
+                size: 20,
+                color: colorScheme.primary,
+              ),
+              label: Text(
+                '识曲',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isDark
+                      ? colorScheme.onSurface.withValues(alpha: .92)
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(width: 10),
         // 与左侧胶囊等高（46）的 tonal 药丸按钮：无阴影、与搜索框对齐；
         // 深色字落在浅色容器上，换任何种子色（尤其浅色金）对比度都不翻车。
         SizedBox(
