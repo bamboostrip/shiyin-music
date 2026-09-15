@@ -196,7 +196,11 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
           maxLines: 1,
           softWrap: false,
           style: textStyle.copyWith(
-            color: widget.unplayedColor.withValues(alpha: safeOpacity),
+            // 传入颜色自身的 alpha 参与合成（相乘而非覆盖）：
+            // 双行模式靠它区分当前句与下一句（1.0 vs 0.85）。
+            color: widget.unplayedColor.withValues(
+              alpha: widget.unplayedColor.a * safeOpacity,
+            ),
             shadows: unplayedShadows,
           ),
         ),
@@ -211,7 +215,9 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
             maxLines: 1,
             softWrap: false,
             style: textStyle.copyWith(
-              color: widget.playedColor.withValues(alpha: safeOpacity),
+              color: widget.playedColor.withValues(
+                alpha: widget.playedColor.a * safeOpacity,
+              ),
               shadows: playedShadows,
             ),
           ),

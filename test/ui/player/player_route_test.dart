@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -357,6 +359,76 @@ void main() {
           expect(find.byType(PlayerPage), findsOneWidget);
         },
       );
+    });
+  });
+
+  group('popPlayerRouteIfTop', () {
+    // 播放页是整屏路由会盖住宿主页（无法 hit-test），故压栈前先保存
+    // 宿主页 context，直接调用辅助函数验证行为。
+    Future<BuildContext> pumpHost(WidgetTester tester) async {
+      BuildContext? captured;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              captured = context;
+              return Scaffold(
+                body: ElevatedButton(
+                  onPressed: () {},
+                  child: const Text('Action'),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      return captured!;
+    }
+
+    testWidgets('根导航顶层是桌面播放页路由时退出播放页', (tester) async {
+      final homeContext = await pumpHost(tester);
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+
+      // 注意：push 的 Future 要到路由 pop 时才完成，不能 await，否则死等。
+      unawaited(nav.push(DesktopPlayerPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('Player')),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text('Player'), findsOneWidget);
+
+      expect(popPlayerRouteIfTop(homeContext), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('Player'), findsNothing);
+    });
+
+    testWidgets('根导航顶层是移动端播放页路由时同样退出', (tester) async {
+      final homeContext = await pumpHost(tester);
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+
+      unawaited(nav.push(PlayerPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('Player')),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text('Player'), findsOneWidget);
+
+      expect(popPlayerRouteIfTop(homeContext), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('Player'), findsNothing);
+    });
+
+    testWidgets('顶层不是播放页路由时不 pop 任何页面', (tester) async {
+      final homeContext = await pumpHost(tester);
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+
+      unawaited(nav.push(MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('Other Page')),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text('Other Page'), findsOneWidget);
+
+      expect(popPlayerRouteIfTop(homeContext), isFalse);
+      await tester.pumpAndSettle();
+      expect(find.text('Other Page'), findsOneWidget);
     });
   });
 }

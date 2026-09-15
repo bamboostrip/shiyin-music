@@ -932,14 +932,15 @@ void main() {
       expect(nextLine.fontWeight, FontWeight.bold);
       expect(currentLine.fontSize, nextLine.fontSize);
       expect(currentLine.fontSize, closeTo(fontSize * 0.82, 0.001));
-      // 基础（未播放）色 RGB 一致，"下一句"那行整体降透明度（0.65）以弱化
+      // 基础（未播放）色 RGB 一致，"下一句"轻度弱化（0.85）但保持可读，
+      // 不再叠 textOpacity 折扣（背景全透明的悬浮窗上双重压暗会看不清）。
       expect(currentLine.unplayedColor.r, nextLine.unplayedColor.r);
       expect(currentLine.unplayedColor.g, nextLine.unplayedColor.g);
       expect(currentLine.unplayedColor.b, nextLine.unplayedColor.b);
       expect(currentLine.unplayedColor.a, closeTo(1.0, 0.001));
-      expect(nextLine.unplayedColor.a, closeTo(0.65, 0.001));
+      expect(nextLine.unplayedColor.a, closeTo(0.85, 0.001));
       expect(currentLine.textOpacity, 1.0);
-      expect(nextLine.textOpacity, closeTo(0.65, 0.001));
+      expect(nextLine.textOpacity, 1.0);
     });
 
     testWidgets('双行交替高亮：当前句在下行时，上行让位给下一句（文字不搬家）',
@@ -958,12 +959,12 @@ void main() {
               .toList();
       expect(karaokeLines.length, 2);
 
-      // 上行 = 下一句（未播放、降透明度、无进度），下行 = 当前句（带动画进度）
+      // 上行 = 下一句（未播放、轻度弱化、无进度），下行 = 当前句（带动画进度）
       final topLine = karaokeLines[0];
       final bottomLine = karaokeLines[1];
       expect(topLine.text, '下一句歌词内容');
       expect(topLine.progress, 0.0);
-      expect(topLine.unplayedColor.a, closeTo(0.65, 0.001));
+      expect(topLine.unplayedColor.a, closeTo(0.85, 0.001));
       expect(bottomLine.text, '当前句歌词内容');
       expect(bottomLine.progress, 0.5);
       expect(bottomLine.unplayedColor.a, closeTo(1.0, 0.001));

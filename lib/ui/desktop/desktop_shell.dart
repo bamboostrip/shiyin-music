@@ -199,6 +199,9 @@ class _DesktopShellState extends State<DesktopShell> {
       await _restoreMainWindow();
     }
     if (!mounted) return;
+    // 播放页是根导航整屏路由，会盖住内层内容导航里的设置页；
+    // 先退出播放页，让「更多设置」在播放页打开时也能直接看到设置页。
+    popPlayerRouteIfTop(context);
     if (_lyricsSettingsPageOpen) return;
     _lyricsSettingsPageOpen = true;
     final route = MaterialPageRoute<void>(

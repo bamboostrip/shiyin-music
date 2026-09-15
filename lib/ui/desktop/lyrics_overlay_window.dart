@@ -1434,7 +1434,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 ///
 /// 双行排布（[activeOnBottom] 由主窗按"当前句下标奇偶"下发）：
 /// - 正在唱的那行带动画进度（已播放色逐字变色 + 跑马灯），另一行是下一句
-///   （未播放色降透明度、progress 0）；
+///   （未播放色轻度弱化、progress 0）；
 /// - 高亮在上下两行之间**交替**：唱到下行时上行换成下一句、唱到上行时下行
 ///   换成下一句 —— 正在唱的那句文字永远留在原地，消除历史实现里
 ///   "每句都要从下行搬到上行"的跳行观感；
@@ -1499,6 +1499,9 @@ Widget buildOverlayLyricsBody({
       required Alignment align,
       required TextAlign textAlign,
     }) {
+      // 下一句只做轻度弱化（颜色 alpha 0.85），不再叠 textOpacity 折扣：
+      // 悬浮窗背景默认全透明，双重压暗会让下一句糊在桌面上看不清
+      //（用户反馈）。层级区分靠 1.0 与 0.85 的轻微差异即可。
       return Align(
         alignment: align,
         child: LyricsKaraokeLine(
@@ -1507,13 +1510,11 @@ Widget buildOverlayLyricsBody({
           playedColor: playedColor,
           unplayedColor: active
               ? unplayedColor
-              : unplayedColor.withValues(alpha: 0.65),
+              : unplayedColor.withValues(alpha: 0.85),
           progress: active ? progress : 0.0,
           availableWidth: dualLineWidth,
           alignment: textAlign,
-          textOpacity: active
-              ? settings.textOpacity
-              : settings.textOpacity * 0.65,
+          textOpacity: settings.textOpacity,
           fontWeight: FontWeight.bold,
         ),
       );
