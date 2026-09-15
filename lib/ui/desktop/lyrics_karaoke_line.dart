@@ -154,26 +154,28 @@ class _LyricsKaraokeLineState extends State<LyricsKaraokeLine> {
   Widget build(BuildContext context) {
     final safeOpacity = widget.textOpacity.clamp(0.0, 1.0);
 
+    // 阴影只作浅色桌面上的可读性兜底，浓度压低：过重的黑影会让歌词
+    // 发闷发脏（用户反馈）。两档均为轻描边 + 大半径柔光。
     final unplayedShadows = [
       Shadow(
-        color: Colors.black.withValues(alpha: (0.75 * safeOpacity).clamp(0.0, 1.0)),
+        color: Colors.black.withValues(alpha: (0.40 * safeOpacity).clamp(0.0, 1.0)),
         blurRadius: 6,
         offset: const Offset(0, 1),
       ),
       Shadow(
-        color: Colors.black.withValues(alpha: (0.45 * safeOpacity).clamp(0.0, 1.0)),
+        color: Colors.black.withValues(alpha: (0.22 * safeOpacity).clamp(0.0, 1.0)),
         blurRadius: 14,
       ),
     ];
 
     final playedShadows = [
       Shadow(
-        color: Colors.black.withValues(alpha: (0.85 * safeOpacity).clamp(0.0, 1.0)),
+        color: Colors.black.withValues(alpha: (0.45 * safeOpacity).clamp(0.0, 1.0)),
         blurRadius: 6,
         offset: const Offset(0, 1),
       ),
       Shadow(
-        color: widget.playedColor.withValues(alpha: (0.40 * safeOpacity).clamp(0.0, 1.0)),
+        color: widget.playedColor.withValues(alpha: (0.25 * safeOpacity).clamp(0.0, 1.0)),
         blurRadius: 12,
       ),
     ];
