@@ -9,7 +9,6 @@ import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../../services/cache_service.dart';
-import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
@@ -23,7 +22,6 @@ import '../keyboard_shortcuts.dart';
 import '../form_factor.dart';
 import '../player/player_route.dart';
 import 'home_page.dart';
-import 'identify_page.dart';
 import 'library_page.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
@@ -378,105 +376,58 @@ class _AppShellState extends State<AppShell> {
       height: 72 + topInset, // Increased from 64
       child: Row(
         children: [
-          // Search & Identify Pill Button — 已适配深色模式：深色下使用实色 + 边框提升对比度
-          Container(
-            height: 46, // Increased from 38
-            decoration: BoxDecoration(
-              color: isDark
-                  ? colorScheme.surfaceContainerHighest
-                  : colorScheme.surfaceContainerHighest.withValues(
-                      alpha: .54,
-                    ),
-              borderRadius: BorderRadius.circular(
-                23,
-              ), // Increased from 19 (height/2)
-              border: Border.all(
-                color: isDark
-                    ? colorScheme.outlineVariant.withValues(alpha: .85)
-                    : colorScheme.outlineVariant.withValues(alpha: .45),
-                width: 1,
+          // Search Pill Button — 纯搜索入口，点击直达搜索页，杜绝首页误触
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SearchPage(
+                  api: widget.api,
+                  auth: widget.auth,
+                  player: widget.player,
+                ),
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => SearchPage(
-                        api: widget.api,
-                        auth: widget.auth,
-                        player: widget.player,
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surfaceContainerHighest.withValues(
+                        alpha: .54,
                       ),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 16, right: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          color: isDark
-                              ? colorScheme.onSurface.withValues(alpha: .92)
-                              : colorScheme.onSurfaceVariant,
-                          size: 22, // Increased from 20
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '搜索',
-                          style: TextStyle(
-                            color: isDark
-                                ? colorScheme.onSurface.withValues(alpha: .92)
-                                : colorScheme.onSurfaceVariant,
-                            fontSize: 16, // Increased from default
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                borderRadius: BorderRadius.circular(23),
+                border: Border.all(
+                  color: isDark
+                      ? colorScheme.outlineVariant.withValues(alpha: .85)
+                      : colorScheme.outlineVariant.withValues(alpha: .45),
+                  width: 1,
                 ),
-                if (IdentifyService.isSupported) ...[
-                  Container(
-                    width: 1,
-                    height: 18,
-                    color: colorScheme.outlineVariant.withValues(
-                      alpha: isDark ? .5 : .35,
-                    ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.search_rounded,
+                    color: isDark
+                        ? colorScheme.onSurface.withValues(alpha: .92)
+                        : colorScheme.onSurfaceVariant,
+                    size: 22,
                   ),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    // 入口防抖:双击会推出两页抢全局采集(见 tryConsumeEntry)。
-                    onTap: () {
-                      if (!IdentifyService.tryConsumeEntry()) return;
-                      Navigator.of(context, rootNavigator: true).push(
-                        MaterialPageRoute<void>(
-                          fullscreenDialog: true,
-                          builder: (_) => IdentifyPage(
-                            player: widget.player,
-                            auth: widget.auth,
-                            musicApi: widget.api,
-                          ),
-                        ),
-                      );
-                    },
-                    child: Tooltip(
-                      message: '听歌识曲',
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8, right: 14),
-                        child: Icon(
-                          Icons.graphic_eq_rounded,
-                          color: colorScheme.primary,
-                          size: 22,
-                        ),
-                      ),
-                    ),
-                  ),
-                ] else
                   const SizedBox(width: 8),
-              ],
+                  Text(
+                    '搜索',
+                    style: TextStyle(
+                      color: isDark
+                          ? colorScheme.onSurface.withValues(alpha: .92)
+                          : colorScheme.onSurfaceVariant,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 24),
