@@ -434,18 +434,26 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                     final line = widget.lyrics[index];
                     final isPlaying = index == _activeLyricIndex;
                     final isFocused = _userHolding && index == _focusedIndex;
-                    final isHighlighted = _userHolding ? isFocused : isPlaying;
                     final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
                     final secondary = _secondaryText(line);
 
+                    // 与移动端 MobileLyricList 同款层级策略：
+                    // - 正在播放行：无论是否在滚动浏览，保持大字号/粗字重/纯白；
+                    // - 滚动准星聚焦行：不放大字号，仅把颜色提亮一档，
+                    //   避免与正在播放行混淆（用户分不清谁在唱）；
+                    // - 其余行：标准字号弱化显示。
                     final Color textColor;
-                    if (isHighlighted) {
+                    if (isPlaying) {
                       textColor = Colors.white;
-                    } else if (_userHolding && isPlaying) {
-                      textColor = Colors.white.withValues(alpha: .52);
+                    } else if (isFocused) {
+                      textColor = Colors.white.withValues(alpha: .85);
                     } else {
                       textColor = Colors.white.withValues(alpha: .32);
                     }
+                    final fontSize =
+                        (isPlaying ? 30.0 : 24.0) * widget.lyricScale;
+                    final fontWeight =
+                        isPlaying ? FontWeight.w900 : FontWeight.w700;
 
                     return GestureDetector(
                       key: key,
@@ -474,13 +482,9 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                                       .headlineMedium!
                                       .copyWith(
                                         color: textColor,
-                                        fontSize:
-                                            (isHighlighted ? 30.0 : 24.0) *
-                                            widget.lyricScale,
+                                        fontSize: fontSize,
                                         height: 1.3,
-                                        fontWeight: isHighlighted
-                                            ? FontWeight.w900
-                                            : FontWeight.w700,
+                                        fontWeight: fontWeight,
                                       ),
                                 )
                               else
@@ -491,13 +495,9 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                                       .headlineMedium!
                                       .copyWith(
                                         color: textColor,
-                                        fontSize:
-                                            (isHighlighted ? 30.0 : 24.0) *
-                                            widget.lyricScale,
+                                        fontSize: fontSize,
                                         height: 1.3,
-                                        fontWeight: isHighlighted
-                                            ? FontWeight.w900
-                                            : FontWeight.w700,
+                                        fontWeight: fontWeight,
                                       ),
                                   child: Text(line.text),
                                 ),
@@ -508,11 +508,9 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(
                                         color: Colors.white.withValues(
-                                          alpha: isHighlighted
+                                          alpha: isPlaying
                                               ? .75
-                                              : (_userHolding && isPlaying
-                                                    ? .45
-                                                    : .28),
+                                              : (isFocused ? .6 : .28),
                                         ),
                                         fontSize: 15.0 * widget.lyricScale,
                                         height: 1.3,

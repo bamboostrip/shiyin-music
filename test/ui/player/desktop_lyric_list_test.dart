@@ -160,6 +160,52 @@ void main() {
     );
   });
 
+  testWidgets('scrolling: focused row keeps standard size, playing row stays big white', (
+    tester,
+  ) async {
+    final lyrics = List.generate(40, _line);
+    final player = _FakePlayerController();
+    player.lyrics = lyrics;
+    player.activeLyricIndex = 0;
+
+    await tester.pumpWidget(_wrap(_buildList(player: player, lyrics: lyrics, activeIndex: 0)));
+    await tester.pump();
+
+    // deterministic scroll: user browsing (holding); playing row 0 stays visible,
+    // the crosshair focus lands on row 3 (row pitch ~49px, focus line at 38%)
+    await tester.drag(find.text('Lyric line number 0'), const Offset(0, -150));
+    await tester.pumpAndSettle();
+
+    // 收集所有行样式（主题层也可能有 AnimatedDefaultTextStyle，故按集合断言）
+    final styles = tester
+        .widgetList<AnimatedDefaultTextStyle>(find.byType(AnimatedDefaultTextStyle))
+        .map((w) => w.style)
+        .toList();
+
+    // playing row keeps pure white + 30px even while user browses
+    final playingStyles = styles.where((s) => s.fontSize == 30.0).toList();
+    expect(playingStyles, hasLength(1));
+    expect(playingStyles.single.color, equals(Colors.white));
+
+    // the focused (crosshair) row: standard 24px, only brightened to 85% white
+    final focusedStyles = styles
+        .where((s) => s.color == Colors.white.withValues(alpha: .85))
+        .toList();
+    expect(focusedStyles, hasLength(1));
+    expect(focusedStyles.single.fontSize, equals(24.0));
+
+    // all other rows stay dimmed at 32% white (theme-level styles share the
+    // collection but never match 24px + 32% white)
+    final normalStyles = styles
+        .where(
+          (s) =>
+              s.fontSize == 24.0 &&
+              s.color == Colors.white.withValues(alpha: .32),
+        )
+        .toList();
+    expect(normalStyles.length, greaterThanOrEqualTo(5));
+  });
+
   testWidgets('auto-resume after idle brings active line back to focus line', (
     tester,
   ) async {

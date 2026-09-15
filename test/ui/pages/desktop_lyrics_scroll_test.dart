@@ -301,7 +301,7 @@ void main() {
       expect(find.text('回到当前'), findsNothing);
     });
 
-    testWidgets('滚动歌词浏览时，中间准星指示的歌词行获得纯白大字高亮，正在播放的原歌词行弱化显示',
+    testWidgets('滚动歌词浏览时，准星聚焦行保持标准字号仅提亮，正在播放行保持纯白大字',
         (tester) async {
       debugDesktopFormFactorOverride = true;
       final player = _FakePlayerController();
@@ -313,7 +313,7 @@ void main() {
       final center = tester.getCenter(listFinder);
       final pointer = TestPointer(3, PointerDeviceKind.mouse);
 
-      // 向下轻微滚动，浏览后续歌词（原播放行仍在视口内弱化）
+      // 向下轻微滚动，浏览后续歌词（原播放行仍保持大字高亮）
       await tester.sendEventToBinding(pointer.hover(center));
       await tester.pump();
       await tester.sendEventToBinding(pointer.scroll(const Offset(0, 100)));
@@ -325,7 +325,6 @@ void main() {
       final seekBtn = find.byKey(const ValueKey('lyric_seek_pointer_button'));
       expect(seekBtn, findsOneWidget);
 
-      // 原播放行（第4句）弱化，不再是纯白 100% 30px
       Finder lyricLineStyleFinder(String text) => find.ancestor(
             of: find.text(text),
             matching: find.byWidgetPredicate(
@@ -335,22 +334,23 @@ void main() {
             ),
           );
 
+      // 正在播放行（第4句）保持纯白 30px，不因浏览而弱化
       final playingLineFinder =
           lyricLineStyleFinder('这是第 4 句歌词，为你弹奏萧邦的夜曲');
       expect(playingLineFinder, findsOneWidget);
       final playingStyle =
           (tester.widget(playingLineFinder) as AnimatedDefaultTextStyle).style;
-      expect(playingStyle.color, isNot(Colors.white));
-      expect(playingStyle.fontSize, equals(24.0));
+      expect(playingStyle.color, equals(Colors.white));
+      expect(playingStyle.fontSize, equals(30.0));
 
-      // 准星指示的当前聚焦行（第6句）获得纯白 30px 高亮
+      // 准星聚焦行（第6句）不放大字号，仅提亮为 85% 白，与正在播放行可辨
       final focusedLineFinder =
           lyricLineStyleFinder('这是第 6 句歌词，为你弹奏萧邦的夜曲');
       expect(focusedLineFinder, findsOneWidget);
       final focusedStyle =
           (tester.widget(focusedLineFinder) as AnimatedDefaultTextStyle).style;
-      expect(focusedStyle.color, equals(Colors.white));
-      expect(focusedStyle.fontSize, equals(30.0));
+      expect(focusedStyle.color, equals(Colors.white.withValues(alpha: .85)));
+      expect(focusedStyle.fontSize, equals(24.0));
 
       // 验证存在“回到当前”快捷入口
       expect(find.text('回到当前'), findsOneWidget);
