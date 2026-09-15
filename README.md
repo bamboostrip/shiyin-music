@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Flutter-3.11+-02569B?logo=flutter&logoColor=white" alt="Flutter" />
   <img src="https://img.shields.io/badge/Dart-3.11+-0175C2?logo=dart&logoColor=white" alt="Dart" />
   <img src="https://img.shields.io/badge/Rust-engine-DEA584?logo=rust&logoColor=white" alt="Rust" />
-  <img src="https://img.shields.io/badge/Version-2.5.1-4CAF50" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-3.0.0-4CAF50" alt="Version" />
 </p>
 
 <p align="center">
@@ -45,12 +45,15 @@
 
 ## 📖 简介
 
-时音是一个功能丰富的**第三方音乐播放器**，使用 Flutter 构建。它在 [umr-xiaomai/kgka_Music_hl](https://github.com/umr-xiaomai/kgka_Music_hl) 的基础上做了两件关键的事：
+时音是一个功能丰富的**第三方音乐播放器**，使用 Flutter 构建。它在 [umr-xiaomai/kgka_Music_hl](https://github.com/umr-xiaomai/kgka_Music_hl) 的基础上做了三件关键的事：
 
 1. **去掉后端依赖** — 默认分支把原本依赖远程服务器的酷狗接口逻辑，用 Rust 重写并内嵌到客户端（经 `flutter_rust_bridge` 以 FFI 调用），签名 / 加密 / 会话管理全部在本地完成，**不需要任何第三方服务器**。
-2. **深度多端 / 车机适配** — 针对车载、平板、桌面等场景做了布局与性能优化。
+2. **深度多端 / 车机适配** — 针对车载、平板等场景做了布局与性能优化。
+3. **PC 桌面级体验** — Windows / Linux 原生桌面应用：侧栏 + 底部播放栏的桌面布局、逐字卡拉OK桌面歌词、托盘常驻、系统媒体控制、快捷键与应用内更新。
 
 - **本地 Rust 引擎** — 无后端、零部署，接口逻辑随 App 一起分发
+- **听歌识曲** — 听一段旋律即可识别歌曲，桌面支持「麦克风 / 系统内录」双采集源，手机走麦克风
+- **PC 桌面端** — 沉浸式标题栏、表格化曲库、桌面歌词悬浮窗、托盘与开机自启
 - **内存优化** — 图片缓存限制、细粒度 Widget 重建、GPU 纹理解码分辨率控制
 - **车机布局** — 横屏左侧播放面板 + 右侧内容区，适配车载屏幕
 - **自适应多端** — 同时兼容手机、平板、电视、桌面，自动切换布局
@@ -100,11 +103,22 @@
 
 - **逐字歌词** — 支持 KRC 格式的逐字高亮歌词
 - **歌词翻译** — 支持翻译和罗马音显示
-- **桌面歌词** — 桌面端悬浮歌词窗口
+- **桌面歌词** — 桌面端悬浮歌词窗口（见下方「桌面端」）
 - **歌词交互** — 双击跳转进度 / 长按复制 / 字体大小可调
+
+### 🖥️ 桌面端（Windows / Linux）
+
+- **桌面布局** — 沉浸式自定义标题栏 + 侧边栏 + 底部播放栏；歌单 / 排行榜 / 歌手 / 搜索 / 已下载页表格化视图
+- **桌面歌词** — 逐字卡拉OK高亮、单 / 双行错行模式、快捷设置菜单、QQ 音乐式锁定全穿透
+- **系统集成** — 系统媒体控制（SMTC / MPRIS）、托盘常驻、关闭行为设置、开机自启、窗口标题随歌曲、下载完成通知
+- **窗口管理** — 尺寸 / 位置记忆、多显示器 DPI 适配
+- **快捷键** — 空格播放暂停、方向键切歌 / 快进快退、侧栏键盘导航
+- **应用内更新** — Windows 安装版支持应用内下载更新（sha256 完整性校验），另有便携版解压即用
+- **音频后端** — Windows / Linux 使用 libmpv（media_kit）音频后端，桌面播放更稳
 
 ### 🔍 搜索与发现
 
+- **听歌识曲** — 听一段旋律即可识别歌曲并直接播放；桌面支持「麦克风 / 系统内录」双采集源，手机与车机走麦克风
 - **多平台搜索** — 支持酷狗 + 网易云音乐双源搜索
 - **搜索建议** — 实时搜索联想
 - **热搜关键词** — 分类展示热门搜索
@@ -150,8 +164,9 @@
 | **框架** | Flutter (SDK ^3.11.5) |
 | **界面语言** | Dart |
 | **接口引擎** | **Rust**（`kugou_engine` crate，经 `flutter_rust_bridge` 2.12.0 以 FFI 暴露给 Dart） |
-| **音频播放** | `just_audio` — 低延迟音频引擎 |
-| **后台播放** | `audio_service` — 通知栏控制 & 后台保活 |
+| **音频播放** | `just_audio` — 低延迟音频引擎；Windows / Linux 桌面后端为 `media_kit`（libmpv） |
+| **后台播放** | `audio_service` — 通知栏控制 & 后台保活（桌面为 SMTC / MPRIS 系统媒体集成） |
+| **多窗口** | `desktop_multi_window` — 桌面歌词悬浮窗 |
 | **音频焦点** | `audio_session` — 系统级音频焦点管理 |
 | **文件下载** | `dio` |
 | **持久化** | `shared_preferences` — 设置 & 缓存 |
