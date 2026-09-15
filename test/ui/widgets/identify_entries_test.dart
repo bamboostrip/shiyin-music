@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/auth_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
+import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/services/identify_service.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/desktop/desktop_title_bar.dart';
@@ -185,6 +187,43 @@ void main() {
 
       expect(find.byTooltip('听歌识曲'), findsOneWidget);
       expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+    });
+
+    testWidgets('车机模式搜索页渲染听歌识曲按钮并包含图标和文字', (tester) async {
+      if (!IdentifyService.isSupported) return;
+
+      SharedPreferences.setMockInitialValues({});
+      final theme = ThemeController();
+      await theme.setCarModeEnabled(true);
+      addTearDown(() async {
+        await ThemeController.instance.setCarModeEnabled(false);
+      });
+
+      tester.view.physicalSize = const Size(1024, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final player = _FakePlayer();
+      final api = _FakeMusicApi();
+      final auth = _FakeAuthController();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SearchPage(
+              api: api,
+              auth: auth,
+              player: player,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final identifyBtn = find.widgetWithText(FilledButton, '识曲');
+      expect(identifyBtn, findsOneWidget);
+      expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '搜索'), findsOneWidget);
     });
   });
 }
