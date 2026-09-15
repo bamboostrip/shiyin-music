@@ -325,14 +325,21 @@ class _SearchPageState extends State<SearchPage> {
     widget.player.playSong(song, queue: _results);
   }
 
-  /// 打开听歌识曲页：PC 桌面嵌入时推入内容区 Navigator，移动端走全屏路由。
+  /// 打开听歌识曲页：PC 桌面嵌入与车机横屏推入内容区 Navigator（保留
+  /// 常驻播放面板/侧边栏），手机竖屏走全屏路由。
   /// 调用点已用 [IdentifyService.isSupported] 把关,不支持平台按钮不渲染。
   /// 入口防抖见 [IdentifyService.tryConsumeEntry]:双击会推出两页抢采集。
   void _openIdentify(BuildContext context) {
     if (!IdentifyService.tryConsumeEntry()) return;
-    Navigator.of(context, rootNavigator: !widget.embedded).push(
+    // 车机横屏与桌面嵌入一样只占内容区：识曲页推入内层 Navigator，
+    // 左侧 CarLeftPlayerPanel 常驻可见可操作（推根 Navigator 会盖住它）。
+    final size = MediaQuery.sizeOf(context);
+    final isCarLandscape =
+        size.width > size.height && ThemeController.instance.carModeEnabled;
+    final inContentArea = widget.embedded || isCarLandscape;
+    Navigator.of(context, rootNavigator: !inContentArea).push(
       MaterialPageRoute<void>(
-        fullscreenDialog: !widget.embedded,
+        fullscreenDialog: !inContentArea,
         builder: (_) => IdentifyPage(
           player: widget.player,
           auth: widget.auth,
