@@ -364,7 +364,10 @@ void _collectKrcLanguageRows(
   final time = row.length > 1 ? asInt(row[0]) : null;
   final values = row.map(asString).whereType<String>().toList();
   if (values.isEmpty) {
-    return null;
+    // 空行是酷狗的占位记号（标题/Credits/纯音乐段等未覆盖行用空串占位），
+    // 保留在 byIndex 中维持行序对齐信息；定时行没有位置意义且无内容，
+    // 直接丢弃。
+    return time == null ? (time: null, text: '') : null;
   }
 
   final text = time != null && row.length > 1
@@ -431,27 +434,93 @@ Map<int, String> _indexedLyricVariants(
     return const {};
   }
 
+  // 1. 若变体数组原始长度与主歌词严格一致，说明各行已包含空串或占位行（如酷狗在
+  // 标题行放入版权声明、制作人员及纯音乐段放入空串）。此时槽位已严格 1:1，
+  // 绝不能先剔除版权声明行而破坏数组下标；版权声明行只需在赋值时滤除。
+  if (variant.byIndex.length == lines.length) {
+    final result = <int, String>{};
+    for (var i = 0; i < lines.length; i++) {
+      final text = variant.byIndex[i].trim();
+      if (text.isEmpty ||
+          _isLyricVariantHeaderRow(text) ||
+          _sameLyricText(lines[i].text, text)) {
+        continue;
+      }
+      result[i] = text;
+    }
+    _debugLyricLog(
+      'indexedVariants(raw 1:1): lines=${lines.length} assigned=${result.length}',
+    );
+    return result;
+  }
+
+  // 轨道自带的声明/版权头行不对应任何歌词行（实测 "以下谐音标注由AI工具
+  // 生产"、"腾讯享有本翻译作品的著作权"/"TME享有..."），先剔除——它们
+  // 参与对齐会整体推移后面所有行。
+  final padded = variant.byIndex
+      .map((t) => t.trim())
+      .where((t) => !_isLyricVariantHeaderRow(t))
+      .toList();
+
+  // 2. 酷狗对未覆盖的行（标题/Credits/纯音乐段）用空串占位。剔除头行后长度
+  // 与主歌词一致时，说明头行是额外插入行，剔除后空占位本身就是精确对齐信息：直接 1:1。
+  if (padded.length == lines.length) {
+    final result = <int, String>{};
+    for (var i = 0; i < lines.length; i++) {
+      final text = padded[i];
+      if (text.isEmpty || _sameLyricText(lines[i].text, text)) {
+        continue;
+      }
+      result[i] = text;
+    }
+    _debugLyricLog(
+      'indexedVariants(padded 1:1): lines=${lines.length} assigned=${result.length}',
+    );
+    return result;
+  }
+
+  // 长度不一致：非空行进入锚点对齐 / 旧启发式。
+  final rows = padded.where((t) => t.isNotEmpty).toList();
+  if (rows.isEmpty || lines.isEmpty) {
+    return const {};
+  }
+
+  // 锚点对齐（见 _alignVariantRowsToLines）：变体轨与主歌词的行数经常
+  // 不一致（Credits 覆盖范围不同、声明头、跳过空行），固定偏移量无法
+  // 对上；锚点驱动的全局对齐可吸收任意插入/缺失。无锚点时回退旧启发式。
+  final aligned = _alignVariantRowsToLines(rows, lines);
+  if (aligned != null) {
+    final result = <int, String>{};
+    aligned.forEach((lineIndex, rowIndex) {
+      if (_sameLyricText(lines[lineIndex].text, rows[rowIndex])) {
+        return;
+      }
+      result[lineIndex] = rows[rowIndex];
+    });
+    _debugLyricLog(
+      'indexedVariants(aligned): lines=${lines.length} rows=${rows.length} assigned=${result.length}',
+    );
+    return result;
+  }
+
   final result = <int, String>{};
 
-  // 计算偏移量：
-  // 如果翻译数组开头有空条目（对应制作人员信息行），则直接按索引对应。
-  // 如果没有空条目（翻译只包含实际歌词），则需要偏移。
-  final leadingEmpty = variant.byIndex
-      .takeWhile((t) => t.trim().isEmpty)
-      .length;
+  // 旧固定偏移启发式（无锚点时的兜底）：
+  // 开头有空条目（对应制作人员信息行）则直接按 padded 索引从前往后对齐，否则收尾对齐。
+  final leadingEmpty = padded.takeWhile((t) => t.isEmpty).length;
   final offset = leadingEmpty > 0
       ? 0
-      : (lines.length - variant.byIndex.length).clamp(0, lines.length);
+      : (lines.length - padded.length).clamp(0, lines.length);
 
   _debugLyricLog(
-    'indexedVariants: lines=${lines.length} variants=${variant.byIndex.length} leadingEmpty=$leadingEmpty offset=$offset',
+    'indexedVariants(legacy): lines=${lines.length} padded=${padded.length} leadingEmpty=$leadingEmpty offset=$offset',
   );
 
-  for (var i = 0; i < variant.byIndex.length; i++) {
+  for (var i = 0; i < padded.length; i++) {
     final lineIndex = i + offset;
     if (lineIndex >= lines.length) break;
 
-    final text = variant.byIndex[i].trim();
+    final text = padded[i];
     if (text.isEmpty || _sameLyricText(lines[lineIndex].text, text)) {
       continue;
     }
@@ -465,8 +534,168 @@ Map<int, String> _indexedLyricVariants(
   return result;
 }
 
+/// 变体行与主歌词行的全局序列对齐（Needleman–Wunsch）。
+///
+/// 返回 行索引 → 变体行索引 的配对；没有任何可信锚点时返回 null（调用
+/// 方回退旧的固定偏移启发式——盲猜也比被单个巧合锚点带偏好）。
+///
+/// 背景：谐音/音译变体轨与主歌词行数常不一致——Credits 段覆盖范围不同、
+/// 变体轨自带声明头、纯英文行无条目、两侧各自跳过空行——单一偏移量必然
+/// 错位（实测某粤语歌整体错 8~9 行，每行显示上一句的谐音）。序列对齐用
+/// 锚点把可信区段锁死，空位罚分让无锚点区段（纯中文 ↔ 谐音，文本上无法
+/// 互认）沿用邻近锚点的相对位置，天然吸收中间的插入/缺失。
+Map<int, int>? _alignVariantRowsToLines(
+  List<String> rows,
+  List<LyricLine> lines,
+) {
+  final rowCount = rows.length;
+  final lineCount = lines.length;
+
+  // "纯拉丁行跳行"惩罚开关：谐音/粤拼轨对纯英文行（无汉字可转写）不生成
+  // 条目，对齐时必须在这些行上空一格而不是推移后续行。仅当轨道的汉字行
+  // 数与主歌词的汉字行数相当（≤）且主歌词确有纯拉丁行时启用——若轨道
+  // 对每行都有内容（如给英文行配了中文翻译的正常翻译轨），惩罚会伤及
+  // 正确配对，必须关闭。
+  final linesWithHan = lines
+      .where((line) => _hasHanRune(line.text))
+      .length;
+  final rowsWithHan = rows.where(_hasHanRune).length;
+  final penalizeLatinOnlyLines =
+      lineCount > linesWithHan && rowsWithHan <= linesWithHan;
+
+  // 逐对打分并统计锚点数。
+  final scores = List.generate(
+    rowCount,
+    (_) => List.filled(lineCount, 0),
+    growable: false,
+  );
+  var anchorPairs = 0;
+  for (var r = 0; r < rowCount; r++) {
+    for (var l = 0; l < lineCount; l++) {
+      final score = _variantPairScore(
+        rows[r],
+        lines[l].text,
+        penalizeLatinOnlyLines: penalizeLatinOnlyLines,
+      );
+      scores[r][l] = score;
+      if (score > 0) anchorPairs++;
+    }
+  }
+  if (anchorPairs < 1) return null;
+
+  const gapPenalty = -1;
+  final dp = List.generate(
+    rowCount + 1,
+    (_) => List.filled(lineCount + 1, 0),
+    growable: false,
+  );
+  for (var i = 1; i <= rowCount; i++) {
+    dp[i][0] = i * gapPenalty;
+  }
+  for (var j = 1; j <= lineCount; j++) {
+    dp[0][j] = j * gapPenalty;
+  }
+  for (var i = 1; i <= rowCount; i++) {
+    for (var j = 1; j <= lineCount; j++) {
+      final diagonal = dp[i - 1][j - 1] + scores[i - 1][j - 1];
+      final skipRow = dp[i - 1][j] + gapPenalty;
+      final skipLine = dp[i][j - 1] + gapPenalty;
+      var best = diagonal;
+      if (skipRow > best) best = skipRow;
+      if (skipLine > best) best = skipLine;
+      dp[i][j] = best;
+    }
+  }
+
+  // 回溯（对角优先，保证无得分差异时按原始顺序 1:1 走）。
+  final pairs = <int, int>{};
+  var i = rowCount;
+  var j = lineCount;
+  while (i > 0 && j > 0) {
+    if (dp[i][j] == dp[i - 1][j - 1] + scores[i - 1][j - 1]) {
+      pairs[j - 1] = i - 1;
+      i--;
+      j--;
+    } else if (dp[i][j] == dp[i - 1][j] + gapPenalty) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return pairs;
+}
+
+/// 变体行与主歌词行的匹配得分：0 = 无证据，-1 = 轻度反证。
+///
+/// - 文本（去符号压缩后）完全相同 → 强锚点。外文歌的"音译"轨就是原文，
+///   这种行大量存在且位置可信。
+/// - 主歌词行里的英文/数字片段在变体行中原样保留 → 锚点。谐音/粤拼
+///   通常只转写汉字，原文的 "@S.A.G"、"love is gone"、人名等片段会
+///   原样留在变体行里，可据此互认（实测 Credits 行与混排英文行都有）。
+/// - [penalizeLatinOnlyLines] 开启时，纯拉丁行（无汉字，无从转写）配
+///   任何非原文行 → -1。谐音/粤拼轨对纯英文行不生成条目，这个轻罚把
+///   对齐的"空档"推到英文行上，而不是错推前后行（实测 Just leave me
+///   alone 行的空档被放错到上一行，导致其后整体错一行）。
+int _variantPairScore(
+  String rowText,
+  String lineText, {
+  required bool penalizeLatinOnlyLines,
+}) {
+  final compactRow = _compactLyricText(rowText);
+  final compactLine = _compactLyricText(lineText);
+  if (compactRow.isNotEmpty && compactRow == compactLine) {
+    return 3;
+  }
+  final anchors = _latinAnchors(lineText);
+  if (anchors.isNotEmpty) {
+    final rowLower = rowText.toLowerCase().replaceAll(' ', '');
+    var matched = true;
+    for (final anchor in anchors) {
+      if (!rowLower.contains(anchor)) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return 2;
+  }
+  if (penalizeLatinOnlyLines && !_hasHanRune(lineText)) {
+    return -1;
+  }
+  return 0;
+}
+
+bool _hasHanRune(String text) {
+  for (final rune in text.runes) {
+    if (_isHanRune(rune)) return true;
+  }
+  return false;
+}
+
+/// 提取一行里的拉丁锚点片段（小写、去空格、长度 ≥ 4 的连续
+/// [字母数字.@/&] 串）。片段越小越容易在粤拼串里碰巧出现，4 是实测
+/// （@s.a.g / vhypher / sean / loveisgone）下够用且不误报的下限。
+List<String> _latinAnchors(String text) {
+  final matches = RegExp(
+    r'[a-z0-9][a-z0-9.@/&]*',
+  ).allMatches(text.toLowerCase());
+  return matches
+      .map((m) => m.group(0)!)
+      .where((token) => token.length >= 4)
+      .toList();
+}
+
 bool _sameLyricText(String a, String b) {
   return _compactLyricText(a) == _compactLyricText(b);
+}
+
+/// 轨道自带的声明/版权头行：不对应任何歌词行，参与对齐会把后续行整体
+/// 推移（实测 "以下谐音标注由AI工具生产"、"腾讯/TME 享有本翻译作品的
+/// 著作权"）。
+bool _isLyricVariantHeaderRow(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return false;
+  return trimmed.contains('谐音标注') ||
+      (trimmed.contains('著作权') && trimmed.contains('享有'));
 }
 
 String _compactLyricText(String text) {
