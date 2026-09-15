@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../config/app_config.dart';
 import 'music_models.dart';
 
@@ -44,6 +46,28 @@ class AppVersionInfo {
   bool get isNewerThanCurrent {
     final currentCode = normalizedVersionCode(AppConfig.appVersionCode);
     return versionCode > currentCode;
+  }
+
+  /// 标准字段覆写复制（平台相关性选版后需要用拼接的 changelog 覆写
+  /// [updateContent]，其余字段沿用 Release 原始数据）。
+  AppVersionInfo copyWith({
+    String? platform,
+    String? versionName,
+    int? versionCode,
+    String? updateContent,
+    String? downloadUrl,
+    bool? forceUpdate,
+    DateTime? releaseDate,
+  }) {
+    return AppVersionInfo(
+      platform: platform ?? this.platform,
+      versionName: versionName ?? this.versionName,
+      versionCode: versionCode ?? this.versionCode,
+      updateContent: updateContent ?? this.updateContent,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
+      forceUpdate: forceUpdate ?? this.forceUpdate,
+      releaseDate: releaseDate ?? this.releaseDate,
+    );
   }
 
   factory AppVersionInfo.fromJson(Map<String, dynamic> json) {
@@ -248,4 +272,63 @@ bool _asBool(Object? value) {
 
   final text = value?.toString().trim().toLowerCase();
   return text == 'true' || text == '1';
+}
+
+/// 解析 Release 说明中的「适用平台」标记行。
+///
+/// 标记格式（发版规范见 docs/release-process.md）：notes 首部一行
+/// `> 适用平台：Windows、Linux`（blockquote，网页上人可读）。L1 拿到的
+/// 是原始 markdown（带 `>` 前缀），L2 Atom 正文经 htmlReleaseBodyToMarkdown
+/// 转换后是裸文本行，两者都要能解析。
+///
+/// 返回小写平台词集合：
+/// - null = 未写标记（历史/全平台 Release，视为影响所有平台，安全兜底）；
+/// - 含 'all' = 显式全平台；
+/// - 其余为具体平台词（'windows'/'linux'/'android'，未来多端新增词需同步
+///   此处词表与发版文档）。
+/// 标记存在但解析不出任何已知词 → {'all'}（宁多提示不漏提示）。
+@visibleForTesting
+Set<String>? parseApplicablePlatforms(String text) {
+  final match = RegExp(
+    r'^\s*>?\s*\**\s*适用平台\s*[：:]\s*(.+)$',
+    multiLine: true,
+  ).firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final platforms = <String>{};
+  for (final raw in match.group(1)!.split(RegExp(r'[、，,/\s]+'))) {
+    // 小写匹配：中文词无大小写，英文词（Windows/All 等）统一归一。
+    switch (raw.trim().toLowerCase()) {
+      case '全平台' || 'all':
+        platforms.add('all');
+      case 'windows' || 'win':
+        platforms.add('windows');
+      case 'linux':
+        platforms.add('linux');
+      case 'pc' || '桌面' || '桌面端':
+        // PC/桌面端没有单一平台词，等价展开为两桌面平台。
+        platforms
+          ..add('windows')
+          ..add('linux');
+      case 'android' || '安卓' || '移动端' || '手机':
+        platforms.add('android');
+    }
+  }
+  // 标记存在但全是未知词：按全平台处理，宁可多提示不漏提示。
+  return platforms.isEmpty ? const {'all'} : platforms;
+}
+
+/// Release 是否影响当前平台。[platforms] 为 [parseApplicablePlatforms] 的
+/// 结果；[myPlatform] 为 'android'/'windows'/'linux'。
+@visibleForTesting
+bool releaseAffectsPlatform(Set<String>? platforms, String myPlatform) {
+  // null = 未写标记的历史/全平台 Release，安全兜底视为影响所有平台。
+  if (platforms == null) {
+    return true;
+  }
+  if (platforms.contains('all')) {
+    return true;
+  }
+  return platforms.contains(myPlatform);
 }

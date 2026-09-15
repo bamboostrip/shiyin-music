@@ -93,8 +93,16 @@ class AppConfig {
 
   /// GitHub Releases 最新正式版接口（公开仓库无需鉴权，但必须带 User-Agent）。
   /// 注意：api.github.com 未鉴权限额 60 次/时/IP，超限返回 403。
+  /// 更新检查已改走 [githubReleasesListUrl] 做平台相关性选版；此 URL 保留供
+  /// docs/release-process.md FAQ 的手工验证命令使用。
   static const githubReleasesLatestUrl =
       'https://api.github.com/repos/$githubRepoOwner/$githubRepoName/releases/latest';
+
+  /// GitHub Releases 列表接口（按创建时间倒序，含预发布；每个元素带 body 与
+  /// assets）。更新检查用它取"最近若干版本"做平台相关性判断，见
+  /// docs/release-process.md 的「版本适用平台标记」。
+  static const githubReleasesListUrl =
+      'https://api.github.com/repos/$githubRepoOwner/$githubRepoName/releases?per_page=30';
 
   /// 仓库网页根。以下三个 github.com 域端点不占 API 频次，
   /// 作为 API 403/超时时的多级容灾渠道（对齐 handwrite-sim 的 updater 策略）。

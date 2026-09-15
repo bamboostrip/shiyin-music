@@ -31,17 +31,17 @@ void main() {
 
     test('Windows 无精确后缀时回退同扩展名', () {
       expect(
-        pickUpdateAssetUrl(
-          const [('bundle.zip', 'https://dl/b.zip'), ('app.exe', 'https://dl/a.exe')],
-          windowsAssetKind: kWindowsAssetPortable,
-        ),
+        pickUpdateAssetUrl(const [
+          ('bundle.zip', 'https://dl/b.zip'),
+          ('app.exe', 'https://dl/a.exe'),
+        ], windowsAssetKind: kWindowsAssetPortable),
         'https://dl/b.zip',
       );
       expect(
-        pickUpdateAssetUrl(
-          const [('bundle.zip', 'https://dl/b.zip'), ('app.exe', 'https://dl/a.exe')],
-          windowsAssetKind: kWindowsAssetSetup,
-        ),
+        pickUpdateAssetUrl(const [
+          ('bundle.zip', 'https://dl/b.zip'),
+          ('app.exe', 'https://dl/a.exe'),
+        ], windowsAssetKind: kWindowsAssetSetup),
         'https://dl/a.exe',
       );
     });
@@ -63,10 +63,7 @@ void main() {
     });
 
     test('无匹配返回空字符串', () {
-      expect(
-        pickUpdateAssetUrl(const [('a.dmg', 'https://dl/a.dmg')]),
-        '',
-      );
+      expect(pickUpdateAssetUrl(const [('a.dmg', 'https://dl/a.dmg')]), '');
     });
   });
 
@@ -74,7 +71,8 @@ void main() {
     Map<String, dynamic> release() => {
       'tag_name': 'v2.5.2',
       'body': '修复若干问题',
-      'html_url': 'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
+      'html_url':
+          'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
       'assets': [
         {
           'name': 'shiyin-v2.5.2-windows-x64-portable.zip',
@@ -104,17 +102,17 @@ void main() {
     });
 
     test('无附件时回退 Release 页面', () {
-      final info = AppVersionInfo.fromGitHubRelease(
-        {'tag_name': 'v2.5.2', 'html_url': 'https://gh/releases/tag/v2.5.2'},
-        windowsAssetKind: kWindowsAssetSetup,
-      );
+      final info = AppVersionInfo.fromGitHubRelease({
+        'tag_name': 'v2.5.2',
+        'html_url': 'https://gh/releases/tag/v2.5.2',
+      }, windowsAssetKind: kWindowsAssetSetup);
       expect(info.downloadUrl, 'https://gh/releases/tag/v2.5.2');
       expect(info.hasDownloadUrl, isTrue);
     });
   });
 
-  group('parseLatestEntryFromAtom', () {
-    test('解析首个条目：链接取 tag，正文取 content', () {
+  group('parseEntriesFromAtom', () {
+    test('解析全部条目：链接取 tag，正文取 content', () {
       const feed = '''
 <?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -132,35 +130,46 @@ void main() {
   </entry>
 </feed>
 ''';
-      final entry = parseLatestEntryFromAtom(feed);
-      expect(entry, isNotNull);
-      final (tag, link, content) = entry!;
+      final entries = parseEntriesFromAtom(feed);
+      expect(entries.length, 2);
+      final (tag, link, content) = entries.first;
       expect(tag, 'v2.5.2');
-      expect(link,
-          'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2');
-      expect(content, '&lt;h2&gt;更新内容&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;修复&lt;/li&gt;&lt;/ul&gt;');
+      expect(
+        link,
+        'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
+      );
+      expect(
+        content,
+        '&lt;h2&gt;更新内容&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;修复&lt;/li&gt;&lt;/ul&gt;',
+      );
+      expect(entries[1].$1, 'v2.5.1');
     });
 
     test('链接缺失时回退 title 取 tag（仅当 title 本身是合法正式版 tag）', () {
-      const feed = '<feed><entry><title>v2.5.2</title>'
+      const feed =
+          '<feed><entry><title>v2.5.2</title>'
           '<content type="html">x</content></entry></feed>';
-      final entry = parseLatestEntryFromAtom(feed);
-      expect(entry?.$1, 'v2.5.2');
+      final entries = parseEntriesFromAtom(feed);
+      expect(entries.length, 1);
+      expect(entries.first.$1, 'v2.5.2');
     });
 
     test('链接缺失且 title 是自由文本（非版本 tag）时不采用，跳过该条目', () {
       // Release 标题是发版者自由填写的文本：含中文/空格的标题直接当 tag
       // 会污染文件名与版本比较，必须跳过。
-      const feed = '<feed><entry><title>v2.5.2 夏日版发布</title>'
+      const feed =
+          '<feed><entry><title>v2.5.2 夏日版发布</title>'
           '<content type="html">x</content></entry>'
           '<entry><title>v2.5.1</title><content type="html">y</content>'
           '</entry></feed>';
-      final entry = parseLatestEntryFromAtom(feed);
-      expect(entry?.$1, 'v2.5.1');
+      final entries = parseEntriesFromAtom(feed);
+      expect(entries.length, 1);
+      expect(entries.first.$1, 'v2.5.1');
     });
 
-    test('首个条目为预发布 tag 时跳过，取下一个正式版', () {
-      const feed = '<feed>'
+    test('预发布 tag 条目被跳过，返回不含该条', () {
+      const feed =
+          '<feed>'
           '<entry><link rel="alternate" type="text/html" '
           'href="https://github.com/a/b/releases/tag/v2.6.0-beta.1"/>'
           '<title>v2.6.0-beta.1</title><content type="html">beta</content>'
@@ -170,15 +179,16 @@ void main() {
           '<title>v2.5.2</title><content type="html">stable</content>'
           '</entry>'
           '</feed>';
-      final entry = parseLatestEntryFromAtom(feed);
-      final (tag, link, content) = entry!;
+      final entries = parseEntriesFromAtom(feed);
+      expect(entries.length, 1);
+      final (tag, link, content) = entries.first;
       expect(tag, 'v2.5.2');
       expect(link, 'https://github.com/a/b/releases/tag/v2.5.2');
       expect(content, 'stable');
     });
 
-    test('空 feed（仓库无 Release）返回 null', () {
-      expect(parseLatestEntryFromAtom('<feed><title>x</title></feed>'), isNull);
+    test('空 feed（仓库无 Release）返回空列表', () {
+      expect(parseEntriesFromAtom('<feed><title>x</title></feed>'), isEmpty);
     });
   });
 
@@ -209,7 +219,8 @@ void main() {
   group('htmlReleaseBodyToMarkdown', () {
     test('标题/列表/加粗/行内码映射，悬空列表标记合并', () {
       // 模拟 Atom content 反转义后的真实结构（li 内容被 p 包裹）。
-      const html = '<h2>更新内容</h2>\n<h3>Added</h3>\n<ul>\n<li>\n<p>'
+      const html =
+          '<h2>更新内容</h2>\n<h3>Added</h3>\n<ul>\n<li>\n<p>'
           '<strong>深色模式</strong>：支持<code>三态切换</code>。</p>\n</li>\n</ul>';
       final text = htmlReleaseBodyToMarkdown(html);
       expect(text, contains('## 更新内容'));
@@ -239,13 +250,10 @@ void main() {
 ''';
       final assets = parseExpandedAssetLinks(html);
       expect(assets.length, 3);
-      expect(
-        assets[0],
-        (
-          'shiyin-v2.5.2-windows-x64-portable.zip',
-          'https://github.com/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-portable.zip',
-        ),
-      );
+      expect(assets[0], (
+        'shiyin-v2.5.2-windows-x64-portable.zip',
+        'https://github.com/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-portable.zip',
+      ));
       expect(assets.any((a) => a.$1.endsWith('-setup.exe')), isTrue);
       expect(assets.any((a) => a.$1.endsWith('.apk')), isTrue);
       expect(assets.any((a) => a.$2.contains('/archive/')), isFalse);
@@ -272,7 +280,9 @@ void main() {
         'v2.5.2',
       );
       expect(
-        extractTagFromLocation('https://github.com/x/y/releases/tag/v1.2.3?foo=1'),
+        extractTagFromLocation(
+          'https://github.com/x/y/releases/tag/v1.2.3?foo=1',
+        ),
         'v1.2.3',
       );
     });

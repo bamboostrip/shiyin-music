@@ -26,12 +26,15 @@ void main() {
     test('Atom 订阅源解析 + expanded_assets 取直链 + 302 重定向探测', () async {
       // L2：Atom 订阅源
       final atomResp = await http
-          .get(Uri.parse(AppConfig.githubReleasesAtomUrl), headers: browserHeaders)
+          .get(
+            Uri.parse(AppConfig.githubReleasesAtomUrl),
+            headers: browserHeaders,
+          )
           .timeout(const Duration(seconds: 15));
       expect(atomResp.statusCode, 200, reason: 'Atom 订阅源应可访问');
-      final entry = parseLatestEntryFromAtom(atomResp.body);
-      expect(entry, isNotNull, reason: '应解析出最新 Release 条目');
-      final (tag, link, contentHtml) = entry!;
+      final entries = parseEntriesFromAtom(atomResp.body);
+      expect(entries, isNotEmpty, reason: '应解析出最新 Release 条目');
+      final (tag, link, contentHtml) = entries.first;
       expect(tag, startsWith('v'), reason: 'tag 应为 v 开头，实际：$tag');
       expect(link, contains('/releases/tag/'));
       final body = htmlReleaseBodyToMarkdown(unescapeHtml(contentHtml));
@@ -64,9 +67,9 @@ void main() {
       final client = http.Client();
       String? location;
       try {
-        final resp = await client.send(probe).timeout(
-              const Duration(seconds: 15),
-            );
+        final resp = await client
+            .send(probe)
+            .timeout(const Duration(seconds: 15));
         location = resp.headers['location'];
       } finally {
         client.close();
