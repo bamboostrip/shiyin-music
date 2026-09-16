@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Flutter-3.11+-02569B?logo=flutter&logoColor=white" alt="Flutter" />
   <img src="https://img.shields.io/badge/Dart-3.11+-0175C2?logo=dart&logoColor=white" alt="Dart" />
   <img src="https://img.shields.io/badge/Rust-engine-DEA584?logo=rust&logoColor=white" alt="Rust" />
-  <img src="https://img.shields.io/badge/Version-3.0.0-4CAF50" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-3.0.1-4CAF50" alt="Version" />
 </p>
 
 <p align="center">
@@ -26,28 +26,11 @@
 
 ---
 
-## 🔀 分支说明（先看这里）
-
-> **当前主线：无后端版本（`main`，默认分支）** — 本仓库现在只维护无后端 / Rust 引擎版本。
-> 有后端版本已**停止更新、逐步放弃**，`backend` 分支仅作历史存档保留，不再修复、不再合入新功能，后续会归档或删除。
-
-| 分支 | 状态 | 架构 | 是否需要后端服务器 | 说明 |
-|---|---|---|---|---|
-| **`main`**（默认，唯一维护） | ✅ 持续维护 | 本地 **Rust 引擎**（经 `flutter_rust_bridge` 调用） | ❌ 否 | 内嵌 Rust 引擎直调酷狗接口，**完全自包含，开箱即用** |
-| `backend` | ⚠️ 已冻结 / 停止维护 | HTTP **后端代理服务器** | ✅ 是 | 历史存档：需自建后端并指定 `KA_MUSIC_API_BASE_URL`，**不再更新** |
-
-> 👉 **所有用户请用 `main`**：无需搭建任何服务器。
-> 如果你坚持要用有后端架构，请见下方「关于有后端版本」一节，直接前往上游原项目或 Rust / .NET 后端实现，不要再用本仓库的 `backend` 分支。
->
-> 本文档以下的内容**均以 `main`（无后端 / Rust 引擎）为准**。
-
----
-
 ## 📖 简介
 
 时音是一个功能丰富的**第三方音乐播放器**，使用 Flutter 构建。它在 [umr-xiaomai/kgka_Music_hl](https://github.com/umr-xiaomai/kgka_Music_hl) 的基础上做了三件关键的事：
 
-1. **去掉后端依赖** — 默认分支把原本依赖远程服务器的酷狗接口逻辑，用 Rust 重写并内嵌到客户端（经 `flutter_rust_bridge` 以 FFI 调用），签名 / 加密 / 会话管理全部在本地完成，**不需要任何第三方服务器**。
+1. **去掉后端依赖** — 把原本依赖远程服务器的酷狗接口逻辑，用 Rust 重写并内嵌到客户端（经 `flutter_rust_bridge` 以 FFI 调用），签名 / 加密 / 会话管理全部在本地完成，**不需要任何第三方服务器**。
 2. **深度多端 / 车机适配** — 针对车载、平板等场景做了布局与性能优化。
 3. **PC 桌面级体验** — Windows / Linux 原生桌面应用：侧栏 + 底部播放栏的桌面布局、逐字卡拉OK桌面歌词、托盘常驻、系统媒体控制、快捷键与应用内更新。
 
@@ -56,6 +39,7 @@
 - **PC 桌面端** — 沉浸式标题栏、表格化曲库、桌面歌词悬浮窗、托盘与开机自启
 - **内存优化** — 图片缓存限制、细粒度 Widget 重建、GPU 纹理解码分辨率控制
 - **车机布局** — 横屏左侧播放面板 + 右侧内容区，适配车载屏幕
+- **平板布局** — 宽屏自动切换触屏侧栏 + 内容网格化，导航与迷你播放器常驻侧栏
 - **自适应多端** — 同时兼容手机、平板、电视、桌面，自动切换布局
 
 > 🔌 该项目通过第三方接口获取音乐数据，仅供学习交流使用。
@@ -64,23 +48,35 @@
 
 ## 📸 预览
 
+### 📱 移动端
+
+| 推荐页 | 播放页 |
+|:----:|:----:|
+| <img src="screenshots/phone-home.png" width="280" alt="手机推荐页" /> | <img src="screenshots/phone-player.png" width="280" alt="手机播放页" /> |
+
+| 歌单 | 我的 |
+|:----:|:----:|
+| <img src="screenshots/phone-playlist.png" width="280" alt="手机歌单" /> | <img src="screenshots/phone-library.png" width="280" alt="手机我的" /> |
+
 ### 🖥️ PC / 桌面
 
-| 推荐页 | 歌单详情 | 播放页 |
-|:------:|:--------:|:------:|
-| ![PC推荐](screenshots/pc-home.png) | ![PC歌单](screenshots/pc-playlist.png) | ![PC播放](screenshots/pc-player.png) |
+**推荐页**
+
+![PC 推荐页](screenshots/pc-home.png)
+
+| 歌单详情 | 播放页 |
+|:--------:|:------:|
+| ![PC 歌单](screenshots/pc-playlist.png) | ![PC 播放](screenshots/pc-player.png) |
 
 ### 🚗 车机横屏
 
-| 推荐 | 歌单 | 播放 |
-|:----:|:----:|:----:|
-| ![车机推荐](screenshots/car-home.png) | ![车机歌单](screenshots/car-playlist.png) | ![车机播放](screenshots/car-player.png) |
+**推荐页**
 
-### 📱 移动端
+![车机推荐页](screenshots/car-home.png)
 
-| 推荐 | 歌单 | 我的 | 播放 |
-|:----:|:----:|:----:|:----:|
-| <img src="screenshots/phone-home.png" width="200" alt="手机推荐" /> | <img src="screenshots/phone-playlist.png" width="200" alt="手机歌单" /> | <img src="screenshots/phone-library.png" width="200" alt="手机我的" /> | <img src="screenshots/phone-player.png" width="200" alt="手机播放" /> |
+| 歌单 | 播放 |
+|:----:|:----:|
+| ![车机歌单](screenshots/car-playlist.png) | ![车机播放](screenshots/car-player.png) |
 
 > 截图以实际运行版本为准，界面与品牌字样可能随版本略有差异。
 
@@ -179,7 +175,7 @@
 
 ## 📐 架构设计
 
-默认分支（无后端 / Rust 引擎）的分层如下，酷狗接口的请求 / 签名 / 加密 / 会话全部在 Rust 引擎内完成：
+分层如下，酷狗接口的请求 / 签名 / 加密 / 会话全部在 Rust 引擎内完成：
 
 ```
 ┌──────────────────────────────────────┐
@@ -227,7 +223,7 @@
 ### 安装与运行
 
 ```bash
-# 克隆仓库（默认分支即无后端 / Rust 引擎版本）
+# 克隆仓库
 git clone https://github.com/bamboostrip/shiyin-music.git
 cd shiyin-music
 
@@ -250,17 +246,11 @@ flutter run -d linux
 
 ### 编译环境变量
 
-无后端版本（`main`）**不需要**配置任何 API 地址 —— 接口由 Rust 引擎直接处理。下表变量仅作历史记录：
+无需配置任何 API 地址 —— 接口由 Rust 引擎直接处理。
 
-| 变量 | 说明 | 状态 |
-|---|---|---|
-| `SHIYIN_DEBUG_LYRICS` | 启用歌词调试日志 | 通用（旧名 `KA_MUSIC_DEBUG_LYRICS` 仍向后兼容） |
-| `KA_MUSIC_API_BASE_URL` | 自定义后端 API 地址 | **仅历史 `backend` 存档分支用过，现已废弃** |
-
-```bash
-# 历史存档：仅旧 backend 分支需要过，main 分支忽略此变量
-flutter run --dart-define=KA_MUSIC_API_BASE_URL=https://your-api.com
-```
+| 变量 | 说明 |
+|---|---|
+| `SHIYIN_DEBUG_LYRICS` | 启用歌词调试日志（旧名 `KA_MUSIC_DEBUG_LYRICS` 仍向后兼容） |
 
 ---
 
@@ -335,28 +325,11 @@ flutter run --dart-define=KA_MUSIC_API_BASE_URL=https://your-api.com
 
 ---
 
-## 🧩 关于有后端版本（已放弃，不再维护）
-
-本仓库的 `backend` 分支是历史存档，**已冻结、不再维护**，仅供追溯 diff 用：
-
-- 不再修复 bug、不再合入功能、不再保证能编译 / 能跑通；
-- 仓库根目录的 `api.json` 描述的是旧后端变体的 HTTP 接口，`main` 分支不使用，保留仅为存档对照。
-
-如需有后端架构，请直接前往以下项目（按需选择，本仓库后续不再从 `backend` 分流）：
-
-| 项目 | 说明 |
-|---|---|
-| [umr-xiaomai/kgka_Music_hl](https://github.com/umr-xiaomai/kgka_Music_hl) | 上游原项目（KA Music），有后端版本的源头 |
-| [bamboostrip/KugouMusic.rs](https://github.com/bamboostrip/KugouMusic.rs) | 作者重构的 Rust Web 后端服务 |
-| [Linsxyx/KugouMusic.NET](https://github.com/Linsxyx/KugouMusic.NET) | .NET 实现的后端项目 |
-
----
-
 ## 🙏 致谢与上游关系
 
 本项目早期基于 [umr-xiaomai/kgka_Music_hl](https://github.com/umr-xiaomai/kgka_Music_hl) 二次开发，感谢原作者的卓越工作。
 
-但随着「无后端 Rust 引擎 + 多端 / 车机适配」等大规模重构，本仓库架构已与上游显著分化，**不再能直接合回上游，也不再从上游同步**。有后端需求请见「关于有后端版本」一节前往对应项目，本仓库只演进无后端主线。
+经过「无后端 Rust 引擎 + 多端 / 车机 / 平板适配」等大规模重构，本仓库架构已与上游显著分化，不再从上游同步，只演进无后端主线。
 
 ---
 
