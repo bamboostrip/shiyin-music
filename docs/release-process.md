@@ -179,17 +179,17 @@ Release 笔记模板：
 
 ## 📥 下载
 
-每个产物均附带同名 `.sha256` 校验文件：应用内更新自动校验 SHA256 确保文件完整，手动下载可自行核对（Windows `certutil -hashfile <文件> SHA256` / Linux `sha256sum <文件>` / macOS `shasum -a 256 <文件>`）。
+每个产物均附带同名 `.sha256` 校验文件：应用内更新自动校验 SHA256 确保文件完整，手动下载可自行核对（Windows `certutil -hashfile <文件> SHA256` / Linux `sha256sum <文件>` / macOS `shasum -a 256 <文件>`）。点击文件名即可直接下载。
 
 | 产物 | 说明 |
 |------|------|
-| `shiyin-vX.Y.Z-impeller-arm64.apk` | **Android 64 位 · Impeller 渲染（默认）**：绝大多数手机 / 平板选这个 |
-| `shiyin-vX.Y.Z-skia-arm64.apk` | **Android 64 位 · Skia 渲染**：Impeller 闪屏 / 冻屏 / 花屏的老 GPU 机型选这个 |
-| `shiyin-vX.Y.Z-skia-arm32.apk` | **Android 32 位 · Skia 渲染**：老车机 / 老 32 位设备专用 |
-| `shiyin-vX.Y.Z-windows-x64-portable.zip` | **Windows 便携版**：解压即用，不写注册表 |
-| `shiyin-vX.Y.Z-windows-x64-setup.exe` | **Windows 标准安装版**：NSIS 安装包，支持应用内检查更新 |
-| `shiyin-vX.Y.Z-linux-x64-portable.tar.gz` | **Linux 便携版**：解压即用 |
-| `shiyin-vX.Y.Z-linux-x64.deb` | **Linux DEB 安装包**：Debian / Ubuntu 系 |
+| [`shiyin-vX.Y.Z-impeller-arm64.apk`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-impeller-arm64.apk) | **Android 64 位 · Impeller 渲染（默认）**：绝大多数手机 / 平板选这个 |
+| [`shiyin-vX.Y.Z-skia-arm64.apk`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-skia-arm64.apk) | **Android 64 位 · Skia 渲染**：Impeller 闪屏 / 冻屏 / 花屏的老 GPU 机型选这个 |
+| [`shiyin-vX.Y.Z-skia-arm32.apk`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-skia-arm32.apk) | **Android 32 位 · Skia 渲染**：老车机 / 老 32 位设备专用 |
+| [`shiyin-vX.Y.Z-windows-x64-portable.zip`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-windows-x64-portable.zip) | **Windows 便携版**：解压即用，不写注册表 |
+| [`shiyin-vX.Y.Z-windows-x64-setup.exe`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-windows-x64-setup.exe) | **Windows 标准安装版**：NSIS 安装包，支持应用内检查更新 |
+| [`shiyin-vX.Y.Z-linux-x64-portable.tar.gz`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-linux-x64-portable.tar.gz) | **Linux 便携版**：解压即用 |
+| [`shiyin-vX.Y.Z-linux-x64.deb`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-linux-x64.deb) | **Linux DEB 安装包**：Debian / Ubuntu 系 |
 ```
 
 > 首行「适用平台」按实际改动影响的平台修改（如 `> 适用平台：Windows、Linux`），
@@ -199,6 +199,10 @@ Release 笔记模板：
 > - 标题必须保持 `## 📥 下载`（`##` 二级 + emoji + "下载"）——应用内更新弹窗
 >   靠它截掉这一区，只向用户展示更新内容（`stripReleaseDownloadSection`）；
 > - 该区约定为笔记**最后一节**；
+> - 产物文件名必须带直链：写法固定为 `` [`<文件名>`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/<同名文件>) ``
+>  （vX.Y.Z 换成当次 tag，链接与文本文件名保持同名），用户点表内文件名直达下载，
+>   不用翻到页面底部附件区。文件名原文保留在链接文本里，`pickUpdateAssetUrl`
+>   读的是 API 附件列表而不是正文，选包逻辑不受影响；
 > - 产物文件名里的 `-$渲染器-` 与 `-arm64`/`-arm32` 段是应用内更新选包依据
 >   （见 `AppVersionInfo` / `pickUpdateAssetUrl`），重命名产物必须同步客户端。
 
