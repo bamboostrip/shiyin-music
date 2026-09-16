@@ -1,7 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, ValueListenable, defaultTargetPlatform;
+    show
+        TargetPlatform,
+        ValueListenable,
+        defaultTargetPlatform,
+        visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -604,9 +608,26 @@ Future<void> _openContainingFolder(
     if (platform == TargetPlatform.windows) {
       // 路径统一为 `\` 分隔（下载服务拼接用 `/`，explorer /select 对
       // 混合分隔符的解析不可靠）；/select 打开父目录并选中文件。
-      await Process.run('explorer', [
-        '/select,${path.replaceAll('/', '\\')}',
-      ]);
+      final winPath = path.replaceAll('/', '\\');
+      // 不能直接 Process.run('explorer', ['/select,$winPath'])：路径含
+      // 空格（"歌手-歌名 (Live).mp3" 很常见）时 Dart 的 argv 重组会给
+      // 整个参数包引号——`"/select,D:\a b.mp3"`——explorer 解析不了被
+      // 引号包住的 /select，就退回打开默认位置（文档文件夹），表现为
+      // 「打开文件夹开到了文档」。改经 PowerShell Start-Process 原样
+      // 传递命令行，保住官方形态 `explorer /select,"D:\a b.mp3"`。
+      final result = await Process.run(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          buildExplorerSelectCommand(winPath),
+        ],
+      );
+      if (result.exitCode != 0) {
+        // 兜底：放弃选中文件，直接打开所在文件夹（单个带引号的纯路径
+        // explorer 可正确解析）。
+        await Process.run('explorer', [dir.replaceAll('/', '\\')]);
+      }
     } else if (platform == TargetPlatform.macOS) {
       await Process.run('open', ['-R', path]);
     } else if (platform == TargetPlatform.linux) {
@@ -630,6 +651,20 @@ Future<void> _openContainingFolder(
     debugPrint('[已下载] 打开所在目录失败: $e');
     Toast.error('打开目录失败，请手动前往：$dir');
   }
+}
+
+/// 构造 PowerShell 侧「原样传递 explorer /select,"路径"」的命令片段。
+///
+/// explorer 的 /select 参数必须形如 `/select,"D:\path with space.mp3"`
+/// （引号在逗号后、包住路径）；`"/select,D:\..."`（整参被引号包住）
+/// 会被 explorer 当成无法解析的路径而退回打开默认位置（文档文件夹）。
+/// Dart 的 [Process.run] 无法阻止 argv 含空格时自动加引号，故经
+/// `powershell -Command` + `Start-Process -ArgumentList '<原样>'` 转发。
+/// PowerShell 单引号字符串里 `'` 需写成 `''` 转义。
+@visibleForTesting
+String buildExplorerSelectCommand(String winPath) {
+  final psEscaped = winPath.replaceAll("'", "''");
+  return "Start-Process explorer.exe -ArgumentList '/select,\"$psEscaped\"'";
 }
 
 /// 下载中行（显示进度）。

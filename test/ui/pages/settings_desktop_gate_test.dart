@@ -53,6 +53,7 @@ void main() {
       expect(find.text('桌面'), findsOneWidget);
       expect(find.text('关闭时最小化到托盘'), findsOneWidget);
       expect(find.text('开机自启'), findsOneWidget);
+      expect(find.text('下载位置'), findsOneWidget);
       expect(find.text('重置窗口'), findsOneWidget);
 
       // 桌面恒横屏、无车机概念：横屏/车机开关不出现
@@ -132,6 +133,8 @@ void main() {
       expect(find.text('桌面'), findsNothing);
       expect(find.text('开机自启'), findsNothing);
       expect(find.text('关闭时最小化到托盘'), findsNothing);
+      // 下载位置仅 PC 桌面形态提供（移动端下载走 App 专属目录，无此概念）。
+      expect(find.text('下载位置'), findsNothing);
       expect(find.text('重置窗口'), findsNothing);
     });
 

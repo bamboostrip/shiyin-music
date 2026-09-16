@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import '../models/music_models.dart';
@@ -44,6 +45,32 @@ class _PendingTask {
 /// 两者共享并发上限，用户主动下载优先。
 class DownloadService {
   DownloadService();
+
+  /// 用户自定义下载目录的 prefs 键（PC 设置页「下载位置」写入）。
+  ///
+  /// 空 / 未设置 = 跟随系统默认（桌面为系统「下载」目录下的
+  /// [AppConfig.downloadDirName] 子目录）。只影响之后的新下载；
+  /// 已有条目的索引是绝对路径，文件留在原处仍可播可删，下次对账
+  /// 还会被搬入新目录（reconcile 的「以文件为准」语义）。
+  static const String downloadDirOverrideKey = 'download_dir_override';
+
+  /// 读取用户自定义下载目录；未设置（空 / 空白）返回 null。
+  static Future<String?> customDownloadDirOverride() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(downloadDirOverrideKey);
+    if (raw == null || raw.trim().isEmpty) return null;
+    return raw.trim();
+  }
+
+  /// 写入 / 清除自定义下载目录（[dir] 传 null 恢复系统默认）。
+  static Future<void> setCustomDownloadDir(String? dir) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (dir == null || dir.trim().isEmpty) {
+      await prefs.remove(downloadDirOverrideKey);
+    } else {
+      await prefs.setString(downloadDirOverrideKey, dir.trim());
+    }
+  }
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
@@ -99,6 +126,7 @@ class DownloadService {
   ///   getDownloadsDirectory：Windows 是 shell Downloads 已知目录，Linux 是
   ///   XDG Downloads）——与"歌曲已保存到下载目录"的通知文案、更新包
   ///   落点（app_update_service 同用 Downloads）保持一致；
+  ///   用户在设置页设置了自定义「下载位置」时优先使用所选目录；
   /// - 其他平台（iOS 等）或获取失败时回退到应用文档目录。
   Future<Directory> downloadDir() async {
     if (Platform.isAndroid) {
@@ -118,6 +146,13 @@ class DownloadService {
       );
     }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // 用户自定义下载位置（PC 设置-桌面-下载位置）优先于系统 Downloads。
+      // 目录失效（卷未挂载、共享盘断开）时 _ensureDir 抛错，由调用方转
+      // 用户可读提示；对账侧已有「下载根不可用时保留全部条目」兜底。
+      final custom = await customDownloadDirOverride();
+      if (custom != null) {
+        return _ensureDir(Directory(custom));
+      }
       final downloadsDir = await getDownloadsDirectory();
       if (downloadsDir != null) {
         final dir =
