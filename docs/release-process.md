@@ -2,7 +2,7 @@
 
 > 适用仓库：`bamboostrip/shiyin-music`
 > CI 工作流：
-> - `.github/workflows/build-android.yml`（打 `v*` tag 自动构建 skia/impeller 双变体 arm64 APK 并按固定顺序附加到 Release）
+> - `.github/workflows/build-android.yml`（打 `v*` tag 自动构建 Android 三变体 APK：impeller-arm64 / skia-arm64 / skia-arm32（老车机），按固定顺序附加到 Release）
 > - `.github/workflows/build-windows.yml`（打 `v*` tag 自动构建 Windows 便携包 + 安装包并附加到 Release）
 > - `.github/workflows/build-linux.yml`（打 `v*` tag 自动构建 Linux 便携包 + deb 包并附加到 Release）
 
@@ -176,13 +176,34 @@ Release 笔记模板：
 ---
 
 **完整变更**：https://github.com/bamboostrip/shiyin-music/compare/v2.4.1...v2.4.2
+
+## 📥 下载
+
+每个产物均附带同名 `.sha256` 校验文件：应用内更新自动校验 SHA256 确保文件完整，手动下载可自行核对（Windows `certutil -hashfile <文件> SHA256` / Linux `sha256sum <文件>` / macOS `shasum -a 256 <文件>`）。
+
+| 产物 | 说明 |
+|------|------|
+| `shiyin-vX.Y.Z-impeller-arm64.apk` | **Android 64 位 · Impeller 渲染（默认）**：绝大多数手机 / 平板选这个 |
+| `shiyin-vX.Y.Z-skia-arm64.apk` | **Android 64 位 · Skia 渲染**：Impeller 闪屏 / 冻屏 / 花屏的老 GPU 机型选这个 |
+| `shiyin-vX.Y.Z-skia-arm32.apk` | **Android 32 位 · Skia 渲染**：老车机 / 老 32 位设备专用 |
+| `shiyin-vX.Y.Z-windows-x64-portable.zip` | **Windows 便携版**：解压即用，不写注册表 |
+| `shiyin-vX.Y.Z-windows-x64-setup.exe` | **Windows 标准安装版**：NSIS 安装包，支持应用内检查更新 |
+| `shiyin-vX.Y.Z-linux-x64-portable.tar.gz` | **Linux 便携版**：解压即用 |
+| `shiyin-vX.Y.Z-linux-x64.deb` | **Linux DEB 安装包**：Debian / Ubuntu 系 |
 ```
 
 > 首行「适用平台」按实际改动影响的平台修改（如 `> 适用平台：Windows、Linux`），
 > 规范见「版本适用平台标记」一节；不写则按全平台处理。
 
+> ⚠️ **「## 📥 下载」区是格式契约**：
+> - 标题必须保持 `## 📥 下载`（`##` 二级 + emoji + "下载"）——应用内更新弹窗
+>   靠它截掉这一区，只向用户展示更新内容（`stripReleaseDownloadSection`）；
+> - 该区约定为笔记**最后一节**；
+> - 产物文件名里的 `-$渲染器-` 与 `-arm64`/`-arm32` 段是应用内更新选包依据
+>   （见 `AppVersionInfo` / `pickUpdateAssetUrl`），重命名产物必须同步客户端。
+
 > ⚠️ CI workflow 中 **不要** 开启 `generate_release_notes: true`，否则会覆盖手写笔记。
-> 当前两个 workflow 均配置为仅附加附件、不覆盖 body。
+> 当前两个 workflows 均配置为仅附加附件、不覆盖 body。
 
 ## 七、确认 CI 构建
 
@@ -194,11 +215,13 @@ gh release view v2.4.2         # 确认附件已附加
 
 CI 完成后 Release 页面应包含：
 
-Android（**顺序不能变**，impeller 在前）：
+Android（**顺序不能变**，impeller-arm64 在前）：
 - `shiyin-vX.Y.Z-impeller-arm64.apk`（默认渲染，老版本客户端只拿第一个 .apk 附件）
 - `shiyin-vX.Y.Z-impeller-arm64.apk.sha256`（完整性 sidecar）
 - `shiyin-vX.Y.Z-skia-arm64.apk`（老 GPU 闪屏/冻屏用户用这个）
 - `shiyin-vX.Y.Z-skia-arm64.apk.sha256`
+- `shiyin-vX.Y.Z-skia-arm32.apk`（v3.0.2 起增加：老车机 / 32 位设备）
+- `shiyin-vX.Y.Z-skia-arm32.apk.sha256`
 
 Windows（顺序不限，应用内按文件后缀识别）：
 - `shiyin-vX.Y.Z-windows-x64-portable.zip`（便携版，解压即用）
@@ -220,8 +243,9 @@ Linux（顺序不限）：
 > 互不冲突。
 
 > 附件命名是应用内更新的识别约定，**必须严格遵守**：
-> Android 靠 `-{flavor}-arm64.apk` 选渲染器包，Windows 靠
-> `-portable.zip` / `-setup.exe` 后缀选形态包，Linux 靠 `.deb` /
+> Android 靠 `-{flavor}-` 选渲染器包、`-arm64`/`-arm32` 选架构包
+> （v3.0.2 起客户端按烘焙的 APP_ABI 匹配，32 位车机自动选 arm32 包），
+> Windows 靠 `-portable.zip` / `-setup.exe` 后缀选形态包，Linux 靠 `.deb` /
 > `-portable.tar.gz` 选形态包。zip 内文件在压缩包根目录，
 > 便携版用户"解压覆盖旧目录"即可完成更新。
 

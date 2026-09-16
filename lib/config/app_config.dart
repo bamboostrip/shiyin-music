@@ -2,11 +2,11 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '时音';
-  static const appVersion = '3.0.1';
+  static const appVersion = '3.0.2';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。3.0.1 → 3000001。
-  static const appVersionCode = '3000001';
+  /// 的 semverToCode 与 docs/release-process.md）。3.0.2 → 3000002。
+  static const appVersionCode = '3000002';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
@@ -20,6 +20,15 @@ class AppConfig {
   static const renderer = String.fromEnvironment(
     'APP_RENDERER',
     defaultValue: 'impeller',
+  );
+
+  /// 当前包的目标 ABI，由构建时 `--dart-define=APP_ABI=arm64|arm32`
+  /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传；产物名含 `-$abi-`，
+  /// 如 `shiyin-v3.0.2-skia-arm32.apk`）。更新检查配合 [renderer] 选包，
+  /// 32 位车机拿到 arm64 包无法安装。本地构建默认 arm64。
+  static const abi = String.fromEnvironment(
+    'APP_ABI',
+    defaultValue: 'arm64',
   );
 
   /// 渲染引擎展示名（关于页 / 日志用）。

@@ -1,4 +1,4 @@
-name: Build Android APK (arm64)
+name: Build Android APK
 
 # 仅在打 tag（v*）或手动触发时打包，避免每次 push 都跑耗时的 Rust 全量编译。
 on:
@@ -18,14 +18,28 @@ env:
 
 jobs:
   build-apk:
-    name: Build arm64-v8a release APK (${{ matrix.flavor }})
+    name: Build ${{ matrix.abi }} release APK (${{ matrix.flavor }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       matrix:
-        # 渲染引擎双变体：skia（老 GPU 稳定）/ impeller（默认）。
-        # 产物名必须含 -$flavor-，应用内更新靠它选包（见 AppVersionInfo）。
-        flavor: [impeller, skia]
+        # 渲染引擎 × ABI 组合：64 位双变体（impeller 默认 / skia 老 GPU
+        # 稳定）+ 32 位仅 skia（老车机；老 GPU 上 Impeller 兼容性差，
+        # 不值得多打一个变体）。产物名必须含 -$flavor- 与 -$abi-，
+        # 应用内更新靠它们选包（见 AppVersionInfo）。
+        include:
+          - flavor: impeller
+            abi: arm64
+            rust-target: aarch64-linux-android
+            flutter-target: android-arm64
+          - flavor: skia
+            abi: arm64
+            rust-target: aarch64-linux-android
+            flutter-target: android-arm64
+          - flavor: skia
+            abi: arm32
+            rust-target: armv7-linux-androideabi
+            flutter-target: android-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,10 +69,10 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Setup Rust toolchain (arm64 target)
+      - name: Setup Rust toolchain (${{ matrix.rust-target }})
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: ${{ matrix.rust-target }}
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
@@ -68,7 +82,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          shared-key: android-arm64
+          shared-key: android-${{ matrix.abi }}
           save-if: ${{ github.event_name != 'pull_request' }}
 
       # 从 Secret 还原 release 签名密钥并生成 key.properties。
@@ -91,14 +105,19 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/PASSWORD not set; falling back to debug signing."
           fi
 
-      - name: Build release APK (arm64-v8a, ${{ matrix.flavor }})
-        run: flutter build apk --release --target-platform android-arm64 --flavor ${{ matrix.flavor }} --dart-define=APP_RENDERER=${{ matrix.flavor }}
+      - name: Build release APK (${{ matrix.abi }}, ${{ matrix.flavor }})
+        run: >-
+          flutter build apk --release
+          --target-platform ${{ matrix.flutter-target }}
+          --flavor ${{ matrix.flavor }}
+          --dart-define=APP_RENDERER=${{ matrix.flavor }}
+          --dart-define=APP_ABI=${{ matrix.abi }}
 
-      - name: Rename APK with flavor
+      - name: Rename APK with flavor and abi
         id: apk
         run: |
           SRC=$(find build -name "app-${{ matrix.flavor }}-release.apk" -print -quit)
-          DST="shiyin-${{ github.ref_name }}-${{ matrix.flavor }}-arm64.apk"
+          DST="shiyin-${{ github.ref_name }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
           cp "$SRC" "$DST"
           echo "path=$DST" >> "$GITHUB_OUTPUT"
           ls -lh "$DST"
@@ -120,27 +139,35 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.flavor }}-${{ github.ref_name }}
+          name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ github.ref_name }}
           path: ${{ steps.apk.outputs.path }}
 
-  # 双附件按固定顺序挂到 Release：impeller 在前、skia 在后。
-  # 老版本客户端不懂选包、只拿第一个附件，impeller 在前可保持它们行为不变。
+  # 三附件按固定顺序挂到 Release：impeller-arm64 在前、skia-arm64 中、
+  # skia-arm32 最后。老版本客户端不懂选包、只拿第一个 .apk 附件，
+  # impeller-arm64 在前可保持它们行为不变（老版本只发过 64 位，
+  # 不存在 32 位老客户端，arm32 放最后不影响）。
   publish-release:
-    name: Attach APKs to Release (impeller first)
+    name: Attach APKs to Release (impeller-arm64 first)
     needs: build-apk
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - name: Download impeller APK
+      - name: Download impeller arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-impeller-${{ github.ref_name }}
+          name: apk-impeller-arm64-${{ github.ref_name }}
           path: dist
 
-      - name: Download skia APK
+      - name: Download skia arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-skia-${{ github.ref_name }}
+          name: apk-skia-arm64-${{ github.ref_name }}
+          path: dist
+
+      - name: Download skia arm32 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-skia-arm32-${{ github.ref_name }}
           path: dist
 
       # 完整性 sidecar：每个 APK 旁生成 `<文件名>.sha256`（与应用内更新
@@ -162,4 +189,6 @@ jobs:
             dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk.sha256
             dist/shiyin-${{ github.ref_name }}-skia-arm64.apk
             dist/shiyin-${{ github.ref_name }}-skia-arm64.apk.sha256
+            dist/shiyin-${{ github.ref_name }}-skia-arm32.apk
+            dist/shiyin-${{ github.ref_name }}-skia-arm32.apk.sha256
           name: 时音 ${{ github.ref_name }}

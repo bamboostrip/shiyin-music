@@ -86,7 +86,8 @@ class AppVersionInfo {
   ///
   /// - `tag_name`（去掉前导 `v`）作为 [versionName]
   /// - `body` 作为更新说明 [updateContent]
-  /// - 附件选择：Android 按 [renderer] 选 `-skia`/`-impeller` 变体 `.apk`；
+  /// - 附件选择：Android 按 [renderer]+[abi] 选 `-skia`/`-impeller` 与
+  ///   `-arm64`/`-arm32` 变体 `.apk`；
   ///   Windows 按 [windowsAssetKind] 选 `-portable.zip` / `-setup.exe`；
   ///   Linux 按 [linuxAsset] 选 `.deb` / `-portable.tar.gz`
   ///   （规则见 [pickUpdateAssetUrl]）。选不中回退 Release 页面 [htmlUrl]
@@ -95,6 +96,7 @@ class AppVersionInfo {
     Map<String, dynamic> json, {
     String htmlUrl = '',
     String renderer = '',
+    String abi = '',
     String windowsAssetKind = '',
     bool linuxAsset = false,
   }) {
@@ -114,6 +116,7 @@ class AppVersionInfo {
     final picked = pickUpdateAssetUrl(
       assets,
       renderer: renderer,
+      abi: abi,
       windowsAssetKind: windowsAssetKind,
       linuxAsset: linuxAsset,
     );
@@ -140,14 +143,19 @@ class AppVersionInfo {
 /// - Windows 便携版：优先 `*-portable.zip`，回退任意 `.zip`；
 /// - Windows 安装版：优先 `*-setup.exe`，回退任意 `.exe`；
 /// - Linux：优先 `.deb`，回退 `*-portable.tar.gz`；
-/// - Android：优先文件名含 `-$renderer` 的 `.apk`（如
-///   `shiyin-v2.5.1-skia-arm64.apk`），回退第一个 `.apk`
-///   （兼容双包之前的老 Release；发版时 impeller 包放前面，老客户端行为不变）。
+/// - Android：按「渲染引擎 + ABI」逐级放宽匹配 `.apk`——
+///   1. 同时含 `-$renderer` 与 `-$abi`（如 `shiyin-v3.0.2-skia-arm32.apk`）；
+///   2. 含 `-$abi`（附件命名无渲染段的兜底）；
+///   3. 含 `-$renderer`（老 Release 无本 ABI 附件时只能拿另一架构——
+///      v3.0.2 前只发过 arm64，不存在 32 位正式用户，可接受）；
+///   4. 第一个 `.apk`（兼容双包之前的老 Release；发版时 impeller 包
+///      放前面，老客户端行为不变）。
 ///
 /// 选不中返回空字符串，调用方回退 Release 页面。
 String pickUpdateAssetUrl(
   Iterable<(String, String)> assets, {
   String renderer = '',
+  String abi = '',
   String windowsAssetKind = '',
   bool linuxAsset = false,
 }) {
@@ -179,13 +187,34 @@ String pickUpdateAssetUrl(
         '';
   }
 
+  final apks = byExtension('.apk').toList();
   final want = renderer.trim().toLowerCase();
-  for (final asset in byExtension('.apk')) {
-    if (want.isNotEmpty && asset.$1.toLowerCase().contains('-$want')) {
-      return asset.$2;
+  final wantAbi = abi.trim().toLowerCase();
+
+  String? firstContaining(String token) {
+    for (final asset in apks) {
+      if (asset.$1.toLowerCase().contains(token)) return asset.$2;
+    }
+    return null;
+  }
+
+  if (want.isNotEmpty && wantAbi.isNotEmpty) {
+    for (final asset in apks) {
+      final name = asset.$1.toLowerCase();
+      if (name.contains('-$want') && name.contains('-$wantAbi')) {
+        return asset.$2;
+      }
     }
   }
-  return _firstUrl(byExtension('.apk')) ?? '';
+  if (wantAbi.isNotEmpty) {
+    final hit = firstContaining('-$wantAbi');
+    if (hit != null) return hit;
+  }
+  if (want.isNotEmpty) {
+    final hit = firstContaining('-$want');
+    if (hit != null) return hit;
+  }
+  return apks.isEmpty ? '' : apks.first.$2;
 }
 
 String? _firstUrl(Iterable<(String, String)> assets) =>
@@ -198,6 +227,38 @@ String stripVersionTagPrefix(String tag) {
     t = t.substring(1);
   }
   return t;
+}
+
+/// 截掉 Release notes 里的「📥 下载」产物清单区（应用内更新弹窗用）。
+///
+/// 该区是给 Release 网页访客看的下载指引（各平台产物表格 + sha256
+/// 校验说明，见 docs/release-process.md 笔记模板）；应用内弹窗只展示
+/// 更新内容本身，避免一大段与本机无关的产物列表刷屏。
+///
+/// 规则：从首个 `## 📥 下载` / `### 下载` 标题行起截到下一个二级标题
+/// 或正文结束（模板约定下载区为最后一节）；标题缺失的老 Release
+/// 原样返回。标题匹配不带 `\b`：CJK 字符不属于 ECMAScript 的 `\w`，
+/// `下载\b` 在中文后永远不成立。
+String stripReleaseDownloadSection(String body) {
+  final headingPattern = RegExp(r'^#{2,3}\s*(?:📥\s*)?下载');
+  final h2Pattern = RegExp(r'^##\s+');
+  final buffer = StringBuffer();
+  var inDownloadSection = false;
+  for (final rawLine in body.split('\n')) {
+    final line = rawLine.trimLeft();
+    if (!inDownloadSection) {
+      if (headingPattern.hasMatch(line)) {
+        inDownloadSection = true;
+        continue;
+      }
+      buffer.writeln(rawLine);
+    } else if (h2Pattern.hasMatch(line)) {
+      // 下载区之后又出现二级标题：恢复输出（模板外的排版兜底）。
+      inDownloadSection = false;
+      buffer.writeln(rawLine);
+    }
+  }
+  return buffer.toString().trimRight();
 }
 
 /// 是否为"正式版" tag：可选 v 前缀 + 纯数字点分段（`v2.4.0`、`2.4`）。

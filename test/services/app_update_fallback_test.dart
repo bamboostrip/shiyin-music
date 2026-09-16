@@ -62,8 +62,114 @@ void main() {
       );
     });
 
+    test('Android 按渲染器 + ABI 精确选 apk（三变体 Release）', () {
+      final triAssets = <(String, String)>[
+        ('shiyin-v3.0.2-impeller-arm64.apk', 'https://dl/impeller-arm64.apk'),
+        ('shiyin-v3.0.2-skia-arm64.apk', 'https://dl/skia-arm64.apk'),
+        ('shiyin-v3.0.2-skia-arm32.apk', 'https://dl/skia-arm32.apk'),
+      ];
+      // 64 位默认变体。
+      expect(
+        pickUpdateAssetUrl(triAssets, renderer: 'impeller', abi: 'arm64'),
+        'https://dl/impeller-arm64.apk',
+      );
+      // 64 位 skia：不得误吞 arm32 包（-arm64 与 -arm32 互不 contains）。
+      expect(
+        pickUpdateAssetUrl(triAssets, renderer: 'skia', abi: 'arm64'),
+        'https://dl/skia-arm64.apk',
+      );
+      // 32 位老车机：必须拿到 arm32 包，拿到 arm64 包无法安装。
+      expect(
+        pickUpdateAssetUrl(triAssets, renderer: 'skia', abi: 'arm32'),
+        'https://dl/skia-arm32.apk',
+      );
+    });
+
+    test('Android 老 Release 无本 ABI 附件时逐级放宽', () {
+      final legacyAssets = <(String, String)>[
+        ('shiyin-v3.0.1-impeller-arm64.apk', 'https://dl/old-impeller.apk'),
+        ('shiyin-v3.0.1-skia-arm64.apk', 'https://dl/old-skia.apk'),
+      ];
+      // v3.0.2 前只发过 arm64：32 位客户端按渲染器回退（历史上不存在
+      // 32 位正式用户，可接受）。
+      expect(
+        pickUpdateAssetUrl(legacyAssets, renderer: 'skia', abi: 'arm32'),
+        'https://dl/old-skia.apk',
+      );
+      // ABI 附件存在但渲染段缺失：按 ABI 匹配。
+      expect(
+        pickUpdateAssetUrl(const [
+          ('shiyin-v9.0.0-arm32.apk', 'https://dl/arm32.apk'),
+          ('shiyin-v9.0.0-arm64.apk', 'https://dl/arm64.apk'),
+        ], renderer: 'skia', abi: 'arm32'),
+        'https://dl/arm32.apk',
+      );
+    });
+
     test('无匹配返回空字符串', () {
       expect(pickUpdateAssetUrl(const [('a.dmg', 'https://dl/a.dmg')]), '');
+    });
+  });
+
+  group('stripReleaseDownloadSection', () {
+    test('截掉末尾「📥 下载」产物清单区，保留更新内容与完整变更链接', () {
+      const body = '''
+> 适用平台：全平台
+
+## 更新内容
+
+### ✨ 新功能
+
+- **平板形态**：触屏侧栏重设计
+
+---
+
+**完整变更**：https://github.com/bamboostrip/shiyin-music/compare/v3.0.1...v3.0.2
+
+## 📥 下载
+
+每个产物均附带同名 `.sha256` 校验文件。
+
+| 产物 | 说明 |
+|------|------|
+| `shiyin-v3.0.2-impeller-arm64.apk` | Android 64 位 · 默认渲染 |
+| `shiyin-v3.0.2-skia-arm32.apk` | Android 32 位 · 老车机 |
+''';
+      final stripped = stripReleaseDownloadSection(body);
+      expect(stripped, contains('平板形态'));
+      expect(stripped, contains('完整变更'));
+      expect(stripped, isNot(contains('📥')));
+      expect(stripped, isNot(contains('.sha256')));
+      expect(stripped, isNot(contains('impeller-arm64.apk')));
+    });
+
+    test('下载区后还有二级标题时只截到该标题为止', () {
+      const body = '''
+## 更新内容
+
+- 修复 A
+
+## 📥 下载
+
+- 产物列表
+
+## 后记
+
+- 附言
+''';
+      final stripped = stripReleaseDownloadSection(body);
+      expect(stripped, contains('修复 A'));
+      expect(stripped, isNot(contains('产物列表')));
+      expect(stripped, contains('后记'));
+    });
+
+    test('无下载区的老 Release 原样返回；正文普通「下载」文字不误伤', () {
+      const body = '''
+## 更新内容
+
+- **下载重构**：并发下载更快
+''';
+      expect(stripReleaseDownloadSection(body), body.trim());
     });
   });
 

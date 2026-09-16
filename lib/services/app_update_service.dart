@@ -90,6 +90,10 @@ class AppUpdateService {
   /// 当前构建在附件选择时使用的平台参数。
   String get _rendererForAsset => _isAndroid ? AppConfig.renderer : '';
 
+  /// 当前构建的目标 ABI（非 Android 返回 ''；ARM32 车机必须选
+  /// `-arm32` APK，拿到 arm64 包无法安装）。
+  String get _abiForAsset => _isAndroid ? AppConfig.abi : '';
+
   /// 当前构建的 Windows 形态附件参数（非 Windows 返回 ''）。
   String get _windowsAssetKind {
     if (!_isWindows) {
@@ -272,6 +276,7 @@ class AppUpdateService {
     return AppVersionInfo.fromGitHubRelease(
       newestJson,
       renderer: _rendererForAsset,
+      abi: _abiForAsset,
       windowsAssetKind: _windowsAssetKind,
       linuxAsset: _isLinux,
     ).copyWith(updateContent: _joinReleaseNotes(selection));
@@ -363,6 +368,7 @@ class AppUpdateService {
     final picked = pickUpdateAssetUrl(
       assets,
       renderer: _rendererForAsset,
+      abi: _abiForAsset,
       windowsAssetKind: _windowsAssetKind,
       linuxAsset: _isLinux,
     );
@@ -385,7 +391,10 @@ class AppUpdateService {
   /// 用户可能一次跨过多个无关版本，提示里要能看到期间与本平台相关的变更。
   String _joinReleaseNotes(RelevantUpdateSelection selection) {
     return selection.relevant
-        .map((entry) => '## ${entry.tag}\n\n${entry.body.trim()}')
+        .map(
+          (entry) =>
+              '## ${entry.tag}\n\n${stripReleaseDownloadSection(entry.body.trim())}',
+        )
         .join('\n\n');
   }
 

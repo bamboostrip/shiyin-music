@@ -14,6 +14,21 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// 按 flutter 传入的 target-platform（-Ptarget-platform=android-arm,android-arm64）
+// 决定本机库（Rust 引擎）与 APK abiFilters：token 精确匹配——
+// "android-arm" 是 32 位，"android-arm64" 含 "android-arm" 前缀，不能用 contains。
+val flutterTargetPlatformTokens: List<String> =
+    (project.findProperty("target-platform") as? String)
+        ?.split(",")
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?: listOf("android-arm64")
+val rustAbis: List<String> = buildList {
+    if (flutterTargetPlatformTokens.contains("android-arm")) add("armeabi-v7a")
+    if (flutterTargetPlatformTokens.contains("android-arm64")) add("arm64-v8a")
+    if (isEmpty()) add("arm64-v8a")
+}
+
 android {
     namespace = "shiyin.famlife.top"
     compileSdk = flutter.compileSdkVersion
@@ -38,11 +53,13 @@ android {
         // Flutter 3.35+ Gradle 插件会在 build.gradle 处理前自动把
         // abiFilters 设为 armeabi-v7a,arm64-v8a,x86_64(防止 x86 误判),
         // 导致原来的 `+= listOf("arm64-v8a")` 失效、APK 塞进 3 套架构。
-        // 必须先 clear() 清掉注入值,再 addAll 自定义架构。
+        // 必须先 clear() 清掉注入值,再按 flutter 传入的 target-platform
+        // 精确设置（--target-platform android-arm → 仅 armeabi-v7a，
+        // 老车机 32 位包；默认/ android-arm64 → 仅 arm64-v8a）。
         // 参考: https://docs.flutter.dev/release/breaking-changes/default-abi-filters-android
         ndk {
             abiFilters.clear()
-            abiFilters.addAll(listOf("arm64-v8a"))
+            abiFilters.addAll(rustAbis)
         }
     }
 
@@ -124,8 +141,19 @@ tasks.register<Exec>("cargoBuildArm64") {
     )
 }
 
+tasks.register<Exec>("cargoBuildArm32") {
+    workingDir = file("${project.projectDir}/../../rust")
+    commandLine(
+        "cargo", "ndk",
+        "-t", "armeabi-v7a",
+        "-o", "../android/app/src/main/jniLibs",
+        "build", "--release"
+    )
+}
+
 tasks.configureEach {
     if (name.startsWith("merge") && name.endsWith("JniLibFolders")) {
-        dependsOn("cargoBuildArm64")
+        if (rustAbis.contains("arm64-v8a")) dependsOn("cargoBuildArm64")
+        if (rustAbis.contains("armeabi-v7a")) dependsOn("cargoBuildArm32")
     }
 }
