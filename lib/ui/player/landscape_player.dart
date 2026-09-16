@@ -10,7 +10,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/lyric_converter.dart';
 import '../form_factor.dart';
-import '../desktop/desktop_player_bar.dart';
+import '../desktop/desktop_player_bar.dart' hide formatDuration;
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
@@ -21,6 +21,7 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import 'desktop_lyric_list.dart';
 import 'lyric_display_mode.dart';
+import 'lyric_seek_pointer_button.dart';
 import 'lyric_views.dart'
     show kLyricShowRomanizationPrefKey, kLyricShowTranslationPrefKey;
 import 'player_controls.dart';
@@ -849,35 +850,96 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     final fontSize = widget.compact ? 26.0 : 34.0;
     final inactiveFontSize = widget.compact ? 18.0 : 24.0;
 
+    // 与移动端 MobileLyricList 同一层级策略：用户滚动时锚点行不放大字号，
+    // 仅把颜色加重到移动端聚焦行的量级（主行 alpha 0.85 / 译行 0.70）。
+    final lyricStyle = LyricStyles.default1.copyWith(
+      textStyle: Theme.of(context).textTheme.titleLarge!.copyWith(
+        color: Colors.white.withValues(alpha: .34),
+        fontSize: inactiveFontSize,
+        height: 1.18,
+        fontWeight: FontWeight.w800,
+      ),
+      activeStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
+        color: Colors.white.withValues(alpha: .34),
+        fontSize: fontSize,
+        height: 1.18,
+        fontWeight: FontWeight.w900,
+      ),
+      selectedColor: Colors.white.withValues(alpha: .85),
+      selectedTranslationColor: Colors.white.withValues(alpha: .70),
+      lineGap: widget.compact ? 10 : 16,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 24,
+        vertical: widget.compact ? 20 : 40,
+      ),
+      fadeRange: FadeRange(top: 40, bottom: 40),
+      textAlign: TextAlign.left,
+      contentAlignment: CrossAxisAlignment.start,
+      activeHighlightColor: Colors.white,
+    );
+
     return ExcludeSemantics(
       // 歌词视图高频更新会触发 Windows AXTree 竞态崩溃，仅桌面排除
       excluding: isDesktopPlatform,
-      child: LyricView(
-        controller: _lyricController,
-        style: LyricStyles.default1.copyWith(
-          textStyle: Theme.of(context).textTheme.titleLarge!.copyWith(
-            color: Colors.white.withValues(alpha: .34),
-            fontSize: inactiveFontSize,
-            height: 1.18,
-            fontWeight: FontWeight.w800,
-          ),
-          activeStyle: Theme.of(context).textTheme.headlineMedium!.copyWith(
-            color: Colors.white.withValues(alpha: .34),
-            fontSize: fontSize,
-            height: 1.18,
-            fontWeight: FontWeight.w900,
-          ),
-          lineGap: widget.compact ? 10 : 16,
-          contentPadding: EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: widget.compact ? 20 : 40,
-          ),
-          fadeRange: FadeRange(top: 40, bottom: 40),
-          textAlign: TextAlign.left,
-          contentAlignment: CrossAxisAlignment.start,
-          activeHighlightColor: Colors.white,
-        ),
+      child: Stack(
+        children: [
+          LyricView(controller: _lyricController, style: lyricStyle),
+          _buildSelectionCrosshair(),
+        ],
       ),
+    );
+  }
+
+  /// 用户滚动歌词时的准星覆盖层：与移动端 MobileLyricList 同款——
+  /// 左侧渐隐准星线 + 右侧 [ ▶ mm:ss ] 播放胶囊，点击跳转播放并立即恢复
+  /// 跟随播放行；点击歌词行直接跳播的逻辑保持不变。
+  Widget _buildSelectionCrosshair() {
+    return SelectListenableBuilder(
+      controller: _lyricController,
+      builder: (state, _) {
+        return Positioned(
+          left: 0,
+          right: 12,
+          top: state.centerY - 14,
+          height: 28,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                // 准星线仅 1px 高且不参与命中，保证拖拽手势穿透回歌词视图
+                child: IgnorePointer(
+                  child: Container(
+                    height: 1,
+                    margin: const EdgeInsets.only(right: 10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.0),
+                          Colors.white.withValues(alpha: 0.08),
+                          Colors.white.withValues(alpha: 0.28),
+                          Colors.white.withValues(alpha: 0.14),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              LyricSeekPointerButton(
+                key: const ValueKey('landscape_lyric_seek_pointer_button'),
+                timeText: formatDuration(state.duration),
+                onTap: () {
+                  // 先校准进度（防跳转后回 0 闪动），再退出选区恢复跟随，
+                  // 最后走与点击歌词行相同的跳播路径。
+                  _lastSentProgress = state.duration;
+                  _lyricController.setProgress(state.duration);
+                  _lyricController.stopSelection();
+                  widget.player.seekToAndPlay(state.duration);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

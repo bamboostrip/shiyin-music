@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import 'lyric_seek_pointer_button.dart';
 import 'lyric_views.dart';
 
 /// 移动端 QQ 音乐风格歌词列表组件：
@@ -596,7 +597,7 @@ class _MobileLyricListState extends State<MobileLyricList>
                         ),
                       ),
                     ),
-                    _MobileSeekPointerButton(
+                    LyricSeekPointerButton(
                       key: const ValueKey('mobile_lyric_seek_pointer_button'),
                       timeText: formatDuration(focusedLine.time),
                       onTap: () {
@@ -615,57 +616,5 @@ class _MobileLyricListState extends State<MobileLyricList>
   }
 }
 
-/// 移动端 QQ 音乐同款时间播放胶囊 [ ▶ mm:ss ]
-class _MobileSeekPointerButton extends StatelessWidget {
-  const _MobileSeekPointerButton({
-    super.key,
-    required this.timeText,
-    required this.onTap,
-  });
-
-  final String timeText;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
-        decoration: BoxDecoration(
-          color: const Color(0x33000000),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.32),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 6,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.white),
-            const SizedBox(width: 3),
-            Text(
-              timeText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
-                height: 1,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+/// 移动端 QQ 音乐同款时间播放胶囊已抽至共享组件 [LyricSeekPointerButton]
+///（车机横屏歌词面板复用同一视觉）。
