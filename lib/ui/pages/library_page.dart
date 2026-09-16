@@ -587,41 +587,65 @@ class _UserProfileHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
-          Container(
-            width: 54,
-            height: 54,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: .24)
-                    : Colors.white.withValues(alpha: .95),
-                width: 2.0,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? .35 : .08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
+          SizedBox.square(
+            dimension: 54,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? .35 : .08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                ),
+                ClipOval(
+                  child: profile?.avatarUrl == null
+                      ? Center(
+                          child: Icon(
+                            Icons.person_rounded,
+                            color: colorScheme.primary,
+                            size: 30,
+                          ),
+                        )
+                      : RetryableNetworkImage(
+                          url: profile!.avatarUrl!,
+                          fit: BoxFit.cover,
+                          // 54dp 圆形头像按档位解码（128），避免整图解码白占内存。
+                          cacheWidth: decodeSizeFor(54),
+                          cacheHeight: decodeSizeFor(54),
+                          errorBuilder: (_, _, _) => Center(
+                            child: Icon(
+                              Icons.person_rounded,
+                              color: colorScheme.primary,
+                              size: 30,
+                            ),
+                          ),
+                        ),
+                ),
+                // 边框环必须叠在头像之上：画在底层装饰上时头像作为 child
+                // 会铺满整个圆，把边框内半圈盖住。
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: .24)
+                            : Colors.white.withValues(alpha: .95),
+                        width: 1.8,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
-            child: profile?.avatarUrl == null
-                ? Icon(Icons.person_rounded, color: colorScheme.primary, size: 30)
-                : RetryableNetworkImage(
-                    url: profile!.avatarUrl!,
-                    fit: BoxFit.cover,
-                    // 54dp 圆形头像按档位解码（128），避免整图解码白占内存。
-                    cacheWidth: decodeSizeFor(54),
-                    cacheHeight: decodeSizeFor(54),
-                    errorBuilder: (_, _, _) => Icon(
-                      Icons.person_rounded,
-                      color: colorScheme.primary,
-                      size: 30,
-                    ),
-                  ),
           ),
           const SizedBox(width: 14),
           Expanded(

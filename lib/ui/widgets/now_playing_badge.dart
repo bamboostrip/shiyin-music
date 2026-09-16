@@ -21,8 +21,9 @@ class NowPlayingBadge extends StatefulWidget {
 }
 
 class _NowPlayingBadgeState extends State<NowPlayingBadge>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _controller;
+  bool _appHidden = false;
 
   @override
   void initState() {
@@ -31,6 +32,21 @@ class _NowPlayingBadgeState extends State<NowPlayingBadge>
       vsync: this,
       duration: const Duration(milliseconds: 820),
     );
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appHidden = lifecycle != null && _isHiddenState(lifecycle);
+    _syncAnimation();
+  }
+
+  /// 仅在窗口真正不可见（hidden/paused/detached）时冻结跳动动画：
+  /// 最小化后桌面端仍会出帧，列表里每个当前播放行都空耗一帧没有意义。
+  /// 仅失焦（inactive）但可见时保持跳动，桌面多软件并排不受影响。
+  static bool _isHiddenState(AppLifecycleState state) =>
+      state != AppLifecycleState.resumed && state != AppLifecycleState.inactive;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appHidden = _isHiddenState(state);
     _syncAnimation();
   }
 
@@ -42,12 +58,13 @@ class _NowPlayingBadgeState extends State<NowPlayingBadge>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
 
   void _syncAnimation() {
-    if (widget.active && widget.playing) {
+    if (widget.active && widget.playing && !_appHidden) {
       if (!_controller.isAnimating) {
         _controller.repeat(reverse: true);
       }

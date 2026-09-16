@@ -7,6 +7,7 @@ import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/album_grid.dart';
 import '../widgets/desktop_song_table_row.dart';
@@ -932,15 +933,24 @@ class _ArtistSongRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        song.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: active ? activeColor : null,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+                      active
+                          ? MarqueeText.text(
+                              song.title,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: activeColor,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            )
+                          : Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
                       const SizedBox(height: 3),
                       Text(
                         [

@@ -6,6 +6,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../player/song_tap_handler.dart';
 import 'artwork.dart';
+import 'marquee_text.dart';
 import 'toast.dart';
 
 /// 弹出播放队列面板（底部弹层）。
@@ -222,15 +223,24 @@ class QueueTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: active ? colorScheme.primary : null,
-                          fontWeight: FontWeight.w700,
+                  active
+                      ? MarqueeText.text(
+                          song.title,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        )
+                      : Text(
+                          song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
-                  ),
                   const SizedBox(height: 2),
                   Text(
                     song.artist,

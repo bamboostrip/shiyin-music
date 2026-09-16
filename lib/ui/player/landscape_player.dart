@@ -15,6 +15,7 @@ import '../pages/desktop_lyrics_settings_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/desktop_anchored_menu.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -225,10 +226,8 @@ class LandscapeHeader extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                MarqueeText.text(
                   song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Colors.white.withValues(alpha: .92),
                     fontSize: compact ? 14 : 16,
@@ -421,8 +420,9 @@ class LandscapeArtworkShowcase extends StatefulWidget {
 }
 
 class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _rotationController;
+  bool _appHidden = false;
 
   @override
   void initState() {
@@ -431,6 +431,21 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
       vsync: this,
       duration: const Duration(seconds: 32),
     );
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appHidden = lifecycle != null && _isHiddenState(lifecycle);
+    _syncRotation();
+  }
+
+  /// 仅在窗口真正不可见（hidden/paused/detached）时冻结：最小化后桌面端
+  /// 仍会出帧，不可见空转唱片没有意义。仅失焦（inactive）但可见时保持
+  /// 旋转——桌面多软件并排是常态，转着更自然。
+  static bool _isHiddenState(AppLifecycleState state) =>
+      state != AppLifecycleState.resumed && state != AppLifecycleState.inactive;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appHidden = _isHiddenState(state);
     _syncRotation();
   }
 
@@ -445,12 +460,13 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _rotationController.dispose();
     super.dispose();
   }
 
   void _syncRotation() {
-    if (widget.player.isPlaying) {
+    if (widget.player.isPlaying && !_appHidden) {
       if (!_rotationController.isAnimating) {
         _rotationController.repeat();
       }

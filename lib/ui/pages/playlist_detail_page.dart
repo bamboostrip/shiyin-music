@@ -15,6 +15,7 @@ import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../widgets/import_playlist_sheet.dart';
 import '../widgets/locate_current_song_button.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
@@ -780,9 +781,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   /// 手动定位到当前播放的歌曲（右下角定位按钮触发，滚动到其所在行）。
   ///
-  /// 当前歌曲尚未加载（分页懒加载）时：若播放队列与当前歌单匹配
-  /// （已加载歌曲全部属于当前队列），逐页加载直到找到；否则不再额外请求，
-  /// 避免点一次按钮就触发全量加载。
+  /// 当前歌曲尚未加载（分页懒加载）时：若当前歌可能属于本歌单/专辑
+  /// （见 [_shouldSearchForCurrentSong]），逐页加载直到找到；否则不再
+  /// 额外请求，避免点一次按钮就触发全量加载。
   Future<void> _locateCurrentSong() async {
     if (_isLocating) return;
     final current = widget.player.currentSong;
@@ -790,7 +791,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     _isLocating = true;
     try {
       var index = _filteredSongs.indexWhere((s) => s.hash == current.hash);
-      if (index < 0 && _queueMatchesThisPlaylist()) {
+      if (index < 0 && _shouldSearchForCurrentSong(current)) {
         // 逐页加载直到找到（上限 24 页，异常情况不再继续）
         var pages = 0;
         while (index < 0 &&
@@ -810,25 +811,49 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  /// 当前播放队列是否「像」来自本歌单：已加载歌曲全部属于当前队列。
+  /// 判断当前播放歌曲是否属于本歌单/专辑，值得向下翻页查找。
   ///
-  /// 在本歌单内点播放时队列即完整歌单，此判断可避免在其他歌单页面
-  /// 触发无意义的全量加载。
-  bool _queueMatchesThisPlaylist() {
+  /// 宽松匹配：专辑页比对专辑 ID/专辑名；歌单页只要队列包含当前歌且
+  /// 与已加载歌单有交集、或歌单总数与队列长度接近即可。不能用「已加载
+  /// 歌曲全部属于队列」的强条件——队列被追加过歌、或从别处播起同一首
+  /// 歌时会误判，导致定位按钮消失、深翻页查找被拒绝。
+  bool _shouldSearchForCurrentSong(Song current) {
+    if (_songs.isEmpty) return false;
+    // 专辑详情页：比对专辑 ID 或专辑名
+    if (_isAlbum) {
+      final targetAlbumId = widget.playlist.albumId ?? widget.playlist.id;
+      if (current.albumId != null && current.albumId == targetAlbumId) {
+        return true;
+      }
+      if (current.albumName != null &&
+          current.albumName!.isNotEmpty &&
+          current.albumName == widget.playlist.title) {
+        return true;
+      }
+    }
+    // 歌单详情页：队列含当前歌，且与已加载歌单有交集，或总数接近
     final queueHashes = widget.player.queue.map((s) => s.hash).toSet();
-    if (queueHashes.isEmpty || _songs.isEmpty) return false;
-    return _songs.every((s) => queueHashes.contains(s.hash));
+    if (queueHashes.contains(current.hash)) {
+      if (_songs.any((s) => queueHashes.contains(s.hash))) {
+        return true;
+      }
+      final total = _currentPlaylist.songCount;
+      if (total != null && (total - widget.player.queue.length).abs() <= 10) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 定位按钮可见性：当前有播放歌曲，且该歌曲已在已加载歌曲列表中；
-  /// 尚未加载到时用「队列像来自本歌单」做代理（深页场景，点击后限量
-  /// 加载再定位）。搜索过滤把当前歌滤掉时列表滚不到它，直接隐藏。
+  /// 尚未加载到时用「当前歌可能属于本歌单」做代理（深页场景，点击后
+  /// 限量加载再定位）。搜索过滤把当前歌滤掉时列表滚不到它，直接隐藏。
   bool get _canShowLocateButton {
     final current = widget.player.currentSong;
     if (current == null) return false;
     if (_filteredSongs.any((s) => s.hash == current.hash)) return true;
     if (_searchQuery.isNotEmpty) return false;
-    return _queueMatchesThisPlaylist();
+    return _shouldSearchForCurrentSong(current);
   }
 
   /// 滚动到展示列表中 [displayIndex] 所在行：先按固定行高估算偏移跳转，
@@ -3398,16 +3423,24 @@ class _SongRowState extends State<_SongRow> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                color: active ? activeColor : null,
-                                fontWeight: FontWeight.w800,
+                        active
+                            ? MarqueeText.text(
+                                song.title,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      color: activeColor,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                              )
+                            : Text(
+                                song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                               ),
-                        ),
                         const SizedBox(height: 3),
                         Text(
                           song.artist,

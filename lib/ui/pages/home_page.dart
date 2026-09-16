@@ -762,11 +762,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
 
   void _checkAndAutoPlay(HomeData data) {
     if (!widget.player.autoPlayOnStartupEnabled || _hasAutoPlayed) return;
-    _hasAutoPlayed = true;
 
     final hasRestored = widget.player.hasRestoredPlaybackState;
     final songs = data.daily.songs;
+    // 数据未就绪（无恢复状态且每日推荐为空，如上次会话接口失败留下的
+    // 缓存）时不消费本次机会，等后续网络数据到达再触发。
     if (!hasRestored && songs.isEmpty) return;
+    _hasAutoPlayed = true;
 
     // 必须推迟到首帧构建完成后执行：_checkAndAutoPlay 会在 initState
     // 阶段被同步调用，此时直接调用 playSong 会触发 notifyListeners()，

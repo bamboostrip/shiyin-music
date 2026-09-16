@@ -6,6 +6,7 @@ import '../../models/music_models.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/desktop_anchored_menu.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
@@ -135,10 +136,8 @@ class TopBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
+                      MarqueeText.text(
                         song.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(
                               color: Colors.white,

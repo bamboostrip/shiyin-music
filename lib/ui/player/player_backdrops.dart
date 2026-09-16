@@ -13,7 +13,8 @@ class ArtworkBackground extends StatefulWidget {
   final Song song;
 
   /// 是否正在播放：旋转+全屏模糊背景按显示刷新率持续消耗 GPU，
-  /// 暂停时冻结在当前角度（纯装饰动画，暂停不动无可感知差异）。
+  /// 暂停或窗口不可见（最小化/后台，音乐还在放）时冻结在当前角度，
+  /// 纯装饰动画暂停不动无可感知差异。
   final bool playing;
 
   @override
@@ -21,8 +22,9 @@ class ArtworkBackground extends StatefulWidget {
 }
 
 class _ArtworkBackgroundState extends State<ArtworkBackground>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _rotationController;
+  bool _appHidden = false;
 
   @override
   void initState() {
@@ -31,6 +33,24 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
       vsync: this,
       duration: const Duration(seconds: 40), // 40 seconds for a full rotation
     );
+    WidgetsBinding.instance.addObserver(this);
+    // 组件可能在应用已不可见时才构建（如后台期间换歌重建），从当前
+    // 生命周期初始化，避免首帧先转起来再等回调纠正。
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appHidden = lifecycle != null && _isHiddenState(lifecycle);
+    _syncRotation();
+  }
+
+  /// 仅在窗口真正不可见（hidden/paused/detached）时冻结：最小化后桌面端
+  /// 仍会继续出帧，空跑全屏模糊是切桌面掉帧的来源。仅失焦（inactive）
+  /// 但窗口可见时保持旋转——桌面端多软件并排是常态，转着更自然；
+  /// 移动端 inactive 只是通知栏下拉等仍可见的瞬时态，不受影响。
+  static bool _isHiddenState(AppLifecycleState state) =>
+      state != AppLifecycleState.resumed && state != AppLifecycleState.inactive;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appHidden = _isHiddenState(state);
     _syncRotation();
   }
 
@@ -43,7 +63,7 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
   }
 
   void _syncRotation() {
-    if (widget.playing) {
+    if (widget.playing && !_appHidden) {
       if (!_rotationController.isAnimating) {
         _rotationController.repeat();
       }
@@ -54,6 +74,7 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _rotationController.dispose();
     super.dispose();
   }

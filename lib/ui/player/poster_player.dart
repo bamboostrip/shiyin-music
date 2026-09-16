@@ -11,6 +11,7 @@ import '../../models/music_models.dart';
 import '../form_factor.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
@@ -173,10 +174,8 @@ class PosterSongInfoRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
+              MarqueeText.text(
                 song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
