@@ -380,6 +380,20 @@ class _SearchPageState extends State<SearchPage> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
         ),
         const SizedBox(width: 12),
+        // 识曲入口对齐移动端搜索页：搜索胶囊左侧的裸图标按钮（isSupported
+        // 闸门：不支持平台不渲染）。与胶囊紧邻表达归属，同时和右侧
+        // 「搜索」主按钮拉开距离，避免想点搜索时误触识曲。
+        if (IdentifyService.isSupported) ...[
+          IconButton(
+            tooltip: '听歌识曲',
+            icon: Icon(
+              Icons.graphic_eq_rounded,
+              color: colorScheme.primary,
+            ),
+            onPressed: () => _openIdentify(context),
+          ),
+          const SizedBox(width: 2),
+        ],
         Expanded(
           child: Container(
             height: 46,
@@ -446,35 +460,6 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
         ),
-        if (IdentifyService.isSupported) ...[
-          const SizedBox(width: 10),
-          SizedBox(
-            height: 46,
-            child: FilledButton.tonalIcon(
-              onPressed: () => _openIdentify(context),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(23),
-                ),
-              ),
-              icon: Icon(
-                Icons.graphic_eq_rounded,
-                size: 20,
-                color: colorScheme.primary,
-              ),
-              label: Text(
-                '识曲',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isDark
-                      ? colorScheme.onSurface.withValues(alpha: .92)
-                      : colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-        ],
         const SizedBox(width: 10),
         // 与左侧胶囊等高（46）的 tonal 药丸按钮：无阴影、与搜索框对齐；
         // 深色字落在浅色容器上，换任何种子色（尤其浅色金）对比度都不翻车。

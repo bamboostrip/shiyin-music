@@ -189,7 +189,7 @@ void main() {
       expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
     });
 
-    testWidgets('车机模式搜索页渲染听歌识曲按钮并包含图标和文字', (tester) async {
+    testWidgets('车机模式搜索页在搜索胶囊左侧渲染听歌识曲图标按钮', (tester) async {
       if (!IdentifyService.isSupported) return;
 
       SharedPreferences.setMockInitialValues({});
@@ -220,10 +220,22 @@ void main() {
       );
       await tester.pump();
 
-      final identifyBtn = find.widgetWithText(FilledButton, '识曲');
+      // 识曲入口对齐移动端：裸图标按钮（tooltip 承载语义），
+      // 不再是带文字的 tonal 药丸。
+      final identifyBtn = find.byTooltip('听歌识曲');
       expect(identifyBtn, findsOneWidget);
       expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, '搜索'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '识曲'), findsNothing);
+
+      // 布局顺序：返回 → 识曲图标 → 搜索胶囊 → 「搜索」主按钮，
+      // 识曲与主按钮之间隔着整个胶囊，避免误触。
+      final submitBtn = find.widgetWithText(FilledButton, '搜索');
+      expect(submitBtn, findsOneWidget);
+      final identifyDx = tester.getCenter(identifyBtn).dx;
+      final fieldDx = tester.getCenter(find.byType(TextField)).dx;
+      final submitDx = tester.getCenter(submitBtn).dx;
+      expect(identifyDx, lessThan(fieldDx));
+      expect(fieldDx, lessThan(submitDx));
     });
   });
 }
