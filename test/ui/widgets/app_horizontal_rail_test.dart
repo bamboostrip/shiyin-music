@@ -47,9 +47,18 @@ void main() {
     expect(find.byType(ListView), findsNothing);
   });
 
-  testWidgets('非桌面同宽：保持横轨（零回归）', (tester) async {
+  testWidgets('非桌面同宽(≥840)：平板侧栏形态同样转网格', (tester) async {
+    // 门控已放宽为纯宽度阈值：移动形态宽内容区（平板触屏侧栏形态）
+    // 与桌面宽窗行为一致，手机窄宽度仍保持横轨。
     debugDesktopFormFactorOverride = false;
     await pumpRail(tester, rail(), const Size(1200, 800));
+    expect(find.byType(GridView), findsOneWidget);
+    expect(find.byType(ListView), findsNothing);
+  });
+
+  testWidgets('非桌面窄宽(<840)：保持横轨（手机零回归）', (tester) async {
+    debugDesktopFormFactorOverride = false;
+    await pumpRail(tester, rail(), const Size(700, 800));
     expect(find.byType(ListView), findsOneWidget);
     expect(find.byType(GridView), findsNothing);
   });

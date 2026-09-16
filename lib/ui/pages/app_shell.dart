@@ -11,9 +11,9 @@ import '../../controllers/local_music_controller.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
-import '../widgets/mini_player.dart';
 import '../widgets/lazy_indexed_stack.dart';
 import '../widgets/toast.dart';
+import '../widgets/touch_sidebar.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import '../desktop/desktop_shell.dart';
@@ -81,8 +81,19 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _setPortraitIndex(int index) {
+    _setShellIndex(index == 0 ? _lastHomeTab : 0);
+  }
+
+  /// 按 shellIndex 切换选中分区（语义与 [_index] 一致：
+  /// 0=我的，1=推荐，2=排行榜，3=电台）。
+  /// 切到首页子 tab 时同步记录 [_lastHomeTab]，单击「首页/推荐」
+  /// 返回时恢复到最后浏览的子 tab。
+  void _setShellIndex(int shellIndex) {
     setState(() {
-      _index = index == 0 ? _lastHomeTab : 0;
+      _index = shellIndex;
+      if (shellIndex >= 1 && shellIndex <= 3) {
+        _lastHomeTab = shellIndex;
+      }
     });
   }
 
@@ -127,8 +138,6 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final colorScheme = Theme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
     final isLandscape = size.width > size.height;
 
@@ -244,7 +253,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     // Original Portrait Layout
-    final useNavRail = size.width >= 720;
+    final useTouchSidebar = AdaptiveLayout.isTouchSidebarWidth(size.width);
     final portraitIndex = _getPortraitIndex();
 
     final homePage = HomePage(
@@ -281,28 +290,47 @@ class _AppShellState extends State<AppShell> {
 
     final pages = [homePage, libraryPage];
 
-    Widget mainContent = Stack(
-      children: [
-        Positioned.fill(
-          child: LazyIndexedStack(index: portraitIndex, children: pages),
-        ),
-        if (useNavRail)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: bottomInset + 16,
-            child: MiniPlayerSlot(player: widget.player, auth: widget.auth),
-          ),
-      ],
+    // 宽屏（平板）形态：迷你播放器停靠侧栏底部，主内容区不再叠全宽迷你条。
+    Widget mainContent = LazyIndexedStack(
+      index: portraitIndex,
+      children: pages,
     );
 
-    if (useNavRail) {
+    if (useTouchSidebar) {
+      // 平板触屏侧栏：把首页三个子 tab（推荐/排行榜/电台）与「我的」
+      // 全部提升为一级导航，顶部搜索胶囊直达搜索页（替代被顶栏收起的
+      // 移动端搜索栏），底部停靠迷你播放器。
       mainContent = Row(
         children: [
-          NavigationRail(
-            selectedIndex: portraitIndex,
-            onDestinationSelected: (index) {
-              if (index == 0) {
+          TouchSidebar(
+            items: const [
+              TouchSidebarItem(
+                icon: Icons.explore_outlined,
+                activeIcon: Icons.explore_rounded,
+                label: '推荐',
+              ),
+              TouchSidebarItem(
+                icon: Icons.leaderboard_outlined,
+                activeIcon: Icons.leaderboard_rounded,
+                label: '排行榜',
+              ),
+              TouchSidebarItem(
+                icon: Icons.radio_rounded,
+                activeIcon: Icons.radio_rounded,
+                label: '电台',
+              ),
+              TouchSidebarItem(
+                icon: Icons.person_outline_rounded,
+                activeIcon: Icons.person_rounded,
+                label: '我的',
+              ),
+            ],
+            // 条目序号 → shellIndex（0=我的，1/2/3=首页子 tab）。
+            selectedIndex: _index == 0 ? 3 : _index - 1,
+            onSelect: (itemIndex) {
+              final shellIndex = itemIndex == 3 ? 0 : itemIndex + 1;
+              // 双击「推荐」：回顶 + 刷新（与底栏/旧 NavigationRail 行为一致）。
+              if (shellIndex == 1) {
                 final now = appShellNow();
                 if (_lastRailHomeTapTime != null &&
                     now.difference(_lastRailHomeTapTime!) <
@@ -315,34 +343,19 @@ class _AppShellState extends State<AppShell> {
               } else {
                 _lastRailHomeTapTime = null;
               }
-              _setPortraitIndex(index);
+              _setShellIndex(shellIndex);
             },
-            backgroundColor: colorScheme.surfaceContainerLow,
-            labelType: NavigationRailLabelType.all,
-            selectedIconTheme: IconThemeData(color: colorScheme.primary),
-            unselectedIconTheme: IconThemeData(
-              color: colorScheme.onSurfaceVariant,
-            ),
-            selectedLabelTextStyle: TextStyle(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w800,
-            ),
-            unselectedLabelTextStyle: TextStyle(
-              color: colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-            destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home_rounded),
-                label: Text('首页'),
+            onSearchTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SearchPage(
+                  api: widget.api,
+                  auth: widget.auth,
+                  player: widget.player,
+                ),
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.person_outline_rounded),
-                selectedIcon: Icon(Icons.person_rounded),
-                label: Text('我的'),
-              ),
-            ],
+            ),
+            player: widget.player,
+            auth: widget.auth,
           ),
           const VerticalDivider(width: 1, thickness: 1),
           Expanded(child: mainContent),
@@ -353,7 +366,7 @@ class _AppShellState extends State<AppShell> {
     return Scaffold(
       extendBody: true,
       body: AdaptiveContentPadding(child: mainContent),
-      bottomNavigationBar: useNavRail
+      bottomNavigationBar: useTouchSidebar
           ? null
           : _FloatingBottomBar(
               currentIndex: portraitIndex,

@@ -80,6 +80,12 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     3,
     (_) => ScrollController(),
   );
+  // 首页三 tab PageView 的跨形态搬运锚点：竖屏 ↔ 宽壳（平板侧栏/桌面）
+  // 切换重构父链时，靠 GlobalKey 原样搬运整个滚动子树，避免
+  // PageController/_tabControllers 在同一帧内附着新旧两套滚动视图
+  // （'ScrollController attached to multiple scroll views'）。
+  final GlobalKey<State<StatefulWidget>> _homeTabsPageViewHostKey =
+      GlobalKey(debugLabel: 'home_tabs_page_view_host');
   // 顶栏收折进度（0 = 完全展开，_headerCollapseRange = 完全收折）：
   // 只驱动顶栏自身的重绘，切页/滚动都不触发整页 setState。
   final ValueNotifier<double> _headerShrink = ValueNotifier<double>(0.0);
@@ -1072,6 +1078,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
         final topPadding = MediaQuery.paddingOf(context).top;
         final isLandscape = size.width > size.height;
         final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
+        // 平板形态：移动形态宽屏（触屏侧栏）下内容区走桌面式布局
+        // （分区标题 + 无吸顶头——导航与搜索都提升到了左侧触屏侧栏）。
+        // 与 AppShell 的侧栏阈值保持同源。
+        final tabletShell = !isCarMode &&
+            !isDesktop &&
+            AdaptiveLayout.isTouchSidebarWidth(size.width);
+        final wideShell = isDesktop || tabletShell;
         // 车机↔竖屏切换时把 PageView 对齐到当前子 tab，避免缩回时掉回推荐页。
         _syncPageControllerForMode(isCarMode);
 
@@ -1253,9 +1266,10 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                 physics: tabPhysics,
                 slivers: [
                   // 顶部留白 = 顶栏完全展开的高度：内容从顶栏底下穿过。
-                  // 桌面端无移动端吸顶头（搜索+tab 已上移），不留白。
+                  // 宽壳形态（桌面 / 平板侧栏）无移动端吸顶头（搜索+tab
+                  // 已上移到侧栏/顶栏），不留白。
                   SliverPadding(
-                    padding: EdgeInsets.only(top: isDesktop ? 0 : headerMaxExtent),
+                    padding: EdgeInsets.only(top: wideShell ? 0 : headerMaxExtent),
                   ),
                   if (_availableUpdate != null && !_updateBannerDismissed)
                     SliverToBoxAdapter(
@@ -1277,9 +1291,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
             );
           }
 
-          final pageView = PageView(
-                key: const Key('home_tabs_page_view'),
-                controller: _pageController,
+          // 跨形态整树搬运：竖屏(Stack+吸顶头) ↔ 宽壳(分区标题) 切换会
+          // 重构 PageView 的父链，若子树随之销毁重建，PageController 与
+          // 三个 _tabControllers 会在同一帧内短暂附着新旧两套滚动视图
+          // （旧视图帧末才卸载），'ScrollController attached to multiple
+          // scroll views' 断言必现（Windows 自由拉伸窗口跨 720 阈值即
+          // 触发）。外层 GlobalKey 让 PageView 子树原样换父，滚动位置与
+          // 附着关系全程保留。
+          final pageView = KeyedSubtree(
+            key: _homeTabsPageViewHostKey,
+            child: PageView(
+              key: const Key('home_tabs_page_view'),
+              controller: _pageController,
                 onPageChanged: (index) {
                   setState(() {
                     _sectionIndex = index;
@@ -1321,19 +1344,27 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       child: Padding(
                         padding:
                             const EdgeInsets.fromLTRB(18, 12, 18, 16),
-                        child: _FeatureShelf(
-                          daily: data.daily,
-                          onDailyPlay: () {
-                            final songs = data.daily.songs;
-                            if (songs.isNotEmpty) {
-                              widget.player.playSong(
-                                songs.first,
-                                queue: songs,
-                              );
-                            }
-                          },
-                          onDailyTap: () =>
-                              _openDailyRecommend(data.daily),
+                        // 平板形态限宽：猜你喜欢是全宽单行卡，千像素宽的
+                        // 内容区里会被拉成失衡长条，收到 620 内保持卡片
+                        // 比例、靠左与后续网格对齐。
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: tabletShell ? 620 : double.infinity,
+                          ),
+                          child: _FeatureShelf(
+                            daily: data.daily,
+                            onDailyPlay: () {
+                              final songs = data.daily.songs;
+                              if (songs.isNotEmpty) {
+                                widget.player.playSong(
+                                  songs.first,
+                                  queue: songs,
+                                );
+                              }
+                            },
+                            onDailyTap: () =>
+                                _openDailyRecommend(data.daily),
+                          ),
                         ),
                       ),
                     ),
@@ -1373,7 +1404,7 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                         ),
                       ),
                     SliverToBoxAdapter(
-                      child: SizedBox(height: isDesktop ? 24 : 166),
+                      child: SizedBox(height: wideShell ? 24 : 166),
                     ),
                   ],
                 ),
@@ -1398,7 +1429,7 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       ),
                     ),
                     SliverToBoxAdapter(
-                      child: SizedBox(height: isDesktop ? 24 : 166),
+                      child: SizedBox(height: wideShell ? 24 : 166),
                     ),
                   ],
                 ),
@@ -1422,22 +1453,30 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       ),
                     ),
                     SliverToBoxAdapter(
-                      child: SizedBox(height: isDesktop ? 24 : 166),
+                      child: SizedBox(height: wideShell ? 24 : 166),
                     ),
                   ],
                 ),
               ),
                 ],
+                ),
               );
-              if (isDesktop) {
-                // 桌面端（QQ 音乐 PC 式）：无移动端吸顶搜索+胶囊 tab，
-                // 切换只走左侧栏；内容区顶部只保留分区标题（刷新走
-                // 双击首页按钮/下拉，不再放刷新按钮）。
+              if (wideShell) {
+                // 宽壳形态（桌面 / 平板侧栏，QQ 音乐 PC 式）：无移动端吸顶
+                // 搜索+胶囊 tab（平板时导航与搜索都在左侧触屏侧栏），切换
+                // 只走侧栏；内容区顶部只保留分区标题（刷新走双击推荐项/
+                // 下拉，不再放刷新按钮）。平板无窗口标题栏，标题行上方补
+                // 状态栏高度。
                 const sectionTitles = ['推荐', '排行榜', '电台'];
                 content = Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 12, 12, 4),
+                      padding: EdgeInsets.fromLTRB(
+                        18,
+                        (isDesktop ? 12 : 12 + topPadding),
+                        12,
+                        4,
+                      ),
                       child: Row(
                         children: [
                           Text(
@@ -2260,11 +2299,12 @@ class _TopSongRail extends StatelessWidget {
         ),
       );
     }
-    // 桌面宽窗：转网格并让封面撑满格宽（此前复用横轨的固定 110 封面，
-    // 格子比图大一圈，hover 时大片空白，见新歌速递截图箭头处）。
+    // 宽内容区（桌面宽窗 / 平板侧栏形态）：转网格并让封面撑满格宽
+    // （此前复用横轨的固定 110 封面，格子比图大一圈，hover 时大片空白，
+    // 见新歌速递截图箭头处）。
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+        if (AdaptiveLayout.isGridWidth(constraints.maxWidth)) {
           return Padding(
             padding: const EdgeInsets.only(top: 20),
             child: Column(
@@ -2487,10 +2527,10 @@ class _PlaylistRail extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           // 门控统一读内容宽度（constraints.maxWidth），与其他分区一致；
-          // 非桌面恒为 false，保持横轨（语义不变）。
+          // 纯宽度阈值：桌面宽窗与平板侧栏形态都转网格，窄内容区保持横轨。
           LayoutBuilder(
             builder: (context, constraints) {
-              if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+              if (AdaptiveLayout.isGridWidth(constraints.maxWidth)) {
                 return GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -3284,8 +3324,9 @@ class _RadioStationRail extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 桌面宽窗直接复用车机网格组件（同参数、同卡片），保持视觉一致。
-        if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+        // 宽内容区（桌面宽窗 / 平板侧栏形态）直接复用车机网格组件
+        // （同参数、同卡片），保持视觉一致。
+        if (AdaptiveLayout.isGridWidth(constraints.maxWidth)) {
           return _RadioStationGrid(
             stations: stations,
             loadingStationId: loadingStationId,

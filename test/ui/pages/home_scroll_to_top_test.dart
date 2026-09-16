@@ -10,6 +10,8 @@ import 'package:shiyin_music/services/cache_service.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/app_shell.dart';
+import 'package:shiyin_music/ui/widgets/home_collapsible_header.dart';
+import 'package:shiyin_music/ui/widgets/touch_sidebar.dart';
 
 class _FakeMusicApi implements MusicApi {
   int dailyRecommendCalls = 0;
@@ -634,20 +636,88 @@ void main() {
     expect(api.dailyRecommendCalls, initialDailyCalls);
   });
 
-  testWidgets('宽屏 NavigationRail 下双击「首页」触发刷新 API', (tester) async {
+  testWidgets('宽屏触屏侧栏下双击「推荐」触发刷新 API', (tester) async {
     final api = await pumpAppShell(tester, size: const Size(800, 1000));
     final initialDailyCalls = api.dailyRecommendCalls;
 
-    expect(find.byType(NavigationRail), findsOneWidget);
-    final homeTabFinder = find.text('首页');
-    expect(homeTabFinder, findsOneWidget);
+    // 旧 80dp NavigationRail 已被平板触屏侧栏取代（平板形态重设计）。
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byType(TouchSidebar), findsOneWidget);
+    final recommendItem = find.descendant(
+      of: find.byType(TouchSidebar),
+      matching: find.text('推荐'),
+    );
+    expect(recommendItem, findsOneWidget);
 
-    await tester.tap(homeTabFinder);
+    await tester.tap(recommendItem);
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(homeTabFinder);
+    await tester.tap(recommendItem);
     await tester.pumpAndSettle();
 
     expect(api.dailyRecommendCalls, greaterThan(initialDailyCalls));
+  });
+
+  testWidgets('平板触屏侧栏：一级导航提升 + 搜索入口，内容区无胶囊 tab', (tester) async {
+    await pumpAppShell(tester, size: const Size(1000, 800));
+
+    expect(find.byType(NavigationRail), findsNothing);
+    final sidebar = find.byType(TouchSidebar);
+    expect(sidebar, findsOneWidget);
+    // 首页三个子 tab（推荐/排行榜/电台）与「我的」全部提升为一级导航。
+    for (final label in ['推荐', '排行榜', '电台', '我的']) {
+      expect(
+        find.descendant(of: sidebar, matching: find.text(label)),
+        findsOneWidget,
+      );
+    }
+    // 搜索入口胶囊在侧栏顶部（移动端顶栏搜索栏已随收折头一起移除）。
+    expect(
+      find.descendant(of: sidebar, matching: find.text('搜索')),
+      findsOneWidget,
+    );
+    // 内容区不再渲染胶囊 tab，导航完全收敛到侧栏。
+    expect(find.byType(HomeCapsuleTabBar), findsNothing);
+    expect(find.text('大家都在听'), findsOneWidget);
+  });
+
+  testWidgets('平板侧栏点「电台」直接驱动首页切到电台分区', (tester) async {
+    await pumpAppShell(tester, size: const Size(1000, 800));
+
+    PageView homePageView() => tester.widget<PageView>(
+          find.byKey(const Key('home_tabs_page_view')),
+        );
+    expect(homePageView().controller?.page ?? -1, 0);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(TouchSidebar),
+        matching: find.text('电台'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(homePageView().controller?.page ?? -1, 2);
+  });
+
+  testWidgets('平板↔竖屏跨阈值来回切换不重挂滚动控制器', (tester) async {
+    await pumpAppShell(tester, size: const Size(1000, 800));
+    expect(find.byType(TouchSidebar), findsOneWidget);
+
+    // 缩到 720 以下回到竖屏：HomePage 从「分区标题 + PageView」重构为
+    // 「Stack + 吸顶头」。若 PageView 子树被销毁重建，三个 _tabControllers
+    // 会在同一帧内短暂附着新旧两套 CustomScrollView（旧视图帧末才卸载），
+    // 任何 .position/.offset 读取都会命中
+    // '_positions.length == 1' 断言（Windows 自由拉伸窗口必现路径）。
+    tester.view.physicalSize = const Size(400, 800);
+    await tester.pumpAndSettle();
+    expect(find.byType(TouchSidebar), findsNothing);
+    expect(find.byType(HomeCapsuleTabBar), findsOneWidget);
+
+    // 再拉回平板形态，同样不允许重挂。
+    tester.view.physicalSize = const Size(1000, 800);
+    await tester.pumpAndSettle();
+    expect(find.byType(TouchSidebar), findsOneWidget);
+    expect(find.byType(HomeCapsuleTabBar), findsNothing);
   });
 
   testWidgets('从排行榜切到「我的」不被弹回首页，回来仍停留在排行榜', (tester) async {

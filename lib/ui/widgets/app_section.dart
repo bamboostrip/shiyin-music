@@ -88,8 +88,9 @@ class AppHorizontalRail<T> extends StatelessWidget {
     if (items.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wideDesktop =
-            AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth);
+        // 宽内容区（桌面宽窗 / 平板侧栏形态）：横轨转网格，
+        // 列数随宽度收敛（设计 §3/§5）。
+        final wide = AdaptiveLayout.isGridWidth(constraints.maxWidth);
         return Padding(
           padding: EdgeInsets.only(top: topPadding),
           child: Column(
@@ -104,7 +105,7 @@ class AppHorizontalRail<T> extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              if (wideDesktop)
+              if (wide)
                 // 桌面宽窗：横轨转网格，列数随宽度收敛（设计 §3/§5）。
                 GridView.builder(
                   shrinkWrap: true,

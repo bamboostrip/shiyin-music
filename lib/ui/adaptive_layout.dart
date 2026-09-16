@@ -28,6 +28,23 @@ class AdaptiveLayout {
   static bool isDesktopGridWidth(double width) =>
       isDesktopFormFactor && width >= kGridStartWidth;
 
+  /// 仅按宽度判定横轨是否转网格（与形态无关）。
+  ///
+  /// 桌面形态沿用 [isDesktopGridWidth]（语义一致），移动形态的平板分支
+  /// （触屏侧栏宽度及以上）用本入口把手机横轨升级为网格；桌面在此
+  /// 门控下的行为与 [isDesktopGridWidth] 完全一致。
+  static bool isGridWidth(double width) => width >= kGridStartWidth;
+
+  /// 移动形态触屏侧栏的宽度起点（逻辑像素）。
+  ///
+  /// 达到该宽度的移动形态窗口（平板横屏 / 大平板竖屏）把底部导航
+  /// 换成左侧触屏侧栏；与 [isTablet]（按最短边）不同，本断点按窗口
+  /// 宽度触发，保证窗口化/分屏时的实时切换。
+  static const double kTouchSidebarStartWidth = 720;
+
+  static bool isTouchSidebarWidth(double width) =>
+      width >= kTouchSidebarStartWidth;
+
   /// 网格列数计算时为两侧内容预留的总边距。
   static const double kGridHorizontalPadding = 32;
 

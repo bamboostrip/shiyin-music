@@ -315,16 +315,21 @@ class RankPageState extends SwrSectionState<RankPage, List<RankCategory>>
             // 点封面右下播钮直接播放（精准命中才拦截，见 _RankCard）。
             // 行式多列：每行 N 张等宽卡，行高由最高的卡自然撑开，不设任何
             // 固定高度——屏宽/字体再怎么变都不可能 OVERFLOW。
+            // 多列门槛：车机横屏 + 平板侧栏形态（移动形态宽内容区）；
+            // 桌面保持 1 列不变。
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final count = !isCarLandscape
+                  final multiColumn = isCarLandscape ||
+                      (!isDesktopFormFactor &&
+                          AdaptiveLayout.isGridWidth(constraints.maxWidth));
+                  final count = !multiColumn
                       ? 1
                       : (constraints.maxWidth > 1000
                           ? 3
                           : (constraints.maxWidth > 640 ? 2 : 1));
-                  final gap = isCarLandscape ? 10.0 : 12.0;
+                  final gap = multiColumn ? 10.0 : 12.0;
                   if (count == 1) {
                     return ListView.separated(
                       padding: EdgeInsets.zero,
@@ -461,8 +466,9 @@ class _NewSongsSection extends StatelessWidget {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final showCount = songs.length > 10 ? 10 : songs.length;
-                  // 桌面宽窗：横轨转网格（项宽 ~120、行高 142），不再横向滚动。
-                  if (AdaptiveLayout.isDesktopGridWidth(constraints.maxWidth)) {
+                  // 宽内容区（桌面宽窗 / 平板侧栏形态）：横轨转网格
+                  // （项宽 ~120、行高 142），不再横向滚动。
+                  if (AdaptiveLayout.isGridWidth(constraints.maxWidth)) {
                     return GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
