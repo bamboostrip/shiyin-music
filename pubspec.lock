@@ -454,7 +454,7 @@ packages:
       path: "packages/just_audio_media_kit"
       relative: true
     source: path
-    version: "2.1.0+shiyin.4"
+    version: "2.1.0+shiyin.7"
   just_audio_platform_interface:
     dependency: transitive
     description:

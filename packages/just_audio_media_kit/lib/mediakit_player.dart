@@ -144,13 +144,37 @@ class MediaKitPlayer extends AudioPlayerPlatform {
             .add(PlayerDataMessage(volume: linearFromMpvVolume(volume)));
       }),
       _player.stream.completed.listen((completed) {
-        _bufferedPosition = _position = Duration.zero;
         if (completed &&
             // is at the end of the [Playlist]
             _currentIndex == _player.state.playlist.medias.length - 1 &&
             // is not looping (technically this shouldn't be fired if the player is looping)
             _player.state.playlistMode == PlaylistMode.none) {
           _processingState = ProcessingStateMessage.completed;
+          _bufferedPosition = _position = Duration.zero;
+          // LOCAL PATCH: EOF 后把 playing 的真话回写给 just_audio。
+          // 上层的 AudioPlayer.playing 只由 play()/pause() 与 PlayerDataMessage
+          // 驱动，本适配层此前从不回写 → 曲末 playing 恒为 true，而
+          // just_audio.play() 首行是 `if (playing) return;`：任何「曲末重新起播」
+          // 都会空转（UI 显示播放中却没有声音）。"改私有 _playing"修不了这条，
+          // 它只影响下面 load() 的 open(play:)，必须走这条真通道。
+          // 加 state.playing 守卫：eof 事件可能迟到于下一次 load/open（那时
+          // 新歌已在播），这种情况不能把 playing 打回 false。
+          // 本回写依赖 EOF 时 media_kit 的 isPlayingStateChangeAllowed 为 true
+          // （packages/media_kit real.dart：open(play:true)/play() 置 true，
+          // EOF 处理器同步置 state.playing=false 后才发 completed，故与
+          // pause/eof 事件顺序无关）。若自动切歌回归，先查该 flag 是否被置 false。
+          if (!_player.state.playing) {
+            _dataController.add(PlayerDataMessage(playing: false));
+          }
+          // 注意：私有的 _playing 不在此处置 false。它只表达「下一次 load()
+          // 该不该自动起播」（load → open(play: _playing)）。曲末用户并没有
+          // 按暂停，同曲重载/自动下一首理应照旧自动播；置 false 会让新开的
+          // 媒体停在暂停态，只能等后续 play() 兜底（历史回归即此）。
+        } else if (!completed &&
+            _processingState == ProcessingStateMessage.completed) {
+          // seek / 重新起播离开 completed：若不复位，上层 isPlaying 会因
+          // processingState==completed 恒为 false，UI 冻在暂停。
+          _processingState = ProcessingStateMessage.ready;
         }
         _errorCode = null;
         _errorMessage = null;
@@ -158,6 +182,15 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _updatePlaybackEvent();
       }),
       _player.stream.error.listen((error) {
+        // LOCAL PATCH: completed 之后的错误只记日志，不回退成 idle+errorCode。
+        // 理由：eof 后偶发 ffmpeg/stream error 日志（连接清理等）若被抬成
+        // 致命错误，会 deactivate 平台、打断自动下一首；completed 后再出错
+        // 也不影响「本曲已播完、应切下一首」的产品语义。加载期/播放中途
+        // 的错误仍走下方原有路径（completeError / 错误态）。
+        if (_processingState == ProcessingStateMessage.completed) {
+          _logger.severe('ERROR OCCURRED (after completed, ignored): $error');
+          return;
+        }
         final errorUri = RegExp(r'Failed to open (.*)\.').firstMatch(error)?[1];
         if (errorUri == null || errorUri == _currentMedia?.uri) {
           _processingState = ProcessingStateMessage.idle;
@@ -379,6 +412,11 @@ class MediaKitPlayer extends AudioPlayerPlatform {
     }
 
     // reset position on seek
+    // completed 后 seek 必须离开 completed 态（completed 流也可能不触发
+    // false，例如 duration 未知时只暂存 _setPosition）。
+    if (_processingState == ProcessingStateMessage.completed) {
+      _processingState = ProcessingStateMessage.ready;
+    }
     _updatePlaybackEvent();
     return SeekResponse();
   }

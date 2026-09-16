@@ -99,6 +99,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     isPreparing = !isSameSong || !hasLocalAudio;
     _changingSourceDepth++;
     errorMessage = null;
+    _tailSkipExhausted = false;
     currentSong = song;
     final queueChanged = queue != null && !listEquals(this.queue, queue);
     if (queue != null && queue.isNotEmpty) {
@@ -310,8 +311,58 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     if (isPreparing || _isChangingSource) return;
     // 用户已暂停时迟到的错误不处理（无"假播放"问题，保留现场等用户操作）。
     if (!isPlaying) return;
+    // 曲目刚播完（completed）时的迟到错误不算「播放中出错」：此时应走
+    // 自动下一首，而不是对已播完的歌弹"没有音源"。PC media_kit 在 EOF 后
+    // 可能先吐错误日志再进入 completed，两个流到上层的顺序不保证。
+    if (audioPlayer.processingState == ProcessingState.completed) return;
+
+    // 曲末解码失败：先采样进度再复位。remaining <= 阈值（含引擎时长
+    // 略短于元数据导致的负 remaining）一律按播完处理，走自动下一首。
+    final errorPosition = audioPlayer.position > position
+        ? audioPlayer.position
+        : position;
+    final songDuration = duration > Duration.zero
+        ? duration
+        : (song.duration ?? Duration.zero);
+    if (songDuration > Duration.zero &&
+        songDuration - errorPosition <= _kNearEndDecodeErrorThreshold) {
+      unawaited(_audioHandler.pause());
+      isPlaying = false;
+      notifyListeners();
+      // 本次「完成」若会被 _handleCompleted 去重掉（同曲已完成过/正在处理），
+      // 它不会推进任何东西：先判掉，别白扣预算。
+      if (!_willHandleCompletion(song)) return;
+      // 计入独立的曲末跳过预算，防止系统性坏尾在长队列里无限静默跳歌；
+      // 不计入 _consecutivePlayFailures，避免误弹「暂无可播放音源」。
+      if (!_tryConsumeNearEndSkipBudget(song)) {
+        // 预算耗尽：停住并给持久提示（Toast 瞬态，errorMessage 持久），
+        // 进度钳到 duration，避免 errorPosition 取 max 后 305.1/305 式的视觉溢出。
+        // 不 seek(0)：留在尾部可 fail-fast，用户点播只需验证最后 1s，
+        // 不必重听整首；若用户手动播完这 1s 触发自然 completed，预算会正常重置。
+        errorMessage = '连续多次在曲末播放失败，已停止自动切歌';
+        _tailSkipExhausted = true;
+        final clamped = errorPosition > songDuration
+            ? songDuration
+            : errorPosition;
+        _setPositionBase(clamped, playing: false);
+        _lastSmoothPosition = clamped;
+        _emitPosition();
+        notifyListeners();
+        return;
+      }
+      debugPrint(
+        '[时音][player] 曲末解码失败，按播完自动切歌: ${song.title} '
+        '(${errorPosition.inMilliseconds}/${songDuration.inMilliseconds}ms, $error)',
+      );
+      unawaited(_handleCompleted());
+      return;
+    }
+
     debugPrint('[时音][player] 播放中出错: ${song.title} ($error)');
     unawaited(_audioHandler.pause());
+    // 同步收敛播放态：pause 是引擎异步确认，不先置 false 的话 UI 会
+    // 在错误提示出现后仍短暂显示「播放中」。
+    isPlaying = false;
     duration = song.duration ?? duration;
     _setPositionBase(Duration.zero, playing: false);
     _lastSmoothPosition = Duration.zero;
@@ -319,6 +370,44 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     errorMessage = '播放中断，请稍后重试';
     notifyListeners();
     _registerPlaybackFailure(song);
+  }
+
+  /// 曲末自动切歌预算：用独立计数 [_consecutiveNearEndSkips]，避免
+  /// 系统性坏尾（CDN 截断/整目录坏帧）在长队列里无限静默跳歌。
+  ///
+  /// 不计入 [_consecutivePlayFailures]（避免误弹「没有音源」）；
+  /// 也不随 playSong 成功清零——那会让每首起播成功就重置预算。
+  /// 计数与墙钟起点只在自然 completed 时清零。返回 false 表示应停住并提示。
+  bool _tryConsumeNearEndSkipBudget(Song song) {
+    if (_disposed) return false;
+    // 单曲队列也会走到 completed 的 seek(0)：单曲循环下会无限重播坏尾，
+    // 因此同样用跳过预算限流（limit 至少 1，允许一次自动重播）。
+    final queueLength = queue.length;
+    final skipLimit = queueLength < _kMaxAutoSkipsPerStreak
+        ? queueLength
+        : _kMaxAutoSkipsPerStreak;
+    final effectiveLimit = skipLimit < 1 ? 1 : skipLimit;
+    // 墙钟起点用本路自己的字段：_autoSkipStreakSince 会被 playSong 起播成功
+    // 清空，而曲末跳过后必然跟一次成功的 playSong，共用字段会让这里永远是
+    // 「刚起算」，墙钟预算形同虚设。
+    final since = _nearEndSkipStreakSince ??= DateTime.now();
+    final overBudget =
+        DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
+    if (_consecutiveNearEndSkips >= effectiveLimit || overBudget) {
+      debugPrint(
+        '[时音][player] 曲末跳过已达上限 '
+        '($_consecutiveNearEndSkips/$effectiveLimit'
+        '${overBudget ? '，已超墙钟预算' : ''})，停止自动切歌: ${song.title}',
+      );
+      Toast.error('连续多次在曲末播放失败，已停止自动切歌');
+      return false;
+    }
+    _consecutiveNearEndSkips++;
+    debugPrint(
+      '[时音][player] 曲末失败计入跳过预算 '
+      '($_consecutiveNearEndSkips/$effectiveLimit): ${song.title}',
+    );
+    return true;
   }
 
   /// 记录一次最终播放失败（已走完 VIP 领取与自动重试）。
@@ -500,28 +589,38 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
   @override
   Future<void> togglePlay() async {
-    if (audioPlayer.playing) {
+    // 以 controller 的 isPlaying 为 UI 真相源：completed 后它已收敛为
+    // false（见 playerStateStream 监听），而 just_audio.playing 在这种状态下
+    // 可能仍是 true（PC 端适配层已在 EOF 回写真话，移动端原生实现仍会陈旧）。
+    // 若继续读 audioPlayer.playing，曲终点「播放」会走进 pause 分支
+    // （图标与行为相反）。
+    if (isPlaying) {
       await _audioHandler.pause();
-    } else {
-      // 冷启动恢复播放状态后，音频引擎只恢复了队列/当前歌曲状态，
-      // 尚未加载任何音频源（idle）。此时直接 play() 只是空转
-      // （UI 显示播放中但不出声），必须走完整播放流程加载当前歌曲。
-      if (audioPlayer.processingState == ProcessingState.idle) {
-        final song = currentSong;
-        if (song != null) {
-          final initPos =
-              _pendingIdlePosition ??
-              (position > Duration.zero ? position : null);
-          _pendingIdlePosition = null;
-          await playSong(song, queue: queue, initialPosition: initPos);
-          return;
-        }
-      }
-      if (audioPlayer.processingState == ProcessingState.completed) {
-        await _audioHandler.seek(Duration.zero);
-      }
-      await _audioHandler.play();
+      return;
     }
+    // 冷启动恢复播放状态后，音频引擎只恢复了队列/当前歌曲状态，
+    // 尚未加载任何音频源（idle）。此时直接 play() 只是空转
+    // （UI 显示播放中但不出声），必须走完整播放流程加载当前歌曲。
+    if (audioPlayer.processingState == ProcessingState.idle) {
+      final song = currentSong;
+      if (song != null) {
+        final initPos =
+            _pendingIdlePosition ?? (position > Duration.zero ? position : null);
+        _pendingIdlePosition = null;
+        await playSong(song, queue: queue, initialPosition: initPos);
+        return;
+      }
+    }
+    if (audioPlayer.processingState == ProcessingState.completed) {
+      // just_audio.play() 首行 `if (playing) return`，而 completed 不会把
+      // just_audio.playing 置回 false。必须先 pause 再 seek+play，否则
+      // 进度回零了却永远不出声。
+      await _audioHandler.pause();
+      await _audioHandler.seek(Duration.zero);
+      await _audioHandler.play();
+      return;
+    }
+    await _audioHandler.play();
   }
 
   void previewSeek(Duration position) {
@@ -591,26 +690,50 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         debugPrint('[时音][player] seekToAndPlay 失败: $error');
         return;
       }
-      if (!audioPlayer.playing) {
-        // 调用方（歌词点击等）常丢弃本 Future，togglePlay 失败必须就地接住，
-        // 否则成为未取消认领的异步异常（与上方 seek 的处理同理）。
-        try {
-          await togglePlay();
-        } catch (error) {
-          debugPrint('[时音][player] seekToAndPlay 起播失败: $error');
-        }
+      // 调用方（歌词点击等）常丢弃本 Future，起播失败必须就地接住，
+      // 否则成为未取消认领的异步异常（与上方 seek 的处理同理）。
+      try {
+        await _ensurePlaying();
+      } catch (error) {
+        debugPrint('[时音][player] seekToAndPlay 起播失败: $error');
       }
     }
+  }
+
+  /// 在当前（已被 seek 到的）位置确保真的起播。
+  ///
+  /// 不能读 `audioPlayer.playing` 判「还在不在播」：曲目播完（completed）后
+  /// just_audio 的 playing 不会被置回 false（只有 play()/pause()/stop() 会改它），
+  /// 直接 `play()` 会被其首行的 `if (playing) return;` 短路——PC media_kit
+  /// 适配层已在 EOF 时回写这段真话，移动端仍可能是陈旧的 true。
+  /// 也不能复用 [togglePlay]：它会把 completed 理解成「从头再来」而 seek 回零，
+  /// 覆盖调用方刚定位到的目标位置。这里只收敛播放标志，不动位置。
+  Future<void> _ensurePlaying() async {
+    if (isPlaying) return;
+    await _audioHandler.pause();
+    await _audioHandler.play();
+  }
+
+  /// 本次「本曲完成」是否会真的被 [_handleCompleted] 处理（去重判定的唯一出处）。
+  ///
+  /// - 同曲已处理过（[_completedSongHash]）：重复事件，丢弃；
+  /// - 同曲的完成流程仍在途（弱网解析下一首可能挂起数秒）：丢弃。
+  ///
+  /// 曲末跳过预算要先问这里再扣额度，否则可能在「不会推进」的事件上白扣一次。
+  bool _willHandleCompletion(Song song) {
+    if (_completedSongHash == song.hash) return false;
+    if (_isHandlingCompletion && _handlingCompletedHash == song.hash) {
+      return false;
+    }
+    return true;
   }
 
   Future<void> _handleCompleted() async {
     final song = currentSong;
     if (song == null) return;
-    if (_completedSongHash == song.hash) return;
+    if (!_willHandleCompletion(song)) return;
     if (_isHandlingCompletion) {
-      // 旧歌仍在处理（弱网解析下一首可能挂起数秒）：同歌去重，
       // 不同歌说明用户已切走且新歌又播完，放行新歌，旧流程自弃
-      if (_handlingCompletedHash == song.hash) return;
       debugPrint('[时音][player] 上一首完成处理中，新歌又完成，直接处理新歌');
     }
     _isHandlingCompletion = true;
@@ -630,7 +753,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
       if (playbackMode == PlaybackMode.singleLoop) {
         // 重启完成后再清去重 hash：重启在途中重复 completed 事件仍去重，
-        // 避免 self-loop 打转；下一轮正常播完可再次触发
+        // 避免 self-loop 打转；下一轮正常播完可再次触发。
+        // completed 后 just_audio.playing 仍为 true，play() 会被
+        // `if (playing) return` 短路——必须先 pause 归零再起播。
+        await _audioHandler.pause();
         await seek(Duration.zero);
         if (currentSong?.hash != song.hash) return;
         await _audioHandler.play();
@@ -709,9 +835,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         );
       } else {
         await seek(climax.startTime);
-        if (!audioPlayer.playing) {
-          await togglePlay();
-        }
+        // 与 seekToAndPlay 同理：不能读 audioPlayer.playing 判在不在播，
+        // 也不能走 togglePlay（completed 下它会 seek 回零，冲掉高潮起点）。
+        await _ensurePlaying();
       }
       if (currentSong?.hash != song.hash) return false;
       _climaxEndTime = climax.endTime;
@@ -726,7 +852,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     final end = _climaxEndTime;
     if (end == null || value < end) return;
     _climaxEndTime = null;
-    if (audioPlayer.playing) {
+    // 以 isPlaying 为准：读 audioPlayer.playing 时，completed/暂停 后的陈旧
+    // true 会让 togglePlay 走进起播分支，把已经停下的播放又拉起来。
+    if (isPlaying) {
       unawaited(togglePlay());
     }
   }

@@ -106,6 +106,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final targetPosition = smoothPosition;
     isPreparing = true;
     errorMessage = null;
+    _tailSkipExhausted = false;
     _changingSourceDepth++;
     // 切旧分析，避免旧歌 LUFS 回调算进新音质增益
     unawaited(_loudness.cancelAnalysis());

@@ -51,6 +51,14 @@ const int _kMaxAutoSkipsPerStreak = 5;
 /// 超预算即停止跳转、落错误态，与次数上限双保险。
 const Duration _kAutoSkipWallClockBudget = Duration(seconds: 60);
 
+/// 中途解码/断流错误距曲尾小于该时长时，按「已播完」处理并自动切下一首。
+///
+/// 部分 CDN/FLAC 在最后一两帧损坏（invalid sync code），用户已完整听完，
+/// 不应再对当前歌弹「暂无可播放音源」。阈值取 1.5s：覆盖坏尾帧即可；
+/// 更大（如 3s）会把尾部真实断网也静默吞掉。最后 1.5s 即使是真断网，
+/// 重试也只能补这 1.5s，直接进下一首是更好的 UX，故不按错误类型分流。
+const Duration _kNearEndDecodeErrorThreshold = Duration(milliseconds: 1500);
+
 class AudioEffectPreset {
   const AudioEffectPreset({required this.name, required this.levels});
 
@@ -144,7 +152,7 @@ class PlayerController extends _PlayerControllerBase
     // 错误态，自动重播一次；isRetry 防止失败后再次触发形成循环。
     _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
       (_) {
-        if (isPreparing || errorMessage == null) return;
+        if (isPreparing || errorMessage == null || _tailSkipExhausted) return;
         final song = currentSong;
         if (song == null) return;
         debugPrint('[时音][player] 网络已恢复，自动重播: ${song.title}');
@@ -191,7 +199,13 @@ class PlayerController extends _PlayerControllerBase
       notifyListeners();
     });
     _stateSub = audioPlayer.playerStateStream.listen((value) {
-      isPlaying = value.playing;
+      // completed 视为未在播：PC 端适配层已在 EOF 把 playing 回写为 false，
+      // 但移动端原生实现不会（just_audio 只在 play/pause/stop 里改它），
+      // 若直接采信 playing，播完瞬间的迟到引擎错误会被
+      // _handleMidPlaybackError 当成「播放中出错」，Toast 挂在刚播完的歌上。
+      isPlaying =
+          value.playing &&
+          value.processingState != ProcessingState.completed;
       isBuffering =
           value.processingState == ProcessingState.loading ||
           value.processingState == ProcessingState.buffering;
@@ -211,7 +225,20 @@ class PlayerController extends _PlayerControllerBase
       state,
     ) {
       if (state == ProcessingState.completed) {
-        if (!_isChangingSource) {
+        // 自然播完才重置曲末跳过预算，且必须是“会推进”的真完成：
+        // - 承重的是 `!_isChangingSource`：兜底 timer 抢跑 → `_handleCompleted`
+        //   → `playSong`（depth>0）后到达的迟到 completed 不推进任何东西，
+        //   也不应白清预算（此时 `_completedSongHash` 已被 playSong 清空，
+        //   `_willHandleCompletion` 为 true，拦不住）；
+        // - `_willHandleCompletion` 覆盖 playSong 已返回后的同曲重复 completed。
+        // 两个都留，但窄窗口下实际承重的是前者；误删前者会让系统性坏尾预算永不清零失效。
+        final song = currentSong;
+        if (song != null &&
+            !_isChangingSource &&
+            _willHandleCompletion(song)) {
+          _consecutiveNearEndSkips = 0;
+          _nearEndSkipStreakSince = null;
+          _tailSkipExhausted = false;
           unawaited(_handleCompleted());
         }
       }
@@ -427,6 +454,18 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 停下报错，不做无限循环（坏源/断网时"跳一次失败一次"会瞬间扫光队列）。
   int _autoSkippedInStreak = 0;
 
+  /// 连续「曲末解码失败自动切歌」次数。
+  ///
+  /// 不随 playSong 成功清零（那会让系统性坏尾每首起播成功就重置预算、
+  /// 无限静默跳歌），只在自然 completed 时重置。
+  int _consecutiveNearEndSkips = 0;
+
+  /// 曲末跳过这一路自己的墙钟起点，与 [_autoSkipStreakSince] 分开：[_autoSkipStreakSince]
+  /// 会被 playSong 起播成功清空，而曲末跳过后必然跟一次成功的 playSong——共用
+  /// 字段会让墙钟预算每次都被重置、永远判不出「超预算」。与 [_consecutiveNearEndSkips]
+  /// 同生命周期（只在自然 completed 时一起清）。
+  DateTime? _nearEndSkipStreakSince;
+
   /// 本轮 streak 第一次自动跳过的时刻：与 [_kAutoSkipWallClockBudget]
   /// 一起限制整轮跳过的墙钟时长（次数上限之外的另一道保险）。
   DateTime? _autoSkipStreakSince;
@@ -491,6 +530,13 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _sleepFinishCurrentSong = false;
   bool _sleepFinishCurrentSongOption = false;
   String? errorMessage;
+
+  /// 曲末跳过预算耗尽标记：与 [errorMessage] 同设不同命。
+  ///
+  /// 耗尽态沿用 errorMessage 做移动端持久提示，但它不是“可重试的网络错误”——
+  /// 网络恢复钩子（[_networkRestoredSub]）必须跳过它，否则任何一次切网都会把
+  /// 停在曲尾的歌从头重播（playSong 不带定位 → 回 0）。只在新起播/自然播完清。
+  bool _tailSkipExhausted = false;
   int? _androidAudioSessionId;
 
   bool get _isChangingSource => _changingSourceDepth > 0;

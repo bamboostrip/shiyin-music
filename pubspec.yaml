@@ -1,7 +1,7 @@
 name: shiyin_music
 description: "the best music application"
 publish_to: 'none'
-version: 3.0.2+3000002
+version: 3.0.3+3000003
 
 environment:
   sdk: ^3.11.5
@@ -22,7 +22,7 @@ dependencies:
   # docs/superpowers/specs/2026-09-11-windows-media-kit-migration-design.md）。
   # Linux 运行期依赖系统 libmpv2（发行版维护）；Windows 二进制由
   # media_kit_libs_windows_audio 构建期提供（见下）。
-  # 本地 vendored 副本（packages/just_audio_media_kit），含五处补丁：
+  # 本地 vendored 副本（packages/just_audio_media_kit），含七处补丁：
   # 1) load() 时清空 _setPosition（上游 2.1.0 跨歌残留 seek 目标 bug）；
   # 2) 新增线性→mpv 立方刻度的 setVolume/回读换算（mpv volume 实际
   #    增益=(volume/100)³，直接 ×100 会把增益 dB 放大 3 倍），另构造时
@@ -30,8 +30,15 @@ dependencies:
   # 3) error 流对 _loadCompleter completeError（上游 load 失败无人
   #    complete，死链路要挂满上层 15s 超时才报错）；
   # 4) buffering 流不再把 idle 错误态掩盖回 ready / 清错误码（失败被
-  #    伪装成已就绪，队列无声冻结在当前歌）。
-  # 升级上游版本时五处都需确认是否已包含/需重新移植。
+  #    伪装成已就绪，队列无声冻结在当前歌）；
+  # 5) EOF 后把 playing 真话回写 just_audio（PlayerDataMessage），
+  #    just_audio.play() 首行 if(playing) return 才不会把曲末重新起播
+  #    整体短路；注意别改成只改私有 _playing，那只影响 open(play:)；
+  # 6) completed 之后的 error 只记日志，不回退 idle（否则平台被
+  #    deactivate，在途的下一首 load 会被打断）；
+  # 7) completed 流的 false 分支 / seek 让 processingState 离开 completed，
+  #    且 _position 只在真 completed 时清零（否则 seek 目标被自己清零）。
+  # 升级上游版本时七处都需确认是否已包含/需重新移植。
   just_audio_media_kit: ^2.1.0
   media_kit_libs_linux: ^1.2.1
   # Windows libmpv 二进制（audio-only 构建，libmpv-2.dll 约 15MB）：构建期
