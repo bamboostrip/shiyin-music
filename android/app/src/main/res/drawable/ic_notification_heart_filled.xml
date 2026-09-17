@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知卡片自定义按钮图标：红心-已收藏（实心红色）。 -->
+<!-- 与空心版同形，收藏后实心红区分；支持颜色的系统/ROM 显示红色， -->
+<!-- 单色着色的系统卡片上显示为实心（与空心区分）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFE53935"
+        android:pathData="M12,20.5l-1.35,-1.23C6.1,15.06 3,12.28 3,8.9 3,6.23 5.05,4.1 7.65,4.1c1.65,0 3.22,0.77 4.35,2.02C13.13,4.87 14.7,4.1 16.35,4.1 18.95,4.1 21,6.23 21,8.9c0,3.38 -3.1,6.16 -7.65,10.37L12,20.5z" />
+</vector>

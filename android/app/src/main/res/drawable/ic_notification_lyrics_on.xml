@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知卡片自定义按钮图标：桌面歌词-开启（悬浮窗 + 两行歌词线 + 右下角勾选徽标）。 -->
+<!-- 徽标为实心圆 + evenOdd 镂空勾（minSdk 26，fillType 可用），各密度清晰； -->
+<!-- 主体白色，由系统按浅色/深色自动着色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.7,5.5h12.6a2.2,2.2 0 0 1 2.2,2.2v7.6a2.2,2.2 0 0 1 -2.2,2.2H4.7a2.2,2.2 0 0 1 -2.2,-2.2V7.7a2.2,2.2 0 0 1 2.2,-2.2z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M6,9.6h10" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M6,13.2h8" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M13.2,17.2a5,5 0 1,0 10,0a5,5 0 1,0 -10,0zM15.9,17.4L17.4,19L20.8,15.2L19.7,14.2L17.3,17L16.9,16.5z" />
+</vector>

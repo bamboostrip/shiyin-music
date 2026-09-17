@@ -162,6 +162,26 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     }
   }
 
+  /// 通知卡片「桌面歌词」按钮的开关入口：与设置页开关同一状态源。区别在
+  /// 无悬浮窗权限时的处理——不跳系统设置页（媒体卡片回调属于后台
+  /// startActivity，会被后台启动限制拦截，用户也正盯着通知栏），改弹
+  /// 原生 Toast 引导用户先在应用内开启一次；授权后此按钮即可长期使用。
+  Future<void> toggleDesktopLyricsFromNotification() async {
+    debugPrint('[SYNOTIF] 通知卡片词按钮触发：当前 desktopLyricsEnabled='
+        '$desktopLyricsEnabled');
+    if (desktopLyricsEnabled) {
+      await setDesktopLyricsEnabled(false);
+      return;
+    }
+    final granted = await _desktopLyrics.checkPermission();
+    debugPrint('[SYNOTIF] 悬浮窗权限检查结果: $granted');
+    if (!granted) {
+      await _desktopLyrics.showToast('开启桌面歌词需要悬浮窗权限，请先在应用内开启一次桌面歌词');
+      return;
+    }
+    await setDesktopLyricsEnabled(true);
+  }
+
   bool get _shouldShowDesktopLyrics {
     if (!desktopLyricsEnabled || currentSong == null) return false;
     // 桌面端（Windows 等）：开启即显示，与前台/后台无关（PC 软件逻辑）。

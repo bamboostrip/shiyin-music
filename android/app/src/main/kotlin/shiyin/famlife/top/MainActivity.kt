@@ -22,6 +22,7 @@ import android.os.Handler
 import android.util.Log
 import android.os.Looper
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -440,6 +441,22 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_IS_FOREGROUND, isForeground)
                         }
                         startService(intent)
+                        result.success(null)
+                    }
+                    // 通知卡片自定义按钮（桌面歌词开关等）在应用后台时触发，
+                    // Flutter 侧的应用内 Toast 不可见，只能走原生 Toast 提示。
+                    "showToast" -> {
+                        val message = call.argument<String>("message") ?: ""
+                        Log.d("SYNOTIF", "showToast: $message")
+                        if (message.isNotEmpty()) {
+                            runCatching {
+                                Toast.makeText(
+                                    applicationContext,
+                                    message,
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                         result.success(null)
                     }
                     else -> result.notImplemented()

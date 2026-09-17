@@ -440,6 +440,17 @@ class DesktopLyricsService {
     }
   }
 
+  /// 原生 Toast：通知卡片的桌面歌词按钮在应用后台触发，应用内 Toast
+  /// 组件被通知栏遮挡不可见，只能走原生提示（桌面平台无此方法，跳过）。
+  Future<void> showToast(String message) async {
+    if (!isSupportedPlatform || _isDesktopBridge) return;
+    try {
+      await _channel.invokeMethod<void>('showToast', {'message': message});
+    } on MissingPluginException {
+      // ignore
+    }
+  }
+
   Future<void> updateLyrics({
     required String current,
     required String next,

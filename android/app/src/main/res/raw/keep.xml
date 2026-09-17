@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知卡片自定义按钮图标保活规则（release 资源裁剪用）。
+     这些图标只在 Dart 侧以字符串名引用（编译进 libapp.so 快照），
+     资源裁剪器扫描不到引用会被当作无用资源删除；删除后原生侧
+     getIdentifier 返回 0，PlaybackStateCompat.CustomAction.Builder 抛
+     "You must specify an icon resource id"，整个 setState 中断，
+     播放通知从此不再出现（2026-09-17 线上回归的根因）。
+     keep.xml 本身会被裁剪器移除，但其 tools:keep 指令会被执行。 -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_notification_heart_filled,@drawable/ic_notification_heart_outline,@drawable/ic_notification_lyrics_on,@drawable/ic_notification_lyrics_off" />

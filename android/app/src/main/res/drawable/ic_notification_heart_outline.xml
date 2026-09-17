@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知卡片自定义按钮图标：红心-未收藏（空心细线条）。 -->
+<!-- 描边式空心，与已收藏的实心红心同形，截图2 风格。 -->
+<!-- 通知图标主体保持白色，由系统按浅色/深色自动着色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,20.5l-1.35,-1.23C6.1,15.06 3,12.28 3,8.9 3,6.23 5.05,4.1 7.65,4.1c1.65,0 3.22,0.77 4.35,2.02C13.13,4.87 14.7,4.1 16.35,4.1 18.95,4.1 21,6.23 21,8.9c0,3.38 -3.1,6.16 -7.65,10.37L12,20.5z" />
+</vector>
