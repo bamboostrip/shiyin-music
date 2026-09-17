@@ -206,6 +206,16 @@ class PlayerController extends _PlayerControllerBase
       isPlaying =
           value.playing &&
           value.processingState != ProcessingState.completed;
+      // 诊断：引擎上报的状态变化（实机排查"completed 到底有没有来"的第一手
+      // 证据）。只在组合变化时记，避免每 tick 刷屏。
+      final stateTrace = '${value.playing}/${value.processingState.name}';
+      if (stateTrace != _lastStateTrace) {
+        _lastStateTrace = stateTrace;
+        _nextLog(
+          '引擎状态 playing=${value.playing} '
+          'processing=${value.processingState.name} → ctrlPlaying=$isPlaying',
+        );
+      }
       isBuffering =
           value.processingState == ProcessingState.loading ||
           value.processingState == ProcessingState.buffering;
@@ -233,9 +243,24 @@ class PlayerController extends _PlayerControllerBase
         // - `_willHandleCompletion` 覆盖 playSong 已返回后的同曲重复 completed。
         // 两个都留，但窄窗口下实际承重的是前者；误删前者会让系统性坏尾预算永不清零失效。
         final song = currentSong;
+        final willHandle = song != null && _willHandleCompletion(song);
+        if (song == null || _isChangingSource || !willHandle) {
+          // 诊断：completed 到达却没推进 —— 必须能从日志直接看出是哪道守卫
+          // 挡的（changingSource / 去重标记 / 完成流程仍在途）。
+          _nextLog(
+            'completed 到达但未推进 ← 守卫拦截: song=${song?.title ?? '-'} '
+            'changingSource=$_isChangingSource(depth=$_changingSourceDepth) '
+            'willHandleCompletion=$willHandle '
+            'completedHash=$_completedSongHash '
+            'handling=$_isHandlingCompletion handlingHash=$_handlingCompletedHash '
+            '| ${_nextSnapshot()}',
+          );
+        } else {
+          _nextLog('completed 到达 → 进入完成处理: song=${song.title} | ${_nextSnapshot()}');
+        }
         if (song != null &&
             !_isChangingSource &&
-            _willHandleCompletion(song)) {
+            willHandle) {
           _consecutiveNearEndSkips = 0;
           _nearEndSkipStreakSince = null;
           _tailSkipExhausted = false;
@@ -462,8 +487,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 曲末跳过这一路自己的墙钟起点，与 [_autoSkipStreakSince] 分开：[_autoSkipStreakSince]
   /// 会被 playSong 起播成功清空，而曲末跳过后必然跟一次成功的 playSong——共用
-  /// 字段会让墙钟预算每次都被重置、永远判不出「超预算」。与 [_consecutiveNearEndSkips]
-  /// 同生命周期（只在自然 completed 时一起清）。
+  /// 字段会让墙钟预算每次都被重置、永远判不出「超预算」。
+  /// 本字段同样在起播成功时重新起算（playSong），只累计同一首歌内的重试风暴；
+  /// 跨曲的坏尾爆发由 [_consecutiveNearEndSkips] 的次数上限兜住——两者若一起
+  /// 只在自然 completed 清，就会在「曲末失败」这条路上永远清不掉而锁死预算。
   DateTime? _nearEndSkipStreakSince;
 
   /// 本轮 streak 第一次自动跳过的时刻：与 [_kAutoSkipWallClockBudget]
@@ -539,7 +566,67 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _tailSkipExhausted = false;
   int? _androidAudioSessionId;
 
+  /// 诊断日志去重：上一次已记录的「引擎 playing/processingState」组合。
+  String? _lastStateTrace;
+
+  /// 诊断日志去重：已记录过曲尾判定的歌曲 hash（每首歌只记一次）。
+  String? _endOfSongLoggedForHash;
+
   bool get _isChangingSource => _changingSourceDepth > 0;
+
+  /// 曲末自动切歌诊断日志。实机排查「播完不跳下一首」时唯一需要过滤的通道：
+  ///
+  ///   adb logcat -s flutter | findstr shiyin
+  ///
+  /// 覆盖链路：引擎状态上报 → 接近曲尾/兜底 timer 是否建立 → completed 是否
+  /// 到达、被哪道守卫拦截 → 完成处理选了哪个分支 → playSong 是否真的起播。
+  /// 日志量按每首歌个位数行控制（状态变化才记、每首歌只记一次曲尾判定）。
+  void _nextLog(String message) {
+    debugPrint('[shiyin][next] $message');
+  }
+
+  /// 诊断快照：一次打印推进判定所需的关键字段。
+  String _nextSnapshot() {
+    return 'song=${currentSong?.title ?? '-'} '
+        'enginePos=${audioPlayer.position.inMilliseconds}ms '
+        'uiPos=${position.inMilliseconds}ms dur=${duration.inMilliseconds}ms '
+        'ctrlPlaying=$isPlaying enginePlaying=${audioPlayer.playing} '
+        'state=${audioPlayer.processingState.name} '
+        'preparing=$isPreparing chgDepth=$_changingSourceDepth';
+  }
+
+  /// 「起播请求」等待平台确认的上限。
+  ///
+  /// Android 原生 just_audio 的 `play(Result)` 只在两种情况下回执：playWhenReady
+  /// 本已为真，或曲目走到 STATE_ENDED（见 just_audio AudioPlayer.java:971-986，
+  /// playResult 只在 STATE_ENDED/dispose 处 complete）。而本工程起播前刚
+  /// pause 过（playSong 切新歌会先暂停旧歌），于是 `AudioPlayer.play()` 的
+  /// Future 会一直挂到曲末——实机日志已经证实：`playSong 起播成功` 与
+  /// `completed` 落在同一毫秒。
+  ///
+  /// 挂起本身不影响出声（Java 侧已 setPlayWhenReady(true)），但 await 它会把
+  /// 调用方的收尾拖到曲末（playSong 的 finally → [_changingSourceDepth] 保持 1）：
+  /// 1. completed 分支被 `!_isChangingSource` 整条挡掉，自动下一首只能靠曲末
+  ///    兜底推进（3.0.3 兜底被 isPlaying 判活关掉 → 手机"播完不跳下一首"）；
+  /// 2. [_handleMidPlaybackError] 同样被挡，播放中断流/解码失败被静默吞掉
+  ///    （界面假播放、无提示、不自动跳过）；
+  /// 3. 单曲循环重播、切音质重载的收尾同样被拖到曲末。
+  ///
+  /// 故统一给「平台确认」设上限：超时按"已起播"处理（引擎侧确实已在播，
+  /// 当失败处理会误伤正常播放）。
+  static const Duration _kPlayConfirmTimeout = Duration(seconds: 2);
+
+  /// 发起播放，只在有界时间内等待平台确认（理由见 [_kPlayConfirmTimeout]）。
+  Future<void> _requestPlayback() async {
+    try {
+      await _audioHandler.play().timeout(_kPlayConfirmTimeout);
+    } on TimeoutException {
+      _nextLog(
+        '起播确认 ${_kPlayConfirmTimeout.inSeconds}s 内未回执 → 按已起播继续'
+        '（Android play(Result) 拖到曲末才回执，属已知平台行为，非错误）',
+      );
+    }
+  }
 
   AudioPlayer get audioPlayer => _audioHandler.audioPlayer;
 

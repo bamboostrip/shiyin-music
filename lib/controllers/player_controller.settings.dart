@@ -164,7 +164,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
       }
       if (currentSong?.hash != song.hash) return;
       if (resumePlayback) {
-        await _audioHandler.play();
+        // 有界等待平台确认：Android 端无界 await 会拖到曲末，把换源深度与
+        // isPreparing 钉死（详见 _kPlayConfirmTimeout）。
+        await _requestPlayback();
       }
       // 切音质后后台缓存（同样受蜂窝门控约束）
       if (networkUrl != null && isAudioPrecacheAllowed) {
