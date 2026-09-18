@@ -271,22 +271,11 @@ class LibraryPageState extends State<LibraryPage> {
         .toList();
     if (targets.isEmpty) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除歌单'),
-        content: Text('确定要删除选中的 ${targets.length} 个歌单吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: '删除歌单',
+      message: '确定要删除选中的 ${targets.length} 个歌单吗？',
+      confirmText: '删除',
     );
     if (confirmed != true) return;
 
