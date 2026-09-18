@@ -57,6 +57,19 @@ class RankPageState extends SwrSectionState<RankPage, List<RankCategory>>
   bool get wantKeepAlive => true;
 
   @override
+  void dispose() {
+    // 静态缓存两级化：页面销毁即丢弃进程级内存层（只收内存，不丢状态
+    // ——磁盘 cache_rank / cache_rank_new 仍在），下次进入由基类既有
+    // 路径从磁盘恢复：_initFromDiskOrNetwork 读 cache_rank、
+    // restoreSidecarFromDisk 读 cache_rank_new，命中直接上屏，无网络白屏。
+    // 本页在 HomePage 内靠 keep-alive / Offstage 承载，只有宿主整体销毁
+    // （如桌面保活栈 LRU 淘汰首页分区）才会走到这里，不影响切 tab 秒回。
+    _cachedRanks = null;
+    _cachedNewSongs = null;
+    super.dispose();
+  }
+
+  @override
   CacheService get cache => widget.cache;
 
   @override
