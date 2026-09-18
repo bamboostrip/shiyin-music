@@ -1976,8 +1976,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                             ),
                             sliver: SliverList.separated(
                               itemCount: _filteredSongs.length,
+                              // 扁平行只靠呼吸间距分隔，不再用卡片式大间隙。
                               separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 2),
                               itemBuilder: (context, index) {
                                 final song = _filteredSongs[index];
                                 return _SongRow(
@@ -3382,7 +3383,6 @@ class _SongRowState extends State<_SongRow> {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final song = widget.song;
-    final index = widget.index;
     final player = widget.player;
     final canDelete = widget.canDelete;
     final selecting = widget.selecting;
@@ -3405,48 +3405,34 @@ class _SongRowState extends State<_SongRow> {
           builder: (context, _) {
             final active = !selecting && player.currentSong?.hash == song.hash;
             final activeColor = colorScheme.primary;
+            // 移动端扁平行（参考 QQ 音乐）：常态透明、无边框无阴影，
+            // 行间只靠呼吸间距分隔；悬停/选中/播中给极淡底色反馈
+            // （桌面小窗下鼠标仍可辨，移动端无影响）。
             final bgColor = selecting
                 ? (selected
                     ? activeColor.withValues(alpha: .10)
-                    : (isDark
-                        ? Colors.white.withValues(alpha: .04)
-                        : Colors.white.withValues(alpha: .85)))
+                    : Colors.transparent)
                 : active
-                    ? activeColor.withValues(alpha: .10)
-                    // PC hover 反馈：悬停一行给底色，用户才知道可点。
+                    ? activeColor.withValues(alpha: .08)
                     : _hovering
                         ? (isDark
-                            ? Colors.white.withValues(alpha: .09)
-                            : colorScheme.surfaceContainerHigh)
-                        : (isDark
-                            ? Colors.white.withValues(alpha: .05)
-                            : Colors.white);
-          final borderColor = selecting && selected || active
-              ? activeColor.withValues(alpha: .18)
-              : (isDark
-                  ? Colors.white.withValues(alpha: .08)
-                  : Colors.white.withValues(alpha: .92));
+                            ? Colors.white.withValues(alpha: .06)
+                            : colorScheme.surfaceContainerHighest
+                                .withValues(alpha: .5))
+                        : Colors.transparent;
           return Container(
             decoration: BoxDecoration(
               color: bgColor,
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(color: borderColor, width: 1),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? .14 : .05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(10),
             ),
             child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadius.lg),
+              borderRadius: BorderRadius.circular(10),
               onTap: onTap,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               child: Row(
                 children: [
@@ -3458,56 +3444,28 @@ class _SongRowState extends State<_SongRow> {
                     const SizedBox(width: 8),
                   ],
                   SizedBox.square(
-                    dimension: 50,
+                    dimension: 46,
                     child: Stack(
                       children: [
-                        Artwork(url: song.coverUrl, size: 50, borderRadius: 9),
-                        if (!selecting)
-                          Positioned(
-                            left: 4,
-                            top: 4,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: .42),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 1,
-                                ),
-                                child: Text(
-                                  '$index',
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(
-                                        color: Colors.white.withValues(
-                                          alpha: .78,
-                                        ),
-                                        fontWeight: FontWeight.w800,
-                                        height: 1.1,
-                                      ),
-                                ),
-                              ),
-                            ),
-                          ),
+                        Artwork(url: song.coverUrl, size: 46, borderRadius: 8),
                         if (active)
                           Positioned(
-                            right: 4,
-                            bottom: 4,
+                            right: 3,
+                            bottom: 3,
                             child: DecoratedBox(
                               decoration: BoxDecoration(
                                 color: colorScheme.surface.withValues(
-                                  alpha: .9,
+                                  alpha: .92,
                                 ),
-                                borderRadius: BorderRadius.circular(7),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Padding(
-                                padding: const EdgeInsets.all(3),
+                                padding: const EdgeInsets.all(2),
                                 child: NowPlayingBadge(
                                   active: active,
                                   playing: player.isPlaying,
                                   color: activeColor,
-                                  size: 14,
+                                  size: 12,
                                 ),
                               ),
                             ),
@@ -3515,35 +3473,38 @@ class _SongRowState extends State<_SongRow> {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         active
                             ? MarqueeText.text(
                                 song.title,
-                                style: Theme.of(context).textTheme.titleSmall
+                                style: Theme.of(context).textTheme.bodyLarge
                                     ?.copyWith(
                                       color: activeColor,
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
                                     ),
                               )
                             : Text(
                                 song.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleSmall
+                                style: Theme.of(context).textTheme.bodyLarge
                                     ?.copyWith(
-                                      fontWeight: FontWeight.w800,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
                                     ),
                               ),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: 2),
                         Text(
                           song.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium
+                          style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: active
                                     ? activeColor.withValues(alpha: .72)
@@ -3553,19 +3514,13 @@ class _SongRowState extends State<_SongRow> {
                       ],
                     ),
                   ),
-                  if (!selecting) ...[
-                    const SizedBox(width: 10),
-                    Text(
-                      formatDuration(song.duration),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: active
-                            ? activeColor.withValues(alpha: .72)
-                            : colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                  if (!selecting)
                     IconButton(
                       tooltip: '更多',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 19,
+                      color:
+                          colorScheme.onSurfaceVariant.withValues(alpha: .55),
                       onPressed: () {
                         showSongActionSheet(
                           context: context,
@@ -3617,9 +3572,8 @@ class _SongRowState extends State<_SongRow> {
                           ],
                         );
                       },
-                      icon: const Icon(Icons.more_horiz_rounded),
+                      icon: const Icon(Icons.more_vert_rounded),
                     ),
-                  ],
                 ],
               ),
             ),
