@@ -113,8 +113,9 @@ Future<void> main(List<String> args) async {
     // Windows：libmpv 解复用（demux）缓存 32MB→8MB，省 24MB/播放器常驻。
     // 音频码率 128~320kbps、FLAC 约 1Mbps，8MB 足够缓冲 60s 以上音频，
     // 弱网抗抖动不受影响；Linux 保持默认 32MB 不变（作为对照）。bufferSize
-    // 是 static 字段，在 ensureInitialized() 初始化 media_kit 时被消费，
-    // 必须在此之前赋值。kIsWeb 前置：web 上访问 Platform.* 会直接 throw。
+    // 是 static 字段，在首个播放器创建（MediaKitPlayer 构造）前生效，故
+    // 置于 ensureInitialized() 之前。kIsWeb 前置：web 上访问 Platform.*
+    // 会直接 throw。
     if (!kIsWeb && Platform.isWindows) {
       JustAudioMediaKit.bufferSize = 8 * 1024 * 1024;
     }

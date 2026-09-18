@@ -612,7 +612,8 @@ class _UserProfileHeader extends StatelessWidget {
                       : RetryableNetworkImage(
                           url: profile!.avatarUrl!,
                           fit: BoxFit.cover,
-                          // 54dp 圆形头像按档位解码（128），避免整图解码白占内存。
+                          // 54dp 圆形头像按档位解码（桌面 1.5x 档 /
+                          // 移动 2x 档，见 decodeSizeFor），避免整图解码白占内存。
                           cacheWidth: decodeSizeFor(54),
                           cacheHeight: decodeSizeFor(54),
                           errorBuilder: (_, _, _) => Center(

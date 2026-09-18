@@ -178,6 +178,9 @@ abstract class SwrSectionState<W extends StatefulWidget, T> extends State<W> {
     final future = fetchData();
     _future = future;
     unawaited(_runSidecar(loadSidecar(epoch)));
+    // 契约：此处刻意不加 mounted 守卫（仅 epoch 守卫）——dispose 后仍允许
+    // 在途请求落地写内存/磁盘缓存（LazyIndexedStack LRU 淘汰重进后秒显）；
+    // 因此 onDataArrived 实现方必须自行 mounted 守卫。
     unawaited(future.then((data) {
       if (epoch == _loadEpoch && hasContent(data)) {
         cachedData = data;

@@ -2270,8 +2270,10 @@ class _SongSectionState extends State<_SongSection> {
   /// 原桌面分支在 LayoutBuilder 里一次性全量实例化全部 HomeSongRow（Row +
   /// 按列 Expanded(Column)），歌曲多时首页峰值内存高；改为 SliverGrid +
   /// SliverChildBuilderDelegate 后只构建滚动可见的行。视觉口径不变：
-  /// 列数断点 ≥1050=3 / ≥650=2、列距 16、行高 60（与移动端分页
-  /// rowCount * 60.0 同口径）、左右 18 边距、底部 24。旧实现按"列主序
+  /// 列数断点 ≥1050=3 / ≥650=2、列距 16、行高 54——桌面旧行高为自然
+  /// 54（44 封面 + 上下 2×5 padding，见 home_song_row.dart），mainAxisExtent
+  /// 54 与旧视觉逐像素一致；60 是移动/车机分页分支的 rowCount * 60.0
+  /// 口径，勿混淆。左右 18 边距、底部 24。旧实现按"列主序
   /// 填充 + 按列展示"，第 r 行第 c 格恰为 songs[r*列数+c]，SliverGrid
   /// 行主序 child i → songs[i] 视觉完全一致，无需任何置换。
   Widget _buildDesktopSlivers() {
@@ -2311,7 +2313,10 @@ class _SongSectionState extends State<_SongSection> {
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   crossAxisSpacing: 16,
-                  mainAxisExtent: 60,
+                  // 桌面旧行高为自然 54（44 封面 + 上下 2×5 padding），
+                  // mainAxisExtent 54 与旧视觉逐像素一致；60 是移动/车机
+                  // 分页分支口径，勿混淆。
+                  mainAxisExtent: 54,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
@@ -2353,8 +2358,10 @@ class _TopSongRail extends StatelessWidget {
   final VoidCallback? onTapTitle;
 
   /// 桌面宽窗下由 tab 级 CustomScrollView 直接承接：本体输出懒构建 sliver
-  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）；非桌面
-  /// 形态则包 SliverToBoxAdapter 挂入。默认 false 返回普通盒子（车机沿用）。
+  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）。
+  /// asSlivers=true 时桌面与非桌面均走本 sliver 懒构建路径（网格/横轨参数
+  /// 与旧盒子路径逐字等价，移动端网格也因此懒构建）；盒子路径仅供车机
+  /// Column 宿主（asSlivers=false，默认值）。
   final bool asSlivers;
 
   @override
@@ -2628,8 +2635,10 @@ class _PlaylistRail extends StatelessWidget {
   final VoidCallback? onTapTitle;
 
   /// 桌面宽窗下由 tab 级 CustomScrollView 直接承接：本体输出懒构建 sliver
-  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）；非桌面
-  /// 形态则包 SliverToBoxAdapter 挂入。默认 false 返回普通盒子（车机沿用）。
+  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）。
+  /// asSlivers=true 时桌面与非桌面均走本 sliver 懒构建路径（网格/横轨参数
+  /// 与旧盒子路径逐字等价，移动端网格也因此懒构建）；盒子路径仅供车机
+  /// Column 宿主（asSlivers=false，默认值）。
   final bool asSlivers;
 
   @override
