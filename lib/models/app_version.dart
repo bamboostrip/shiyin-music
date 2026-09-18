@@ -235,12 +235,14 @@ String stripVersionTagPrefix(String tag) {
 /// 校验说明，见 docs/release-process.md 笔记模板）；应用内弹窗只展示
 /// 更新内容本身，避免一大段与本机无关的产物列表刷屏。
 ///
-/// 规则：从首个 `## 📥 下载` / `### 下载` 标题行起截到下一个二级标题
-/// 或正文结束（模板约定下载区为最后一节）；标题缺失的老 Release
+/// 规则：标题行精确为 `## 📥 下载` / `### 下载`（模板格式契约，标题就是
+/// 「下载」两字，见 docs/release-process.md）时截到下一个二级标题或正文
+/// 结束（模板约定下载区为最后一节）；整行精确匹配避免把「## 下载管理
+/// 重构」这类真正的更新内容标题误当下载区吞掉。标题缺失的老 Release
 /// 原样返回。标题匹配不带 `\b`：CJK 字符不属于 ECMAScript 的 `\w`，
 /// `下载\b` 在中文后永远不成立。
 String stripReleaseDownloadSection(String body) {
-  final headingPattern = RegExp(r'^#{2,3}\s*(?:📥\s*)?下载');
+  final headingPattern = RegExp(r'^#{2,3}\s*(?:📥\s*)?下载\s*$');
   final h2Pattern = RegExp(r'^##\s+');
   final buffer = StringBuffer();
   var inDownloadSection = false;

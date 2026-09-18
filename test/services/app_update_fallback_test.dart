@@ -171,6 +171,24 @@ void main() {
 ''';
       expect(stripReleaseDownloadSection(body), body.trim());
     });
+
+    test('以「下载」开头的更新内容章节标题不误吞（格式契约精确匹配）', () {
+      const body = '''
+## 更新内容
+
+### 下载管理重构
+
+- 并发下载更快
+
+## 📥 下载
+
+- 产物清单
+''';
+      final stripped = stripReleaseDownloadSection(body);
+      expect(stripped, contains('下载管理重构'));
+      expect(stripped, contains('并发下载更快'));
+      expect(stripped, isNot(contains('产物清单')));
+    });
   });
 
   group('AppVersionInfo.fromGitHubRelease', () {
