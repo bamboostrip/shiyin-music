@@ -4,6 +4,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/app_song_row.dart';
 import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/mini_player.dart';
@@ -47,22 +48,26 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
   }
 
   Future<void> _confirmClear() async {
+    // 与歌单删除/已下载清空同语言：18 圆角居中卡 + 双药丸按钮。
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierColor: AppDialogStyle.barrierColor(),
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text('清空播放历史'),
-          content: const Text('确定要清空全部播放历史吗？此操作不可恢复。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('清空'),
-            ),
-          ],
+        return AppDialogShell(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppDialogTitle('清空播放历史'),
+              const SizedBox(height: 12),
+              const AppDialogMessage('确定要清空全部播放历史吗？此操作不可恢复。'),
+              const SizedBox(height: 22),
+              AppDialogPillActions(
+                confirmText: '清空',
+                onCancel: () => Navigator.of(ctx).pop(false),
+                onConfirm: () => Navigator.of(ctx).pop(true),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -187,6 +192,10 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
   ) {
     return SliverAppBar(
       pinned: true,
+      // 全局 AppBarTheme 背景透明，歌曲上滑会从标题/清空按钮下透出来；
+      // 与歌单详情页同写法：不透明 surface 遮挡滚动内容。
+      backgroundColor: colorScheme.surface,
+      surfaceTintColor: Colors.transparent,
       title: const Text(
         '播放历史',
         style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),

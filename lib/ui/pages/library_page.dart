@@ -130,16 +130,10 @@ class LibraryPageState extends State<LibraryPage> {
       // 纯确认型弹窗（playlist_detail 的 _confirm）保持可点遮罩取消。
       barrierDismissible: false,
       barrierColor: AppDialogStyle.barrierColor(),
-      // 裸 Dialog 不像 AlertDialog 那样自带键盘避让；包一层随键盘顶起，
-      // 否则自动聚焦弹起键盘后输入框会被盖住。
-      builder: (dialogContext) => AnimatedPadding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(dialogContext).bottom,
-        ),
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOut,
-        child: const _CreatePlaylistDialog(),
-      ),
+      // Dialog 内部已按 viewInsets + insetPadding 避让键盘（与删除确认
+      // 弹窗同写法），外层禁止再包 AnimatedPadding：双倍吃掉垂直空间后
+      // 内容 Column 约束只剩几十 px，按钮溢出画到白卡外面（键盘弹起必现）。
+      builder: (_) => const _CreatePlaylistDialog(),
     );
     if (name == null) return;
 
