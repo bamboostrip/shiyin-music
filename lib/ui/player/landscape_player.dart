@@ -516,61 +516,68 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
                             child: child,
                           );
                         },
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: RadialGradient(
-                                  colors: [
-                                    Colors.white.withValues(alpha: .88),
-                                    Colors.white.withValues(alpha: .58),
-                                    Colors.white.withValues(alpha: .22),
-                                  ],
-                                  stops: const [0, .62, 1],
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: .26),
-                                    blurRadius: 30,
-                                    offset: const Offset(0, 18),
+                        // 静态唱片内容外包 RepaintBoundary：每帧只有外层
+                        // Transform.rotate 变化，唱片栅格（含 30px 阴影模糊
+                        // 与多层圆环描边）因此能命中缓存，不必逐帧重绘。
+                        child: RepaintBoundary(
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      Colors.white.withValues(alpha: .88),
+                                      Colors.white.withValues(alpha: .58),
+                                      Colors.white.withValues(alpha: .22),
+                                    ],
+                                    stops: const [0, .62, 1],
                                   ),
-                                ],
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: .26,
+                                      ),
+                                      blurRadius: 30,
+                                      offset: const Offset(0, 18),
+                                    ),
+                                  ],
+                                ),
+                                child: const SizedBox.expand(),
                               ),
-                              child: const SizedBox.expand(),
-                            ),
-                            for (final ratio in const [.36, .52, .68, .82])
-                              SizedBox.square(
-                                dimension: discSize * ratio,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: .16,
+                              for (final ratio in const [.36, .52, .68, .82])
+                                SizedBox.square(
+                                  dimension: discSize * ratio,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white.withValues(
+                                          alpha: .16,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ClipOval(
-                              child: Artwork(
-                                url: widget.song.coverUrl,
-                                size: coverSize,
-                                borderRadius: coverSize,
-                              ),
-                            ),
-                            SizedBox.square(
-                              dimension: discSize * .08,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.white.withValues(alpha: .82),
+                              ClipOval(
+                                child: Artwork(
+                                  url: widget.song.coverUrl,
+                                  size: coverSize,
+                                  borderRadius: coverSize,
                                 ),
                               ),
-                            ),
-                          ],
+                              SizedBox.square(
+                                dimension: discSize * .08,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.white.withValues(alpha: .82),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

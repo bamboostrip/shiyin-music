@@ -27,6 +27,7 @@ class PosterPlayerPage extends StatefulWidget {
     required this.onQueue,
     required this.auth,
     required this.onArtistTap,
+    this.isPageVisible = true,
     this.onLyricTap,
     this.onCoverTap,
     this.onVerticalDragDown,
@@ -41,6 +42,11 @@ class PosterPlayerPage extends StatefulWidget {
   final VoidCallback onQueue;
   final AuthController auth;
   final ValueChanged<Song> onArtistTap;
+
+  /// 本页是否可见（播放页 PageView 的当前页）。划到歌词页后本页被
+  /// `AutomaticKeepAliveClientMixin` 留在树上，不门控的话海报歌词预览
+  /// 仍会以 ~30Hz setState 空转。
+  final bool isPageVisible;
   final VoidCallback? onLyricTap;
   final VoidCallback? onCoverTap;
   final GestureDragDownCallback? onVerticalDragDown;
@@ -126,6 +132,7 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
                   player: widget.player,
                   onLyricTap: widget.onLyricTap,
                   compact: compact,
+                  isPageVisible: widget.isPageVisible,
                 ),
                 SizedBox(height: compact ? 8 : 12),
                 PosterActionRail(
@@ -383,11 +390,17 @@ class PosterLyricPreview extends StatefulWidget {
     required this.player,
     this.onLyricTap,
     this.compact = false,
+    this.isPageVisible = true,
   });
 
   final PlayerController player;
   final VoidCallback? onLyricTap;
   final bool compact;
+
+  /// 本页是否可见。不可见时停掉 ticker：本组件由海报页持有，而海报页
+  /// 在划到歌词页后仍被 keep-alive 缓存，否则会持续 ~30Hz setState。
+  /// （移动端歌词列表对同一问题已有门控，见 MobileLyricList._syncTicker。）
+  final bool isPageVisible;
 
   @override
   State<PosterLyricPreview> createState() => _PosterLyricPreviewState();
@@ -422,6 +435,7 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
 
   void _syncTicker() {
     final shouldTick =
+        widget.isPageVisible &&
         widget.player.isPlaying &&
         widget.player.lyrics.isNotEmpty &&
         !widget.player.isScrubbing;
@@ -583,8 +597,6 @@ class _MarqueeSingleLineState extends State<MarqueeSingleLine>
         ..stop()
         ..reset();
       _overflow = 0;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
-    } else {
       WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
     }
   }

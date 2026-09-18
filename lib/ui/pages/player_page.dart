@@ -311,6 +311,10 @@ class _PlayerBodyState extends State<_PlayerBody>
                     ArtworkBackground(
                       song: widget.song,
                       playing: widget.player.isPlaying,
+                      // 与 _lyricPageVisible 互补：划到歌词页后封面页仍被
+                      // PageView（allowImplicitScrolling）缓存在树上，不门控
+                      // 的话整屏旋转 + sigma24 模糊会继续按刷新率空转。
+                      pageVisible: _page == 0 || _pageScrolling,
                     ),
                     SafeArea(
                       // 横屏时同样需要处理顶部状态栏和底部系统导航栏（如车机空调控制栏）的遮挡。
@@ -381,6 +385,12 @@ class _PlayerBodyState extends State<_PlayerBody>
                                                   onQueue: widget.onQueue,
                                                   auth: widget.auth,
                                                   onArtistTap: _openArtist,
+                                                  // 海报页被 keep-alive 缓存，划走后需
+                                                  // 停掉歌词预览 ticker（与 _lyricPageVisible
+                                                  // 互补）。
+                                                  isPageVisible:
+                                                      _page == 0 ||
+                                                      _pageScrolling,
                                                   onCoverTap: () =>
                                                       _showMoreSheet(context),
                                                   onVerticalDragDown:
