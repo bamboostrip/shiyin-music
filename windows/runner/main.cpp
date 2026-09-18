@@ -7,9 +7,51 @@
 
 #include "flutter_window.h"
 #include "utils.h"
+#include "win32_window.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // 单实例判定必须在一切初始化之前：第二实例零副作用唤醒已有窗口后立即
+  // 退出，不写任何状态、不初始化 COM/Flutter。互斥体句柄保活到进程结束
+  // （故意不 CloseHandle）：进程退出/被任务管理器强杀时内核自动销毁，
+  // 无"幽灵锁"（与 Dart 侧硬终止退出天然契合）。
+  // 安装版与便携版共用同一互斥体名（产品级全局单实例）。
+  // 注意：desktop_multi_window 的歌词子窗是同进程第二个 Flutter 引擎，
+  // 不走 wWinMain，天然不受此判定影响。
+  HANDLE single_instance_mutex =
+      ::CreateMutexW(nullptr, TRUE, Win32Window::SingleInstanceMutexName());
+  const DWORD single_instance_error = ::GetLastError();
+  const bool already_running = (single_instance_mutex != nullptr &&
+                                single_instance_error == ERROR_ALREADY_EXISTS);
+  if (already_running) {
+    // B（主）：私有广播由已有实例自己抢前台（绕前台锁定，见
+    // Win32Window::MessageHandler）；A（兜底）：第二实例直接 FindWindow
+    // 置前，覆盖已有实例尚未处理广播的窗口期。
+    // 歌词悬浮窗的原生类名为 FlutterMultiWindow，与主窗类名不冲突，
+    // 按类名查找不会找错。
+    const UINT activate_message =
+        Win32Window::SingleInstanceActivateMessageId();
+    if (activate_message != 0) {
+      ::PostMessageW(HWND_BROADCAST, activate_message, 0, 0);
+    }
+    // 并发竞态：连续快速双击时第一实例可能尚未 CreateWindow，重试后放弃。
+    HWND existing_window = nullptr;
+    for (int i = 0; i < 3; ++i) {
+      existing_window = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+      if (existing_window != nullptr) {
+        break;
+      }
+      ::Sleep(200);
+    }
+    Win32Window::BringWindowToFront(existing_window);
+    ::CloseHandle(single_instance_mutex);
+    return EXIT_SUCCESS;
+  }
+  // 第一实例：single_instance_mutex 留在栈上直到消息循环结束（进程级
+  // 生命周期），全程持有互斥体；故意不 CloseHandle，进程死亡时内核回收。
+  // CreateMutex 失败（返回 nullptr）时无法 enforce 单实例，仍继续启动。
+  (void)single_instance_mutex;
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

@@ -12,9 +12,12 @@ import 'desktop_window.dart';
 
 /// Windows 系统托盘常驻（仅桌面形态，由 main.dart 门控调用）。
 ///
-/// - 左键单击：切换主窗显示/隐藏（最小化时恢复窗口）；
+/// - 左键单击：恒为「恢复并置前」（最小化/托盘隐藏/后台一律展示，已在前台
+///   则无操作；永不把已显示的窗口隐藏）；
 /// - 右键单击：弹出菜单（显示/隐藏主窗、播放/暂停、上一首、下一首、
 ///   「桌面歌词」勾选项、解锁桌面歌词、退出）；
+/// - 隐藏主窗的正式入口只有两处：标题栏 X（关闭到托盘）与右键菜单
+///   「隐藏主窗」；托盘左键不提供隐藏；
 /// - 「桌面歌词」：勾选态跟随 [PlayerController.desktopLyricsEnabled]，
 ///   点击切换悬浮窗显示/隐藏；
 /// - "退出"：先立即落盘窗口几何再销毁窗口。
@@ -74,7 +77,10 @@ class DesktopTray {
     final menu = Menu();
     final lyricsSupported = DesktopLyricsService.isSupportedPlatform;
     await menu.buildFrom([
-      MenuItemLabel(label: '显示主窗', onClicked: (_) => _showWindow()),
+      MenuItemLabel(
+        label: '显示主窗',
+        onClicked: (_) => unawaited(DesktopWindow.showAndFocus()),
+      ),
       MenuItemLabel(label: '隐藏主窗', onClicked: (_) => windowManager.hide()),
       MenuSeparator(),
       MenuItemLabel(
@@ -113,7 +119,8 @@ class DesktopTray {
     _menu = menu;
     tray.registerSystemTrayEventHandler((eventName) {
       if (eventName == kSystemTrayEventClick) {
-        unawaited(_toggleWindowVisibility());
+        // 左键恒为恢复并置前：已在前台时 showAndFocus 即无操作，不再隐藏。
+        unawaited(DesktopWindow.showAndFocus());
       } else if (eventName == kSystemTrayEventRightClick) {
         // Windows 右键只派发事件，弹出菜单需主动调用；
         // 弹出前刷新「桌面歌词」勾选态与「解锁桌面歌词」可用态
@@ -219,26 +226,6 @@ class DesktopTray {
     _menu = null;
     _player = null;
     await tray?.destroy();
-  }
-
-  static Future<void> _showWindow() async {
-    await windowManager.show();
-    await windowManager.focus();
-  }
-
-  static Future<void> _toggleWindowVisibility() async {
-    // isVisible 在窗口最小化时仍返回 true：需先检查最小化状态，
-    // 左键单击应恢复窗口而不是把最小化窗口再隐藏一次。
-    if (await windowManager.isMinimized()) {
-      await windowManager.restore();
-      await _showWindow();
-      return;
-    }
-    if (await windowManager.isVisible()) {
-      await windowManager.hide();
-    } else {
-      await _showWindow();
-    }
   }
 
   static Future<void> _exit() async {

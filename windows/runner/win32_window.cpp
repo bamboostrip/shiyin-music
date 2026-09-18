@@ -18,6 +18,15 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
+// 单实例互斥体/激活消息：与安装包 AppId 保持一致（installer/shiyin.iss），
+// 安装版与便携版共用同一名称（产品级全局只允许一个时音进程）。
+// 必须用 Local\ 前缀（按登录会话隔离；Global\ 会让多用户/RDP 互相顶掉）。
+constexpr const wchar_t kSingleInstanceMutexName[] =
+    L"Local\\ShiYinMusic.SingleInstance.{53E8B6D2-7C41-4F5A-9D6E-1A0B2C3D4E5F}";
+// main.cpp 与本文件用同一字符串 RegisterWindowMessage 即得同一消息 ID。
+constexpr const wchar_t kSingleInstanceActivateMessage[] =
+    L"ShiYinMusic.SingleInstance.Activate.{53E8B6D2-7C41-4F5A-9D6E-1A0B2C3D4E5F}";
+
 /// Registry key for app theme preference.
 ///
 /// A value of 0 indicates apps should use dark mode. A non-zero or missing
@@ -195,6 +204,13 @@ Win32Window::MessageHandler(HWND hwnd,
                             UINT const message,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
+  // 单实例激活（第二实例 PostMessage(HWND_BROADCAST)）：由已有实例自己
+  // 恢复并抢前台，比第二实例跨进程 SetForegroundWindow 更易绕过前台锁定。
+  const UINT activate_message = SingleInstanceActivateMessageId();
+  if (activate_message != 0 && message == activate_message) {
+    BringWindowToFront(hwnd);
+    return 0;
+  }
   switch (message) {
     case WM_DESTROY:
       window_handle_ = nullptr;
@@ -288,6 +304,35 @@ RECT Win32Window::GetClientArea() {
 
 HWND Win32Window::GetHandle() {
   return window_handle_;
+}
+
+UINT Win32Window::SingleInstanceActivateMessageId() {
+  static const UINT kId =
+      ::RegisterWindowMessageW(kSingleInstanceActivateMessage);
+  return kId;
+}
+
+const wchar_t* Win32Window::SingleInstanceMutexName() {
+  return kSingleInstanceMutexName;
+}
+
+void Win32Window::BringWindowToFront(HWND hwnd) {
+  if (hwnd == nullptr || !::IsWindow(hwnd)) {
+    return;
+  }
+  // 托盘隐藏（SW_HIDE）时 IsIconic 为 false，只判最小化会漏恢复：
+  // 最小化用 SW_RESTORE，其余（含隐藏态）用 SW_SHOW 覆盖。
+  if (::IsIconic(hwnd)) {
+    ::ShowWindowAsync(hwnd, SW_RESTORE);
+  } else {
+    ::ShowWindowAsync(hwnd, SW_SHOW);
+  }
+  // SetForegroundWindow 受前台锁定限制可能失败，退化为 TOP 置顶。
+  if (!::SetForegroundWindow(hwnd)) {
+    ::SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                   SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW);
+    ::BringWindowToTop(hwnd);
+  }
 }
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {

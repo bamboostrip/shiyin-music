@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/download_controller.dart';
@@ -23,7 +22,7 @@ import '../keyboard_focus_guard.dart';
 import '../player/player_route.dart';
 import '../widgets/lazy_indexed_stack.dart';
 import 'desktop_player_bar.dart';
-import 'desktop_search_suggest_panel.dart';
+import 'desktop_window.dart';import 'desktop_search_suggest_panel.dart';
 import 'desktop_sidebar.dart';
 import 'desktop_title_bar.dart';
 
@@ -175,16 +174,9 @@ class _DesktopShellState extends State<DesktopShell> {
     super.dispose();
   }
 
+  /// 歌词设置页打开前把主窗带到前台（通知/托盘的统一恢复语义）。
   Future<void> _restoreMainWindow() async {
-    try {
-      if (await windowManager.isMinimized()) {
-        await windowManager.restore();
-      }
-      await windowManager.show();
-      await windowManager.focus();
-    } catch (e) {
-      debugPrint('[DesktopShell] Failed to restore main window: $e');
-    }
+    await DesktopWindow.showAndFocus();
   }
 
   Future<void> _onOpenLyricsSettingsRequested() async {

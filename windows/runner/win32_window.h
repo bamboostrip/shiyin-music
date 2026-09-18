@@ -75,6 +75,14 @@ class Win32Window {
   // 差异并推进快照，后续擦除差异为空、自然空操作。
   static void FillExposedEdgesOnErase(HWND hwnd, HDC hdc);
 
+  // 单实例：已有实例激活消息 ID（RegisterWindowMessage）与窗口置前。
+  //
+  // 由 main.cpp（第二实例的兜底置前）与 MessageHandler（已有实例收到广播后
+  // 自己抢前台）共用，GUID 字面量只落在 win32_window.cc 一处，避免漂移。
+  static UINT SingleInstanceActivateMessageId();
+  static const wchar_t* SingleInstanceMutexName();
+  static void BringWindowToFront(HWND hwnd);
+
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 

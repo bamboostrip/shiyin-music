@@ -94,6 +94,37 @@ class DesktopWindow {
 
   static _WindowGeometrySaver? _saver;
 
+  /// 恢复并置前主窗（托盘单击/通知点击/单实例唤醒等所有"展示主窗"入口的
+  /// 唯一实现）：最小化时先 restore，再 show 覆盖托盘隐藏（SW_HIDE），
+  /// 最后 focus 抢前台。
+  ///
+  /// 隐藏态与最小化态是两种状态（隐藏时 isMinimized 为 false），只判最小化
+  /// 会漏掉托盘隐藏，因此 restore 与 show 缺一不可；顺序固定为
+  /// `restore → show → focus`。
+  ///
+  /// 永不抛出：窗口操作失败（如窗口已销毁）只记日志，保证开机自启重复触发
+  /// 之类的"无害激活"不会产生未捕获异步异常。
+  ///
+  /// 窗口动作可注入（仅测试使用）：默认走 [windowManager]，单测传入 fake
+  /// 即可断言调用顺序， product 代码一律无参调用。
+  static Future<void> showAndFocus({
+    Future<bool> Function()? isMinimized,
+    Future<void> Function()? restore,
+    Future<void> Function()? show,
+    Future<void> Function()? focus,
+  }) async {
+    try {
+      final isMin = await (isMinimized ?? windowManager.isMinimized)();
+      if (isMin) {
+        await (restore ?? windowManager.restore)();
+      }
+      await (show ?? windowManager.show)();
+      await (focus ?? windowManager.focus)();
+    } catch (error) {
+      debugPrint('DesktopWindow: 恢复主窗失败（忽略）: $error');
+    }
+  }
+
   /// 解除关闭拦截（启动失败兜底路径使用）。
   ///
   /// 启动在 [ensureInitialized] 之后失败时，托盘永远不会创建（Tray.init

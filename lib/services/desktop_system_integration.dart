@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart'
-    show Listenable, VoidCallback, debugPrint;
+import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../config/app_config.dart';
+import '../ui/desktop/desktop_window.dart';
 
 // =============================================================================
 // 本文件聚合桌面形态（isDesktopFormFactor）的系统级集成：
@@ -83,19 +83,10 @@ class LocalNotifierDownloadNotifier implements DesktopDownloadNotifier {
     unawaited(notification.show());
   }
 
-  /// 主窗可能在托盘（隐藏）或最小化：先恢复再置前。
-  static Future<void> _bringMainWindowToFront() async {
-    try {
-      if (await windowManager.isMinimized()) {
-        await windowManager.restore();
-      }
-      await windowManager.show();
-      await windowManager.focus();
-    } on Exception catch (error) {
-      // 置前失败只影响体验，不影响下载结果。
-      debugPrint('DesktopSystemIntegration: 通知点击置前失败: $error');
-    }
-  }
+  /// 主窗可能在托盘（隐藏）或最小化：走统一的恢复并置前语义
+  /// （见 [DesktopWindow.showAndFocus]，永不抛出）。
+  static Future<void> _bringMainWindowToFront() =>
+      DesktopWindow.showAndFocus();
 }
 
 /// 批量下载完成聚合器（纯逻辑，可单测）。

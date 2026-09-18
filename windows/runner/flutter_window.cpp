@@ -130,6 +130,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // 单实例激活直达主窗：先于 Flutter 引擎分发处理，避免引擎消费该消息
+  // 后基类收不到（与 Win32Window::MessageHandler 的处理幂等）。
+  const UINT activate_message = Win32Window::SingleInstanceActivateMessageId();
+  if (activate_message != 0 && message == activate_message) {
+    Win32Window::BringWindowToFront(hwnd);
+    return 0;
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   // 销毁期间（is_shutting_down_）跳过：重入消息交给 DefWindowProc 即可。
   if (flutter_controller_ && !is_shutting_down_) {
