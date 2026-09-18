@@ -226,6 +226,33 @@ void main() {
     expect(client.posts, isNot(contains('/playlist/tracks/del')));
   });
 
+  test('取消首删失败后重同步发现服务端已无此歌：保持熄灭不回滚', () async {
+    // 快照 fileId 直删的路径：首次删除请求失败（快照 fileId 已失效等），
+    // 重同步后服务端喜欢的列表里已无此歌——与上一用例同语义（同步结果即
+    // 真值），此前这里会 rethrow 把红心回滚加回，与主路径分叉。
+    final client = _FakeLikeClient()
+      ..addRespOverride = {
+        'info': [
+          {'fileid': 9}
+        ],
+        'count': 1,
+      }
+      ..trackAllResp = {
+        'songs': [
+          {'hash': 'other', 'fileid': 100, 'name': '别的歌'},
+        ],
+      };
+    final auth = _buildAuth(client);
+    await auth.toggleLike(_songNoFileId);
+    expect(auth.isLiked(_songNoFileId), isTrue);
+
+    client.failNext = true; // 首次 /playlist/tracks/del 抛错，触发重同步分支
+    await auth.toggleLike(_songNoFileId);
+
+    expect(auth.isLiked(_songNoFileId), isFalse, reason: '同步已确认服务端无此歌，保持移除');
+    expect(client.posts, contains('/playlist/tracks/del'));
+  });
+
   test('取消时同步失败：无法定真值，回滚成收藏', () async {
     final client = _FakeLikeClient()
       ..addRespOverride = {'count': 1}

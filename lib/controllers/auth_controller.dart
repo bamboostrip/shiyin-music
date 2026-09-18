@@ -157,6 +157,16 @@ class AuthController extends ChangeNotifier {
             if (prevFileId != null && fileId == prevFileId) {
               final synced = await _syncLikedSongsLocked();
               final freshId = _hashToFileId[song.hash];
+              if (synced && freshId == null) {
+                // 与上方 fileId 缺失的主路径同语义：同步成功且服务端已无
+                // 此歌——首次删除实际已生效（或另一设备已取消），同步结果
+                // 即真值，保持乐观移除并落盘。此处 rethrow 会让外层回滚把
+                // 红心加回，本地与服务端分叉到下次同步才收敛，且用户看到
+                // 「取消失败」实为已成功。
+                notifyListeners();
+                await _persistLikedHashes();
+                return;
+              }
               if (synced && freshId != null && freshId != prevFileId) {
                 resp = await _api.removeSongsFromPlaylist(
                   targetListId,
