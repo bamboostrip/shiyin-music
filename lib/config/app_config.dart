@@ -79,9 +79,11 @@ class AppConfig {
   /// 桌面端内存上限：宽窗一屏能铺开几百张封面（推荐页桌面端把当天全部
   /// 歌曲/歌单转成网格），沿用移动端口径会长期处于 LRU 淘汰状态——条目
   /// 被淘汰后再次解析只能重新走网络，表现为"进出播放页后整页封面变白
-  /// 再逐张回来"。桌面内存充裕，单独放宽，Android 不读这两个值。
-  static const desktopImageMemoryCacheMaxCount = 600;
-  static const desktopImageMemoryCacheMaxBytes = 256 * 1024 * 1024; // 256MB
+  /// 再逐张回来"。放宽到移动端 1.5 倍条目 / 2 倍字节（此前 600 张 /
+  /// 256MB 常驻内存偏高，收敛为保守档）；被淘汰的条目由桌面 200MB 磁盘
+  /// 缓存（[desktopImageDiskCacheMaxBytes]）兜底，Android 不读这两个值。
+  static const desktopImageMemoryCacheMaxCount = 300;
+  static const desktopImageMemoryCacheMaxBytes = 128 * 1024 * 1024; // 128MB
 
   /// 封面磁盘缓存上限（0 = 关闭）。只占存储不占 RAM：
   /// 内存条目被淘汰或 App 冷启动时，命中磁盘即可直接解码，不必等网络往返。
