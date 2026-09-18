@@ -27,6 +27,7 @@ import 'services/legacy_migration.dart';
 import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
 import 'services/network_monitor.dart';
+import 'models/music_models.dart';
 import 'ui/adaptive_layout.dart';
 import 'ui/desktop/desktop_tray.dart';
 import 'ui/desktop/desktop_window.dart';
@@ -35,6 +36,7 @@ import 'ui/app_theme.dart';
 import 'ui/form_factor.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
+import 'ui/widgets/song_action_sheets.dart' show likeFailureMessage;
 import 'ui/widgets/toast.dart';
 
 Future<void> main(List<String> args) async {
@@ -307,7 +309,19 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     // 监听触发重广播，见 [_refreshNotificationButtons]。
     widget.audioHandler.attachNotificationActions(
       NotificationActionBridge(
-        canToggleLike: () => _auth.isLoggedIn && _player.currentSong != null,
+        // 门控与 UI 红心入口（player_controls 等）对齐：登录 + 有歌 + kugou
+        // 源 + 喜欢歌单已就绪。冷启动 restore 窗口内（会话已恢复、歌单尚未
+        // 加载）likedPlaylist 为 null，toggleLike 会静默返回——此时按钮先
+        // 不出现，restore 完成后 AuthController 的通知会把它刷出来，避免
+        // 「点通知红心无任何反馈」的假死观感（本地/网易云歌曲 UI 一律不
+        // 给红心，通知侧同样不给）。
+        canToggleLike: () {
+          final song = _player.currentSong;
+          return _auth.isLoggedIn &&
+              song != null &&
+              song.source == SongSource.kugou &&
+              _auth.likedPlaylist != null;
+        },
         isCurrentSongLiked: () {
           final song = _player.currentSong;
           return song != null && _auth.isLiked(song);
@@ -320,7 +334,10 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
             try {
               await _auth.toggleLike(song);
             } catch (e) {
+              // 已回滚（红心弹回）：给可读提示而非只打日志——用户点了却
+              // 无任何反馈，体感像「取消红心不生效」回归。
               debugPrint('[SYNOTIF] 通知红心失败（已回滚）: $e');
+              Toast.error(likeFailureMessage(e));
             }
           }
           debugPrint('[SYNOTIF] 通知红心处理结束：'
