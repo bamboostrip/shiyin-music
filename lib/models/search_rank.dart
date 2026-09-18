@@ -96,7 +96,12 @@ class SearchAlbumResult {
           asString(json['album_name']) ??
           asString(json['name']) ??
           '未知专辑',
+      // `/search` type=album 的字段名是 `singer`（见 api.json 的
+      // SearchAlbumItem），不是歌手接口那套 singername/author_name。
+      // 只认后者会让专辑 tab 的歌手名恒为空（上层是
+      // `if (artistName.isNotEmpty)`，所以表现为静默不显示）。
       artistName:
+          asString(json['singer']) ??
           asString(json['singername']) ??
           asString(json['author_name']) ??
           asString(json['singer_name']) ??
