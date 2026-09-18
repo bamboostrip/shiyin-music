@@ -59,6 +59,20 @@ const Duration _kAutoSkipWallClockBudget = Duration(seconds: 60);
 /// 重试也只能补这 1.5s，直接进下一首是更好的 UX，故不按错误类型分流。
 const Duration _kNearEndDecodeErrorThreshold = Duration(milliseconds: 1500);
 
+/// 「起播请求」平台确认的结果（见 [_PlayerControllerBase._requestPlayback]）。
+enum PlayConfirm {
+  /// 平台在限时内回执确认。
+  confirmed,
+
+  /// 超时但引擎侧已在播（Android `play(Result)` 拖到曲末的已知行为），
+  /// 等同成功：清失败计数、记历史。
+  timeoutPlaying,
+
+  /// 超时且引擎侧静默（会话被抢/未 ready 又不抛错的未来路径），
+  /// 调用方不得按成功记账：不清失败计数、不记历史不做缓存。
+  timeoutSilent,
+}
+
 class AudioEffectPreset {
   const AudioEffectPreset({required this.name, required this.levels});
 
@@ -620,18 +634,35 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 3. 单曲循环重播、切音质重载的收尾同样被拖到曲末。
   ///
   /// 故统一给「平台确认」设上限：超时按"已起播"处理（引擎侧确实已在播，
-  /// 当失败处理会误伤正常播放）。
+  /// 当失败处理会误伤正常播放）。超时后额外复核一次引擎侧 `playing`：
+  /// 若引擎静默（会话被抢/未 ready 又不抛错的未来路径），返回
+  /// [PlayConfirm.timeoutSilent]，调用方不清失败计数、不记历史。
   static const Duration _kPlayConfirmTimeout = Duration(seconds: 2);
 
   /// 发起播放，只在有界时间内等待平台确认（理由见 [_kPlayConfirmTimeout]）。
-  Future<void> _requestPlayback() async {
+  ///
+  /// 返回值区分三种结局：平台确认成功、超时但引擎已在播（等同成功）、
+  /// 超时且引擎静默（调用方不应按成功记账）。只读 `audioPlayer.playing`
+  /// 做复核：just_audio 的 playing 含 buffering 为 true，慢网不会误判；
+  /// 本方法调用前刚 `loadSong` 成功，processingState 不可能是 completed，
+  /// 不用担心 EOF 陈旧 true。
+  Future<PlayConfirm> _requestPlayback() async {
     try {
       await _audioHandler.play().timeout(_kPlayConfirmTimeout);
+      return PlayConfirm.confirmed;
     } on TimeoutException {
+      // 读引擎侧真相，不读 controller 的 isPlaying（后者是 UI 真相源，
+      // 见 togglePlay 注释；这里要判断的是引擎有没有接受播放）。
+      final enginePlaying = audioPlayer.playing;
       _nextLog(
-        '起播确认 ${_kPlayConfirmTimeout.inSeconds}s 内未回执 → 按已起播继续'
+        '起播确认 ${_kPlayConfirmTimeout.inSeconds}s 内未回执 → '
+        'enginePlaying=$enginePlaying '
+        '${enginePlaying ? '按已起播继续' : '引擎静默，不按成功记账'}'
         '（Android play(Result) 拖到曲末才回执，属已知平台行为，非错误）',
       );
+      return enginePlaying
+          ? PlayConfirm.timeoutPlaying
+          : PlayConfirm.timeoutSilent;
     }
   }
 

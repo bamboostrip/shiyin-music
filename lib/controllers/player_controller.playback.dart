@@ -202,8 +202,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 起播请求不能无界 await：Android 端平台确认会拖到曲末，把本方法的
       // finally（→ _changingSourceDepth）钉在 1 一整首歌，completed 分支与
       // 中途错误处理都会被整条挡掉。理由详见 [_kPlayConfirmTimeout]。
-      await _requestPlayback();
-      // 起播成功：连续失败 streak 整体归零（含已自动跳过的计数）。
+      final confirm = await _requestPlayback();
+      if (confirm == PlayConfirm.timeoutSilent) {
+        // 超时且引擎静默：load 成功但引擎没接住（会话被抢/未 ready 又不抛错）。
+        // 不清失败计数（否则自动跳过失效）、不记历史不做缓存；不抛异常，
+        // 后续真实错误由中途错误处理/下一次失败计数接管。finally 照常收尾。
+        _nextLog('playSong 起播未确认(引擎静默): ${song.title} | ${_nextSnapshot()}');
+        return;
+      }
+      // 起播成功（含超时但引擎已在播）：连续失败 streak 整体归零（含已自动跳过的计数）。
       _consecutivePlayFailures = 0;
       _autoSkippedInStreak = 0;
       _autoSkipStreakSince = null;
