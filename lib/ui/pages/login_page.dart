@@ -11,6 +11,7 @@ import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../desktop/desktop_window_controls.dart';
 import '../form_factor.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/toast.dart';
 
 class LoginPage extends StatefulWidget {
@@ -84,30 +85,45 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
 
   Future<void> _showErrorDialog(String message) async {
     if (!mounted || message.trim().isEmpty) return;
+    // 关闭守卫：退出动画期间再点「确定」会把登录页路由顺带 pop 掉；
+    // 在 builder 外持有，防路由重建（键盘 inset 变化）时被重置。
+    var resolved = false;
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
+      barrierColor: AppDialogStyle.barrierColor(),
       builder: (dialogContext) {
         final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          icon: Icon(
-            Icons.error_outline_rounded,
-            color: colorScheme.error,
-            size: 38,
-          ),
-          title: const Text(
-            '登录失败',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: Column(
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        void close() {
+          if (resolved) return;
+          resolved = true;
+          Navigator.of(dialogContext).pop();
+        }
+
+        final cancelBg = isDark
+            ? colorScheme.surfaceContainerHighest
+            : const Color(0xFFF4F5F7);
+        final cancelFg =
+            isDark ? colorScheme.onSurface : const Color(0xFF1A1D24);
+        // 与确认类弹窗同一套壳（18 圆角 + 双药丸），错误详情框保留可选中
+        // 复制；「复制错误信息」不关弹窗（可复制后继续查看），「确定」关闭。
+        return AppDialogShell(
+          maxWidth: 360,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Icon(
+                Icons.error_outline_rounded,
+                color: colorScheme.error,
+                size: 38,
+              ),
+              const SizedBox(height: 10),
+              const AppDialogTitle('登录失败'),
+              const SizedBox(height: 8),
               Text(
                 '登录或服务请求失败，详细错误信息如下：',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13,
                   color: colorScheme.onSurfaceVariant,
@@ -136,22 +152,33 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppPillButton(
+                      label: '复制错误信息',
+                      foreground: cancelFg,
+                      background: cancelBg,
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: message));
+                        Toast.success('已复制错误信息到剪贴板');
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: AppPillButton(
+                      label: '确定',
+                      foreground: colorScheme.onPrimary,
+                      gradient: AppDialogStyle.confirmGradient(colorScheme),
+                      onTap: close,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          actions: [
-            OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: message));
-                Toast.success('已复制错误信息到剪贴板');
-              },
-              icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('复制错误信息'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('确定'),
-            ),
-          ],
         );
       },
     );
