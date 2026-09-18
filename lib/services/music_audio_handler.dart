@@ -214,9 +214,20 @@ class MusicAudioHandler extends BaseAudioHandler
     if (bridge == null) return null;
     switch (name) {
       case toggleLikeActionName:
-        await bridge.onToggleLike();
+        // 桥接回调抛错不得上浮到 audio_service：这里是系统媒体会话的调用，
+        // 未捕获异常会污染会话状态。失败时记日志并继续走兜底重广播，
+        // 把通知图标恢复到真实状态（回滚乐观换装）。
+        try {
+          await bridge.onToggleLike();
+        } catch (e) {
+          debugPrint('[SYNOTIF][ERROR] customAction 红心执行失败: $e');
+        }
       case toggleDesktopLyricsActionName:
-        await bridge.onToggleDesktopLyrics();
+        try {
+          await bridge.onToggleDesktopLyrics();
+        } catch (e) {
+          debugPrint('[SYNOTIF][ERROR] customAction 桌面歌词执行失败: $e');
+        }
       default:
         debugPrint('[SYNOTIF] 未知 customAction：$name');
         return null;
