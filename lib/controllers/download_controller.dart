@@ -903,17 +903,30 @@ class DownloadController extends ChangeNotifier {
       if (name == null) return null;
       final target = '${dir.path}/$name';
       final retryPath = _service.resolveNonCollidingPath(target, source.path);
+      // 此分支里 retryPath 必然是本次新建的（外层已排除「目标已存在且同
+      // 内容」的采用分支，"(n)" 备选名选的也是不存在路径）。复制与删源
+      // 分别接错：复制中途失败（空间不足/网络盘断开）可能残留半截目标，
+      // 不能凭 existsSync() 判「已落地」——索引会指向残缺文件，显示已
+      // 下载却播不动；删源失败则目标已完整，属成功。
       try {
         await source.copy(retryPath);
-        await source.delete();
-        return retryPath;
       } catch (error) {
-        debugPrint('[时音][download] 历史目录文件跨盘搬移失败（保留原路径）: $error');
-        // 复制成功但删源失败时目标已落地：索引指向新路径，源残留由用户清理，
-        // 不视为失败（复制失败则落到外层统一保留原路径）。
-        if (File(retryPath).existsSync()) return retryPath;
+        debugPrint('[时音][download] 历史目录文件跨盘复制失败（保留原路径）: $error');
+        try {
+          final partial = File(retryPath);
+          if (partial.existsSync()) await partial.delete();
+        } catch (_) {
+          // 残片删除失败（被占用等）：仍保留原路径，残片由用户清理
+        }
         return null;
       }
+      try {
+        await source.delete();
+      } catch (error) {
+        // 删源失败：目标已完整落地，索引指向新路径，源残留由用户清理。
+        debugPrint('[时音][download] 跨盘搬移删源失败（源残留）: $error');
+      }
+      return retryPath;
     } catch (error) {
       debugPrint('[时音][download] 历史目录文件搬移失败（保留原路径）: $error');
       return null;
