@@ -92,4 +92,20 @@ void main() {
           MusicAudioHandler.toggleDesktopLyricsActionName);
     });
   });
+
+  group('refreshPlaybackControls 冷启动门控', () {
+    test('未投递过媒体时不允许广播：冷启动恢复不凭空贴通知', () {
+      expect(
+        MusicAudioHandler.shouldRefreshPlaybackControls(hasLoadedMedia: false),
+        isFalse,
+      );
+    });
+
+    test('投递过媒体后允许广播：按钮刷新正常下发', () {
+      expect(
+        MusicAudioHandler.shouldRefreshPlaybackControls(hasLoadedMedia: true),
+        isTrue,
+      );
+    });
+  });
 }

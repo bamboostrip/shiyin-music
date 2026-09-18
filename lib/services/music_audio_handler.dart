@@ -122,6 +122,19 @@ class MusicAudioHandler extends BaseAudioHandler
   bool _notificationActionsEnabled = false;
   NotificationActionBridge? _notificationActions;
 
+  /// 本进程是否向系统媒体会话投递过媒体（loadSong/setSongQueue）。
+  /// 昨日通知按钮改动新增的恢复/开关监听会在冷启动（_restoreSettings/
+  /// _restorePlaybackState 的 notifyListeners）触发 refreshPlaybackControls，
+  /// 此时 handler 还没有任何 mediaItem：放行广播会让 audio_service 凭空
+  /// 贴出媒体通知。未投递过直接跳过，等首播自然建立通知。
+  bool _hasLoadedMedia = false;
+
+  /// 是否允许重广播播放状态（纯决策，可单测）：只有向系统会话投递过
+  /// 媒体后刷新才有意义，否则广播只会让 audio_service 凭空贴通知。
+  @visibleForTesting
+  static bool shouldRefreshPlaybackControls({required bool hasLoadedMedia}) =>
+      hasLoadedMedia;
+
   /// 播放事件流订阅（替代已删除的 .pipe，见构造函数注释）。
   StreamSubscription<PlaybackEvent>? _playbackEventsSubscription;
 
@@ -164,6 +177,12 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 让通知卡片按钮图标立即换装（audio_service 只在 playbackState 重发时
   /// 重建通知按钮，见 audio_service#1002）。
   void refreshPlaybackControls() {
+    // 冷启动恢复阶段（尚无 mediaItem）跳过：此时广播只会凭空贴通知，
+    // 没有可刷新的按钮。
+    if (!shouldRefreshPlaybackControls(hasLoadedMedia: _hasLoadedMedia)) {
+      debugPrint('[SYNOTIF] refreshPlaybackControls 跳过：本进程尚未投递媒体');
+      return;
+    }
     debugPrint('[SYNOTIF] refreshPlaybackControls：enabled='
         '$_notificationActionsEnabled bridge=${_notificationActions != null} '
         'playing=${audioPlayer.playing}');
@@ -249,6 +268,7 @@ class MusicAudioHandler extends BaseAudioHandler
     required List<Song> queueSongs,
     required int queueIndex,
   }) async {
+    _hasLoadedMedia = true;
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
     final currentItem = _mediaItemFor(song, includeArt: true);
     final items = _buildSystemQueue(queueSongs, _queueIndex);
@@ -510,6 +530,7 @@ class MusicAudioHandler extends BaseAudioHandler
     required int queueIndex,
     Song? currentSong,
   }) async {
+    _hasLoadedMedia = true;
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
     queue.add(_buildSystemQueue(queueSongs, _queueIndex));
     if (currentSong != null) {

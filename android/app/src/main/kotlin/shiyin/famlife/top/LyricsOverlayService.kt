@@ -129,7 +129,14 @@ class LyricsOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // 空 action：只会来自旧版本 START_STICKY 残留的系统拉活（本服务已改为
+        // NOT_STICKY）——没有展示内容，直接停掉，避免只剩“桌面歌词显示中”
+        // 常驻通知、悬浮窗却不在的幽灵态。
+        if (intent?.action == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        when (intent.action) {
             ACTION_UPDATE_LYRICS -> {
                 val current = intent.getStringExtra(EXTRA_CURRENT_LYRIC) ?: ""
                 val next = intent.getStringExtra(EXTRA_NEXT_LYRIC) ?: ""
@@ -176,7 +183,20 @@ class LyricsOverlayService : Service() {
                 }
             }
         }
-        return START_STICKY
+        // 非展示类 intent（设置/前后台/播态/进度同步）也会把服务拉起来并在
+        // onCreate 留下“桌面歌词显示中”通知：冷启动时的设置同步就是典型
+        // （悬浮窗根本没创建，通知却挂着，直到下次播放的 hide 才消失）。
+        // 处理完若仍无悬浮窗在展示，直接停服清掉通知；设置已 saveSettings
+        // 落盘，下次 show 时 onCreate 会 loadSettings 重读，不丢失。
+        // 注意悬浮窗的真实存活由 Flutter 侧 _shouldShowDesktopLyrics  gate，
+        // 播放器播控/歌词推送只在该条件成立时下发，这里只做兜底。
+        if (!isShowing) {
+            stopSelf()
+        }
+        // 常驻拉活对悬浮窗无意义：进程死后 Flutter 侧的歌词内容/播态全丢，
+        // 拉活只能得到空通知 + 空窗（且 audio_service 的播控是独立服务，
+        // 后台播歌不受本返回值影响），故用 NOT_STICKY。
+        return START_NOT_STICKY
     }
 
     /** 计算悬浮窗默认宽度（px）：min(屏幕宽 * 0.9, 320dp)，不随歌词文本长度变化。 */
