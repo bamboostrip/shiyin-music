@@ -745,12 +745,7 @@ class _LikeButton extends StatelessWidget {
           tooltip: isLiked ? '取消喜欢' : '喜欢',
           onPressed: !likeEnabled
               ? null
-              : () => auth!
-                    .toggleLike(song!)
-                    .then(
-                      (_) {},
-                      onError: (Object _) => Toast.error('操作失败，请重试'),
-                    ),
+              : () => toggleLikeWithFeedback(auth!, song!),
           icon: Icon(
             isLiked
                 ? Icons.favorite_rounded

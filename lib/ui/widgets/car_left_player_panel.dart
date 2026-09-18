@@ -9,6 +9,7 @@ import '../player/player_route.dart';
 import '../player/song_tap_handler.dart';
 import 'artwork.dart';
 import 'marquee_text.dart';
+import 'song_action_sheets.dart' show toggleLikeWithFeedback;
 import 'toast.dart';
 
 class CarLeftPlayerPanel extends StatelessWidget {
@@ -195,13 +196,7 @@ class CarLeftPlayerPanel extends StatelessWidget {
                           child: IconButton(
                             padding: EdgeInsets.zero,
                             onPressed: song.source == SongSource.kugou
-                                ? () => auth
-                                      .toggleLike(song)
-                                      .then(
-                                        (_) {},
-                                        onError: (Object _) =>
-                                            Toast.error('操作失败，请重试'),
-                                      )
+                                ? () => toggleLikeWithFeedback(auth, song)
                                 : null,
                             icon: Icon(
                               liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,

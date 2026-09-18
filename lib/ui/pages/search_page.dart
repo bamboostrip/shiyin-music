@@ -14,6 +14,7 @@ import '../widgets/artwork.dart';
 import '../widgets/app_search_field.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
 import '../keyboard_focus_guard.dart';
@@ -678,12 +679,8 @@ class _SearchPageState extends State<SearchPage> {
                 songs: _results,
                 onPlay: _playSong,
                 isLiked: (song) => widget.auth.isLiked(song),
-                onLikeTap: (song) => widget.auth
-                    .toggleLike(song)
-                    .then(
-                      (_) {},
-                      onError: (Object _) => Toast.error('操作失败，请重试'),
-                    ),
+                onLikeTap: (song) =>
+                    toggleLikeWithFeedback(widget.auth, song),
                 auth: widget.auth,
                 player: widget.player,
                 onViewArtist: _openArtist,
@@ -698,12 +695,8 @@ class _SearchPageState extends State<SearchPage> {
                   songs: _results,
                   onPlay: _playSong,
                   isLiked: (song) => widget.auth.isLiked(song),
-                  onLikeTap: (song) => widget.auth
-                      .toggleLike(song)
-                      .then(
-                        (_) {},
-                        onError: (Object _) => Toast.error('操作失败，请重试'),
-                      ),
+                  onLikeTap: (song) =>
+                      toggleLikeWithFeedback(widget.auth, song),
                   auth: widget.auth,
                   player: widget.player,
                   onViewArtist: _openArtist,

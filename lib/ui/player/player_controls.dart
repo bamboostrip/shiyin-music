@@ -8,6 +8,7 @@ import '../form_factor.dart';
 import '../widgets/audio_quality_sheet.dart';
 import '../widgets/climax_slider_track.dart';
 import '../widgets/desktop_anchored_menu.dart';
+import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
 import '../widgets/toast.dart';
 
 Future<void> showAudioQualityPicker(
@@ -342,13 +343,7 @@ class Controls extends StatelessWidget {
                       iconSize: edgeIconSize,
                       padding: EdgeInsets.zero,
                       onPressed: likeSong.source == SongSource.kugou
-                          ? () => likeAuth
-                                .toggleLike(likeSong)
-                                .then(
-                                  (_) {},
-                                  onError: (Object _) =>
-                                      Toast.error('操作失败，请重试'),
-                                )
+                          ? () => toggleLikeWithFeedback(likeAuth, likeSong)
                           : null,
                       icon: Icon(
                         liked

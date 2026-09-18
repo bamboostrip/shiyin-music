@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
+import '../../core/api_client.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
 import 'artwork.dart';
@@ -586,16 +587,31 @@ Future<void> addSongToQueueWithFeedback({
 
 /// 红心切换统一入口：toggleLike 失败会回滚并 rethrow，
 /// 直接 fire-and-forget 会产生未处理的异步错误且用户无感知，
-/// 所有“点红心”的 onTap 都应走这里（内部已挂 onError + toast）。
+/// 所有「点红心」的 onTap 都应走这里（内部已挂 onError + toast）。
 void toggleLikeWithFeedback(AuthController auth, Song song) {
   auth.toggleLike(song).then(
     (_) {},
     onError: (Object error) {
       // 取消收藏失败已回滚（红心弹回），给一句可读提示。
-      final msg = '$error'.replaceFirst('Exception: ', '');
-      Toast.error(msg.isNotEmpty ? msg : '操作失败，请重试');
+      Toast.error(likeFailureMessage(error));
     },
   );
+}
+
+/// 红心失败的用户可读提示语。
+///
+/// toggleLike 现在会抛携带可读文案的错误（ApiException「取消收藏失败：…」、
+/// Exception「无法定位歌曲在歌单中的 fileid，请下拉刷新后重试」），统一
+/// 提取正文；传输层异常（DioException 等）没有可读文案，回退通用提示。
+String likeFailureMessage(Object error) {
+  if (error is ApiException) {
+    return error.message.trim().isNotEmpty ? error.message : '操作失败，请重试';
+  }
+  final msg = '$error'.replaceFirst(
+    RegExp(r'^(?:ApiException(?:\(\d+\))?|Exception|StateError):\s*'),
+    '',
+  );
+  return msg.trim().isNotEmpty ? msg : '操作失败，请重试';
 }
 
 class _SongActionTile extends StatelessWidget {

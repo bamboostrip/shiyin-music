@@ -11,7 +11,7 @@ import 'artwork.dart';
 import 'cover_play_overlay.dart';
 import 'desktop_anchored_menu.dart';
 import 'now_playing_badge.dart';
-import 'toast.dart';
+import 'song_action_sheets.dart' show toggleLikeWithFeedback;
 
 /// PC 桌面端专业歌曲表格行通用粘性表头委托（表头高度 36px）。
 class DesktopSongTableStickyHeaderDelegate
@@ -525,14 +525,11 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                         ? Colors.redAccent
                                         : null,
                                     tooltip: isLiked ? '取消收藏' : '收藏',
-                                    // toggleLike 失败会 rethrow，这里兜底提示避免未处理的异步错误。
-                                    onTap: () => auth
-                                        .toggleLike(song)
-                                        .then(
-                                          (_) {},
-                                          onError: (Object _) =>
-                                              Toast.error('收藏失败，请重试'),
-                                        ),
+                                    // toggleLike 失败会 rethrow，helper 内兜底提示避免未处理的异步错误。
+                                    onTap: () => toggleLikeWithFeedback(
+                                      auth,
+                                      song,
+                                    ),
                                   ),
                                   const SizedBox(width: 2),
                                   _DesktopRowIconButton(

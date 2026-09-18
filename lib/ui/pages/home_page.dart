@@ -23,6 +23,7 @@ import '../widgets/home_collapsible_header.dart';
 import '../widgets/home_song_row.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/refresh_equalizer.dart';
+import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
 import '../widgets/swr_section_state.dart';
 import '../widgets/toast.dart';
 import '../player/song_tap_handler.dart';
@@ -1375,13 +1376,8 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                         songs: data.daily.songs,
                         onPlay: _playSong,
                         isLiked: (song) => widget.auth.isLiked(song),
-                        onLikeTap: (song) => widget.auth
-                            .toggleLike(song)
-                            .then(
-                              (_) {},
-                              onError: (Object _) =>
-                                  Toast.error('操作失败，请重试'),
-                            ),
+                        onLikeTap: (song) =>
+                            toggleLikeWithFeedback(widget.auth, song),
                         auth: widget.auth,
                         player: widget.player,
                         onViewArtist: _openArtist,
@@ -1572,13 +1568,8 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                             songs: data.daily.songs,
                             onPlay: _playSong,
                             isLiked: (song) => widget.auth.isLiked(song),
-                            onLikeTap: (song) => widget.auth
-                                .toggleLike(song)
-                                .then(
-                                  (_) {},
-                                  onError: (Object _) =>
-                                      Toast.error('操作失败，请重试'),
-                                ),
+                            onLikeTap: (song) =>
+                                toggleLikeWithFeedback(widget.auth, song),
                             auth: widget.auth,
                             player: widget.player,
                             onViewArtist: _openArtist,
