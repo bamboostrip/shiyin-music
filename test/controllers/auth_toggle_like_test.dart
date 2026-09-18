@@ -234,9 +234,12 @@ void main() {
     await auth.toggleLike(_songNoFileId);
     expect(auth.isLiked(_songNoFileId), isTrue);
 
-    await auth.toggleLike(_songNoFileId);
+    // 拿不到服务端真值：回滚并抛错（调用方据此弹 toast），红心回弹。
+    // 与「点赞服务端失败」用例同契约：失败必回滚 + 必 rethrow。
+    await expectLater(auth.toggleLike(_songNoFileId), throwsException);
 
     // 拿不到服务端真值：恢复点按前状态，红心回弹。
     expect(auth.isLiked(_songNoFileId), isTrue);
+    expect(client.posts, isNot(contains('/playlist/tracks/del')));
   });
 }
