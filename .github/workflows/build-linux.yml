@@ -104,11 +104,12 @@ jobs:
           视听（ShiYin Music）Linux x64 便携版
           ====================================
 
-          运行前请安装一次运行期依赖（音频后端 libmpv 与托盘 AppIndicator）：
+          运行前请安装一次运行期依赖（音频后端 libmpv、托盘 AppIndicator
+          与下载完成通知 libnotify）：
 
-            Debian 12 / Ubuntu 24.04 :  sudo apt install libmpv2 libayatana-appindicator3-1
-            Ubuntu 22.04             :  sudo apt install libmpv1 libayatana-appindicator3-1
-            Fedora / RHEL            :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3
+            Debian 12 / Ubuntu 24.04 :  sudo apt install libmpv2 libayatana-appindicator3-1 libnotify4
+            Ubuntu 22.04             :  sudo apt install libmpv1 libayatana-appindicator3-1 libnotify4
+            Fedora / RHEL            :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3 libnotify
 
           （media_kit 按 libmpv.so → libmpv.so.2 → libmpv.so.1 顺序探测，
           Ubuntu 22.04 的 libmpv1（mpv 0.34）与 libmpv2（mpv 0.35+）均可。）
@@ -126,7 +127,9 @@ jobs:
       # deb 包：bundle 入 /opt/shiyin-music，带 .desktop 与 hicolor 图标，
       # 运行期依赖经 Depends 声明（音频后端 libmpv：Ubuntu 24.04/Debian 12
       # 是 libmpv2，Ubuntu 22.04 只有 libmpv1——media_kit 两个 soname 都能
-      # 探测，用备选依赖兼容 22.04，否则 22.04 用户 apt 安装直接失败）。
+      # 探测，用备选依赖兼容 22.04，否则 22.04 用户 apt 安装直接失败；
+      # libnotify4 是下载完成通知（local_notifier）的运行期依赖，构建期
+      # 的 libnotify-dev 对应它，22.04/24.04/Debian12 包名同为 libnotify4）。
       - name: Build deb package
         run: |
           tag="${{ steps.names.outputs.tag }}"
@@ -148,7 +151,7 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: bamboostrip <bamboostrip@users.noreply.github.com>
-          Depends: libgtk-3-0, libmpv2 | libmpv1, libayatana-appindicator3-1
+          Depends: libgtk-3-0, libmpv2 | libmpv1, libayatana-appindicator3-1, libnotify4
           Recommends: xdg-user-dirs
           Homepage: https://github.com/bamboostrip/shiyin-music
           Description: 视听音乐播放器 (ShiYin Music)
