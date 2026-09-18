@@ -565,6 +565,8 @@ class _LandscapeArtworkShowcaseState extends State<LandscapeArtworkShowcase>
                                   url: widget.song.coverUrl,
                                   size: coverSize,
                                   borderRadius: coverSize,
+                                  // 横屏唱片大图：任何形态都保持 2x/600 解码档。
+                                  highRes: true,
                                 ),
                               ),
                               SizedBox.square(

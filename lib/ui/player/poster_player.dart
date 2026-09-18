@@ -115,6 +115,8 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
                           url: widget.song.coverUrl,
                           size: double.infinity,
                           borderRadius: 8,
+                          // 播放页海报大图：任何形态都保持 2x/600 解码档。
+                          highRes: true,
                         ),
                       ),
                     ),

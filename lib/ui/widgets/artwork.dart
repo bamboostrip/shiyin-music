@@ -1,11 +1,12 @@
 import 'dart:async';
-import 'dart:math' show cos, pi;
+import 'dart:math' show cos, min, pi;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/disk_cached_image_provider.dart';
 import '../../services/network_monitor.dart';
+import '../form_factor.dart';
 
 /// 图片解码尺寸档位。
 ///
@@ -18,14 +19,25 @@ import '../../services/network_monitor.dart';
 /// 数下降与跨布局复用，整体仍显著优于"淘汰后重新走网络"。
 const _decodeSizeSteps = <int>[64, 96, 128, 160, 200, 256, 320, 400, 480, 600];
 
-/// 把布局尺寸换算为量化后的解码边长（含 2x 屏幕密度余量，上限 600）。
-int decodeSizeFor(double size) {
-  if (!size.isFinite) return 600;
-  final target = (size * 2.0).ceil();
+/// 把布局尺寸换算为量化后的解码边长。
+///
+/// - 移动/车机（!isDesktopFormFactor）：维持 `size*2.0` 吸档、上限 600，
+///   size 非有限 → 600（与历史口径完全一致，档位零变化）。
+/// - 桌面且 [highRes] 为 false：网格/列表缩略图降为 `size*1.5` 吸档、上限
+///   400，size 非有限 → 400。桌面常见 DPR 1.0~1.5，1.5x 恰够显示清晰度，
+///   单张位图内存约降为原来的 (1.5/2)² ≈ 56%。
+/// - [highRes] 为 true（播放页海报/横屏大图）：任何形态都走 2x/600 旧档。
+int decodeSizeFor(double size, {bool highRes = false}) {
+  final highTier = highRes || !isDesktopFormFactor;
+  final cap = highTier ? 600 : 400;
+  if (!size.isFinite) return cap;
+  final scale = highTier ? 2.0 : 1.5;
+  // 超过上限时直接钳到上限档，避免桌面档位“触顶后升到 480/600”。
+  final target = min((size * scale).ceil(), cap);
   for (final step in _decodeSizeSteps) {
     if (target <= step) return step;
   }
-  return 600;
+  return cap;
 }
 
 /// 网络图片，断网恢复后自动重试。
@@ -127,12 +139,18 @@ class Artwork extends StatefulWidget {
     required this.size,
     this.borderRadius = 8,
     this.icon = Icons.music_note_rounded,
+    this.highRes = false,
   });
 
   final String? url;
   final double size;
   final double borderRadius;
   final IconData icon;
+
+  /// 是否按高分辨率档解码（2x/600）。仅播放页大图（海报、横屏唱片）传 true；
+  /// 网格/列表缩略图保持默认 false，桌面形态下走 1.5x/400 降档省内存。
+  /// 移动/车机下该参数不改变行为（恒为 2x/600）。
+  final bool highRes;
 
   @override
   State<Artwork> createState() => _ArtworkState();
@@ -150,13 +168,15 @@ class _ArtworkState extends State<Artwork> {
                 size: widget.size,
                 borderRadius: widget.borderRadius,
                 icon: widget.icon,
+                highRes: widget.highRes,
               )
             : RetryableNetworkImage(
                 url: imageUrl,
                 // 解码尺寸吸附到固定档位（见 [decodeSizeFor]）：同一封面在不同
                 // 布局尺寸下复用同一条 ImageCache 条目，条目数下降、重复下载变少。
-                cacheWidth: decodeSizeFor(widget.size),
-                cacheHeight: decodeSizeFor(widget.size),
+                cacheWidth: decodeSizeFor(widget.size, highRes: widget.highRes),
+                cacheHeight:
+                    decodeSizeFor(widget.size, highRes: widget.highRes),
                 fit: BoxFit.cover,
                 errorBuilder:
                     (context, error, stackTrace) => _Fallback(icon: widget.icon),
@@ -187,12 +207,14 @@ class _ContentUriImage extends StatefulWidget {
     required this.size,
     required this.borderRadius,
     required this.icon,
+    required this.highRes,
   });
 
   final String uri;
   final double size;
   final double borderRadius;
   final IconData icon;
+  final bool highRes;
 
   @override
   State<_ContentUriImage> createState() => _ContentUriImageState();
@@ -244,8 +266,8 @@ class _ContentUriImageState extends State<_ContentUriImage> {
     return Image.memory(
       _bytes!,
       fit: BoxFit.cover,
-      cacheWidth: decodeSizeFor(widget.size),
-      cacheHeight: decodeSizeFor(widget.size),
+      cacheWidth: decodeSizeFor(widget.size, highRes: widget.highRes),
+      cacheHeight: decodeSizeFor(widget.size, highRes: widget.highRes),
     );
   }
 }

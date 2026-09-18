@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/services/image_disk_cache.dart';
 import 'package:shiyin_music/services/network_monitor.dart';
+import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/widgets/artwork.dart';
 
 /// 1×1 透明 PNG（Flutter 官方测试图 kTransparentImage 同款，引擎必然可解码）。
@@ -101,6 +102,15 @@ void main() {
   });
 
   group('解码尺寸量化', () {
+    setUp(() {
+      // 桌面网格降档（P1-2）后，这里固定为移动/车机口径（旧 2x/600 公式）
+      // 作为零回归基线；桌面 1.5x/400 档见 artwork_decode_size_test.dart。
+      debugDesktopFormFactorOverride = false;
+    });
+    tearDown(() {
+      debugDesktopFormFactorOverride = null;
+    });
+
     test('吸附到固定档位，封顶 600，非法尺寸回落到 600', () {
       // 44/48 这类相邻尺寸历史上是两条缓存条目，量化后共用同一条。
       expect(decodeSizeFor(44), 96);
