@@ -888,6 +888,25 @@ class DownloadController extends ChangeNotifier {
       }
       await source.rename(finalPath);
       return finalPath;
+    } on FileSystemException catch (_) {
+      // 跨盘/跨卷 rename（如 C 盘默认目录 ↔ D 盘自定义目录）必失败：
+      // 外层 try 的局部变量在 catch 子句不可见，这里按源路径重算目标
+      // （对账是快照遍历，无并发改名，结论一致）。
+      final name = _basenameOf(source.path);
+      if (name == null) return null;
+      final target = '${dir.path}/$name';
+      final retryPath = _service.resolveNonCollidingPath(target, source.path);
+      try {
+        await source.copy(retryPath);
+        await source.delete();
+        return retryPath;
+      } catch (error) {
+        debugPrint('[时音][download] 历史目录文件跨盘搬移失败（保留原路径）: $error');
+        // 复制成功但删源失败时目标已落地：索引指向新路径，源残留由用户清理，
+        // 不视为失败（复制失败则落到外层统一保留原路径）。
+        if (File(retryPath).existsSync()) return retryPath;
+        return null;
+      }
     } catch (error) {
       debugPrint('[时音][download] 历史目录文件搬移失败（保留原路径）: $error');
       return null;

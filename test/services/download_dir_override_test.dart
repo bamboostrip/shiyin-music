@@ -53,6 +53,41 @@ void main() {
       expect(await DownloadService.customDownloadDirOverride(), isNull);
     });
 
+    test('换目录时旧自定义目录记入历史，供对账找回旧文件', () async {
+      await DownloadService.setCustomDownloadDir('D:\\MusicA');
+      expect(await DownloadService.customDownloadDirHistory(), isEmpty,
+          reason: '首次设置无被替换值，不记历史');
+      await DownloadService.setCustomDownloadDir('D:\\MusicB');
+      expect(await DownloadService.customDownloadDirHistory(), ['D:\\MusicA']);
+      // 同值重设不重复记录；恢复默认时当前值同样入历史。
+      await DownloadService.setCustomDownloadDir('D:\\MusicB');
+      expect(await DownloadService.customDownloadDirHistory(), ['D:\\MusicA']);
+      await DownloadService.setCustomDownloadDir(null);
+      expect(await DownloadService.customDownloadDirHistory(),
+          ['D:\\MusicB', 'D:\\MusicA']);
+    });
+
+    test('ensureWritableDir：可写目录通过，文件路径/非法路径抛错', () async {
+      final tmp = await Directory.systemTemp.createTemp('shiyin_dl_probe_');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      final dir = await DownloadService.ensureWritableDir(
+        '${tmp.path}${Platform.pathSeparator}sub',
+      );
+      expect(dir.existsSync(), isTrue);
+
+      // 路径指向一个已存在的文件：当目录用必失败。
+      final file = File('${tmp.path}${Platform.pathSeparator}afile');
+      await file.writeAsString('x');
+      expect(
+        () => DownloadService.ensureWritableDir(file.path),
+        throwsStateError,
+      );
+    });
+
     test('downloadDir 优先使用自定义目录并确保其存在（桌面分支）', () async {
       final tmp = await Directory.systemTemp.createTemp('shiyin_dl_override_');
       addTearDown(() async {

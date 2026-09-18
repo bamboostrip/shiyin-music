@@ -234,6 +234,15 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
         directory = await _pickDirectoryFallback(_effectivePath);
       }
       if (directory == null) return;
+      // 先探测可写再保存：选到不可写目录（权限不足/只读介质）时当场报错，
+      // 而不是存下来等下载时才失败。
+      try {
+        await DownloadService.ensureWritableDir(directory);
+      } catch (e) {
+        debugPrint('[设置] 下载位置不可写: $e');
+        Toast.error('$e');
+        return;
+      }
       await DownloadService.setCustomDownloadDir(directory);
       Toast.success('下载位置已更新，之后下载的歌曲将保存到该文件夹');
       await _load();

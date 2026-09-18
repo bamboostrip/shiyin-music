@@ -50,9 +50,18 @@ class DownloadService {
   ///
   /// 空 / 未设置 = 跟随系统默认（桌面为系统「下载」目录下的
   /// [AppConfig.downloadDirName] 子目录）。只影响之后的新下载；
-  /// 已有条目的索引是绝对路径，文件留在原处仍可播可删，下次对账
-  /// 还会被搬入新目录（reconcile 的「以文件为准」语义）。
+  /// 已有条目的索引是绝对路径，文件留在原处仍可播可删；换目录前的
+  /// 旧自定义目录会记入 [downloadDirOverrideHistoryKey]，下次对账
+  /// 按「以文件为准」语义搬入新目录（见 [legacyDownloadDirs]）。
   static const String downloadDirOverrideKey = 'download_dir_override';
+
+  /// 历史自定义下载目录的 prefs 键（StringList，最多保留
+  /// [_maxOverrideHistory] 条）：每次换目录/恢复默认时把被替换掉的
+  /// 旧自定义目录记入，供 [legacyDownloadDirs] 对账找回。
+  /// 不记的话旧文件永远“以文件为准”不了，与上面的搬移注释自相矛盾。
+  static const String downloadDirOverrideHistoryKey =
+      'download_dir_override_history';
+  static const int _maxOverrideHistory = 10;
 
   /// 读取用户自定义下载目录；未设置（空 / 空白）返回 null。
   static Future<String?> customDownloadDirOverride() async {
@@ -63,12 +72,58 @@ class DownloadService {
   }
 
   /// 写入 / 清除自定义下载目录（[dir] 传 null 恢复系统默认）。
+  ///
+  /// 被替换掉的旧自定义目录会记入历史（见
+  /// [downloadDirOverrideHistoryKey]），以便对账找回留在旧目录的文件；
+  /// 值不变时不重复记录。
   static Future<void> setCustomDownloadDir(String? dir) async {
     final prefs = await SharedPreferences.getInstance();
-    if (dir == null || dir.trim().isEmpty) {
+    final previous = await customDownloadDirOverride();
+    final next = (dir == null || dir.trim().isEmpty) ? null : dir.trim();
+    if (previous != null && previous != next) {
+      final history = List<String>.of(
+        prefs.getStringList(downloadDirOverrideHistoryKey) ?? const [],
+      )..remove(previous);
+      history.insert(0, previous);
+      while (history.length > _maxOverrideHistory) {
+        history.removeLast();
+      }
+      await prefs.setStringList(downloadDirOverrideHistoryKey, history);
+    }
+    if (next == null) {
       await prefs.remove(downloadDirOverrideKey);
     } else {
-      await prefs.setString(downloadDirOverrideKey, dir.trim());
+      await prefs.setString(downloadDirOverrideKey, next);
+    }
+  }
+
+  /// 读取历史自定义下载目录（去重、去空、去当前值，由调用方过滤）。
+  static Future<List<String>> customDownloadDirHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(downloadDirOverrideHistoryKey);
+    if (list == null) return const [];
+    return list.where((e) => e.trim().isNotEmpty).toList();
+  }
+
+  /// 探测目录是否可用作下载位置：确保存在并真实可写。
+  ///
+  /// 设置页保存前调用：选到不可写目录（权限不足、只读介质、路径是文件等）
+  /// 时提前报错，而不是存下来等下载时才失败。成功返回目录；失败抛
+  /// [StateError]（信息已是用户可读文案，可直接 Toast）。
+  static Future<Directory> ensureWritableDir(String path) async {
+    final dir = Directory(path);
+    try {
+      if (!dir.existsSync()) {
+        await dir.create(recursive: true);
+      }
+      final probe = File(
+        '${dir.path}${Platform.pathSeparator}.shiyin_write_test',
+      );
+      await probe.writeAsString('ok');
+      await probe.delete();
+      return dir;
+    } catch (error) {
+      throw StateError('该文件夹不可写，换一个位置试试（$error）');
     }
   }
 
@@ -207,6 +262,15 @@ class DownloadService {
       for (final name in _legacyDownloadDirNameCandidates) {
         dirs.add(Directory('${base.path}/$name'));
       }
+    }
+    // 历史自定义目录：用户换过下载位置时，旧目录里的文件仍在原处，
+    // 纳入对账才能按「以文件为准」搬入当前目录（否则换目录=旧歌丢索引）。
+    try {
+      for (final historyPath in await customDownloadDirHistory()) {
+        dirs.add(Directory(historyPath));
+      }
+    } catch (_) {
+      // prefs 读取失败不影响既有历史目录对账
     }
     // 排除当前下载目录（macOS/Linux 下文档目录兜底路径可能与历史路径重合）
     Directory? current;
