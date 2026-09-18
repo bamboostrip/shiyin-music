@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../controllers/player_controller.dart';
+import 'app_dialog.dart';
 
 Future<void> showAudioEffectsSheet({
   required BuildContext context,
@@ -83,6 +84,9 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
   }
 }
 
+/// 顶部胶囊分段切换（均衡器/增强）：44 高整圆角胶囊，选中项为悬浮白丸 +
+/// 主题色字，与搜索胶囊/药丸按钮同语言。此前 86 高大字标题 + 圆点指示
+/// 在移动端显大显旧。
 class _EffectTabs extends StatelessWidget {
   const _EffectTabs({required this.index, required this.onChanged});
 
@@ -92,45 +96,61 @@ class _EffectTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final labels = ['均衡器', '增强'];
-    return Container(
-      height: 86,
-      color: colorScheme.surfaceContainer,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          for (final entry in labels.indexed)
-            InkWell(
-              onTap: () => onChanged(entry.$1),
-              child: SizedBox(
-                width: 132,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: isDark
+              ? colorScheme.surfaceContainerHighest
+              : const Color(0xFFF1F2F5),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          children: [
+            for (final entry in labels.indexed)
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onChanged(entry.$1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: entry.$1 == index
+                          ? (isDark
+                                ? colorScheme.surfaceContainerLowest
+                                : Colors.white)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(19),
+                      boxShadow: entry.$1 == index
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Text(
                       entry.$2,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         color: entry.$1 == index
                             ? colorScheme.primary
-                            : colorScheme.onSurface,
-                        fontWeight: FontWeight.w900,
+                            : colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: entry.$1 == index ? 8 : 0,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -151,7 +171,7 @@ class _EqualizerPanel extends StatelessWidget {
     return Column(
       children: [
         SwitchListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 22),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
           title: const Text('启用均衡器'),
           subtitle: Text(
             player.equalizerEnabled ? player.equalizerPresetName : '关闭',
@@ -159,8 +179,9 @@ class _EqualizerPanel extends StatelessWidget {
           value: player.equalizerEnabled,
           onChanged: player.setEqualizerEnabled,
         ),
+        const SizedBox(height: 4),
         SizedBox(
-          height: 84,
+          height: 64,
           child: CustomPaint(
             painter: _EqualizerCurvePainter(
               colorScheme: colorScheme,
@@ -176,16 +197,31 @@ class _EqualizerPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                width: 62,
+                width: 56,
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 32, bottom: 58),
+                  padding: const EdgeInsets.only(top: 26, bottom: 44),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('+${maxDb.round()}dB'),
-                      const Text('0dB'),
-                      Text('${minDb.round()}dB'),
+                      Text(
+                        '+${maxDb.round()}dB',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        '0dB',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        '${minDb.round()}dB',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -224,23 +260,13 @@ class _EqualizerPanel extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _showPresetPicker(context),
-                  child: const Text('预设'),
-                ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: player.resetEqualizer,
-                  child: const Text('重置'),
-                ),
-              ),
-            ],
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+          // 与确认弹窗同语言：左浅底重置 + 右渐变预设（46 高整圆角药丸）。
+          child: AppDialogPillActions(
+            cancelText: '重置',
+            confirmText: '预设',
+            onCancel: player.resetEqualizer,
+            onConfirm: () => _showPresetPicker(context),
           ),
         ),
       ],
@@ -310,16 +336,19 @@ class _EqualizerBandSlider extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final dbValue = value / 100;
     return SizedBox(
-      width: 72,
+      width: 64,
       child: Column(
         children: [
           SizedBox(
-            height: 28,
+            height: 24,
             child: Text(
               dbValue == 0 ? '0' : dbValue.toStringAsFixed(1),
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: enabled
+                    ? colorScheme.onSurface
+                    : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           Expanded(
@@ -327,13 +356,19 @@ class _EqualizerBandSlider extends StatelessWidget {
               quarterTurns: -1,
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
+                  trackHeight: 4,
                   thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 17,
-                    disabledThumbRadius: 17,
+                    enabledThumbRadius: 10,
+                    disabledThumbRadius: 10,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 18,
                   ),
                   activeTrackColor: colorScheme.primary,
                   inactiveTrackColor: colorScheme.outlineVariant,
+                  thumbColor: enabled
+                      ? colorScheme.primary
+                      : colorScheme.outlineVariant,
                 ),
                 child: Slider(
                   value: value.toDouble(),
@@ -347,13 +382,15 @@ class _EqualizerBandSlider extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             label,
             maxLines: 1,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w900,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: enabled
+                  ? colorScheme.onSurfaceVariant
+                  : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
