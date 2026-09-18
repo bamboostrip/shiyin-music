@@ -141,7 +141,7 @@ fn analyze_path(
     }
     // 本地/回退路径对 interrupted（截断文件）沿用容错语义：按已解码
     // 部分出结果，与历史行为一致。
-    Ok(analyze_mss(mss, &hint, cancelled, progress)?.map(|analysis| analysis.result))
+    Ok(analyze_mss(mss, &hint, cancelled, progress, true)?.map(|analysis| analysis.result))
 }
 
 /// [analyze_mss] 的产物：结果 + 是否异常中断。
@@ -156,11 +156,17 @@ struct MssAnalysis {
 
 /// 统一解码循环：probe → 选轨 → 包循环 → 门限响度计。本地文件、整曲
 /// 下载回退、HTTP 流式三条路径共用，差异仅在 MediaSource 与 hint 的构造。
+/// [emit_interrupted_final]：包循环因读错误中断时是否仍推送
+/// `is_final=true`。本地/回退路径传 true（沿用容错语义：截断文件按已解码
+/// 部分出结果）；流式路径传 false（半截 LUFS 不得当最终值，由回退路径独占
+/// final——否则 Dart 侧一见 final 就写缓存并取消订阅，回退的真 final 再也
+/// 送不回来）。
 fn analyze_mss(
     mss: MediaSourceStream,
     hint: &Hint,
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(LoudnessProgress),
+    emit_interrupted_final: bool,
 ) -> anyhow::Result<Option<MssAnalysis>> {
     let probed = symphonia::default::get_probe().format(
         hint,
@@ -262,11 +268,15 @@ fn analyze_mss(
         anyhow::bail!("no valid loudness blocks");
     }
     let analyzed_ms = meter.analyzed_ms();
-    progress(LoudnessProgress {
-        lufs,
-        analyzed_ms,
-        is_final: true,
-    });
+    // 流式中途读错误时不推送 final：半截 LUFS 只配做中途进度，final 由
+    // 整曲下载回退路径独占（见 analyze_mss 的 emit_interrupted_final）。
+    if !interrupted || emit_interrupted_final {
+        progress(LoudnessProgress {
+            lufs,
+            analyzed_ms,
+            is_final: true,
+        });
+    }
     Ok(Some(MssAnalysis {
         result: LoudnessResult {
             lufs,
@@ -332,7 +342,9 @@ fn analyze_streaming(
     if let Some(ext) = url_extension(source) {
         hint.with_extension(&ext);
     }
-    match analyze_mss(mss, &hint, cancelled, progress)? {
+    // 流式路径传 false：中途读错误时不推送半截 final，由回退路径独占
+    // final（Dart 侧一见 final 就写缓存并取消订阅，先推半截必污染缓存）。
+    match analyze_mss(mss, &hint, cancelled, progress, false)? {
         None => Ok(None), // 已取消
         // 中途读错误（网络抖动/超时截断）：半截结果不可当最终值，返回
         // Err 交由上层回退整曲下载（代价是重新完整下载一次，有界）。
@@ -406,7 +418,8 @@ fn resolve_local(
 
     // 崩溃/取消残留的同名临时文件直接复用，免去一次重复下载
     // （正常路径分析结束即删，命中窗口很小，但零成本顺手兜住）。
-    if path.exists() {
+    // 空文件不复用：写入非原子，崩溃可能留下 0 字节半截文件。
+    if path.exists() && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0 {
         return Ok(Some((path, true)));
     }
 
@@ -418,7 +431,21 @@ fn resolve_local(
         let _ = std::fs::remove_file(&path);
         return Ok(None);
     }
-    std::fs::write(&path, &bytes)?;
+    // 原子落盘：先写唯一临时名再 rename，避免崩溃在目标路径留下半截文件
+    // 被下次复用（rename 在同一目录内是原子的）。
+    let staging = dir.join(format!(
+        "analyze-{}-{}.part",
+        simple_hash(source),
+        std::process::id()
+    ));
+    if let Err(e) = (|| -> anyhow::Result<()> {
+        std::fs::write(&staging, &bytes)?;
+        std::fs::rename(&staging, &path)?;
+        Ok(())
+    })() {
+        let _ = std::fs::remove_file(&staging);
+        return Err(e);
+    }
     Ok(Some((path, true)))
 }
 
@@ -719,6 +746,8 @@ mod tests {
         hint.with_extension("wav");
 
         let mut streaming_events = Vec::new();
+        // 不可 seek 侧按流式生产语义传 false（本用例是干净流尾，
+        // interrupted=false，final 照常推送，断言不受影响）。
         let non_seekable = analyze_mss(
             MediaSourceStream::new(
                 Box::new(SequentialReadSource {
@@ -729,6 +758,7 @@ mod tests {
             &hint,
             &cancelled,
             &mut |p| streaming_events.push(p),
+            false,
         )
         .unwrap()
         .expect("不可 seek 源上不应取消");
@@ -741,6 +771,7 @@ mod tests {
             &hint,
             &cancelled,
             &mut |_| {},
+            true,
         )
         .unwrap()
         .expect("可 seek 源上不应取消");
@@ -762,6 +793,101 @@ mod tests {
             streaming_events.len() >= 2 && streaming_events.iter().any(|p| !p.is_final),
             "期望 >=2 个进度事件（含中途），实际 {}",
             streaming_events.len()
+        );
+    }
+
+    /// 中途读错误时流式路径不得推送半截 final（回归测试）：截断源 +
+    /// `emit_interrupted_final=false` 应返回 `interrupted=true` 且事件流里
+    /// 没有 `is_final`；同源 + true（本地容错语义）则仍推送 final。
+    /// 覆盖的是“弱网长曲半截 LUFS 写缓存污染”问题。
+    #[test]
+    fn interrupted_streaming_emits_no_final() {
+        use std::io::Read;
+
+        /// 前 `limit` 字节正常给，之后恒报非 EOF 读错误（模拟网络截断）。
+        struct TruncatingReader {
+            data: Vec<u8>,
+            pos: usize,
+            limit: usize,
+        }
+        impl Read for TruncatingReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.pos >= self.limit {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "模拟网络中途截断",
+                    ));
+                }
+                let end = (self.pos + buf.len()).min(self.limit).min(self.data.len());
+                let n = end - self.pos;
+                buf[..n].copy_from_slice(&self.data[self.pos..end]);
+                self.pos = end;
+                Ok(n)
+            }
+        }
+
+        // 5s 正弦 WAV 取前 1/4 做截断源：足以解出有效响度块（前文已证
+        // 该信号远高于绝对门限），又保证包循环撞上读错误而非干净流尾。
+        let bytes = make_wav_bytes(5.0, 44100);
+        let limit = bytes.len() / 4;
+        let cancelled = || false;
+        let mut hint = Hint::new();
+        hint.with_extension("wav");
+
+        // 流式语义：无 final，标记中断。
+        let mut streaming_events = Vec::new();
+        let analysis = analyze_mss(
+            MediaSourceStream::new(
+                Box::new(SequentialReadSource {
+                    inner: TruncatingReader {
+                        data: bytes.clone(),
+                        pos: 0,
+                        limit,
+                    },
+                }),
+                Default::default(),
+            ),
+            &hint,
+            &cancelled,
+            &mut |p| streaming_events.push((p.lufs, p.analyzed_ms, p.is_final)),
+            false,
+        )
+        .unwrap()
+        .expect("截断不应被当成取消");
+        assert!(analysis.interrupted, "截断源应标记 interrupted");
+        assert!(
+            analysis.result.lufs.is_finite(),
+            "半截音频仍应算出有限 LUFS"
+        );
+        assert!(
+            streaming_events.iter().all(|(_, _, f)| !f),
+            "流式中断不得推送 is_final，实际事件: {streaming_events:?}",
+        );
+
+        // 本地容错语义：同源仍推送 final（行为不变）。
+        let mut local_events = Vec::new();
+        let local = analyze_mss(
+            MediaSourceStream::new(
+                Box::new(SequentialReadSource {
+                    inner: TruncatingReader {
+                        data: bytes,
+                        pos: 0,
+                        limit,
+                    },
+                }),
+                Default::default(),
+            ),
+            &hint,
+            &cancelled,
+            &mut |p| local_events.push((p.lufs, p.analyzed_ms, p.is_final)),
+            true,
+        )
+        .unwrap()
+        .expect("截断不应被当成取消");
+        assert!(local.interrupted);
+        assert!(
+            local_events.iter().any(|(_, _, f)| *f),
+            "本地容错语义下仍应推送 final，实际事件: {local_events:?}",
         );
     }
 
