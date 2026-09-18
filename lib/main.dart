@@ -363,7 +363,7 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
       // 会拖慢冷启动（车机 eMMC 尤其明显），首帧后再跑用户无感。
       unawaited(ImageDiskCache.instance.prune());
     });
-    // Windows 桌面：托盘常驻（左键切换窗口、右键菜单、退出）。
+    // Windows 桌面：托盘常驻（左键恒恢复并置前，右键菜单、退出）。
     if (isDesktopFormFactor) {
       // 退出统一走 DesktopWindow.quitGracefully（落盘几何 → 刷写状态 →
       // 终止进程）：引擎 teardown 在 IME/UIA 环境下必崩，托盘图标与桌面
