@@ -7,6 +7,7 @@ import '../../models/music_models.dart';
 import '../form_factor.dart';
 import '../player/player_route.dart';
 import 'artwork.dart';
+import 'marquee_text.dart';
 import 'queue_sheet.dart';
 
 /// 迷你播放条本体（悬浮胶囊）。
@@ -122,10 +123,10 @@ class _MiniPlayerContent extends StatelessWidget {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
+                                      // 长歌名不再被 ellipsis 截断；放得下时
+                                      // MarqueeText 内部零开销地退化为静态文本。
+                                      MarqueeText.text(
                                         song.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
                                         style: Theme.of(context)
                                             .textTheme
                                             .titleSmall

@@ -137,30 +137,21 @@ class _AppSongRowState extends State<AppSongRow> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            active
-                                ? MarqueeText.text(
-                                    song.title,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyLarge
-                                        ?.copyWith(
-                                          color: activeColor,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                        ),
-                                  )
-                                : Text(
-                                    song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyLarge
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                        ),
+                            // 全部行都用 MarqueeText：文本放得下时它内部直接
+                            // 渲染静态 Text.rich（零动画开销），放不下才滚动。
+                            // 之前只有 active 行用跑马灯，其余长歌名一律被
+                            // ellipsis 截断。
+                            MarqueeText.text(
+                              song.title,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyLarge
+                                  ?.copyWith(
+                                    color: active ? activeColor : null,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
                                   ),
+                            ),
                             const SizedBox(height: 2),
                             Text(
                               widget.subtitle ?? song.artist,

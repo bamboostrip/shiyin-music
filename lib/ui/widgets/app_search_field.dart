@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'marquee_text.dart';
+
 /// 移动端统一搜索胶囊（首页顶栏 / 搜索页 / 歌单内过滤 / 本地检索共用）。
 ///
 /// 以首页 [HomeSearchBar] + 搜索页 AppBar 输入框为基准收敛：
@@ -60,6 +62,12 @@ class AppSearchField extends StatefulWidget {
 }
 
 class _AppSearchFieldState extends State<AppSearchField> {
+  /// 后缀槽（清除按钮；空态为等宽占位）的宽度。
+  ///
+  /// 输入区右边界 = Stack 右边界 − 本值。覆盖层（提示/跑马灯）必须按同样
+  /// 宽度内缩，否则失焦态的跑马灯会把滚动中的文字画到 X 图标上。
+  static const double _suffixSlotWidth = 32;
+
   FocusNode? _internalFocusNode;
   bool _focused = false;
   bool _hasText = false;
@@ -234,7 +242,14 @@ class _AppSearchFieldState extends State<AppSearchField> {
                   onChanged: widget.onChanged,
                   onSubmitted: widget.onSubmitted,
                   textAlignVertical: TextAlignVertical.center,
-                  style: textStyle,
+                  // 失焦且有文字时把原生文字置为透明，交由下方 MarqueeText
+                  // 覆盖层渲染：TextField 失焦态只会把超长文本裁成省略号，
+                  // 长歌名/歌手名看不到后半截。
+                  style: (!_focused && _hasText)
+                      ? (textStyle ?? const TextStyle()).copyWith(
+                          color: Colors.transparent,
+                        )
+                      : textStyle,
                   decoration: InputDecoration(
                     isDense: true,
                     filled: false,
@@ -255,13 +270,16 @@ class _AppSearchFieldState extends State<AppSearchField> {
                             ),
                             onPressed: _handleClear,
                           )
-                        // 空态也占住后缀 32px 槽位：空态与输入态装饰器高度
+                        // 空态也占住后缀槽位：空态与输入态装饰器高度
                         // 一致，textAlignVertical.center 的垂直再分配才会
                         // 生效，光标与提示文字上下居中。
-                        : const SizedBox(width: 32, height: 32),
+                        : const SizedBox(
+                            width: _suffixSlotWidth,
+                            height: _suffixSlotWidth,
+                          ),
                     suffixIconConstraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
+                      minWidth: _suffixSlotWidth,
+                      minHeight: _suffixSlotWidth,
                     ),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
@@ -274,6 +292,7 @@ class _AppSearchFieldState extends State<AppSearchField> {
                 ),
                 if (!_hasText)
                   Positioned.fill(
+                    right: _suffixSlotWidth,
                     child: IgnorePointer(
                       child: Align(
                         alignment: Alignment.centerLeft,
@@ -282,6 +301,34 @@ class _AppSearchFieldState extends State<AppSearchField> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: hintStyle,
+                        ),
+                      ),
+                    ),
+                  ),
+                // 超长文本跑马灯覆盖层（仅失焦态：聚焦时由 TextField 自己
+                // 跟光标横向滚动）。必须用 ValueListenableBuilder 直接监听
+                // controller —— 本组件的 _handleTextChanged 刻意只在
+                // "空↔非空"边界 setState（增量优化），拿 _hasText 驱动的话
+                // 覆盖层文字不会跟着输入更新。
+                if (!_focused)
+                  Positioned.fill(
+                    // 右侧让出后缀槽：输入区右边界止于 X 之前，跑马灯必须
+                    // 按同一边界裁剪，否则滚动中的文字会盖到 X 图标上。
+                    right: _suffixSlotWidth,
+                    child: IgnorePointer(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _controller!,
+                          builder: (context, value, _) {
+                            if (value.text.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+                            return MarqueeText.text(
+                              value.text,
+                              style: textStyle,
+                            );
+                          },
                         ),
                       ),
                     ),

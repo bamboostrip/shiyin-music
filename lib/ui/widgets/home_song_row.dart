@@ -7,6 +7,7 @@ import '../form_factor.dart';
 import 'artwork.dart';
 import 'cover_play_overlay.dart';
 import 'desktop_anchored_menu.dart';
+import 'marquee_text.dart';
 import 'now_playing_badge.dart';
 import 'song_action_sheets.dart';
 
@@ -222,10 +223,10 @@ class _HomeSongRowState extends State<HomeSongRow> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          // 长歌名不再被 ellipsis 截断；放得下时 MarqueeText
+                          // 内部零开销地退化为静态文本。
+                          MarqueeText.text(
                             widget.song.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context)
                                 .textTheme
                                 .titleSmall
