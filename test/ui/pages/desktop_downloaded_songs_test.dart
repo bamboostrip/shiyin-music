@@ -31,6 +31,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
 
   // 迷你播放条（行点播后挂载）读取的进度/状态成员：真机由 Rust 引擎驱动，
   // fake 给零值即可，只保证组件能构建。
+  @override
   final ValueNotifier<Duration> positionListenable =
       ValueNotifier(Duration.zero);
 

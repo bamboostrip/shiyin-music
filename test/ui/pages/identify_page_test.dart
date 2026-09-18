@@ -13,6 +13,7 @@ import 'package:shiyin_music/services/identify_service.dart';
 import 'package:shiyin_music/src/rust/services/identify.dart' show IdentifyCandidate;
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/identify_page.dart';
+import 'package:shiyin_music/ui/widgets/app_song_row.dart';
 
 IdentifyCandidate _candidate({String name = '晴天', String singer = '周杰伦'}) =>
     IdentifyCandidate(
@@ -188,8 +189,12 @@ void main() {
 
     expect(find.text('晴天'), findsOneWidget);
 
-    // 移动端更多按钮 (Icons.more_horiz_rounded)
-    final moreButton = find.byIcon(Icons.more_horiz_rounded);
+    // 移动端结果行已收敛到共享组件 AppSongRow（见 search_song_results.dart），
+    // 「更多」由 AppSongRowMenuButton 提供（Icons.more_vert_rounded，
+    // tooltip '更多'）。这里按组件类型断言，不再绑定某个具体图标 ——
+    // 之前写死 Icons.more_horiz_rounded，行统一为 AppSongRow 后断言失效，
+    // 但功能（菜单里仍有「下一首播放」）一直是好的。
+    final moreButton = find.byType(AppSongRowMenuButton);
     expect(moreButton, findsOneWidget);
     await tester.tap(moreButton);
     await tester.pumpAndSettle();
