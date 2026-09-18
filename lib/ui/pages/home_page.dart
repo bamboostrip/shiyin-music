@@ -1369,40 +1369,40 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                         ),
                       ),
                     ),
-                    SliverToBoxAdapter(
-                      child: _SongSection(
-                        key: ValueKey('song_section_$railResetEpoch'),
-                        title: '大家都在听',
-                        songs: data.daily.songs,
-                        onPlay: _playSong,
-                        isLiked: (song) => widget.auth.isLiked(song),
-                        onLikeTap: (song) =>
-                            toggleLikeWithFeedback(widget.auth, song),
-                        auth: widget.auth,
-                        player: widget.player,
-                        onViewArtist: _openArtist,
-                      ),
+                    // 桌面宽窗：本体直接输出懒构建 sliver 组（SliverGrid 只
+                    // 构建滚动可见的行，见 _SongSection.asSlivers）；移动端
+                    // 由本体自行包 SliverToBoxAdapter，观感不变。
+                    _SongSection(
+                      key: ValueKey('song_section_$railResetEpoch'),
+                      asSlivers: true,
+                      title: '大家都在听',
+                      songs: data.daily.songs,
+                      onPlay: _playSong,
+                      isLiked: (song) => widget.auth.isLiked(song),
+                      onLikeTap: (song) =>
+                          toggleLikeWithFeedback(widget.auth, song),
+                      auth: widget.auth,
+                      player: widget.player,
+                      onViewArtist: _openArtist,
                     ),
-                    SliverToBoxAdapter(
-                      child: _PlaylistRail(
-                        key: ValueKey('playlist_rail_$railResetEpoch'),
-                        playlists: data.playlists,
-                        onTap: _openPlaylist,
-                        onPlay: _playPlaylist,
-                        onTapTitle: () =>
-                            _openRecommendedPlaylists(data.playlists),
-                      ),
+                    // 同上：推荐歌单网格桌面端转懒构建 SliverGrid。
+                    _PlaylistRail(
+                      key: ValueKey('playlist_rail_$railResetEpoch'),
+                      asSlivers: true,
+                      playlists: data.playlists,
+                      onTap: _openPlaylist,
+                      onPlay: _playPlaylist,
+                      onTapTitle: () =>
+                          _openRecommendedPlaylists(data.playlists),
                     ),
                     if (data.topSongs.isNotEmpty)
-                      SliverToBoxAdapter(
-                        child: _TopSongRail(
-                          key: ValueKey('topsong_rail_$railResetEpoch'),
-                          songs: data.topSongs,
-                          onPlay: (song) =>
-                              _playSong(song, data.topSongs),
-                          onTapTitle: () =>
-                              _openTopSongs(data.topSongs),
-                        ),
+                      // 同上：新歌速递网格桌面端转懒构建 SliverGrid。
+                      _TopSongRail(
+                        key: ValueKey('topsong_rail_$railResetEpoch'),
+                        asSlivers: true,
+                        songs: data.topSongs,
+                        onPlay: (song) => _playSong(song, data.topSongs),
+                        onTapTitle: () => _openTopSongs(data.topSongs),
                       ),
                     SliverToBoxAdapter(
                       child: SizedBox(height: wideShell ? 24 : 166),
@@ -2017,7 +2017,13 @@ class _SongSection extends StatefulWidget {
     required this.auth,
     required this.player,
     required this.onViewArtist,
+    this.asSlivers = false,
   });
+
+  /// 桌面宽窗下由 tab 级 CustomScrollView 直接承接：本体输出懒构建 sliver
+  /// 组（见 _buildDesktopSlivers），非桌面形态则包 SliverToBoxAdapter 挂入。
+  /// 默认 false 时返回普通盒子（车机 Column 宿主沿用）。
+  final bool asSlivers;
 
   final String title;
   final List<Song> songs;
@@ -2051,13 +2057,23 @@ class _SongSectionState extends State<_SongSection> {
   @override
   Widget build(BuildContext context) {
     if (widget.songs.isEmpty) {
+      // 桌面懒构建形态本体是 sliver：空数据也返回空 sliver，避免盒子混进
+      // tab 的 slivers 列表。
+      if (widget.asSlivers) {
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
+      }
       return const SizedBox.shrink();
     }
 
     return AnimatedBuilder(
       animation: widget.auth,
       builder: (context, _) {
-        return Padding(
+        // 桌面宽窗：宿主是 tab 的 CustomScrollView，标题 + 网格整体转为
+        // 懒构建 sliver 组（只有滚动可见的行才实例化）。
+        if (widget.asSlivers && isDesktopFormFactor) {
+          return _buildDesktopSlivers();
+        }
+        final section = Padding(
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
           child: Column(
             children: [
@@ -2239,7 +2255,85 @@ class _SongSectionState extends State<_SongSection> {
             ],
           ),
         );
+        // 非桌面形态（asSlivers 挂进 tab slivers）：与改造前调用处的
+        // SliverToBoxAdapter 包装等价，仅挪到本体内部；盒子宿主原样返回。
+        if (widget.asSlivers) {
+          return SliverToBoxAdapter(child: section);
+        }
+        return section;
       },
+    );
+  }
+
+  /// 桌面宽窗懒构建形态（宿主为 tab 级 CustomScrollView）。
+  ///
+  /// 原桌面分支在 LayoutBuilder 里一次性全量实例化全部 HomeSongRow（Row +
+  /// 按列 Expanded(Column)），歌曲多时首页峰值内存高；改为 SliverGrid +
+  /// SliverChildBuilderDelegate 后只构建滚动可见的行。视觉口径不变：
+  /// 列数断点 ≥1050=3 / ≥650=2、列距 16、行高 60（与移动端分页
+  /// rowCount * 60.0 同口径）、左右 18 边距、底部 24。旧实现按"列主序
+  /// 填充 + 按列展示"，第 r 行第 c 格恰为 songs[r*列数+c]，SliverGrid
+  /// 行主序 child i → songs[i] 视觉完全一致，无需任何置换。
+  Widget _buildDesktopSlivers() {
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverToBoxAdapter(
+          // 8 = 原 header 与网格之间的 SizedBox(8)。
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+            child: _SectionHeader(
+              title: widget.title,
+              action: _CirclePlayButton(
+                tooltip: '播放',
+                size: 38,
+                iconSize: 22,
+                onTap: () => widget.onPlay(widget.songs.first, widget.songs),
+              ),
+            ),
+          ),
+        ),
+        SliverPadding(
+          // 左右 18 与标题对齐，底部 24 = 原区块底部留白；列距 16 =
+          // 原 Row 列间 SizedBox(16)。
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+          sliver: SliverLayoutBuilder(
+            builder: (context, constraints) {
+              final maxWidth = constraints.crossAxisExtent;
+              final int crossAxisCount;
+              if (maxWidth >= 1050) {
+                crossAxisCount = 3;
+              } else if (maxWidth >= 650) {
+                crossAxisCount = 2;
+              } else {
+                crossAxisCount = 1;
+              }
+              return SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 16,
+                  mainAxisExtent: 60,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final song = widget.songs[index];
+                    return HomeSongRow(
+                      song: song,
+                      queue: widget.songs,
+                      onPlay: widget.onPlay,
+                      isLiked: widget.isLiked(song),
+                      onLikeTap: () => widget.onLikeTap(song),
+                      auth: widget.auth,
+                      player: widget.player,
+                      onViewArtist: () => widget.onViewArtist(song),
+                    );
+                  },
+                  childCount: widget.songs.length,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2251,11 +2345,17 @@ class _TopSongRail extends StatelessWidget {
     required this.songs,
     required this.onPlay,
     this.onTapTitle,
+    this.asSlivers = false,
   });
 
   final List<Song> songs;
   final ValueChanged<Song> onPlay;
   final VoidCallback? onTapTitle;
+
+  /// 桌面宽窗下由 tab 级 CustomScrollView 直接承接：本体输出懒构建 sliver
+  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）；非桌面
+  /// 形态则包 SliverToBoxAdapter 挂入。默认 false 返回普通盒子（车机沿用）。
+  final bool asSlivers;
 
   @override
   Widget build(BuildContext context) {
@@ -2299,6 +2399,70 @@ class _TopSongRail extends StatelessWidget {
             ),
           ],
         ),
+      );
+    }
+    // 桌面宽窗（宿主为 tab 级 CustomScrollView）：标题 + 网格整体转为懒构建
+    // sliver 组，旧 GridView(shrinkWrap) 会一次性构建全部卡片；窄内容区
+    // 仍回退横轨（与下方盒子分支同口径，只是宿主换成 sliver）。注意横轨
+    // 自带分区标题（AppHorizontalRail 内部渲染），与旧结构一致只在网格
+    // 分支额外挂 _SectionHeader。
+    if (asSlivers) {
+      return SliverLayoutBuilder(
+        builder: (context, constraints) {
+          if (AdaptiveLayout.isGridWidth(constraints.crossAxisExtent)) {
+            return SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    // 20 = 原区块顶部留白，12 = 原 header 与网格之间的
+                    // SizedBox(12)。
+                    padding: const EdgeInsets.fromLTRB(18, 20, 18, 12),
+                    child: _SectionHeader(
+                      title: '新歌速递',
+                      action: const SizedBox.shrink(),
+                      onTap: onTapTitle,
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 160,
+                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 14,
+                      // 正方形封面 + 两行文字 ≈ 宽:高 = 0.72。
+                      childAspectRatio: 0.72,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: _TopSongCard(
+                          song: songs[index],
+                          onTap: () => onPlay(songs[index]),
+                        ),
+                      ),
+                      childCount: songs.length,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+          return SliverToBoxAdapter(
+            child: AppHorizontalRail<Song>(
+              title: '新歌速递',
+              items: songs,
+              height: 162,
+              itemWidth: 110,
+              topPadding: 20,
+              onTapTitle: onTapTitle,
+              itemBuilder: (context, song) =>
+                  _TopSongCard(song: song, onTap: () => onPlay(song)),
+            ),
+          );
+        },
       );
     }
     // 宽内容区（桌面宽窗 / 平板侧栏形态）：转网格并让封面撑满格宽
@@ -2455,6 +2619,7 @@ class _PlaylistRail extends StatelessWidget {
     required this.onTap,
     this.onPlay,
     this.onTapTitle,
+    this.asSlivers = false,
   });
 
   final List<PlaylistSummary> playlists;
@@ -2462,9 +2627,19 @@ class _PlaylistRail extends StatelessWidget {
   final ValueChanged<PlaylistSummary>? onPlay;
   final VoidCallback? onTapTitle;
 
+  /// 桌面宽窗下由 tab 级 CustomScrollView 直接承接：本体输出懒构建 sliver
+  /// 组（网格改 SliverGrid，姿势同 recommended_playlists_page）；非桌面
+  /// 形态则包 SliverToBoxAdapter 挂入。默认 false 返回普通盒子（车机沿用）。
+  final bool asSlivers;
+
   @override
   Widget build(BuildContext context) {
     if (playlists.isEmpty) {
+      // 桌面懒构建形态本体是 sliver：空数据也返回空 sliver，避免盒子混进
+      // tab 的 slivers 列表。
+      if (asSlivers) {
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
+      }
       return const SizedBox.shrink();
     }
 
@@ -2512,6 +2687,81 @@ class _PlaylistRail extends StatelessWidget {
             ),
           ],
         ),
+      );
+    }
+
+    // 桌面宽窗（宿主为 tab 级 CustomScrollView）：标题 + 网格整体转为懒构建
+    // sliver 组，旧 GridView(shrinkWrap) 会一次性构建全部卡片；窄内容区
+    // 仍回退横轨（与下方盒子分支同口径，只是宿主换成 sliver）。
+    if (asSlivers) {
+      return SliverMainAxisGroup(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              // 12 = 原区块顶部留白 = 原 header 与网格之间的 SizedBox(12)。
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+              child: _SectionHeader(
+                title: '推荐歌单',
+                action: const SizedBox.shrink(),
+                onTap: onTapTitle,
+              ),
+            ),
+          ),
+          SliverLayoutBuilder(
+            builder: (context, constraints) {
+              if (AdaptiveLayout.isGridWidth(constraints.crossAxisExtent)) {
+                return SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 160,
+                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 14,
+                      childAspectRatio: 0.60,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final playlist = playlists[index];
+                        return _PlaylistCard(
+                          playlist: playlist,
+                          onTap: () => onTap(playlist),
+                          onPlay:
+                              onPlay == null ? null : () => onPlay!(playlist),
+                        );
+                      },
+                      childCount: playlists.length,
+                    ),
+                  ),
+                );
+              }
+              return SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 204,
+                  child: HorizontalWheelScroll(
+                    builder: (context, controller) => ListView.separated(
+                      controller: controller,
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: playlists.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 14),
+                      itemBuilder: (context, index) {
+                        final playlist = playlists[index];
+                        return _PlaylistCard(
+                          playlist: playlist,
+                          onTap: () => onTap(playlist),
+                          onPlay:
+                              onPlay == null ? null : () => onPlay!(playlist),
+                          width: 128,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       );
     }
 
