@@ -212,6 +212,11 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _search(String keywords) async {
     if (keywords.isEmpty) return;
+    // 收键盘放在 _search 本体，而不是只放在 _onSubmit：点热搜词
+    // （_onKeywordTap）、切平台（_switchPlatform）、切搜索类型
+    // （_switchSearchType）与 initialQuery 自动搜都直接调这里，否则这些
+    // 路径下键盘不收起、挡住结果列表。
+    _focusNode.unfocus();
     _debounce?.cancel();
     final seq = ++_searchSeq;
     setState(() {

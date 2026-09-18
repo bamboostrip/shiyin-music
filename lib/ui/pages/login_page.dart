@@ -829,7 +829,18 @@ class _LoginTextField extends StatelessWidget {
                     fontSize: 16,
                   ),
                   decoration: InputDecoration(
+                    // 主题的 inputDecorationTheme 给了 filled + 14px 圆角
+                    // 的 enabledBorder/focusedBorder；本输入框嵌在自绘胶囊里，
+                    // 只覆盖 border 不够——聚焦时会在胶囊内浮出一圈主题色描边
+                    // 和深色填充块。故把各状态边框一并关掉。
+                    filled: false,
+                    fillColor: Colors.transparent,
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
                     isDense: true,
                     contentPadding: EdgeInsets.zero,
                     hintText: hintText,
