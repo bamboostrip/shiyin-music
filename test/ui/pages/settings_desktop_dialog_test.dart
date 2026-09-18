@@ -176,6 +176,16 @@ class _FakeAuth extends ChangeNotifier implements AuthController {
 }
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
+  @override
+  bool keepScreenOnEnabled = true;
+
+  @override
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    keepScreenOnEnabled = enabled;
+    notifyListeners();
+  }
+
   final List<AudioQuality> setAudioQualityCalls = [];
 
   @override

@@ -21,6 +21,16 @@ class _FakeApi implements MusicApi {
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  /// PlayerPage 的 KEEP_SCREEN_ON 门控会读写这两个成员。
+  @override
+  bool keepScreenOnEnabled = true;
+
+  @override
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    keepScreenOnEnabled = enabled;
+    notifyListeners();
+  }
+
   @override
   Song? currentSong = const Song(
     id: 'test-song-1',

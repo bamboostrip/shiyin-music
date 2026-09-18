@@ -180,6 +180,23 @@ class PlaybackSettingsSection extends StatelessWidget {
                 value: player.addListeningTimeEnabled,
                 onChanged: player.setAddListeningTimeEnabled,
               ),
+              // 可见性只跟形态走（与上面的「后台打断机制」同口径），不叠
+              // defaultTargetPlatform 判断：Windows 上用
+              // `--dart-define=FORCE_MOBILE=true` 预览移动端布局时，
+              // isDesktopFormFactor 被强制为 false 而宿主平台仍是 windows，
+              // 叠加平台判断会让这个开关在移动端预览里凭空消失。
+              // 原生通道目前只有 Android 实现（MainActivity.kt 的
+              // shiyin_music/screen），iOS/桌面下拨动是无副作用的空操作；
+              // 要让 iOS 真正生效需补 UIApplication.idleTimerDisabled。
+              SettingsDivider(),
+              SettingsSwitchTile(
+                icon: Icons.stay_current_portrait_rounded,
+                iconColor: const Color(0xFF00ACC1),
+                title: '播放页保持屏幕常亮',
+                subtitle: '仅在播放中常亮；暂停或停止后交回系统自动休眠',
+                value: player.keepScreenOnEnabled,
+                onChanged: player.setKeepScreenOnEnabled,
+              ),
             ],
             if (player.isDesktopLyricsSupported) ...[
               SettingsDivider(),

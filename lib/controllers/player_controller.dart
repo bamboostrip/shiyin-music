@@ -102,6 +102,7 @@ const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
 const _autoPlayOnDeviceConnectedSettingKey =
     'settings.auto_play_on_device_connected';
 const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
+const _keepScreenOnSettingKey = 'settings.keep_screen_on';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
 const _listenTimeReportInterval = Duration(minutes: 30);
@@ -497,6 +498,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 一起限制整轮跳过的墙钟时长（次数上限之外的另一道保险）。
   DateTime? _autoSkipStreakSince;
   bool addListeningTimeEnabled = true;
+
+  /// 播放页是否保持屏幕常亮（仅 Android 生效，其余平台无原生实现）。
+  ///
+  /// 真实生效条件是 [keepScreenOnEnabled] **且** [isPlaying]：暂停/停播时
+  /// 交回系统休眠。历史上是无条件常亮，导致暂停后停在播放页仍在烧屏。
+  bool keepScreenOnEnabled = true;
   AudioQuality audioQuality = AudioQuality.standard;
 
   /// 是否开启音质智能切换（播放失败时自动降级重试）。

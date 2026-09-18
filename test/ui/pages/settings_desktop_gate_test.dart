@@ -49,6 +49,7 @@ void main() {
       expect(find.text('连接新音频设备自动播放'), findsNothing);
       expect(find.text('后台打断机制'), findsNothing);
       expect(find.text('增加听歌时长'), findsNothing);
+      expect(find.text('播放页保持屏幕常亮'), findsNothing);
 
       expect(find.text('桌面'), findsOneWidget);
       expect(find.text('关闭时最小化到托盘'), findsOneWidget);
@@ -182,6 +183,26 @@ void main() {
           findsOneWidget,
         );
         expect(find.textContaining('Windows 仅支持压低偏响歌曲'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('Windows 宿主 + FORCE_MOBILE 预览移动端布局时，常亮开关依然展示', (tester) async {
+      // 回归点：`--dart-define=FORCE_MOBILE=true` 只强制 isDesktopFormFactor
+      // 为 false，宿主平台仍是 windows。曾经的实现额外叠了
+      // `defaultTargetPlatform == TargetPlatform.android` 判断，导致这个
+      // 开关在移动端预览里凭空消失（真机 Android 上却是好的）。
+      // 可见性必须只跟形态走，与「后台打断机制」同口径。
+      debugDesktopFormFactorOverride = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester);
+
+        expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+        // 与同组「后台打断机制」「增加听歌时长」同进同出。
+        expect(find.text('后台打断机制'), findsOneWidget);
+        expect(find.text('增加听歌时长'), findsOneWidget);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
@@ -324,6 +345,16 @@ class _FakeAuth extends ChangeNotifier implements AuthController {
 }
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
+  @override
+  bool keepScreenOnEnabled = true;
+
+  @override
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    keepScreenOnEnabled = enabled;
+    notifyListeners();
+  }
+
   @override
   AudioQuality get audioQuality => AudioQuality.standard;
 

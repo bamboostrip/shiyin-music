@@ -13,6 +13,19 @@ import 'package:shiyin_music/ui/player/player_route.dart';
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  /// PlayerPage 的 KEEP_SCREEN_ON 门控会读写这两个成员。
+  @override
+  bool keepScreenOnEnabled = true;
+
+  @override
+  bool isPlaying = false;
+
+  @override
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    keepScreenOnEnabled = enabled;
+    notifyListeners();
+  }
+
   @override
   Song? get currentSong => null;
 

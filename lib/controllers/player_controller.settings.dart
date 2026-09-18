@@ -17,6 +17,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    if (keepScreenOnEnabled == enabled) {
+      return;
+    }
+    keepScreenOnEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keepScreenOnSettingKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setAudioQuality(
     AudioQuality quality, {
     bool reloadCurrent = false,
@@ -327,6 +337,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     addListeningTimeEnabled =
         prefs.getBool(_listenTimeSettingKey) ?? addListeningTimeEnabled;
+    keepScreenOnEnabled =
+        prefs.getBool(_keepScreenOnSettingKey) ?? keepScreenOnEnabled;
     audioQuality = AudioQuality.fromApiValue(
       prefs.getString(_audioQualitySettingKey),
     );

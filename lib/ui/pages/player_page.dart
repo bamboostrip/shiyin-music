@@ -34,10 +34,15 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage> {
   static const _screenChannel = MethodChannel('shiyin_music/screen');
 
+  /// 原生窗口当前是否已置为常亮。用于 diff：playerStateStream 每次变化都会
+  /// notifyListeners，不去重会往平台通道打大量无谓调用。
+  bool _isScreenOn = false;
+
   @override
   void initState() {
     super.initState();
-    unawaited(_setKeepScreenOn(true));
+    widget.player.addListener(_syncKeepScreenOn);
+    _syncKeepScreenOn();
     // 不在此处调用 setPreferredOrientations：方向策略由 ThemeController 全局管理。
     // 如果这里解锁方向，即使用户在设置里没开横屏模式，旋转手机时播放页也会
     // 跟着旋转，影响竖屏体验。
@@ -45,9 +50,25 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
-    unawaited(_setKeepScreenOn(false));
+    widget.player.removeListener(_syncKeepScreenOn);
+    if (_isScreenOn) {
+      _isScreenOn = false;
+      unawaited(_setKeepScreenOn(false));
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
+  }
+
+  /// 目标常亮状态 = 用户开关 **且** 正在播放。
+  ///
+  /// 暂停/停播即清 flag 交回系统休眠。历史实现是无条件 `true`：Android 的
+  /// `FLAG_KEEP_SCREEN_ON` 只关心窗口是否可见、与播放状态无关，于是"暂停后
+  /// 停在播放页发呆"也会一直烧屏。开关（默认开）关掉后，播放中也不常亮。
+  void _syncKeepScreenOn() {
+    final want = widget.player.keepScreenOnEnabled && widget.player.isPlaying;
+    if (want == _isScreenOn) return;
+    _isScreenOn = want;
+    unawaited(_setKeepScreenOn(want));
   }
 
   Future<void> _setKeepScreenOn(bool enabled) async {
