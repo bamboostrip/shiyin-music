@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart'
@@ -441,28 +442,18 @@ class _DownloadedList extends StatelessWidget {
   }
 
   void _confirmClearAll(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierColor: AppDialogStyle.barrierColor(),
-      builder: (ctx) => AppDialogShell(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const AppDialogTitle('清空全部下载'),
-            const SizedBox(height: 12),
-            const AppDialogMessage('确定要删除所有已下载的歌曲吗？此操作不可撤销。'),
-            const SizedBox(height: 22),
-            AppDialogPillActions(
-              confirmText: '清空',
-              onCancel: () => Navigator.pop(ctx),
-              onConfirm: () {
-                Navigator.pop(ctx);
-                downloads.clearAllDownloads();
-              },
-            ),
-          ],
-        ),
-      ),
+    unawaited(
+      () async {
+        final confirmed = await showAppConfirmDialog(
+          context,
+          title: '清空全部下载',
+          message: '确定要删除所有已下载的歌曲吗？此操作不可撤销。',
+          confirmText: '清空',
+        );
+        if (confirmed) {
+          await downloads.clearAllDownloads();
+        }
+      }(),
     );
   }
 }
@@ -809,28 +800,18 @@ class _PlayCacheList extends StatelessWidget {
   }
 
   void _confirmClearCache(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierColor: AppDialogStyle.barrierColor(),
-      builder: (ctx) => AppDialogShell(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const AppDialogTitle('清空播放缓存'),
-            const SizedBox(height: 12),
-            const AppDialogMessage('确定要清空所有播放缓存吗？下次播放需要重新加载。'),
-            const SizedBox(height: 22),
-            AppDialogPillActions(
-              confirmText: '清空',
-              onCancel: () => Navigator.pop(ctx),
-              onConfirm: () {
-                Navigator.pop(ctx);
-                downloads.clearPlayCache();
-              },
-            ),
-          ],
-        ),
-      ),
+    unawaited(
+      () async {
+        final confirmed = await showAppConfirmDialog(
+          context,
+          title: '清空播放缓存',
+          message: '确定要清空所有播放缓存吗？下次播放需要重新加载。',
+          confirmText: '清空',
+        );
+        if (confirmed) {
+          await downloads.clearPlayCache();
+        }
+      }(),
     );
   }
 }

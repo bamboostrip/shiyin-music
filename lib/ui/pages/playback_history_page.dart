@@ -48,30 +48,14 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
   }
 
   Future<void> _confirmClear() async {
-    // 与歌单删除/已下载清空同语言：18 圆角居中卡 + 双药丸按钮。
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierColor: AppDialogStyle.barrierColor(),
-      builder: (ctx) {
-        return AppDialogShell(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const AppDialogTitle('清空播放历史'),
-              const SizedBox(height: 12),
-              const AppDialogMessage('确定要清空全部播放历史吗？此操作不可恢复。'),
-              const SizedBox(height: 22),
-              AppDialogPillActions(
-                confirmText: '清空',
-                onCancel: () => Navigator.of(ctx).pop(false),
-                onConfirm: () => Navigator.of(ctx).pop(true),
-              ),
-            ],
-          ),
-        );
-      },
+    // 与歌单删除/已下载清空同语言：18 圆角居中卡 + 双药丸按钮（内置连点守卫）。
+    final confirmed = await showAppConfirmDialog(
+      context,
+      title: '清空播放历史',
+      message: '确定要清空全部播放历史吗？此操作不可恢复。',
+      confirmText: '清空',
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     await widget.player.clearPlaybackHistory();
     Toast.success('已清空播放历史');
     _reload();

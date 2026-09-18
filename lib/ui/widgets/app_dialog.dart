@@ -222,3 +222,57 @@ abstract final class AppDialogStyle {
   /// 确认类弹窗统一遮罩：40% 黑。
   static Color barrierColor() => Colors.black.withValues(alpha: 0.4);
 }
+
+/// 统一确认类弹窗：标题 + 正文 + 双药丸按钮（[AppDialogShell] 版式），
+/// 自带连点守卫。
+///
+/// 守卫的必要性：确认按钮是裸 `Navigator.pop`，弹窗退出动画期间（约
+/// 150ms）按钮仍在树上、仍可命中，二次点击会把弹窗之下的路由顺带 pop
+/// 掉；「清空下载」这类确认回调里的破坏性动作也可能执行两次。首次点击
+/// （取消或确认）即消费整个弹窗的结局，之后的点击全部忽略。
+///
+/// 返回 true=确认；取消/关闭返回 false（不抛、不返回 null，调用方免判空）。
+Future<bool> showAppConfirmDialog(
+  BuildContext context, {
+  required String title,
+  required String message,
+  String confirmText = '确定',
+  String cancelText = '取消',
+  bool barrierDismissible = false,
+}) async {
+  /// 弹窗结局一次性消费标记：取消/确认首点后置位，退出动画期间的再点击
+  /// （含键盘 submit 抢跑后的补点）全部短路。必须在 builder 外持有——
+  /// builder 会因键盘 inset/theme 变化重建，闭包内声明会随重建被重置。
+  var resolved = false;
+  final result = await showDialog<bool>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierColor: AppDialogStyle.barrierColor(),
+    builder: (ctx) {
+      void close(bool value) {
+        if (resolved) return;
+        resolved = true;
+        Navigator.of(ctx).pop(value);
+      }
+
+      return AppDialogShell(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppDialogTitle(title),
+            const SizedBox(height: 12),
+            AppDialogMessage(message),
+            const SizedBox(height: 22),
+            AppDialogPillActions(
+              confirmText: confirmText,
+              cancelText: cancelText,
+              onCancel: () => close(false),
+              onConfirm: () => close(true),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  return result ?? false;
+}

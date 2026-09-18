@@ -1529,6 +1529,11 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
   var _canSubmit = false;
   var _focused = false;
 
+  /// 弹窗结局一次性消费标记：键盘 submit 与「创建/取消」按钮多入口，先到
+  /// 的 pop 之后弹窗进入退出动画，迟到的第二次提交会把弹窗之下的路由顺带
+  /// pop 掉（或触发两次创建回调），首点后短路。
+  var _resolved = false;
+
   @override
   void initState() {
     super.initState();
@@ -1562,7 +1567,13 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
   void _submit([String? value]) {
     final trimmed = (value ?? _controller.text).trim();
     if (trimmed.isEmpty) return;
-    Navigator.of(context).pop(trimmed);
+    _close(trimmed);
+  }
+
+  void _close([String? value]) {
+    if (_resolved) return;
+    _resolved = true;
+    Navigator.of(context).pop(value);
   }
 
   @override
@@ -1633,7 +1644,7 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
           AppDialogPillActions(
             confirmText: '创建',
             confirmEnabled: _canSubmit,
-            onCancel: () => Navigator.of(context).pop(),
+            onCancel: () => _close(),
             onConfirm: _submit,
           ),
         ],

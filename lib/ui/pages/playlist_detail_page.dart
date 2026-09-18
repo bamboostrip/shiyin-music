@@ -1500,29 +1500,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     required String message,
     String confirmText = '删除',
   }) {
-    return showDialog<bool>(
-      context: context,
+    // 统一确认弹窗（AppDialogShell + 双药丸，内置连点守卫）。
+    return showAppConfirmDialog(
+      context,
+      title: title,
+      message: message,
+      confirmText: confirmText,
       barrierDismissible: true,
-      barrierColor: AppDialogStyle.barrierColor(),
-      builder: (dialogContext) {
-        // 与创建歌单 dialog 同一套公共组件（AppDialogShell + 双药丸按钮）。
-        return AppDialogShell(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AppDialogTitle(title),
-              const SizedBox(height: 12),
-              AppDialogMessage(message),
-              const SizedBox(height: 22),
-              AppDialogPillActions(
-                confirmText: confirmText,
-                onCancel: () => Navigator.of(dialogContext).pop(false),
-                onConfirm: () => Navigator.of(dialogContext).pop(true),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
