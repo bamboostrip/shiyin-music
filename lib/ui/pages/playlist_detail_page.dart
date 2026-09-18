@@ -10,6 +10,7 @@ import '../../core/pinyin_utils.dart';
 import '../../models/music_models.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/app_search_field.dart';
 import '../widgets/app_section.dart';
 import '../widgets/artwork.dart';
@@ -1503,102 +1504,23 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return showDialog<bool>(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.4),
+      barrierColor: AppDialogStyle.barrierColor(),
       builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        final textTheme = Theme.of(dialogContext).textTheme;
-        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
-        // 参考图版式：圆角 + 居中标题/文案 + 双药丸按钮；
-        // 确认按钮用主题色渐变（左浅右深），取消为中性浅底。
-        final dialogBg = isDark
-            ? colorScheme.surfaceContainerLow
-            : Colors.white;
-        final titleColor = isDark ? colorScheme.onSurface : const Color(0xFF1A1D24);
-        final messageColor = isDark
-            ? colorScheme.onSurfaceVariant
-            : const Color(0xFF5B606B);
-        final cancelBg = isDark
-            ? colorScheme.surfaceContainerHighest
-            : const Color(0xFFF4F5F7);
-        final cancelFg = isDark ? colorScheme.onSurface : const Color(0xFF1A1D24);
-        // 主题色渐变：左端向白色提亮 25%，右端为 primary 本色，
-        // 与全局 FilledButton（Stadium + primary）同色系，只是多了渐变质感。
-        final confirmGradient = LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: [
-            Color.lerp(colorScheme.primary, Colors.white, 0.22) ??
-                colorScheme.primary,
-            colorScheme.primary,
-          ],
-        );
-        return Dialog(
-          backgroundColor: dialogBg,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 24,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: textTheme.titleMedium?.copyWith(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: titleColor,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    message,
-                    textAlign: TextAlign.center,
-                    style: textTheme.bodyMedium?.copyWith(
-                      fontSize: 14,
-                      color: messageColor,
-                      height: 1.6,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _ConfirmPillButton(
-                          label: '取消',
-                          foreground: cancelFg,
-                          background: cancelBg,
-                          gradient: null,
-                          onTap: () =>
-                              Navigator.of(dialogContext).pop(false),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _ConfirmPillButton(
-                          label: confirmText,
-                          foreground: colorScheme.onPrimary,
-                          background: null,
-                          gradient: confirmGradient,
-                          onTap: () =>
-                              Navigator.of(dialogContext).pop(true),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+        // 与创建歌单 dialog 同一套公共组件（AppDialogShell + 双药丸按钮）。
+        return AppDialogShell(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppDialogTitle(title),
+              const SizedBox(height: 12),
+              AppDialogMessage(message),
+              const SizedBox(height: 22),
+              AppDialogPillActions(
+                confirmText: confirmText,
+                onCancel: () => Navigator.of(dialogContext).pop(false),
+                onConfirm: () => Navigator.of(dialogContext).pop(true),
               ),
-            ),
+            ],
           ),
         );
       },
@@ -3694,54 +3616,4 @@ String _playCount(int? value) {
     return '${(value / 10000).toStringAsFixed(1)} 万次播放';
   }
   return '$value 次播放';
-}
-
-/// 参考图风格的药丸按钮：取消为浅底深字，确认为蓝渐变白字。
-/// 用 Container + InkWell 实现渐变（FilledButton 不支持渐变背景）。
-class _ConfirmPillButton extends StatelessWidget {
-  const _ConfirmPillButton({
-    required this.label,
-    required this.foreground,
-    required this.onTap,
-    this.background,
-    this.gradient,
-  });
-
-  final String label;
-  final Color foreground;
-  final Color? background;
-  final Gradient? gradient;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: Ink(
-          height: 46,
-          decoration: BoxDecoration(
-            color: gradient == null ? background : null,
-            gradient: gradient,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Center(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: foreground,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                height: 1.2,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

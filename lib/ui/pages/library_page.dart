@@ -8,6 +8,7 @@ import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/artwork.dart';
 import '../widgets/toast.dart';
 import 'cloud_drive_page.dart';
@@ -123,12 +124,20 @@ class LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _showCreatePlaylistDialog() async {
-    final name = await showModalBottomSheet<String>(
+    final name = await showDialog<String>(
       context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (sheetContext) => _CreatePlaylistSheet(),
+      barrierDismissible: true,
+      barrierColor: AppDialogStyle.barrierColor(),
+      // 裸 Dialog 不像 AlertDialog 那样自带键盘避让；包一层随键盘顶起，
+      // 否则自动聚焦弹起键盘后输入框会被盖住。
+      builder: (dialogContext) => AnimatedPadding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(dialogContext).bottom,
+        ),
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        child: const _CreatePlaylistDialog(),
+      ),
     );
     if (name == null) return;
 
@@ -1508,83 +1517,115 @@ class _PlaylistRowState extends State<_PlaylistRow> {
   }
 }
 
-// --- 10. 创建歌单 BottomSheet ---
+// --- 10. 创建歌单 Dialog（与删除确认弹窗同语言：18 圆角居中 + 双药丸按钮）---
 
-class _CreatePlaylistSheet extends StatefulWidget {
+class _CreatePlaylistDialog extends StatefulWidget {
+  const _CreatePlaylistDialog();
+
   @override
-  State<_CreatePlaylistSheet> createState() => _CreatePlaylistSheetState();
+  State<_CreatePlaylistDialog> createState() => _CreatePlaylistDialogState();
 }
 
-class _CreatePlaylistSheetState extends State<_CreatePlaylistSheet> {
+class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
   final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  var _canSubmit = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
-    });
+    _controller.addListener(_handleTextChanged);
   }
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    _controller.removeListener(_handleTextChanged);
     _controller.dispose();
     super.dispose();
   }
 
+  void _handleTextChanged() {
+    final canSubmit = _controller.text.trim().isNotEmpty;
+    if (canSubmit != _canSubmit && mounted) {
+      setState(() => _canSubmit = canSubmit);
+    }
+  }
+
   void _submit([String? value]) {
     final trimmed = (value ?? _controller.text).trim();
-    Navigator.of(context).pop(trimmed.isEmpty ? null : trimmed);
+    if (trimmed.isEmpty) return;
+    Navigator.of(context).pop(trimmed);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        0,
-        20,
-        20 + MediaQuery.viewInsetsOf(context).bottom,
-      ),
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AppDialogShell(
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '创建歌单',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
+          const AppDialogTitle('创建歌单'),
           const SizedBox(height: 16),
-          TextField(
-            controller: _controller,
-            focusNode: _focusNode,
-            maxLength: 40,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              hintText: '请输入歌单名称',
-              counterText: '',
-              border: OutlineInputBorder(),
+          Container(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? colorScheme.surfaceContainerHighest
+                  : const Color(0xFFF4F5F7),
+              borderRadius: BorderRadius.circular(12),
             ),
-            onSubmitted: _submit,
+            child: TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLength: 40,
+              textInputAction: TextInputAction.done,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+              decoration: InputDecoration(
+                hintText: '请输入歌单名称',
+                hintStyle: TextStyle(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                counterStyle: TextStyle(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
+                  fontSize: 12,
+                ),
+              ),
+              buildCounter: (
+                _, {
+                required int currentLength,
+                required bool isFocused,
+                required int? maxLength,
+              }) =>
+                  Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(
+                  '$currentLength/$maxLength',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              onSubmitted: _submit,
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('取消'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () => _submit(),
-                child: const Text('创建'),
-              ),
-            ],
+          const SizedBox(height: 20),
+          AppDialogPillActions(
+            confirmText: '创建',
+            confirmEnabled: _canSubmit,
+            onCancel: () => Navigator.of(context).pop(),
+            onConfirm: _submit,
           ),
         ],
       ),
