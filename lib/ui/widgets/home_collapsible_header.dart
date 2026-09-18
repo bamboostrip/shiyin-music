@@ -8,6 +8,7 @@ import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../pages/identify_page.dart';
 import '../pages/search_page.dart';
+import 'app_search_field.dart';
 
 /// 页面层固定吸顶头视图：以普通 widget 形式渲染
 /// [HomeCollapsibleHeaderDelegate] 的布局与绘制（搜索行淡出上移、标签栏
@@ -346,54 +347,11 @@ class HomeSearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    Widget content = Container(
+    // 统一样式唯一来源：见 AppSearchField.tap（36 高胶囊 + #F3F4F6 底）。
+    Widget content = AppSearchField.tap(
+      onTap: () => _handleTap(context),
+      hintText: hintText,
       height: height,
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.07)
-            : const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(height / 2),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(height / 2),
-          onTap: () => _handleTap(context),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.search_rounded,
-                  size: 16.5,
-                  color: colorScheme.onSurfaceVariant.withValues(
-                    alpha: isDark ? 0.65 : 0.5,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    hintText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant.withValues(
-                            alpha: isDark ? 0.7 : 0.6,
-                          ),
-                          fontWeight: FontWeight.w400,
-                          fontSize: 14,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
 
     if (margin != null) {

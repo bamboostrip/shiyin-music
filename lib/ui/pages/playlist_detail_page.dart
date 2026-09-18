@@ -10,6 +10,7 @@ import '../../core/pinyin_utils.dart';
 import '../../models/music_models.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
+import '../widgets/app_search_field.dart';
 import '../widgets/app_section.dart';
 import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
@@ -1662,26 +1663,18 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       // 选择模式也保留默认返回箭头（参考主流 App）：
                       // PopScope 会把返回拦截为退出选择，不需要 X。
                       title: _isSearching
-                          ? TextField(
+                          // 与首页/搜索页同款胶囊：同高 36、同圆角、同底色、
+                          // 同搜索图标与同提示样式，顶栏搜索不再是裸 TextField。
+                          ? AppSearchField(
                               controller: _searchController,
                               autofocus: true,
+                              hintText: _isLoadingAllSongs
+                                  ? '正在加载全部歌曲…'
+                                  : '搜索歌曲名或歌手名',
                               onChanged: (value) =>
                                   setState(() => _searchQuery = value),
-                              decoration: InputDecoration(
-                                hintText: _isLoadingAllSongs
-                                    ? '正在加载全部歌曲…'
-                                    : '搜索歌曲名或歌手名',
-                                border: InputBorder.none,
-                                hintStyle: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              onSubmitted: (_) =>
+                                  FocusScope.of(context).unfocus(),
                             )
                           // 参考图4：标题仅在收起后淡入，展开时由 Hero 居中展示，
                           // 顶栏不再与一排按钮抢宽度，窄屏也能完整显示。

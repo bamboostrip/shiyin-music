@@ -5,6 +5,7 @@ import '../adaptive_layout.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../widgets/toast.dart';
+import '../widgets/app_search_field.dart';
 import '../widgets/artwork.dart';
 import '../widgets/now_playing_badge.dart';
 import '../player/song_tap_handler.dart';
@@ -491,32 +492,18 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                       ),
                     ),
                   ),
-                // 搜索栏
+                // 搜索栏：与首页/搜索页/歌单内搜索同款胶囊（36 高整圆角）。
                 if (allSongs.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 4,
                     ),
-                    child: TextField(
+                    child: AppSearchField(
                       controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: '检索本地音乐...',
-                        prefixIcon: const Icon(Icons.search_rounded),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                onPressed: () => _searchController.clear(),
-                                icon: const Icon(Icons.clear_rounded),
-                              )
-                            : null,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      ),
+                      hintText: '检索本地音乐...',
+                      onSubmitted: (_) =>
+                          FocusScope.of(context).unfocus(),
                     ),
                   ),
                 // 歌曲列表

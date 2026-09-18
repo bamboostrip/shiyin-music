@@ -11,6 +11,7 @@ import '../../services/music_api.dart';
 import '../../services/network_monitor.dart';
 import '../../services/search_history_service.dart';
 import '../widgets/artwork.dart';
+import '../widgets/app_search_field.dart';
 import '../widgets/horizontal_wheel_scroll.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/toast.dart';
@@ -488,7 +489,6 @@ class _SearchPageState extends State<SearchPage> {
     final size = MediaQuery.sizeOf(context);
     final isLandscape = size.width > size.height;
     final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     // 车机式搜索栏仅在车机模式开启时使用，普通横屏用标准布局。
     final isCarMode = isLandscape && ThemeController.instance.carModeEnabled;
 
@@ -564,9 +564,9 @@ class _SearchPageState extends State<SearchPage> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        // 与首页 HomeSearchBar 同款胶囊：同高 36、同圆角、同底色、
-        // 同搜索图标与同提示样式，点击首页搜索进入时视觉无断层。
-        // 常态无边框无阴影（首页即如此），聚焦时染一圈主色细边框。
+        // 搜索胶囊统一样式唯一来源：见 AppSearchField（与首页同高 36、
+        // 同圆角、同底色、同搜索图标与同提示样式，聚焦主色细边框由组件
+        // 内部自管，页内不再重复写 Container + TextField）。
         // 胶囊左侧是识曲入口（isSupported 闸门：不支持平台不渲染，
         // 行内只剩胶囊本身，维持原布局）。
         title: Row(
@@ -585,121 +585,12 @@ class _SearchPageState extends State<SearchPage> {
               const SizedBox(width: 2),
             ],
             Expanded(
-              child: Container(
-          height: 36,
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: .07)
-                : const Color(0xFFF3F4F6),
-            borderRadius: BorderRadius.circular(18),
-            border: _searchFocused
-                ? Border.all(
-                    color: colorScheme.primary.withValues(alpha: .65),
-                    width: 1.3,
-                  )
-                : Border.all(color: Colors.transparent, width: 1),
-          ),
-          child: Row(
-            children: [
-              const SizedBox(width: 12),
-              Icon(
-                Icons.search_rounded,
-                size: 16.5,
-                color: colorScheme.onSurfaceVariant.withValues(
-                  alpha: isDark ? 0.65 : 0.5,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                // 提示文案不走 InputDecoration.hintText：其基线由 InputDecorator
-                // 的内联合成样式决定，在 Windows 真实字体（Microsoft YaHei UI）
-                // 度量下会比输入行低约 4px，出现"输入文字居中、提示偏下"。
-                // 改为普通 Text 叠放在输入框同层，与输入行走同一套居中布局。
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) => _onSubmitFromKeyboard(),
-                      textAlignVertical: TextAlignVertical.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: isDark
-                                ? colorScheme.onSurface.withValues(alpha: .92)
-                                : colorScheme.onSurface,
-                            fontWeight: FontWeight.w400,
-                            fontSize: 14,
-                          ),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        filled: false,
-                        suffixIcon: _controller.text.isNotEmpty
-                            ? IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints.tightFor(
-                                  width: 28,
-                                  height: 28,
-                                ),
-                                icon: Icon(Icons.close_rounded,
-                                    size: 16,
-                                    color: isDark
-                                        ? colorScheme.onSurface
-                                              .withValues(alpha: .86)
-                                        : colorScheme.onSurfaceVariant),
-                                onPressed: () {
-                                  _controller.clear();
-                                  _focusNode.requestFocus();
-                                  setState(() {});
-                                },
-                              )
-                            // 空态也占住后缀 32px 槽位：空态与输入态装饰器高度
-                            // 一致，textAlignVertical.center 的垂直再分配才会
-                            // 生效，聚焦光标与提示文字一样上下居中（否则光标
-                            // 在空态比胶囊中心低约 4px）。
-                            : const SizedBox(width: 32, height: 32),
-                        // 收紧后缀图标约束：默认 48 高度会撑破 36 高的胶囊。
-                        suffixIconConstraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    if (_controller.text.isEmpty)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '搜索歌曲、歌手、专辑',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant
-                                        .withValues(alpha: isDark ? 0.7 : 0.6),
-                                    fontWeight: FontWeight.w400,
-                                    fontSize: 14,
-                                  ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              // 无文字时补右内边距：有清除按钮时按钮自带边距，无按钮时
-              // TextField 会贴到容器右边缘、压住外圈边框。
-              if (_controller.text.isEmpty) const SizedBox(width: 12),
-            ],
-          ),
+              child: AppSearchField(
+                controller: _controller,
+                focusNode: _focusNode,
+                hintText: '搜索歌曲、歌手、专辑',
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) => _onSubmitFromKeyboard(),
               ),
             ),
           ],
