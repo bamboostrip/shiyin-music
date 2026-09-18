@@ -223,24 +223,16 @@ class QueueTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  active
-                      ? MarqueeText.text(
-                          song.title,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                color: colorScheme.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        )
-                      : Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
+                  // 与 AppSongRow/HomeSongRow 同口径：全部行用跑马灯，
+                  // 文本放得下时内部零开销退化为静态文本，长歌名不再被
+                  // ellipsis 截断。
+                  MarqueeText.text(
+                    song.title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: active ? colorScheme.primary : null,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     song.artist,
