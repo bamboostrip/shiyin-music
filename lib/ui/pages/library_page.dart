@@ -126,7 +126,9 @@ class LibraryPageState extends State<LibraryPage> {
   Future<void> _showCreatePlaylistDialog() async {
     final name = await showDialog<String>(
       context: context,
-      barrierDismissible: true,
+      // 输入型弹窗不允许点遮罩关闭：误触会丢掉已输入的歌单名；
+      // 纯确认型弹窗（playlist_detail 的 _confirm）保持可点遮罩取消。
+      barrierDismissible: false,
       barrierColor: AppDialogStyle.barrierColor(),
       // 裸 Dialog 不像 AlertDialog 那样自带键盘避让；包一层随键盘顶起，
       // 否则自动聚焦弹起键盘后输入框会被盖住。
