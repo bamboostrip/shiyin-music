@@ -315,7 +315,7 @@ class _AppShellState extends State<AppShell> {
                 label: '排行榜',
               ),
               TouchSidebarItem(
-                icon: Icons.radio_rounded,
+                icon: Icons.radio_outlined,
                 activeIcon: Icons.radio_rounded,
                 label: '电台',
               ),
