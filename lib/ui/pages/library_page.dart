@@ -1528,19 +1528,31 @@ class _CreatePlaylistDialog extends StatefulWidget {
 
 class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   var _canSubmit = false;
+  var _focused = false;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_handleTextChanged);
+    _focusNode.addListener(_handleFocusChanged);
   }
 
   @override
   void dispose() {
     _controller.removeListener(_handleTextChanged);
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _handleFocusChanged() {
+    final focused = _focusNode.hasFocus;
+    if (focused != _focused && mounted) {
+      setState(() => _focused = focused);
+    }
   }
 
   void _handleTextChanged() {
@@ -1570,14 +1582,26 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
             decoration: BoxDecoration(
               color: isDark
                   ? colorScheme.surfaceContainerHighest
-                  : const Color(0xFFF4F5F7),
+                  : const Color(0xFFF7F8FA),
               borderRadius: BorderRadius.circular(12),
+              // 常态浅灰描边保证盒子结构可见；聚焦时染主题色，
+              // 与搜索胶囊的聚焦细边框同语言。
+              border: Border.all(
+                color: _focused
+                    ? colorScheme.primary.withValues(alpha: 0.6)
+                    : (isDark
+                        ? colorScheme.outlineVariant.withValues(alpha: 0.5)
+                        : const Color(0xFFE2E5EA)),
+                width: _focused ? 1.4 : 1,
+              ),
             ),
             child: TextField(
               controller: _controller,
+              focusNode: _focusNode,
               autofocus: true,
               maxLength: 40,
               textInputAction: TextInputAction.done,
+              textAlignVertical: TextAlignVertical.center,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
@@ -1589,32 +1613,20 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
                   fontSize: 15,
                   fontWeight: FontWeight.w400,
                 ),
+                // 计数器直接隐藏（参考 QQ 样式：只留盒内 hint）；
+                // maxLength 仍硬限制 40 字。
+                counterText: '',
+                // 全局 InputDecorationTheme 是 filled 白底，盖住外层灰底圆角盒
+                // 还会露出白色直角（四个角花的元凶），必须显式关掉。
+                filled: false,
+                fillColor: Colors.transparent,
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
+                isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14,
-                  vertical: 12,
-                ),
-                counterStyle: TextStyle(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
-                  fontSize: 12,
-                ),
-              ),
-              buildCounter: (
-                _, {
-                required int currentLength,
-                required bool isFocused,
-                required int? maxLength,
-              }) =>
-                  Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(
-                  '$currentLength/$maxLength',
-                  style: TextStyle(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
-                    fontSize: 12,
-                  ),
+                  vertical: 13,
                 ),
               ),
               onSubmitted: _submit,
