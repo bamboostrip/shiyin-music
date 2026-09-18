@@ -843,8 +843,15 @@ class DownloadController extends ChangeNotifier {
         continue;
       }
 
-      // 到处不存在：外部已删除，移除条目（存储不可用时见 canPrune 注释）
+      // 到处不存在：外部已删除，移除条目。两级保守门控：
+      // - 当前下载根不可用（canPrune，见上）→ 全员保留；
+      // - 条目所在目录本身不可见（历史自定义目录在外置盘/NAS 上，卷未
+      //   挂载）→ 无法区分「文件被删」与「整个卷离线」，保留条目等卷
+      //   恢复后再判。换过下载位置后旧卷离线时启动/打开已下载页，若只看
+      //   canPrune 会把文件仍在盘上的条目从索引清掉（存储恢复后「下载
+      //   全丢」）。目录在而文件不在才是可判定的「外部删除」。
       if (!canPrune) continue;
+      if (!await file.parent.exists()) continue;
       drops.add(entry.song.hash);
       removed++;
       changed = true;

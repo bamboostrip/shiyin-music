@@ -78,8 +78,13 @@ void main() {
   }
 
   test('外部删除：文件到处不存在 → 移除条目并持久化', () async {
+    // 目录仍在、文件被删才是可判定的「外部删除」；目录整个不可见
+    // （卷离线口径）走下面的保留用例。
+    final goneDir = Directory('${tmpRoot.path}/gone')..createSync();
+    File('${goneDir.path}/a.mp3').writeAsBytesSync([1, 2, 3]);
+    File('${goneDir.path}/a.mp3').deleteSync();
     final controller = buildController();
-    await seedIndex(_song, '${tmpRoot.path}/gone/a.mp3');
+    await seedIndex(_song, '${goneDir.path}/a.mp3');
 
     await controller.initialize();
 
@@ -87,6 +92,20 @@ void main() {
     expect(jsonDecode(await readIndex()), isEmpty);
     // 幂等：再次对账无新变化
     expect(await controller.reconcileDownloads(), 0);
+  });
+
+  test('目录整体不可见（外置盘/NAS 离线口径）→ 保留条目不移除', () async {
+    // 条目指向的目录不存在时无法区分「文件被删」与「整个卷离线」：
+    // 保守保留等卷恢复后再判，否则换过下载位置+拔盘再启动会把文件
+    // 仍在盘上的下载从索引里清掉（存储恢复后「下载全丢」）。
+    final controller = buildController();
+    await seedIndex(_song, '${tmpRoot.path}/offline_volume/a.mp3');
+
+    await controller.initialize();
+
+    final entry = controller.entryFor(_song);
+    expect(entry?.status, DownloadStatus.downloaded);
+    expect(entry?.filePath, '${tmpRoot.path}/offline_volume/a.mp3');
   });
 
   test('历史目录迁移：文件仍在旧目录 → 搬入当前目录并重写路径', () async {
