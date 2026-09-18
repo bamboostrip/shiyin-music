@@ -16,8 +16,10 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../form_factor.dart';
+import '../widgets/app_song_row.dart';
 import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
+import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
@@ -113,16 +115,31 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage>
         ),
       ),
       body: AdaptiveContentPadding(
-        child: TabBarView(
-          controller: _tabController,
+        // 悬浮迷你播放条：桌面形态由 MiniPlayerSlot 内部收敛为 shrink，
+        // 移动端/车机有播放时浮在列表底部（歌单/历史页同款挂法）。
+        child: Stack(
           children: [
-            _DownloadedList(
-              api: widget.api,
-              auth: widget.auth,
-              player: widget.player,
-              downloads: widget.downloads,
+            TabBarView(
+              controller: _tabController,
+              children: [
+                _DownloadedList(
+                  api: widget.api,
+                  auth: widget.auth,
+                  player: widget.player,
+                  downloads: widget.downloads,
+                ),
+                _PlayCacheList(downloads: widget.downloads),
+              ],
             ),
-            _PlayCacheList(downloads: widget.downloads),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.paddingOf(context).bottom + 10,
+              child: MiniPlayerSlot(
+                player: widget.player,
+                auth: widget.auth,
+              ),
+            ),
           ],
         ),
       ),
@@ -233,6 +250,8 @@ class _DownloadedList extends StatelessWidget {
                 (entry) => _FailedRow(entry: entry, downloads: downloads),
               ),
             ],
+            // 悬浮播放条占位：滑到底时末行不被盖住。
+            const SizedBox(height: 84),
           ],
         );
       },
@@ -464,60 +483,28 @@ class _DownloadedSongRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final song = entry.song;
-    final isCurrent = player.currentSong?.hash == song.hash;
-    final colorScheme = Theme.of(context).colorScheme;
 
-    return ListTile(
-      leading: Artwork(url: song.coverUrl, size: 48, borderRadius: 8),
-      title: Text(
-        song.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: isCurrent
-            ? TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w600)
-            : null,
-      ),
-      subtitle: Text(
-        song.artist,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.play_circle_fill_rounded),
-            color: colorScheme.primary,
-            onPressed: () {
-              if (openPlayerIfSameSong(
-                context,
-                player: player,
-                auth: auth,
-                song: song,
-              )) {
-                return;
-              }
-              player.playSong(song);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert_rounded),
-            onPressed: () => _showActions(context, song),
-          ),
-        ],
-      ),
-      onTap: () {
-        if (openPlayerIfSameSong(
-          context,
-          player: player,
-          auth: auth,
-          song: song,
-        )) {
-          return;
-        }
-        player.playSong(song);
-      },
+    void play() {
+      if (openPlayerIfSameSong(
+        context,
+        player: player,
+        auth: auth,
+        song: song,
+      )) {
+        return;
+      }
+      player.playSong(song);
+    }
+
+    // 行视觉与歌单/搜索/歌手页统一见 AppSongRow；点行即播，
+    // 右侧只留 ⋮（删下载/看文件夹/拷路径），播放圈按钮已收敛掉。
+    return AppSongRow(
+      song: song,
+      player: player,
+      onTap: play,
+      trailing: [
+        AppSongRowMenuButton(onPressed: () => _showActions(context, song)),
+      ],
     );
   }
 
@@ -810,6 +797,8 @@ class _PlayCacheList extends StatelessWidget {
                 ),
               ),
             ),
+            // 悬浮播放条占位：滑到底时末行不被盖住。
+            const SizedBox(height: 84),
           ],
         );
       },

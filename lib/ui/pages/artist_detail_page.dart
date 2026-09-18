@@ -6,10 +6,9 @@ import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
 import '../widgets/mini_player.dart';
-import '../widgets/now_playing_badge.dart';
-import '../widgets/marquee_text.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/album_grid.dart';
+import '../widgets/app_song_row.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../adaptive_layout.dart';
 import '../form_factor.dart';
@@ -611,10 +610,16 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                               separatorBuilder: (_, _) => const SizedBox(height: 2),
                               itemBuilder: (context, index) {
                                 final song = _songs[index];
-                                return _ArtistSongRow(
+                                // 行视觉与歌单/搜索结果统一见 AppSongRow；
+                                // 副标题带专辑名，更多菜单只留歌手页语境的两项。
+                                return AppSongRow(
                                   song: song,
-                                  auth: widget.auth,
                                   player: widget.player,
+                                  subtitle: [
+                                    song.artist,
+                                    if (song.albumName?.isNotEmpty == true)
+                                      song.albumName!,
+                                  ].join(' · '),
                                   onTap: () {
                                     if (openPlayerIfSameSong(
                                       context,
@@ -629,6 +634,40 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                       queue: List<Song>.of(_songs),
                                     );
                                   },
+                                  trailing: [
+                                    AppSongRowMenuButton(
+                                      onPressed: () {
+                                        showSongActionSheet(
+                                          context: context,
+                                          song: song,
+                                          actions: [
+                                            SongSheetAction(
+                                              icon:
+                                                  Icons.queue_music_rounded,
+                                              title: '下一首播放',
+                                              onTap: () =>
+                                                  addSongToQueueWithFeedback(
+                                                context: context,
+                                                player: widget.player,
+                                                song: song,
+                                              ),
+                                            ),
+                                            SongSheetAction(
+                                              icon: Icons
+                                                  .playlist_add_rounded,
+                                              title: '添加到歌单',
+                                              onTap: () =>
+                                                  showAddToPlaylistSheet(
+                                                context: context,
+                                                auth: widget.auth,
+                                                song: song,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                  ],
                                 );
                               },
                             ),
@@ -861,159 +900,6 @@ class _SongSectionHeader extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _ArtistSongRow extends StatelessWidget {
-  const _ArtistSongRow({
-    required this.song,
-    required this.auth,
-    required this.player,
-    required this.onTap,
-  });
-
-  final Song song;
-  final AuthController auth;
-  final PlayerController player;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return AnimatedBuilder(
-      animation: player,
-      builder: (context, _) {
-        final active = player.currentSong?.hash == song.hash;
-        final activeColor = colorScheme.primary;
-
-        return InkWell(
-          mouseCursor: isDesktopFormFactor ? SystemMouseCursors.click : null,
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-            decoration: BoxDecoration(
-              color: active
-                  ? activeColor.withValues(alpha: .09)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              children: [
-                Stack(
-                  children: [
-                    Artwork(url: song.coverUrl, size: 50, borderRadius: 9),
-                    if (active)
-                      Positioned(
-                        right: 4,
-                        bottom: 4,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: colorScheme.surface.withValues(alpha: .9),
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(3),
-                            child: NowPlayingBadge(
-                              active: active,
-                              playing: player.isPlaying,
-                              color: activeColor,
-                              size: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      active
-                          ? MarqueeText.text(
-                              song.title,
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(
-                                    color: activeColor,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                            )
-                          : Text(
-                              song.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                            ),
-                      const SizedBox(height: 3),
-                      Text(
-                        [
-                          song.artist,
-                          if (song.albumName?.isNotEmpty == true)
-                            song.albumName!,
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: active
-                              ? activeColor.withValues(alpha: .72)
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  formatDuration(song.duration),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: active
-                        ? activeColor.withValues(alpha: .72)
-                        : colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                IconButton(
-                  tooltip: '更多',
-                  onPressed: () {
-                    showSongActionSheet(
-                      context: context,
-                      song: song,
-                      actions: [
-                        SongSheetAction(
-                          icon: Icons.queue_music_rounded,
-                          title: '下一首播放',
-                          onTap: () => addSongToQueueWithFeedback(
-                            context: context,
-                            player: player,
-                            song: song,
-                          ),
-                        ),
-                        SongSheetAction(
-                          icon: Icons.playlist_add_rounded,
-                          title: '添加到歌单',
-                          onTap: () => showAddToPlaylistSheet(
-                            context: context,
-                            auth: auth,
-                            song: song,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                  icon: const Icon(Icons.more_horiz_rounded),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

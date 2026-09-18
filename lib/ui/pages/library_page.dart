@@ -415,6 +415,7 @@ class LibraryPageState extends State<LibraryPage> {
                           MaterialPageRoute(
                             builder: (_) => LocalSongsPage(
                               player: widget.player,
+                              auth: widget.auth,
                               localMusic: widget.localMusic,
                             ),
                           ),

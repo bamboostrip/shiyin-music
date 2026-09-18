@@ -42,7 +42,7 @@ Future<void> main(List<String> args) async {
   // 若想在 Windows 调试时查看手机移动端界面，取消下面这行注释（或命令行传入 --dart-define=FORCE_MOBILE=true）。
   // 注意：此开关优先级最高且对所有构建生效，严禁以启用状态提交——
   // 否则 Windows/macOS/Linux 的桌面骨架会被整体静默禁用。
-  debugDesktopFormFactorOverride = false;
+  // debugDesktopFormFactorOverride = false;
 
   // desktop_multi_window 子窗口（桌面歌词悬浮窗）入口分流：
   // 子窗口引擎会以 args=['multi_window', id, arguments] 重新执行 main()，

@@ -4,10 +4,9 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
-import '../widgets/artwork.dart';
+import '../widgets/app_song_row.dart';
 import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/mini_player.dart';
-import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import '../adaptive_layout.dart';
@@ -156,7 +155,6 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
                             final song = songs[index];
                             return _HistorySongRow(
                               song: song,
-                              index: index + 1,
                               player: widget.player,
                               onTap: () => _play(song, songs),
                               onAddToPlaylist: () =>
@@ -215,7 +213,6 @@ class _PlaybackHistoryPageState extends State<PlaybackHistoryPage> {
 class _HistorySongRow extends StatelessWidget {
   const _HistorySongRow({
     required this.song,
-    required this.index,
     required this.player,
     required this.onTap,
     required this.onAddToPlaylist,
@@ -223,7 +220,6 @@ class _HistorySongRow extends StatelessWidget {
   });
 
   final Song song;
-  final int index;
   final PlayerController player;
   final VoidCallback onTap;
   final VoidCallback onAddToPlaylist;
@@ -231,172 +227,59 @@ class _HistorySongRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return AnimatedBuilder(
-      animation: player,
-      builder: (context, _) {
-        final active = player.currentSong?.hash == song.hash;
-        final activeColor = colorScheme.primary;
-        return InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-            decoration: BoxDecoration(
-              color: active
-                  ? activeColor.withValues(alpha: .09)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              children: [
-                SizedBox.square(
-                  dimension: 50,
-                  child: Stack(
-                    children: [
-                      Artwork(url: song.coverUrl, size: 50, borderRadius: 9),
-                      Positioned(
-                        left: 4,
-                        top: 4,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: .42),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 1,
-                            ),
-                            child: Text(
-                              '$index',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color: Colors.white.withValues(alpha: .78),
-                                    fontWeight: FontWeight.w800,
-                                    height: 1.1,
-                                  ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (active)
-                        Positioned(
-                          right: 4,
-                          bottom: 4,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: colorScheme.surface.withValues(alpha: .9),
-                              borderRadius: BorderRadius.circular(7),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(3),
-                              child: NowPlayingBadge(
-                                active: active,
-                                playing: player.isPlaying,
-                                color: activeColor,
-                                size: 14,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+    // 行视觉与歌单/搜索/歌手页统一见 AppSongRow；这里只组装
+    // 更多菜单（下一首/加歌单/看歌手/下载），序号与时长已收敛掉。
+    return AppSongRow(
+      song: song,
+      player: player,
+      onTap: onTap,
+      trailing: [
+        Builder(builder: (moreButtonContext) {
+          return AppSongRowMenuButton(
+            onPressed: () {
+              showSongActionSheet(
+                context: moreButtonContext,
+                anchor: anchorBelow(moreButtonContext),
+                song: song,
+                actions: [
+                  SongSheetAction(
+                    icon: Icons.queue_music_rounded,
+                    title: '下一首播放',
+                    onTap: () => addSongToQueueWithFeedback(
+                      context: context,
+                      player: player,
+                      song: song,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        song.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: active ? activeColor : null,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        song.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: active
-                              ? activeColor.withValues(alpha: .72)
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                  SongSheetAction(
+                    icon: Icons.playlist_add_rounded,
+                    title: '添加到歌单',
+                    onTap: onAddToPlaylist,
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  formatDuration(song.duration),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: active
-                        ? activeColor.withValues(alpha: .72)
-                        : colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
+                  SongSheetAction(
+                    icon: Icons.person_rounded,
+                    title: '查看歌手',
+                    onTap: onViewArtist,
                   ),
-                ),
-                Builder(builder: (moreButtonContext) {
-                  return IconButton(
-                    tooltip: '更多',
-                    onPressed: () {
-                      showSongActionSheet(
-                        context: moreButtonContext,
-                        anchor: anchorBelow(moreButtonContext),
-                        song: song,
-                      actions: [
-                        SongSheetAction(
-                          icon: Icons.queue_music_rounded,
-                          title: '下一首播放',
-                          onTap: () => addSongToQueueWithFeedback(
-                            context: context,
-                            player: player,
-                            song: song,
-                          ),
-                        ),
-                        SongSheetAction(
-                          icon: Icons.playlist_add_rounded,
-                          title: '添加到歌单',
-                          onTap: onAddToPlaylist,
-                        ),
-                        SongSheetAction(
-                          icon: Icons.person_rounded,
-                          title: '查看歌手',
-                          onTap: onViewArtist,
-                        ),
-                        if (player.downloadController != null)
-                          SongSheetAction(
-                            icon: player.downloadController!.isDownloaded(song)
-                                ? Icons.download_done_rounded
-                                : Icons.download_rounded,
-                            title: player.downloadController!.isDownloaded(song)
-                                ? '已下载'
-                                : '下载',
-                            onTap: () => player.downloadController!.download(
-                              song,
-                              player.audioQuality,
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                  icon: const Icon(Icons.more_horiz_rounded),
-                );
-                }),
-              ],
-            ),
-          ),
-        );
-      },
+                  if (player.downloadController != null)
+                    SongSheetAction(
+                      icon: player.downloadController!.isDownloaded(song)
+                          ? Icons.download_done_rounded
+                          : Icons.download_rounded,
+                      title: player.downloadController!.isDownloaded(song)
+                          ? '已下载'
+                          : '下载',
+                      onTap: () => player.downloadController!.download(
+                        song,
+                        player.audioQuality,
+                      ),
+                    ),
+                ],
+              );
+            },
+          );
+        }),
+      ],
     );
   }
 }

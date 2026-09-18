@@ -2,22 +2,25 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import '../adaptive_layout.dart';
+import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../widgets/toast.dart';
 import '../widgets/app_search_field.dart';
-import '../widgets/artwork.dart';
-import '../widgets/now_playing_badge.dart';
+import '../widgets/app_song_row.dart';
+import '../widgets/mini_player.dart';
 import '../player/song_tap_handler.dart';
 
 class LocalSongsPage extends StatefulWidget {
   const LocalSongsPage({
     super.key,
     required this.player,
+    required this.auth,
     required this.localMusic,
   });
 
   final PlayerController player;
+  final AuthController auth;
   final LocalMusicController localMusic;
 
   @override
@@ -387,9 +390,13 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
         ],
       ),
       body: AdaptiveContentPadding(
-        child: AnimatedBuilder(
-          animation: Listenable.merge([widget.localMusic, widget.player]),
-          builder: (context, _) {
+        // 悬浮迷你播放条：桌面形态由 MiniPlayerSlot 内部收敛为 shrink，
+        // 移动端有播放时浮在列表底部（歌单/历史页同款挂法）。
+        child: Stack(
+          children: [
+            AnimatedBuilder(
+              animation: Listenable.merge([widget.localMusic, widget.player]),
+              builder: (context, _) {
             // 桌面（Windows/Linux）：无目录时引导添加；有目录走通用列表。
             if (_isDesktop) {
               if (widget.localMusic.desktopRoots.isEmpty) {
@@ -527,75 +534,22 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                                 )
                               : null,
                         )
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(bottom: 120),
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 120),
                           itemCount: filteredSongs.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 2),
                           itemBuilder: (context, index) {
                             final song = filteredSongs[index];
-                            final isCurrent =
-                                widget.player.currentSong?.hash == song.hash;
-                            final isPlaying =
-                                isCurrent && widget.player.isPlaying;
-
-                            return ListTile(
-                              leading: SizedBox(
-                                width: 44,
-                                height: 44,
-                                child: Stack(
-                                  children: [
-                                    Artwork(url: song.coverUrl, size: 44),
-                                    if (isCurrent)
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.4,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: NowPlayingBadge(
-                                            active: true,
-                                            playing: isPlaying,
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              title: Text(
-                                song.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontWeight: isCurrent
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: isCurrent
-                                      ? colorScheme.primary
-                                      : colorScheme.onSurface,
-                                ),
-                              ),
-                              subtitle: Text(
-                                song.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isCurrent
-                                      ? colorScheme.primary.withValues(
-                                          alpha: .7,
-                                        )
-                                      : colorScheme.onSurfaceVariant,
-                                ),
-                              ),
+                            // 行视觉与歌单/搜索/歌手页统一见 AppSongRow。
+                            return AppSongRow(
+                              song: song,
+                              player: widget.player,
                               onTap: () {
-                                // 无 auth 时退化为“恢复播放/无反应”，同样不重头播放。
                                 if (openPlayerIfSameSong(
                                   context,
                                   player: widget.player,
+                                  auth: widget.auth,
                                   song: song,
                                 )) {
                                   return;
@@ -612,6 +566,17 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
               ],
             );
           },
+        ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.paddingOf(context).bottom + 10,
+              child: MiniPlayerSlot(
+                player: widget.player,
+                auth: widget.auth,
+              ),
+            ),
+          ],
         ),
       ),
     );

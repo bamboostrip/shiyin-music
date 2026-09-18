@@ -4,10 +4,9 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
-import '../widgets/artwork.dart';
+import '../widgets/app_song_row.dart';
 import '../widgets/desktop_anchored_menu.dart';
 import '../widgets/desktop_song_table_row.dart';
-import '../widgets/now_playing_badge.dart';
 import '../widgets/song_action_sheets.dart';
 
 /// 搜索结果（歌曲）列表。
@@ -54,151 +53,62 @@ class SearchSongResults extends StatelessWidget {
             final liked = isLiked(song);
             // 其他平台歌曲（如网易云）仅支持播放，不支持收藏等操作
             final isExternal = song.source != SongSource.kugou;
-            return AnimatedBuilder(
-              animation: player,
-              builder: (context, _) {
-                final active = player.currentSong?.hash == song.hash;
-                final activeColor = colorScheme.primary;
-                return InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => onPlay(song),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 9,
-                      horizontal: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? activeColor.withValues(alpha: .08)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Row(
-                      children: [
-                        Stack(
-                          children: [
-                            Artwork(
-                              url: song.coverUrl,
-                              size: 58,
-                              borderRadius: 8,
-                            ),
-                            if (active)
-                              Positioned(
-                                right: 5,
-                                bottom: 5,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surface
-                                        .withValues(alpha: .88),
-                                    borderRadius: BorderRadius.circular(7),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(3),
-                                    child: NowPlayingBadge(
-                                      active: active,
-                                      playing: player.isPlaying,
-                                      color: activeColor,
-                                      size: 14,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                song.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(
-                                      color: active ? activeColor : null,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 16,
-                                    ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                song.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: active
-                                          ? activeColor.withValues(alpha: .72)
-                                          : colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        if (!isExternal)
-                          IconButton(
-                            onPressed: () => onLikeTap(song),
-                            icon: Icon(
-                              liked
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              color: liked
-                                  ? Colors.redAccent
-                                  : colorScheme.outline,
-                              size: 27,
-                            ),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        if (!isExternal)
-                          Builder(
-                            builder: (moreButtonContext) {
-                              return IconButton(
-                                tooltip: '更多',
-                                onPressed: () => _showSongMenu(
-                                  moreButtonContext,
-                                  song,
-                                  anchor: anchorBelow(moreButtonContext),
-                                ),
-                                icon: const Icon(Icons.more_horiz_rounded),
-                                visualDensity: VisualDensity.compact,
-                              );
-                            },
-                          ),
-                        if (isExternal)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: colorScheme.outlineVariant.withValues(
-                                  alpha: .5,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                song.source == SongSource.netease
-                                    ? '网易云'
-                                    : '外部',
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ),
-                          ),
-                      ],
+            // 行视觉与歌单/歌手页统一见 AppSongRow；这里只组装
+            // 红心、外部来源标与更多菜单（播中态/律动标由组件内管）。
+            return AppSongRow(
+              song: song,
+              player: player,
+              onTap: () => onPlay(song),
+              trailing: [
+                if (!isExternal) ...[
+                  IconButton(
+                    onPressed: () => onLikeTap(song),
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      liked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: liked
+                          ? Colors.redAccent
+                          : colorScheme.outline,
+                      size: 22,
                     ),
                   ),
-                );
-              },
+                  Builder(
+                    builder: (moreButtonContext) {
+                      return AppSongRowMenuButton(
+                        onPressed: () => _showSongMenu(
+                          moreButtonContext,
+                          song,
+                          anchor: anchorBelow(moreButtonContext),
+                        ),
+                      );
+                    },
+                  ),
+                ] else
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.outlineVariant.withValues(
+                          alpha: .5,
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        song.source == SongSource.netease ? '网易云' : '外部',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
         );

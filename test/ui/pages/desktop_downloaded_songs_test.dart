@@ -9,6 +9,7 @@ import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/downloaded_songs_page.dart';
+import 'package:shiyin_music/ui/widgets/app_song_row.dart';
 import 'package:shiyin_music/ui/widgets/desktop_song_table_row.dart';
 
 class _FakeMusicApi implements MusicApi {
@@ -27,6 +28,26 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   DownloadController? get downloadController => null;
 
   Song? lastPlayedSong;
+
+  // 迷你播放条（行点播后挂载）读取的进度/状态成员：真机由 Rust 引擎驱动，
+  // fake 给零值即可，只保证组件能构建。
+  final ValueNotifier<Duration> positionListenable =
+      ValueNotifier(Duration.zero);
+
+  @override
+  Duration duration = Duration.zero;
+
+  @override
+  bool isPreparing = false;
+
+  @override
+  String? errorMessage;
+
+  @override
+  Future<void> togglePlay() async {
+    isPlaying = !isPlaying;
+    notifyListeners();
+  }
 
   @override
   Future<void> playSong(
@@ -292,18 +313,25 @@ void main() {
       debugDesktopFormFactorOverride = false;
     });
 
-    testWidgets('保持 ListTile 行内操作，不渲染桌面表格', (tester) async {
+    testWidgets('统一 AppSongRow 行：点行播放、仅 ⋮ 菜单，不渲染桌面表格', (tester) async {
+      final player = _FakePlayerController();
       final downloads = _FakeDownloadController([
         _entry(song: _downloadedSong, filePath: r'C:\music\a.mp3'),
       ]);
 
-      await tester.pumpWidget(buildPage(downloads));
+      await tester.pumpWidget(buildPage(downloads, player: player));
       await tester.pumpAndSettle();
 
       expect(find.byType(DesktopSongTableRow), findsNothing);
       expect(find.byType(DesktopSongTableHeader), findsNothing);
-      expect(find.byIcon(Icons.play_circle_fill_rounded), findsOneWidget);
+      expect(find.byType(AppSongRow), findsOneWidget);
+      // 播放圈按钮已收敛掉：点行即播；右侧只留 ⋮ 菜单。
+      expect(find.byIcon(Icons.play_circle_fill_rounded), findsNothing);
       expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
+
+      await tester.tap(find.text('海阔天空'));
+      await tester.pump();
+      expect(player.lastPlayedSong?.hash, _downloadedSong.hash);
     });
   });
 }
