@@ -177,7 +177,9 @@ mixin _MusicApiPlaylist on _MusicApiBase {
       '/playlist/tracks/add',
       body: {'listId': listId, 'songs': songs.map(_songAddPayload).toList()},
     );
-    return result is Map<String, dynamic> ? result : null;
+    final map = result is Map<String, dynamic> ? result : null;
+    _ensurePlaylistOpSuccess(map, '添加');
+    return map;
   }
 
   Future<Map<String, dynamic>?> removeFromPlaylist(String listId, Song song) {
@@ -200,7 +202,30 @@ mixin _MusicApiPlaylist on _MusicApiBase {
       '/playlist/tracks/del',
       query: {'listid': listId, 'fileids': ids.join(',')},
     );
-    return result is Map<String, dynamic> ? result : null;
+    final map = result is Map<String, dynamic> ? result : null;
+    // Rust 层业务失败不抛错：这里必须校验 status/error_code，
+    // 否则调用方（toggleLike / 歌单删除）会误判为成功，
+    // 本地乐观状态在下次同步时被服务端真值打回。
+    _ensurePlaylistOpSuccess(map, '删除');
+    return map;
+  }
+
+  /// 歌单写操作统一校验：成功 status 为 1/200 且 error_code 为 0/缺省。
+  /// 失败时抛错（含服务端 message），调用方回滚乐观状态并提示。
+  void _ensurePlaylistOpSuccess(Map<String, dynamic>? resp, String action) {
+    if (resp == null) return;
+    final status = resp['status'];
+    final errorCode = resp['error_code'] ?? resp['errcode'];
+    final okStatus = status == null || status == 1 || status == 200;
+    final okCode = errorCode == null || errorCode == 0;
+    if (okStatus && okCode) return;
+    final msg = resp['error'] ?? resp['err'] ?? resp['msg'] ?? resp['message'];
+    final detail = msg is String && msg.trim().isNotEmpty
+        ? '：$msg'
+        : errorCode != null
+        ? '（错误码 $errorCode）'
+        : '';
+    throw ApiException('$action失败$detail');
   }
 
   Map<String, Object?> _songAddPayload(Song song) {

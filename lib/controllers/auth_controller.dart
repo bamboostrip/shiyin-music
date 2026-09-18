@@ -36,6 +36,7 @@ class AuthController extends ChangeNotifier {
   static const _playlistCachePrefix = 'shiyin_cached_playlists';
   static const _playlistEmptyCountPrefix = 'shiyin_playlist_empty_count';
   static const _likedHashesKey = 'shiyin_liked_hashes';
+  static const _likedFileIdsKey = 'shiyin_liked_fileids';
   final MusicApi _api;
   final CacheService _cacheService;
   late final VipBackgroundTask _vipBackgroundTask = VipBackgroundTask(_api);
@@ -112,9 +113,15 @@ class AuthController extends ChangeNotifier {
       try {
         Map<String, dynamic>? resp;
         if (wasLiked) {
-          var fileId = _resolvePlaylistFileId(song);
+          // fileId 来源优先级（已持有互斥锁，同步直接跑执行体）：
+          // 1. 点按前快照 prevFileId（最可信；乐观段已清映射，必须用快照）；
+          // 2. 无快照时先全量同步拿服务端真值，再用映射；
+          //    绝不能直接信任 song.id——搜索/首页来的 Song 其 id 是
+          //    MixSongID 而非 fileid，用它删服务端会静默失败，
+          //    本地乐观移除在下次同步时被打回（“取消红心不生效”）。
+          // 3. 同步失败才回退试 song.id（歌单页的 Song 其 id 即 fileid）。
+          var fileId = prevFileId;
           if (fileId == null) {
-            // 已持有互斥锁，直接跑同步执行体；再入队会等待自身，死锁。
             final synced = await _syncLikedSongsLocked();
             fileId = _hashToFileId[song.hash];
             if (fileId == null) {
@@ -123,32 +130,68 @@ class AuthController extends ChangeNotifier {
                 // 设备已取消、或前一次点赞请求失败），保持乐观移除，
                 // 不得回滚加回——否则本地与服务端永久分叉。
                 notifyListeners();
+                await _persistLikedHashes();
                 return;
               }
-              // 同步失败无法定真值：回滚到点按前状态。
-              _likedHashes.add(song.hash);
-              if (prevFileId != null) _hashToFileId[song.hash] = prevFileId;
-              notifyListeners();
-              return;
+              fileId = _resolvePlaylistFileId(song);
+              if (fileId == null) {
+                _likedHashes.add(song.hash);
+                if (prevFileId != null) _hashToFileId[song.hash] = prevFileId;
+                notifyListeners();
+                throw Exception('无法定位歌曲在歌单中的 fileid，请下拉刷新后重试');
+              }
             }
           }
-          resp = await _api.removeSongsFromPlaylist(
-            targetListId,
-            [song],
-            fileIds: [fileId],
-          );
+          try {
+            resp = await _api.removeSongsFromPlaylist(
+              targetListId,
+              [song],
+              fileIds: [fileId],
+            );
+            // Rust 层业务失败不抛错（只回传 status/error_code 信封），
+            // 不校验就会“本地已取消、服务端没删”，重启同步后红心回来。
+            _ensurePlaylistMutationSuccess(resp, '取消收藏');
+          } catch (error) {
+            // 快照 fileId 可能是旧值（另一设备删后重加，fileid 已变）：
+            // 同步一次拿新 fileId 重试，仍失败才走外层回滚。
+            if (prevFileId != null && fileId == prevFileId) {
+              final synced = await _syncLikedSongsLocked();
+              final freshId = _hashToFileId[song.hash];
+              if (synced && freshId != null && freshId != prevFileId) {
+                resp = await _api.removeSongsFromPlaylist(
+                  targetListId,
+                  [song],
+                  fileIds: [freshId],
+                );
+                _ensurePlaylistMutationSuccess(resp, '取消收藏');
+                _likedHashes.remove(song.hash);
+                _hashToFileId.remove(song.hash);
+                _updateLikedCountFromResponse(resp);
+                notifyListeners();
+                await _persistLikedHashes();
+                return;
+              }
+            }
+            rethrow;
+          }
           // 幂等确认（同步段已做乐观移除；期间若被全量同步重建则清掉）。
           _likedHashes.remove(song.hash);
           _hashToFileId.remove(song.hash);
         } else {
           resp = await _api.addToPlaylist(targetListId, song);
+          _ensurePlaylistMutationSuccess(resp, '收藏');
           // 幂等确认（期间若被全量同步清空则补回）。
           _likedHashes.add(song.hash);
           if (resp != null) {
             final info = resp['info'];
             if (info is List && info.isNotEmpty) {
               final fid = info[0]['fileid'];
-              if (fid is int) _hashToFileId[song.hash] = fid;
+              if (fid is int) {
+                _hashToFileId[song.hash] = fid;
+              } else if (fid is String) {
+                final parsed = int.tryParse(fid);
+                if (parsed != null) _hashToFileId[song.hash] = parsed;
+              }
             }
           }
         }
@@ -613,6 +656,7 @@ class AuthController extends ChangeNotifier {
         vipInfo = null;
         playlists = const [];
         _likedHashes.clear();
+        _hashToFileId.clear();
         _api.setSession(null);
         await prefs.remove(_tokenKey);
         await prefs.remove(_t1Key);
@@ -621,6 +665,7 @@ class AuthController extends ChangeNotifier {
         await prefs.remove(cacheKey);
         await prefs.remove(emptyCountKey);
         await prefs.remove(_likedHashesKey);
+        await prefs.remove(_likedFileIdsKey);
         await _clearSession();
       }
     });
@@ -633,6 +678,28 @@ class AuthController extends ChangeNotifier {
     final index = playlists.indexWhere((p) => p.isLikedPlaylist);
     if (index < 0) return;
     playlists[index] = playlists[index].copyWith(songCount: count);
+  }
+
+  /// Rust 传输层业务失败不抛错（见 transport.rs：失败只 warn 并回传
+  /// 原始 status/error_code 信封），Dart 必须显式校验，否则会出现
+  /// “本地已翻转、服务端没写，重启同步后打回原形”的假成功。
+  void _ensurePlaylistMutationSuccess(
+    Map<String, dynamic>? resp,
+    String action,
+  ) {
+    if (resp == null) return;
+    final status = resp['status'];
+    final errorCode = resp['error_code'] ?? resp['errcode'];
+    final okStatus = status == null || status == 1 || status == 200;
+    final okCode = errorCode == null || errorCode == 0;
+    if (okStatus && okCode) return;
+    final msg = resp['error'] ?? resp['err'] ?? resp['msg'] ?? resp['message'];
+    final detail = msg is String && msg.trim().isNotEmpty
+        ? '：$msg'
+        : errorCode != null
+        ? '（错误码 $errorCode）'
+        : '';
+    throw ApiException('$action失败$detail');
   }
 
   /// 全量同步入队入口（外部调用走互斥链）。
@@ -671,18 +738,46 @@ class AuthController extends ChangeNotifier {
   Future<void> _persistLikedHashes() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_likedHashesKey, jsonEncode(_likedHashes.toList()));
+    // fileId 映射同样落盘：否则重启后 _hashToFileId 为空，取消收藏时
+    // 回退用 song.id（MixSongID，非 fileid）删服务端会静默失败，
+    // 本地乐观移除在下次同步时被打回——“取消红心不生效”。
+    try {
+      await prefs.setString(
+        _likedFileIdsKey,
+        jsonEncode(_hashToFileId.map((k, v) => MapEntry(k, v))),
+      );
+    } catch (_) {}
   }
 
   Future<void> _loadLikedHashes() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_likedHashesKey);
-    if (raw == null || raw.isEmpty) return;
-    try {
-      final list = jsonDecode(raw);
-      if (list is List) {
-        _likedHashes.addAll(list.whereType<String>());
-      }
-    } catch (_) {}
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final list = jsonDecode(raw);
+        if (list is List) {
+          _likedHashes.addAll(list.whereType<String>());
+        }
+      } catch (_) {}
+    }
+    // 兼容老版本：没有 fileId 映射时保持空，toggleLike 会按需全量同步补齐。
+    final rawIds = prefs.getString(_likedFileIdsKey);
+    if (rawIds != null && rawIds.isNotEmpty) {
+      try {
+        final map = jsonDecode(rawIds);
+        if (map is Map) {
+          map.forEach((key, value) {
+            if (key is! String || key.isEmpty) return;
+            if (value is int && value != 0) {
+              _hashToFileId[key] = value;
+            } else if (value is String) {
+              final parsed = int.tryParse(value);
+              if (parsed != null && parsed != 0) _hashToFileId[key] = parsed;
+            }
+          });
+        }
+      } catch (_) {}
+    }
   }
 
   Future<List<PlaylistSummary>> _loadUserPlaylistsWithCache() async {
@@ -775,6 +870,7 @@ class AuthController extends ChangeNotifier {
     profile = null;
     playlists = const [];
     _likedHashes.clear();
+    _hashToFileId.clear();
     _api.setSession(null);
     await prefs.remove(_tokenKey);
     await prefs.remove(_t1Key);
@@ -783,6 +879,7 @@ class AuthController extends ChangeNotifier {
     await prefs.remove(_playlistCacheKey);
     await prefs.remove(_playlistEmptyCountKey);
     await prefs.remove(_likedHashesKey);
+    await prefs.remove(_likedFileIdsKey);
     await _cacheService.clearUserCache(null);
     notifyListeners();
   }

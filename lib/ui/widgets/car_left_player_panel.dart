@@ -195,7 +195,13 @@ class CarLeftPlayerPanel extends StatelessWidget {
                           child: IconButton(
                             padding: EdgeInsets.zero,
                             onPressed: song.source == SongSource.kugou
-                                ? () => auth.toggleLike(song)
+                                ? () => auth
+                                      .toggleLike(song)
+                                      .then(
+                                        (_) {},
+                                        onError: (Object _) =>
+                                            Toast.error('操作失败，请重试'),
+                                      )
                                 : null,
                             icon: Icon(
                               liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,

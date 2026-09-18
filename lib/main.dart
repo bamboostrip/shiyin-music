@@ -42,7 +42,7 @@ Future<void> main(List<String> args) async {
   // 若想在 Windows 调试时查看手机移动端界面，取消下面这行注释（或命令行传入 --dart-define=FORCE_MOBILE=true）。
   // 注意：此开关优先级最高且对所有构建生效，严禁以启用状态提交——
   // 否则 Windows/macOS/Linux 的桌面骨架会被整体静默禁用。
-  // debugDesktopFormFactorOverride = false;
+  debugDesktopFormFactorOverride = false;
 
   // desktop_multi_window 子窗口（桌面歌词悬浮窗）入口分流：
   // 子窗口引擎会以 args=['multi_window', id, arguments] 重新执行 main()，
@@ -316,7 +316,13 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
           final song = _player.currentSong;
           debugPrint('[SYNOTIF] 通知红心被点：song=${song?.title} '
               'beforeLiked=${song != null && _auth.isLiked(song)}');
-          if (song != null) await _auth.toggleLike(song);
+          if (song != null) {
+            try {
+              await _auth.toggleLike(song);
+            } catch (e) {
+              debugPrint('[SYNOTIF] 通知红心失败（已回滚）: $e');
+            }
+          }
           debugPrint('[SYNOTIF] 通知红心处理结束：'
               'afterLiked=${song != null && _auth.isLiked(song)}');
         },

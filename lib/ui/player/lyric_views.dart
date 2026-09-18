@@ -7,6 +7,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
+import '../widgets/toast.dart';
 import 'desktop_lyric_list.dart';
 import 'lyric_bottom_bar.dart';
 import 'lyric_display_mode.dart';
@@ -170,7 +171,13 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
                     iconSize: 24,
                     tooltip: liked ? '取消喜欢' : '喜欢',
                     onPressed: likeEnabled
-                        ? () => widget.auth!.toggleLike(widget.song)
+                        ? () => widget.auth!
+                              .toggleLike(widget.song)
+                              .then(
+                                (_) {},
+                                onError: (Object _) =>
+                                    Toast.error('操作失败，请重试'),
+                              )
                         : null,
                     icon: Icon(
                       liked

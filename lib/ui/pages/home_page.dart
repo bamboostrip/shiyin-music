@@ -1375,8 +1375,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                         songs: data.daily.songs,
                         onPlay: _playSong,
                         isLiked: (song) => widget.auth.isLiked(song),
-                        onLikeTap: (song) =>
-                            widget.auth.toggleLike(song),
+                        onLikeTap: (song) => widget.auth
+                            .toggleLike(song)
+                            .then(
+                              (_) {},
+                              onError: (Object _) =>
+                                  Toast.error('操作失败，请重试'),
+                            ),
                         auth: widget.auth,
                         player: widget.player,
                         onViewArtist: _openArtist,
@@ -1567,7 +1572,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                             songs: data.daily.songs,
                             onPlay: _playSong,
                             isLiked: (song) => widget.auth.isLiked(song),
-                            onLikeTap: (song) => widget.auth.toggleLike(song),
+                            onLikeTap: (song) => widget.auth
+                                .toggleLike(song)
+                                .then(
+                                  (_) {},
+                                  onError: (Object _) =>
+                                      Toast.error('操作失败，请重试'),
+                                ),
                             auth: widget.auth,
                             player: widget.player,
                             onViewArtist: _openArtist,

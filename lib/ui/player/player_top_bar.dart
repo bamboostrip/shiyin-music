@@ -160,7 +160,13 @@ class TopBar extends StatelessWidget {
                   tooltip: liked ? '取消喜欢' : '喜欢',
                   color: Colors.white,
                   onPressed: song.source == SongSource.kugou
-                      ? () => auth.toggleLike(song)
+                      ? () => auth
+                            .toggleLike(song)
+                            .then(
+                              (_) {},
+                              onError: (Object _) =>
+                                  Toast.error('操作失败，请重试'),
+                            )
                       : null,
                   icon: Icon(
                     liked

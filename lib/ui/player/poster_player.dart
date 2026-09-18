@@ -224,7 +224,15 @@ class PosterSongInfoRow extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 iconSize: 26,
                 tooltip: liked ? '取消喜欢' : '喜欢',
-                onPressed: likeEnabled ? () => auth.toggleLike(song) : null,
+                onPressed: likeEnabled
+                    ? () => auth
+                          .toggleLike(song)
+                          .then(
+                            (_) {},
+                            onError: (Object _) =>
+                                Toast.error('操作失败，请重试'),
+                          )
+                    : null,
                 icon: Icon(
                   liked
                       ? Icons.favorite_rounded

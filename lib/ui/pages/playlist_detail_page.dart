@@ -1094,9 +1094,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     if (!_canEdit) return;
     final songs = await _resolveSelectedSongs();
     if (songs.isEmpty || !mounted) return;
+    final isLiked = _libraryPlaylist.isLikedPlaylist;
     final confirmed = await _confirm(
       title: '删除歌曲',
-      message: '从当前歌单删除选中的 ${songs.length} 首歌曲？',
+      message: isLiked
+          ? '确定将选中的 ${songs.length} 首歌曲从“我喜欢”中移除？'
+          : '确定从当前歌单中移除选中的 ${songs.length} 首歌曲？',
+      confirmText: '删除',
     );
     if (confirmed != true) return;
     await _runMutation(() async {
@@ -1164,11 +1168,18 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         ? '删除歌单'
         : '取消收藏';
     final message = target.isCollectedAlbum
-        ? '确定要取消收藏这个专辑吗？'
+        ? '确定取消收藏这个专辑吗？'
         : target.isCreatedPlaylist
-        ? '确定要删除这个歌单吗？'
-        : '确定要取消收藏这个歌单吗？';
-    final confirmed = await _confirm(title: title, message: message);
+        ? '确定删除「${target.title}」吗？'
+        : '确定取消收藏「${target.title}」吗？';
+    final confirmText = target.isCollectedAlbum || !target.isCreatedPlaylist
+        ? '取消收藏'
+        : '删除歌单';
+    final confirmed = await _confirm(
+      title: title,
+      message: message,
+      confirmText: confirmText,
+    );
     if (confirmed != true) return;
 
     // 仅在删除/取消收藏成功后才退出页面，失败留在本页并提示。
@@ -1181,7 +1192,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   Future<void> _removeSong(Song song) async {
-    final confirmed = await _confirm(title: '删除歌曲', message: '从当前歌单删除这首歌？');
+    final isLiked = _libraryPlaylist.isLikedPlaylist;
+    final confirmed = await _confirm(
+      title: '删除歌曲',
+      message: isLiked ? '确定将该歌曲从“我喜欢”中移除？' : '确定从当前歌单中移除该歌曲？',
+      confirmText: '删除',
+    );
     if (confirmed != true) return;
     await _runMutation(() async {
       await widget.auth.removeSongFromPlaylist(_libraryPlaylist, song);
@@ -1478,23 +1494,111 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  Future<bool?> _confirm({required String title, required String message}) {
+  Future<bool?> _confirm({
+    required String title,
+    required String message,
+    String confirmText = '删除',
+  }) {
     return showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('确定'),
-            ),
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.4),
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        final textTheme = Theme.of(dialogContext).textTheme;
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        // 参考图版式：圆角 + 居中标题/文案 + 双药丸按钮；
+        // 确认按钮用主题色渐变（左浅右深），取消为中性浅底。
+        final dialogBg = isDark
+            ? colorScheme.surfaceContainerLow
+            : Colors.white;
+        final titleColor = isDark ? colorScheme.onSurface : const Color(0xFF1A1D24);
+        final messageColor = isDark
+            ? colorScheme.onSurfaceVariant
+            : const Color(0xFF5B606B);
+        final cancelBg = isDark
+            ? colorScheme.surfaceContainerHighest
+            : const Color(0xFFF4F5F7);
+        final cancelFg = isDark ? colorScheme.onSurface : const Color(0xFF1A1D24);
+        // 主题色渐变：左端向白色提亮 25%，右端为 primary 本色，
+        // 与全局 FilledButton（Stadium + primary）同色系，只是多了渐变质感。
+        final confirmGradient = LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color.lerp(colorScheme.primary, Colors.white, 0.22) ??
+                colorScheme.primary,
+            colorScheme.primary,
           ],
+        );
+        return Dialog(
+          backgroundColor: dialogBg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: textTheme.titleMedium?.copyWith(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: titleColor,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontSize: 14,
+                      color: messageColor,
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ConfirmPillButton(
+                          label: '取消',
+                          foreground: cancelFg,
+                          background: cancelBg,
+                          gradient: null,
+                          onTap: () =>
+                              Navigator.of(dialogContext).pop(false),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _ConfirmPillButton(
+                          label: confirmText,
+                          foreground: colorScheme.onPrimary,
+                          background: null,
+                          gradient: confirmGradient,
+                          onTap: () =>
+                              Navigator.of(dialogContext).pop(true),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
     );
@@ -3643,4 +3747,54 @@ String _playCount(int? value) {
     return '${(value / 10000).toStringAsFixed(1)} 万次播放';
   }
   return '$value 次播放';
+}
+
+/// 参考图风格的药丸按钮：取消为浅底深字，确认为蓝渐变白字。
+/// 用 Container + InkWell 实现渐变（FilledButton 不支持渐变背景）。
+class _ConfirmPillButton extends StatelessWidget {
+  const _ConfirmPillButton({
+    required this.label,
+    required this.foreground,
+    required this.onTap,
+    this.background,
+    this.gradient,
+  });
+
+  final String label;
+  final Color foreground;
+  final Color? background;
+  final Gradient? gradient;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Ink(
+          height: 46,
+          decoration: BoxDecoration(
+            color: gradient == null ? background : null,
+            gradient: gradient,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

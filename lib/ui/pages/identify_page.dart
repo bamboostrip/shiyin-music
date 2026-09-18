@@ -718,7 +718,12 @@ class _IdentifyPageState extends State<IdentifyPage>
             songs: songs,
             onPlay: _playSong,
             isLiked: (song) => _auth.isLiked(song),
-            onLikeTap: (song) => _auth.toggleLike(song),
+            onLikeTap: (song) => _auth
+                .toggleLike(song)
+                .then(
+                  (_) {},
+                  onError: (Object _) => Toast.error('操作失败，请重试'),
+                ),
             auth: _auth,
             player: widget.player,
             onViewArtist: _openArtist,

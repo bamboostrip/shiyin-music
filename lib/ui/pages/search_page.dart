@@ -782,7 +782,12 @@ class _SearchPageState extends State<SearchPage> {
                 songs: _results,
                 onPlay: _playSong,
                 isLiked: (song) => widget.auth.isLiked(song),
-                onLikeTap: (song) => widget.auth.toggleLike(song),
+                onLikeTap: (song) => widget.auth
+                    .toggleLike(song)
+                    .then(
+                      (_) {},
+                      onError: (Object _) => Toast.error('操作失败，请重试'),
+                    ),
                 auth: widget.auth,
                 player: widget.player,
                 onViewArtist: _openArtist,
@@ -797,7 +802,12 @@ class _SearchPageState extends State<SearchPage> {
                   songs: _results,
                   onPlay: _playSong,
                   isLiked: (song) => widget.auth.isLiked(song),
-                  onLikeTap: (song) => widget.auth.toggleLike(song),
+                  onLikeTap: (song) => widget.auth
+                      .toggleLike(song)
+                      .then(
+                        (_) {},
+                        onError: (Object _) => Toast.error('操作失败，请重试'),
+                      ),
                   auth: widget.auth,
                   player: widget.player,
                   onViewArtist: _openArtist,

@@ -342,7 +342,13 @@ class Controls extends StatelessWidget {
                       iconSize: edgeIconSize,
                       padding: EdgeInsets.zero,
                       onPressed: likeSong.source == SongSource.kugou
-                          ? () => likeAuth.toggleLike(likeSong)
+                          ? () => likeAuth
+                                .toggleLike(likeSong)
+                                .then(
+                                  (_) {},
+                                  onError: (Object _) =>
+                                      Toast.error('操作失败，请重试'),
+                                )
                           : null,
                       icon: Icon(
                         liked
