@@ -453,12 +453,16 @@ class MainActivity : AudioServiceActivity() {
                         val passthrough = call.argument<Boolean>("passthrough") ?: false
                         // 旧版 Flutter 只发 textColor（= 未播放色），新版发双色键；
                         // 缺键时用旧键回退，保证升级前后外观一致。
-                        val legacyTextColor = call.argument<Long>("textColor")
-                        val unplayedColorLong = call.argument<Long>("unplayedTextColor")
-                            ?: legacyTextColor ?: 0xFFFFFFFF
-                        val playedColorLong = call.argument<Long>("playedTextColor")
-                            ?: legacyTextColor ?: 0xFFFFFFFF
-                        val backgroundColorLong = call.argument<Long>("backgroundColor") ?: 0xFF1A1A2E
+                        // 颜色统一按 Number 读：StandardMessageCodec 对 < 2^31 的
+                        // 整数编成 Int、否则编成 Long，只按 Long 读会让低 alpha
+                        // 颜色静默回退成白色。
+                        val legacyTextColor = call.argument<Number>("textColor")?.toLong()
+                        val unplayedColorLong = call.argument<Number>("unplayedTextColor")
+                            ?.toLong() ?: legacyTextColor ?: 0xFFFFFFFFL
+                        val playedColorLong = call.argument<Number>("playedTextColor")
+                            ?.toLong() ?: legacyTextColor ?: 0xFFFFFFFFL
+                        val backgroundColorLong = call.argument<Number>("backgroundColor")
+                            ?.toLong() ?: 0xFF1A1A2EL
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 16f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
                         val singleLine = call.argument<Boolean>("singleLine") ?: true
