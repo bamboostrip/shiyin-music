@@ -20,6 +20,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.Gravity
+import android.util.Log
 import android.util.TypedValue
 import android.view.WindowManager
 import android.widget.ImageView
@@ -29,6 +30,7 @@ import kotlin.math.abs
 class LyricsOverlayService : Service() {
 
     companion object {
+        private const val TAG = "LyricsOverlay"
         const val CHANNEL_ID = "shiyin_music.lyrics_overlay"
         // 改名前的旧渠道 ID，onCreate 建渠道前删除（避免通知设置里新旧并存）
         private const val OLD_CHANNEL_ID = "kgka_music_hl.lyrics_overlay"
@@ -111,16 +113,17 @@ class LyricsOverlayService : Service() {
         // 非活动行（0.65）保持一致。
         private const val NEXT_LYRIC_DIM_RATIO = 0.65f
 
-        fun isRunning(context: Context): Boolean {
-            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-            @Suppress("DEPRECATION")
-            for (service in manager.getRunningServices(Int.MAX_VALUE)) {
-                if (LyricsOverlayService::class.java.name == service.service.className) {
-                    return true
-                }
-            }
-            return false
-        }
+        /**
+         * 进程内悬浮窗**真实展示态**（供 isVisible 查询；跨实例可见）。
+         *
+         * 历史实现用 ActivityManager.getRunningServices 判断"服务是否在跑"，
+         * 既踩已废弃 API 又会误报：服务实例在"App 前台 + 歌词开启"期间是常驻的
+         * （前台隐藏期间保活，回桌面才能用缓存即刻重建），那时服务在跑但窗并
+         * 不在显示。
+         */
+        @Volatile
+        var overlayVisible: Boolean = false
+            private set
     }
 
     private var windowManager: WindowManager? = null
@@ -238,12 +241,15 @@ class LyricsOverlayService : Service() {
         // 改为仅在悬浮窗真正展示时挂出（showOverlay），隐藏即撤下。
     }
 
-    /** 悬浮窗展示期间挂常驻通知（失败不影响悬浮窗本身）。 */
+    /** 悬浮窗展示期间挂常驻通知（失败只记日志：悬浮窗本身照常展示）。 */
     private fun startForegroundCompat() {
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
         } catch (e: Exception) {
-            e.printStackTrace()
+            // 失败（Android 12+ 后台起 FGS 被拒、类型/权限异常等）时会出现
+            // "窗在显示但没有 FGS/通知"的窗口期，后台可能被系统回收导致
+            // 悬浮窗消失——必须留下可观测的日志，便于真机定位。
+            Log.w(TAG, "startForeground 失败：悬浮窗仍展示，但后台保活/通知可能缺失", e)
         }
     }
 
@@ -496,6 +502,7 @@ class LyricsOverlayService : Service() {
         try {
             windowManager?.addView(overlayView, layoutParams)
             isShowing = true
+            overlayVisible = true
             // 通知只在悬浮窗真的展示期间挂出（隐藏即撤，见 stopForegroundCompat），
             // 避免“桌面歌词显示中”却看不到悬浮窗的幽灵通知。
             startForegroundCompat()
@@ -828,6 +835,7 @@ class LyricsOverlayService : Service() {
         btnResize = null
         layoutParams = null
         isShowing = false
+        overlayVisible = false
         notifyVisibilityChanged(visible = false, userClosed = userClosed)
     }
 

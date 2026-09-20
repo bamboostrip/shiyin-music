@@ -428,7 +428,9 @@ class MainActivity : AudioServiceActivity() {
                         result.success(null)
                     }
                     "isVisible" -> {
-                        result.success(LyricsOverlayService.isRunning(this))
+                        // 真实展示态：服务实例在"App 前台 + 歌词开启"期间是常驻的
+                        // （前台隐藏期保活），用服务存活判断会把"没窗"报成可见。
+                        result.success(LyricsOverlayService.overlayVisible)
                     }
                     "updateKaraokeProgress" -> {
                         val progress = call.argument<Double>("progress")?.toFloat() ?: 0f
