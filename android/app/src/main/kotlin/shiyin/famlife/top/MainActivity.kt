@@ -61,6 +61,19 @@ class MainActivity : AudioServiceActivity() {
         private const val REQUEST_READ_AUDIO = 1001
         private const val TAG_SUPER_LYRIC = "SuperLyricPublisher"
         private const val TAG_BLUETOOTH_LYRICS = "BluetoothLyrics"
+        private const val TAG_LYRICS_OVERLAY = "LyricsOverlay"
+    }
+
+    // 桌面歌词 intent 的 fire-and-forget 拉起。用户点关闭后服务已 stopSelf，
+    // Dart 侧补发的显式 hide 会落在"进程短暂不持有任何前台服务"的窗口期，
+    // Android 12+ 后台启动限制下 startService 可能抛 IllegalStateException；
+    // 歌词推送本就有下一次推送 / Flutter 侧 show 兜底，这里吞掉记日志即可，
+    // 不让 method-channel handler 里的未捕获异常带崩应用。
+    private fun startLyricsService(intent: Intent) {
+        runCatching { startService(intent) }
+            .onFailure {
+                Log.w(TAG_LYRICS_OVERLAY, "startService 失败，本次忽略: ${it.message}")
+            }
     }
 
     private val downloadReceiver = object : BroadcastReceiver() {
@@ -366,7 +379,10 @@ class MainActivity : AudioServiceActivity() {
                         // 立刻上屏，不依赖紧随其后的 updateLyrics（那一次推送
                         // 可能被服务 stop/start 竞态吞掉，伴奏期没有后续推送
                         // 兜底，窗口会空到下一句）。
-                        val hasLyricPayload = call.hasArgument("lyricPayload")
+                        // 读值而非判存在：Dart 恒发 true，当前等价；判存在的
+                        // 写法会让将来的 lyricPayload=false 被误当成 true，
+                        // 空歌词不再回退到服务内缓存。
+                        val hasLyricPayload = call.argument<Boolean>("lyricPayload") ?: false
                         val current = call.argument<String>("current") ?: ""
                         val next = call.argument<String>("next") ?: ""
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
@@ -380,7 +396,7 @@ class MainActivity : AudioServiceActivity() {
                                 hasLyricPayload
                             )
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "hide" -> {
@@ -391,7 +407,7 @@ class MainActivity : AudioServiceActivity() {
                             action = LyricsOverlayService.ACTION_HIDE
                             putExtra(LyricsOverlayService.EXTRA_TRANSIENT_HIDE, transient)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "updateLyrics" -> {
@@ -402,7 +418,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "cacheLyrics" -> {
@@ -415,7 +431,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "updatePlayState" -> {
@@ -424,7 +440,7 @@ class MainActivity : AudioServiceActivity() {
                             action = LyricsOverlayService.ACTION_UPDATE_PLAY_STATE
                             putExtra(LyricsOverlayService.EXTRA_IS_PLAYING, isPlaying)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "isVisible" -> {
@@ -434,7 +450,10 @@ class MainActivity : AudioServiceActivity() {
                     }
                     "updateKaraokeProgress" -> {
                         val progress = call.argument<Double>("progress")?.toFloat() ?: 0f
-                        val lineDurationMs = call.argument<Int>("lineDurationMs") ?: 0
+                        // 与颜色键同理按 Number 读（StandardMessageCodec 对
+                        // < 2^31 的整数编成 Int），编解码收口保持一致。
+                        val lineDurationMs =
+                            call.argument<Number>("lineDurationMs")?.toInt() ?: 0
                         val isPlaying = call.argument<Boolean>("isPlaying") ?: false
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_KARAOKE
@@ -442,12 +461,13 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_LINE_DURATION_MS, lineDurationMs)
                             putExtra(LyricsOverlayService.EXTRA_IS_PLAYING, isPlaying)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "updateSettings" -> {
                         // 缺键回退与 Flutter 侧 DesktopLyricsSettings 默认对齐
-                        //（透明底、单行）；正常流程 Flutter 恒传显式值。
+                        //（透明底、单行、字号 24、金黄/天蓝双色）；正常流程
+                        // Flutter 恒传显式值。
                         val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0f
                         val locked = call.argument<Boolean>("locked") ?: false
                         val passthrough = call.argument<Boolean>("passthrough") ?: false
@@ -463,7 +483,7 @@ class MainActivity : AudioServiceActivity() {
                             ?.toLong() ?: legacyTextColor ?: 0xFFFFFFFFL
                         val backgroundColorLong = call.argument<Number>("backgroundColor")
                             ?.toLong() ?: 0xFF1A1A2EL
-                        val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 16f
+                        val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
                         val singleLine = call.argument<Boolean>("singleLine") ?: true
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
@@ -479,7 +499,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_BACKGROUND_COLOR, backgroundColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_FONT_SIZE, fontSize)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     "setAppForeground" -> {
@@ -488,7 +508,7 @@ class MainActivity : AudioServiceActivity() {
                             action = LyricsOverlayService.ACTION_SET_APP_FOREGROUND
                             putExtra(LyricsOverlayService.EXTRA_IS_FOREGROUND, isForeground)
                         }
-                        startService(intent)
+                        startLyricsService(intent)
                         result.success(null)
                     }
                     // 通知卡片自定义按钮（桌面歌词开关等）在应用后台时触发，

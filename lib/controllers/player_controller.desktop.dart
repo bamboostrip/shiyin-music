@@ -217,12 +217,12 @@ mixin _PlayerDesktop on _PlayerControllerBase {
         '[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限',
       );
     } else {
-      // 悬浮窗每次创建都是原生默认值（白字/双行/不透明度 0.8）：用户在设置页
-      // 调好的配色/行数/透明度只在“设置变更”时下发，首次显示（冷启动、切歌
-      // 拉起服务）会用原生默认把高亮颜色盖错——这里显示成功后补推一次当前
-      // 设置，保证卡拉 OK 高亮色第一次就正确。Windows 子窗同理（幂等重建）。
+      // 原生设置在每次 ACTION_UPDATE_SETTINGS 时已落盘、onCreate 恢复，
+      // 正常与 Flutter 侧一致；这里补推只为兜住"首次安装尚无持久化/原生
+      // 偏好被清"的首帧（幂等）。歌词内容不再补推：show 请求自带
+      // （上方 _syncDesktopLyrics 已把镜像备好），Windows 子窗创建参数同
+      // 样自带，重复推送只会多一次 IPC。
       unawaited(_desktopLyrics.updateSettings(desktopLyricsSettings));
-      _syncDesktopLyrics();
       _syncDesktopPlayState();
       _syncDesktopKaraokeProgress();
     }

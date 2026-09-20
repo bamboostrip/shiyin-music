@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -81,6 +82,13 @@ class LyricsOverlayService : Service() {
         // 落地的窗口，避免 stopSelf 把已排队的 START 命令一起吞掉。
         private const val STOP_SETTLE_MS = 300L
 
+        // 出厂默认与 Flutter 侧 DesktopLyricsSettings 对齐（金黄=已播放、
+        // 天蓝=未播放、字号 24）：全新安装的首帧即与设置页一致，不再闪
+        // 旧默认的白色 16 号字。老用户持久化值不受影响。
+        private const val DEFAULT_PLAYED_COLOR = 0xFFFFD700.toInt()
+        private const val DEFAULT_UNPLAYED_COLOR = 0xFF00BFFF.toInt()
+        private const val DEFAULT_FONT_SIZE_SP = 24f
+
         private const val PREFS_NAME = "lyrics_overlay_prefs"
         private const val KEY_POS_X = "pos_x"
         private const val KEY_POS_Y = "pos_y"
@@ -144,22 +152,22 @@ class LyricsOverlayService : Service() {
     private var karaokeLineDurationMs = 0
     private var karaokePlaying = false
 
-    // Settings（默认值与 Flutter 侧 DesktopLyricsSettings 对齐：
-    // 透明底 + 单行；冷启动首次显示即与设置页一致）。
+    // Settings（默认值与 Flutter 侧 DesktopLyricsSettings 对齐：透明底 +
+    // 单行 + 金黄/天蓝双色 + 字号 24；冷启动首次显示即与设置页一致）。
     private var bgOpacity: Float = 0f
     private var isLocked: Boolean = false
     private var isPassthrough: Boolean = false
     // 卡拉OK双色：active=高亮（已播放），base=歌词（未播放），与 PC 悬浮窗语义一致。
     // textColor 字段保留，仅作旧版持久化/旧版 Flutter 推送的回退来源。
     @Suppress("unused")
-    private var textColor: Int = Color.WHITE
-    private var playedColor: Int = Color.WHITE
-    private var unplayedColor: Int = Color.WHITE
+    private var textColor: Int = DEFAULT_UNPLAYED_COLOR
+    private var playedColor: Int = DEFAULT_PLAYED_COLOR
+    private var unplayedColor: Int = DEFAULT_UNPLAYED_COLOR
     private var textOpacity: Float = 1f
     // 单行模式只显示当前句，下一句隐藏；默认 true 与 Flutter 侧一致。
     private var isSingleLine: Boolean = true
     private var backgroundColor: Int = Color.parseColor("#1A1A2E")
-    private var fontSizeSp: Float = 16f
+    private var fontSizeSp: Float = DEFAULT_FONT_SIZE_SP
 
     // 悬浮窗“应展示”意图：true = 现在本应显示（只因 App 在前台被临时隐藏），
     // 回桌面必须立刻用缓存歌词重建；false = 用户已关闭/无歌/未开启，不该复活。
@@ -170,6 +178,11 @@ class LyricsOverlayService : Service() {
     // 其中紧跟 stopSelf 的那次 startService 会被系统连实例一起丢掉。伴奏期
     // 之后没有任何歌词推送能兜底，悬浮窗就会一直空到下一句才突然出现（用户
     // 报的正是这个）。保持实例存活，回桌面直接用缓存重建即可根治。
+    //
+    // 注意冷启动首回合该标记尚未置位（resumed 与 Flutter 侧初始值相同，不会
+    // 触发前后台同步）：首回合的窗口由 Flutter 侧 show 建立——show 自带歌词
+    // 内容，即使撞上停服 debounce、实例重建也能从 intent 拿到内容，不依赖
+    // 本标记与缓存。用户回过一次前台（窗口在展示时切前台）即有自愈保护。
     private var overlayWanted: Boolean = false
     private var lastCurrent: String? = null
     private var lastNext: String? = null
@@ -244,7 +257,20 @@ class LyricsOverlayService : Service() {
     /** 悬浮窗展示期间挂常驻通知（失败只记日志：悬浮窗本身照常展示）。 */
     private fun startForegroundCompat() {
         try {
-            startForeground(NOTIFICATION_ID, buildNotification())
+            // 显式传类型（Android 14+ 文档推荐写法）：manifest 已声明
+            // specialUse，2 参调用也会回退用 manifest 类型，这里写明让
+            // 类型声明与调用点不脱节。FOREGROUND_SERVICE_TYPE_* 为 API 29+，
+            // minSdk 26 需分支。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(NOTIFICATION_ID, buildNotification())
+            }
         } catch (e: Exception) {
             // 失败（Android 12+ 后台起 FGS 被拒、类型/权限异常等）时会出现
             // "窗在显示但没有 FGS/通知"的窗口期，后台可能被系统回收导致
@@ -277,7 +303,10 @@ class LyricsOverlayService : Service() {
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
                 val artist = intent.getStringExtra(EXTRA_ARTIST) ?: ""
                 // MainActivity 的 show 请求固定携带 TITLE extra（可能为空串），
-                // 普通歌词推送不带：以此区分“初始显示”与“歌词更新”。
+                // 普通歌词推送不带：以此区分“初始显示”与“歌词更新”。这是
+                // 隐式协议，依赖两点：Flutter 侧只在“应当展示”时才发 show，
+                // 且 Dart 通道按序派发——关闭（hide(false)）恒后于此前任何
+                // show，故在途 show 不会把已关的窗口复活。
                 val isShowRequest = intent.hasExtra(EXTRA_TITLE)
                 // show 请求 = 明确要求“把悬浮窗建出来”（回桌面重建、设置页悬浮
                 // 预览都走它），因此不看前后台；普通歌词推送只是内容更新，只有
@@ -388,11 +417,8 @@ class LyricsOverlayService : Service() {
                                     lastPlaying,
                                 )
                             }
-                        } else {
-                            // 建窗失败（悬浮窗权限被撤等）：不留空转的服务，
-                            // 由 Flutter 侧下次推送/开关重新拉起。
-                            overlayWanted = false
                         }
+                        // 建窗失败由 showOverlay 的 catch 统一清 overlayWanted。
                     }
                 }
             }
@@ -514,7 +540,11 @@ class LyricsOverlayService : Service() {
             }
             notifyVisibilityChanged(visible = true, userClosed = false)
         } catch (e: Exception) {
-            e.printStackTrace()
+            // 建窗失败（悬浮窗权限被撤等）：清掉"应展示"意图，别留一个无窗
+            // 却自认为该展示的空转服务（scheduleStopIfIdle 会因此停服）；
+            // 由 Flutter 侧下次推送/开关重新拉起。
+            overlayWanted = false
+            Log.w(TAG, "悬浮窗创建失败", e)
         }
     }
 
@@ -787,19 +817,19 @@ class LyricsOverlayService : Service() {
     private fun loadSettings() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         // 新鲜安装默认值与 Flutter 侧 DesktopLyricsSettings 对齐（透明底、
-        // 单行）；老用户已持久化的选择不受影响。
+        // 单行、金黄/天蓝、字号 24）；老用户已持久化的选择不受影响。
         bgOpacity = prefs.getFloat(KEY_OPACITY, 0f)
         isLocked = prefs.getBoolean(KEY_LOCKED, false)
         isPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, false)
         // 旧版只有 KEY_TEXT_COLOR 单键：双色缺省时用它回退，保持升级后外观不变。
-        val legacyText = prefs.getInt(KEY_TEXT_COLOR, Color.WHITE)
+        val legacyText = prefs.getInt(KEY_TEXT_COLOR, DEFAULT_UNPLAYED_COLOR)
         unplayedColor = prefs.getInt(KEY_UNPLAYED_TEXT_COLOR, legacyText)
         playedColor = prefs.getInt(KEY_PLAYED_TEXT_COLOR, legacyText)
         textColor = unplayedColor
         textOpacity = prefs.getFloat(KEY_TEXT_OPACITY, 1f).coerceIn(0f, 1f)
         isSingleLine = prefs.getBoolean(KEY_SINGLE_LINE, true)
         backgroundColor = prefs.getInt(KEY_BACKGROUND_COLOR, Color.parseColor("#1A1A2E"))
-        fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, 16f)
+        fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, DEFAULT_FONT_SIZE_SP)
     }
 
     private fun saveSettings() {
