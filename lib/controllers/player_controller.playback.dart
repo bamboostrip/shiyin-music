@@ -94,6 +94,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       duration = song.duration ?? Duration.zero;
       lyrics = const [];
       _lastDesktopLyricIndex = -1;
+      // 同步清空桌面歌词缓存：此刻到新歌词加载完成之间如果回桌面，
+      // 原生自愈重建不能拿上一首的句子把窗口画出来（前台隐藏期走
+      // cacheLyrics('') 清原生缓存，后台改发上屏推送显示"暂无歌词"）。
+      _syncDesktopLyrics();
     }
 
     // 切新歌或无本地缓存需走网络解析时标记 isPreparing；
