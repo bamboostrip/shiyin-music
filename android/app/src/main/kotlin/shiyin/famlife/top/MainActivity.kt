@@ -465,10 +465,10 @@ class MainActivity : AudioServiceActivity() {
                         result.success(null)
                     }
                     "updateSettings" -> {
-                        // 缺键回退与 Flutter 侧 DesktopLyricsSettings 默认对齐
-                        //（透明底、单行、字号 24、金黄/天蓝双色）；正常流程
+                        // 缺键回退与 Flutter 侧 DesktopLyricsSettings 移动端默认对齐
+                        //（双行、50% 背景、字号 24、金黄/天蓝双色）；正常流程
                         // Flutter 恒传显式值。
-                        val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0f
+                        val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0.5f
                         val locked = call.argument<Boolean>("locked") ?: false
                         val passthrough = call.argument<Boolean>("passthrough") ?: false
                         // 旧版 Flutter 只发 textColor（= 未播放色），新版发双色键；
@@ -478,14 +478,14 @@ class MainActivity : AudioServiceActivity() {
                         // 颜色静默回退成白色。
                         val legacyTextColor = call.argument<Number>("textColor")?.toLong()
                         val unplayedColorLong = call.argument<Number>("unplayedTextColor")
-                            ?.toLong() ?: legacyTextColor ?: 0xFFFFFFFFL
+                            ?.toLong() ?: legacyTextColor ?: 0xFF00BFFFL
                         val playedColorLong = call.argument<Number>("playedTextColor")
-                            ?.toLong() ?: legacyTextColor ?: 0xFFFFFFFFL
+                            ?.toLong() ?: legacyTextColor ?: 0xFFFFD700L
                         val backgroundColorLong = call.argument<Number>("backgroundColor")
                             ?.toLong() ?: 0xFF1A1A2EL
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
-                        val singleLine = call.argument<Boolean>("singleLine") ?: true
+                        val singleLine = call.argument<Boolean>("singleLine") ?: false
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_SETTINGS
                             putExtra(LyricsOverlayService.EXTRA_OPACITY, opacity)

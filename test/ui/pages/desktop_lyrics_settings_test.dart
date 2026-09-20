@@ -82,26 +82,34 @@ void main() {
 
       expect(find.text('单行显示'), findsOneWidget);
       expect(find.text('双行显示'), findsOneWidget);
-      expect(player.desktopLyricsSettings.singleLine, isTrue);
-
-      // Switch to dual line
-      await tester.tap(find.text('双行显示'));
-      await tester.pumpAndSettle();
-
+      // 桌面默认双行两端对齐。
       expect(player.desktopLyricsSettings.singleLine, isFalse);
-      expect(player.updatedSettingsList.last.singleLine, isFalse);
 
-      // Switch back to single line
+      // Switch to single line
       await tester.tap(find.text('单行显示'));
       await tester.pumpAndSettle();
 
       expect(player.desktopLyricsSettings.singleLine, isTrue);
       expect(player.updatedSettingsList.last.singleLine, isTrue);
+
+      // Switch back to dual line
+      await tester.tap(find.text('双行显示'));
+      await tester.pumpAndSettle();
+
+      expect(player.desktopLyricsSettings.singleLine, isFalse);
+      expect(player.updatedSettingsList.last.singleLine, isFalse);
     });
 
     testWidgets('alignment options follow line count (split is dual-only)', (
       tester,
     ) async {
+      // 先切到单行：单行模式只有居中/左/右三种；「左右分离」只对双行显示有意义。
+      await player.updateDesktopLyricsSettings(
+        player.desktopLyricsSettings.copyWith(
+          singleLine: true,
+          alignment: DesktopLyricsAlignment.center,
+        ),
+      );
       await pumpSettingsPage(tester);
 
       // 单行模式只有居中/左/右三种；「左右分离」只对双行显示有意义。
@@ -225,19 +233,19 @@ void main() {
       // Preview section header
       expect(find.text('效果预览'), findsOneWidget);
 
-      // Single line shows "时音 听我想听" (karaoke line renders stacked Text widgets)
-      expect(find.text('时音 听我想听'), findsWidgets);
-      expect(find.byType(LyricsKaraokeLine), findsOneWidget);
-      expect(find.text('让音乐更自由'), findsNothing);
-
-      // Switch to dual line mode
-      await tester.tap(find.text('双行显示'));
-      await tester.pumpAndSettle();
-
-      // Dual line preview shows both lines
+      // 桌面默认双行：预览同时显示两行。
       expect(find.text('时音 听我想听'), findsWidgets);
       expect(find.text('让音乐更自由'), findsWidgets);
       expect(find.byType(LyricsKaraokeLine), findsNWidgets(2));
+
+      // Switch to single line mode
+      await tester.tap(find.text('单行显示'));
+      await tester.pumpAndSettle();
+
+      // Single line preview shows only current line
+      expect(find.text('时音 听我想听'), findsWidgets);
+      expect(find.byType(LyricsKaraokeLine), findsOneWidget);
+      expect(find.text('让音乐更自由'), findsNothing);
     });
 
     testWidgets('restore defaults resets appearance and keeps locked', (
@@ -245,8 +253,8 @@ void main() {
     ) async {
       await pumpSettingsPage(tester);
 
-      // 先把外观调乱：双行、大字号、粉色歌词色。
-      await tester.tap(find.text('双行显示'));
+      // 先把外观调乱：单行、大字号、粉色歌词色。
+      await tester.tap(find.text('单行显示'));
       await tester.pumpAndSettle();
       final fontSlider = tester.widget<Slider>(
         find.descendant(
@@ -277,7 +285,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final restored = player.updatedSettingsList.last;
-      expect(restored.singleLine, isTrue);
+      expect(restored.singleLine, isFalse);
       expect(restored.fontSize, DesktopLyricsSettings.defaultFontSize);
       expect(restored.alignment, DesktopLyricsAlignment.split);
       expect(restored.opacity, DesktopLyricsSettings.defaultOpacity);
@@ -301,11 +309,11 @@ void main() {
     ) async {
       await pumpSettingsPage(tester);
 
-      // 默认 split 在单行下展示为渲染等价的居中（split 仅双行可选）。
+      // 桌面默认双行两端对齐：对齐选择器直接展示 split。
       final alignmentSelector = tester.widget<SegmentedButton<String>>(
         find.byType(SegmentedButton<String>),
       );
-      expect(alignmentSelector.selected, {DesktopLyricsAlignment.center});
+      expect(alignmentSelector.selected, {DesktopLyricsAlignment.split});
 
       // Externally update player settings
       await player.updateDesktopLyricsSettings(
@@ -341,13 +349,13 @@ void main() {
         expect(previewPos.dx, greaterThan(appearancePos.dx));
 
         // Both are visible on screen
-        expect(find.byType(LyricsKaraokeLine), findsOneWidget);
-
-        // 1. Updating segments (行数)
-        await tester.tap(find.text('双行显示'));
-        await tester.pumpAndSettle();
-        expect(player.desktopLyricsSettings.singleLine, isFalse);
         expect(find.byType(LyricsKaraokeLine), findsNWidgets(2));
+
+        // 1. Updating segments (行数)：默认双行，切单行验证切换生效。
+        await tester.tap(find.text('单行显示'));
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.singleLine, isTrue);
+        expect(find.byType(LyricsKaraokeLine), findsOneWidget);
 
         // 2. Updating slider (字体大小)
         final fontSlider = tester.widget<Slider>(
@@ -473,12 +481,20 @@ void main() {
         expect(find.text('触摸穿透'), findsOneWidget);
 
         // 预览与移动端原生悬浮窗一致：恒为左对齐（即使存量值是 split）。
-        final line = tester.widget<LyricsKaraokeLine>(
-          find.byType(LyricsKaraokeLine),
-        );
-        expect(line.alignment, TextAlign.left);
+        // 桌面默认双行，预览直接渲染两行。
+        final lines = tester
+            .widgetList<LyricsKaraokeLine>(
+              find.byType(LyricsKaraokeLine),
+            )
+            .toList();
+        expect(lines.length, 2);
+        expect(lines.first.alignment, TextAlign.left);
 
-        // 行数切换在移动端仍可用：切双行后预览出现下一句。
+        // 行数切换在移动端仍可用：切单行后下一句消失，切回双行恢复。
+        await tester.tap(find.text('单行显示'));
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.singleLine, isTrue);
+        expect(find.text('让音乐更自由'), findsNothing);
         await tester.tap(find.text('双行显示'));
         await tester.pumpAndSettle();
         expect(player.desktopLyricsSettings.singleLine, isFalse);

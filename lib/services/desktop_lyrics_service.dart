@@ -37,8 +37,11 @@ class DesktopLyricsAlignment {
 }
 
 class DesktopLyricsSettings {
-  // 默认 QQ 音乐式透明悬浮：无底色（透明度 0），靠文字阴影保证可读性；
-  // 字号 24 在 780x124 悬浮窗内展示效果最佳。用户可在设置页调回底色。
+  // 桌面默认 QQ 音乐式悬浮：双行两端对齐（上行居左/下行居右 split），
+  // 无底色（透明度 0），靠文字阴影保证可读性；
+  // 字号 24 在 780x124 悬浮窗内展示效果最佳。用户可在设置页调回底色/单行。
+  // 移动端（Android 原生悬浮窗）默认同样双行，但背景透明度 50%，见
+  // defaultMobileOpacity/defaultMobileSingleLine。
   // 默认经典金黄（已播放 0xFFFFD700）与天蓝（未播放 0xFF00BFFF）卡拉OK双色，
   // 双行默认左右分离（split）、单行等价居中。
 
@@ -50,14 +53,24 @@ class DesktopLyricsSettings {
 
   /// 外观默认值：构造参数、fromMap 兜底与设置页「恢复默认」共用的
   /// 唯一定义处，改动默认配色/字号只需改这里。
+  ///
+  /// 桌面（Windows/Linux 悬浮窗）默认双行两端对齐 + 透明悬浮（透明度 0）；
+  /// 移动端（Android 原生悬浮窗）默认同样双行，但背景透明度 50%（小屏上
+  /// 半透底保证浅色壁纸下的可读性）。两套默认分离维护，恢复默认按钮
+  /// 按平台取对应值（见 [withPlatformDefaultAppearance]）。
   static const double defaultOpacity = 0.0;
   static const int defaultBackgroundColor = 0xFF1A1A2E;
   static const double defaultFontSize = 24.0;
-  static const bool defaultSingleLine = true;
+  static const bool defaultSingleLine = false;
   static const String defaultAlignment = DesktopLyricsAlignment.split;
   static const double defaultTextOpacity = 1.0;
   static const int defaultPlayedTextColor = 0xFFFFD700;
   static const int defaultUnplayedTextColor = 0xFF00BFFF;
+
+  /// 移动端外观默认值（Android 原生悬浮窗）：双行显示 + 背景透明度 50%。
+  /// 其余外观（配色/字号/对齐/文字透明度）与桌面默认一致。
+  static const double defaultMobileOpacity = 0.5;
+  static const bool defaultMobileSingleLine = false;
 
   const DesktopLyricsSettings({
     this.opacity = defaultOpacity,
@@ -77,6 +90,9 @@ class DesktopLyricsSettings {
   /// 外观恢复出厂默认（配色/字号/行数/对齐/透明度），设置页「恢复默认」
   /// 按钮使用。锁定与触摸穿透是行为状态，不在此重置——正在使用的
   /// 悬浮窗不应因恢复外观而突然解锁或改变穿透。
+  ///
+  /// 桌面默认见 [defaultOpacity]/[defaultSingleLine]；移动端默认见
+  /// [defaultMobileOpacity]/[defaultMobileSingleLine]（双行 + 50% 背景）。
   DesktopLyricsSettings withDefaultAppearance() => copyWith(
     opacity: defaultOpacity,
     backgroundColor: defaultBackgroundColor,
@@ -87,6 +103,36 @@ class DesktopLyricsSettings {
     playedTextColor: defaultPlayedTextColor,
     unplayedTextColor: defaultUnplayedTextColor,
   );
+
+  /// 移动端外观恢复出厂默认：与 [withDefaultAppearance] 相同的字段集合，
+  /// 仅行数与背景透明度取移动端默认值（双行 + 50% 背景）。
+  DesktopLyricsSettings withDefaultMobileAppearance() => copyWith(
+    opacity: defaultMobileOpacity,
+    backgroundColor: defaultBackgroundColor,
+    fontSize: defaultFontSize,
+    singleLine: defaultMobileSingleLine,
+    alignment: defaultAlignment,
+    textOpacity: defaultTextOpacity,
+    playedTextColor: defaultPlayedTextColor,
+    unplayedTextColor: defaultUnplayedTextColor,
+  );
+
+  /// 按平台取外观默认：[isDesktop] 为 true 用桌面默认，否则用移动端默认。
+  /// 设置页「恢复默认」与新安装首启共用，避免两处各写一套分支。
+  DesktopLyricsSettings withPlatformDefaultAppearance({
+    required bool isDesktop,
+  }) => isDesktop
+      ? withDefaultAppearance()
+      : withDefaultMobileAppearance();
+
+  /// 平台出厂默认实例：新安装尚无持久化时用它（桌面透明双行 / 移动半透双行）。
+  static DesktopLyricsSettings platformDefault({required bool isDesktop}) =>
+      isDesktop
+          ? const DesktopLyricsSettings()
+          : const DesktopLyricsSettings(
+              opacity: defaultMobileOpacity,
+              singleLine: defaultMobileSingleLine,
+            );
 
   final double opacity;
   final bool locked;

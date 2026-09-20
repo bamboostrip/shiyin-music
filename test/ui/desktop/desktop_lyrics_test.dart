@@ -42,7 +42,8 @@ void main() {
       expect(settings.unplayedTextColor, 0xFF00BFFF);
       expect(settings.playedTextColor, 0xFFFFD700);
       expect(settings.fontSize, 24.0);
-      expect(settings.singleLine, isTrue);
+      // 桌面默认双行两端对齐（split）：正在唱的上行居左、下一句下行居右。
+      expect(settings.singleLine, isFalse);
       // 默认左右分离：单行下与居中渲染一致，双行下即 QQ 音乐经典对角交错。
       expect(settings.alignment, DesktopLyricsAlignment.split);
       expect(settings.textOpacity, 1.0);
@@ -101,7 +102,7 @@ void main() {
         expect(legacy.passthrough, isTrue);
         expect(legacy.opacity, 0.5);
         expect(legacy.fontSize, 20.0);
-        expect(legacy.singleLine, isTrue);
+        expect(legacy.singleLine, isFalse);
         expect(legacy.alignment, DesktopLyricsAlignment.split);
         expect(legacy.textOpacity, 1.0);
         expect(legacy.playedTextColor, 0xFFFFD700);
@@ -128,7 +129,7 @@ void main() {
         expect(minimal.passthrough, isFalse);
         expect(minimal.opacity, 0.0);
         expect(minimal.fontSize, 24.0);
-        expect(minimal.singleLine, isTrue);
+        expect(minimal.singleLine, isFalse);
         expect(minimal.alignment, DesktopLyricsAlignment.split);
         expect(minimal.textOpacity, 1.0);
         expect(minimal.playedTextColor, 0xFFFFD700);
@@ -140,7 +141,7 @@ void main() {
       const base = DesktopLyricsSettings();
 
       // copyWith 各个新字段
-      expect(base.copyWith(singleLine: false).singleLine, isFalse);
+      expect(base.copyWith(singleLine: true).singleLine, isTrue);
       expect(base.copyWith(alignment: 'right').alignment, 'right');
       expect(base.copyWith(textOpacity: 0.5).textOpacity, 0.5);
       expect(
@@ -158,7 +159,7 @@ void main() {
       );
 
       // 相等性对比
-      final modifiedSingleLine = base.copyWith(singleLine: false);
+      final modifiedSingleLine = base.copyWith(singleLine: true);
       expect(modifiedSingleLine, isNot(base));
       expect(modifiedSingleLine.hashCode, isNot(base.hashCode));
 

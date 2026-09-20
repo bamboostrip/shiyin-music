@@ -409,12 +409,23 @@ mixin _PlayerSettings on _PlayerControllerBase {
             }
           }
         } catch (_) {}
+      } else {
+        // v2 已是最新但尚无持久化（新安装）：按平台取默认值，
+        // 桌面透明单行，移动端双行 + 50% 背景。
+        desktopLyricsSettings = DesktopLyricsSettings.platformDefault(
+          isDesktop: isDesktopFormFactor,
+        );
       }
     } else {
       // 旧版本残留直接丢弃，并把版本号写到最新，避免每次启动重复判断。
       // 必须同时删除旧 JSON：只写版本号的话，下次启动 dlVersion 已达标，
       // 上面的读取分支会把 v1 的旧值（旧透明度/字号/锁定态）重新 parse
       // 回来——首启是新默认值、二启复活旧样式，来回翻转。
+      // 新安装的默认值按平台取（桌面透明双行 / 移动半透双行），
+      // 存量老用户不强制迁移（已有持久化在上个分支原样保留）。
+      desktopLyricsSettings = DesktopLyricsSettings.platformDefault(
+        isDesktop: isDesktopFormFactor,
+      );
       await prefs.remove(_desktopLyricsSettingsKey);
       await prefs.setInt(
         _desktopLyricsSettingsVersionKey,

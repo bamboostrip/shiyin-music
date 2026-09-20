@@ -64,7 +64,10 @@ class _DesktopLyricsSettingsPageState
 
   void _resetToDefaults() {
     // 只恢复外观（配色/字号/行数/对齐/透明度）；锁定与触摸穿透保持不变。
-    _update((s) => s.withDefaultAppearance());
+    // 桌面默认双行两端对齐 + 透明悬浮，移动端（Android 原生悬浮窗）默认双行 + 50% 背景。
+    _update(
+      (s) => s.withPlatformDefaultAppearance(isDesktop: isDesktopFormFactor),
+    );
     // PC 播放栏常驻窗口底部，SnackBar 会压在播放栏上；改用悬浮 Toast。
     Toast.show('已恢复默认外观（锁定状态不变）', type: ToastType.success);
   }

@@ -552,7 +552,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool autoPlayOnDeviceConnected = false;
   bool bluetoothLyricsEnabled = false;
   bool desktopLyricsEnabled = false;
-  DesktopLyricsSettings desktopLyricsSettings = const DesktopLyricsSettings();
+  // 平台出厂默认：桌面透明双行两端对齐 / 移动（Android）半透双行。
+  // 不能用 const 默认构造——移动端首启即应是 50% 背景（构造默认透明度 0 是桌面值）。
+  DesktopLyricsSettings desktopLyricsSettings =
+      DesktopLyricsSettings.platformDefault(isDesktop: isDesktopFormFactor);
 
   /// 用户音量（0..1）：UI 滑杆/快捷键的唯一真相源。
   /// 引擎实际音量 = 用户音量 × 响度系数（见 _applyLoudnessGain），

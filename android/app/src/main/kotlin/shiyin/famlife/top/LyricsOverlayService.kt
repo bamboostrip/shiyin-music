@@ -152,9 +152,9 @@ class LyricsOverlayService : Service() {
     private var karaokeLineDurationMs = 0
     private var karaokePlaying = false
 
-    // Settings（默认值与 Flutter 侧 DesktopLyricsSettings 对齐：透明底 +
-    // 单行 + 金黄/天蓝双色 + 字号 24；冷启动首次显示即与设置页一致）。
-    private var bgOpacity: Float = 0f
+    // Settings（默认值与 Flutter 侧 DesktopLyricsSettings 移动端默认对齐：
+    // 双行 + 50% 背景 + 金黄/天蓝双色 + 字号 24；冷启动首次显示即与设置页一致）。
+    private var bgOpacity: Float = 0.5f
     private var isLocked: Boolean = false
     private var isPassthrough: Boolean = false
     // 卡拉OK双色：active=高亮（已播放），base=歌词（未播放），与 PC 悬浮窗语义一致。
@@ -164,8 +164,8 @@ class LyricsOverlayService : Service() {
     private var playedColor: Int = DEFAULT_PLAYED_COLOR
     private var unplayedColor: Int = DEFAULT_UNPLAYED_COLOR
     private var textOpacity: Float = 1f
-    // 单行模式只显示当前句，下一句隐藏；默认 true 与 Flutter 侧一致。
-    private var isSingleLine: Boolean = true
+    // 单行模式只显示当前句，下一句隐藏；移动端默认双行（false），与 Flutter 侧一致。
+    private var isSingleLine: Boolean = false
     private var backgroundColor: Int = Color.parseColor("#1A1A2E")
     private var fontSizeSp: Float = DEFAULT_FONT_SIZE_SP
 
@@ -816,9 +816,9 @@ class LyricsOverlayService : Service() {
 
     private fun loadSettings() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        // 新鲜安装默认值与 Flutter 侧 DesktopLyricsSettings 对齐（透明底、
-        // 单行、金黄/天蓝、字号 24）；老用户已持久化的选择不受影响。
-        bgOpacity = prefs.getFloat(KEY_OPACITY, 0f)
+        // 新鲜安装默认值与 Flutter 侧 DesktopLyricsSettings 移动端默认对齐
+        //（双行 + 50% 背景、金黄/天蓝、字号 24）；老用户已持久化的选择不受影响。
+        bgOpacity = prefs.getFloat(KEY_OPACITY, 0.5f)
         isLocked = prefs.getBoolean(KEY_LOCKED, false)
         isPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, false)
         // 旧版只有 KEY_TEXT_COLOR 单键：双色缺省时用它回退，保持升级后外观不变。
@@ -827,7 +827,7 @@ class LyricsOverlayService : Service() {
         playedColor = prefs.getInt(KEY_PLAYED_TEXT_COLOR, legacyText)
         textColor = unplayedColor
         textOpacity = prefs.getFloat(KEY_TEXT_OPACITY, 1f).coerceIn(0f, 1f)
-        isSingleLine = prefs.getBoolean(KEY_SINGLE_LINE, true)
+        isSingleLine = prefs.getBoolean(KEY_SINGLE_LINE, false)
         backgroundColor = prefs.getInt(KEY_BACKGROUND_COLOR, Color.parseColor("#1A1A2E"))
         fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, DEFAULT_FONT_SIZE_SP)
     }
