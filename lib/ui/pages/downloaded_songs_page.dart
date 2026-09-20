@@ -46,9 +46,9 @@ class DownloadedSongsPage extends StatefulWidget {
   final DownloadController downloads;
 
   /// 桌面保活栈（LazyIndexedStack）专用：分区切换的修订号通知。
-  /// 保活下本页 [State.initState] 只在首次可见时执行一次，用户切走
-  /// 再切回不会重建——外部删除同步需要靠本通知在"重新成为当前分区"
-  /// 时再触发对账。移动端按路由 push 每次全新构建，两个参数为 null，
+  /// 未被 LRU 淘汰时本页 [State] 常驻，切回靠本通知在"重新成为当前分区"
+  /// 时再触发对账；若已被淘汰则重建走 [State.initState] 的打开对账，
+  /// 两条路径互补。移动端按路由 push 每次全新构建，两个参数为 null，
   /// 行为与之前完全一致。
   final ValueListenable<int>? activationRevision;
 

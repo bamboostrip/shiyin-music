@@ -2091,49 +2091,9 @@ class _SongSectionState extends State<_SongSection> {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final maxWidth = constraints.maxWidth;
-                  // 桌面端（PC 软件逻辑）：纵向多列一次看全，外层页面纵滚，
-                  // 不做左右翻页、不显示分页圆点。
-                  if (isDesktopFormFactor) {
-                    final int crossAxisCount;
-                    if (maxWidth >= 1050) {
-                      crossAxisCount = 3;
-                    } else if (maxWidth >= 650) {
-                      crossAxisCount = 2;
-                    } else {
-                      crossAxisCount = 1;
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (int col = 0; col < crossAxisCount; col++) ...[
-                          if (col > 0) const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                for (
-                                  int i = col;
-                                  i < widget.songs.length;
-                                  i += crossAxisCount
-                                )
-                                  HomeSongRow(
-                                    song: widget.songs[i],
-                                    queue: widget.songs,
-                                    onPlay: widget.onPlay,
-                                    isLiked: widget.isLiked(widget.songs[i]),
-                                    onLikeTap: () =>
-                                        widget.onLikeTap(widget.songs[i]),
-                                    auth: widget.auth,
-                                    player: widget.player,
-                                    onViewArtist: () =>
-                                        widget.onViewArtist(widget.songs[i]),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    );
-                  }
+                  // 盒子宿主统一走分页懒加载（PageView.builder 只构建可见
+                  // 页）：桌面网格懒构建在 _buildDesktopSlivers（sliver
+                  // 宿主），此处不保留桌面全量 eager 分支。
                   final int crossAxisCount;
                   final int itemsPerPage;
                   if (maxWidth >= 1050) {
