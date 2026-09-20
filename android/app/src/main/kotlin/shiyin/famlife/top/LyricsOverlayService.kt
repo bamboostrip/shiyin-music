@@ -176,6 +176,11 @@ class LyricsOverlayService : Service() {
     private var lastProgress: Float = 0f
     private var lastLineDurationMs: Int = 0
     private var lastPlaying: Boolean = false
+    // 快照归属的歌词文本。回桌面自愈时缓存可能已被 App 内的换句/切歌刷新——
+    // 文本新、进度旧地把新句画成旧句的高亮，比不恢复更糟（伴奏期应该整句
+    // 亮着，恢复成半亮会一直错到下一次推送）。两者不同就只上屏文字、不恢复
+    // 进度，交给随后 Flutter 侧的高亮推送。
+    private var lastProgressLine: String? = null
 
     private fun hasCachedLyrics(): Boolean =
         !lastCurrent.isNullOrEmpty() || !lastNext.isNullOrEmpty()
@@ -186,6 +191,7 @@ class LyricsOverlayService : Service() {
         lastProgress = 0f
         lastLineDurationMs = 0
         lastPlaying = false
+        lastProgressLine = null
     }
 
     /** 记下当前逐字进度快照，供回桌面重建时恢复高亮。 */
@@ -193,7 +199,12 @@ class LyricsOverlayService : Service() {
         lastProgress = karaokeView?.progress ?: karaokeAnchorProgress
         lastLineDurationMs = karaokeLineDurationMs
         lastPlaying = karaokePlaying
+        lastProgressLine = lastCurrent
     }
+
+    /** 快照是否仍属于当前缓存的那一句（否则不能拿来恢复高亮）。 */
+    private fun hasSnapshotForCurrentLine(): Boolean =
+        lastProgressLine != null && lastProgressLine == lastCurrent
 
     // 停服延迟二次确认：前后台切换/冷启动设置同步会把多条 intent 挤在极短的
     // 时间里，若在其中一条的处理里立刻 stopSelf，AMS 会把已排队但尚未派发的
@@ -362,12 +373,15 @@ class LyricsOverlayService : Service() {
                         showOverlay("", "")
                         if (isShowing) {
                             // 恢复逐字高亮：正在伴奏时当前句其实已整句唱完，
-                            // 不恢复会从 0% 重新点亮。
-                            updateKaraokeProgress(
-                                lastProgress,
-                                lastLineDurationMs,
-                                lastPlaying,
-                            )
+                            // 不恢复会从 0% 重新点亮。仅当快照还属于这一句时
+                            // 才恢复（见 lastProgressLine）。
+                            if (hasSnapshotForCurrentLine()) {
+                                updateKaraokeProgress(
+                                    lastProgress,
+                                    lastLineDurationMs,
+                                    lastPlaying,
+                                )
+                            }
                         } else {
                             // 建窗失败（悬浮窗权限被撤等）：不留空转的服务，
                             // 由 Flutter 侧下次推送/开关重新拉起。
