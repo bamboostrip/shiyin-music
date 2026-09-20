@@ -264,8 +264,14 @@ class LyricsOverlayService : Service() {
                 val isShowRequest = intent.hasExtra(EXTRA_TITLE)
                 // show 请求 = 明确要求“把悬浮窗建出来”（回桌面重建、设置页悬浮
                 // 预览都走它），因此不看前后台；普通歌词推送只是内容更新，只有
-                // App 不在前台时才补建窗口（前台补建会把悬浮窗盖在应用上）。
-                if (!isShowing && (isShowRequest || !isAppForeground)) {
+                // “后台 + 本应展示”时才补建窗口。overlayWanted 这道门是必需的：
+                // 用户点关闭那一刻往往正好有一句换句推送在途，它落在关闭之后的
+                // 实例上，若只看前后台就会把用户刚关掉的悬浮窗又建出来（且
+                // Flutter 侧已把开关置 false，再也不会下发 hide，窗口会一直挂着
+                // 盖在应用上）。
+                if (!isShowing &&
+                    (isShowRequest || (!isAppForeground && overlayWanted))
+                ) {
                     showOverlay(title, artist)
                 }
                 // 新版 Flutter 的 show 请求自带歌词字段（EXTRA_LYRIC_PAYLOAD），

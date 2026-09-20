@@ -387,6 +387,11 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_desktopLyricsEnabledSettingKey, false);
     notifyListeners();
+    // 原生已自行关窗停服，这里再补一次显式关闭：既是幂等兜底，也能清掉
+    // "用户点关闭那一刻正好在途的换句推送"刚写回原生的歌词缓存 —— 否则那份
+    // 缓存会让原生把它当成"应展示"，在下次回桌面时把刚关掉的悬浮窗重建出来
+    // （而 Flutter 侧开关已关，再也不会下发 hide，窗口会一直挂着）。
+    await _desktopLyrics.hide();
   }
 
   void _handleDesktopLyricsPlaybackAction(String action) {
