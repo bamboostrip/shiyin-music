@@ -7,6 +7,7 @@ import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/services/identify_service.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/ui/desktop/desktop_title_bar.dart';
+import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/search_page.dart';
 import 'package:shiyin_music/ui/widgets/home_collapsible_header.dart';
 
@@ -193,10 +194,14 @@ void main() {
       if (!IdentifyService.isSupported) return;
 
       SharedPreferences.setMockInitialValues({});
+      // 车机分支仅移动形态生效（ThemeController.carModeEnabled 桌面恒
+      // false），测试须显式钉住移动形态，勿依赖桌面宿主的形态泄漏。
+      debugDesktopFormFactorOverride = false;
       final theme = ThemeController();
       await theme.setCarModeEnabled(true);
       addTearDown(() async {
         await ThemeController.instance.setCarModeEnabled(false);
+        debugDesktopFormFactorOverride = null;
       });
 
       tester.view.physicalSize = const Size(1024, 600);

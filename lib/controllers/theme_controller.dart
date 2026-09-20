@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/device_info_service.dart';
 import '../ui/adaptive_layout.dart';
+import '../ui/form_factor.dart';
 
 /// 全局个性化设置控制器。
 ///
@@ -73,7 +74,14 @@ class ThemeController extends ChangeNotifier {
   String? get backgroundImagePath => _backgroundImagePath;
   double get backgroundOpacity => _backgroundOpacity;
   bool get landscapeEnabled => _landscapeEnabled;
-  bool get carModeEnabled => _carModeEnabled;
+
+  /// 车机模式开关（仅移动形态生效：桌面恒 false）。
+  ///
+  /// PC 窗口恒横屏，若把移动端残留的开关值当真，全项目约 18 处
+  /// `横屏 && carModeEnabled` 的车机分支会把车机/移动布局整套套到桌面
+  /// （AppShell 早已桌面先行返回，页面层缺同款护栏）；与该契约收敛到
+  /// 本唯一判定入口。开关 UI 本就只在移动端展示，桌面读到的必为残留值。
+  bool get carModeEnabled => _carModeEnabled && !isDesktopFormFactor;
   double get fontScale => _fontScale;
   bool get isAutomotiveDevice => _isAutomotiveDevice;
 
