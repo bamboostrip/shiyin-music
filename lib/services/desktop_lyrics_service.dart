@@ -267,6 +267,18 @@ class DesktopLyricsService {
   static ValueChanged<DesktopLyricsSettings>? _settingsChanged;
   static VoidCallback? _openSettingsRequested;
 
+  /// 主窗侧歌词缓存（最近一次 show/updateLyrics 的内容）。
+  ///
+  /// Android 悬浮窗是按需创建/销毁的原生 View：回桌面重建窗口那一刻必须知道
+  /// “现在该显示哪一句”。伴奏（间奏）期间不会再有换句推送，若重建时依赖
+  /// “show 之后再补一次 updateLyrics”，那次补发一旦被系统的服务 stop/start
+  /// 竞态吞掉，悬浮窗就会空到下一句才突然出现。因此 show 请求直接带上当前
+  /// 歌词内容，窗口一建出来就有字。Windows 桥接早就是这套语义（子窗创建
+  /// 参数里带 current/next）。
+  String _cachedCurrent = '';
+  String _cachedNext = '';
+  bool _cachedActiveOnBottom = false;
+
   /// 桌面形态的悬浮窗桥接（进程级单例；Android 分支不使用）。
   /// Windows/Linux 共用（实现基于 desktop_multi_window + window_manager，
   /// 平台无关）；可见性、播控与锁定回调经静态转发交给实例级
@@ -418,6 +430,11 @@ class DesktopLyricsService {
       await _channel.invokeMethod<void>('show', {
         'title': title,
         'artist': artist,
+        // 带上当前歌词：新建窗口即刻有字，不依赖紧随其后的 updateLyrics。
+        'current': _cachedCurrent,
+        'next': _cachedNext,
+        'activeOnBottom': _cachedActiveOnBottom,
+        'lyricPayload': true,
       });
       return true;
     } on PlatformException {
@@ -427,14 +444,57 @@ class DesktopLyricsService {
     }
   }
 
-  Future<void> hide() async {
+  /// 只更新主窗侧歌词缓存，不发平台调用。
+  ///
+  /// 悬浮窗因 App 在前台被原生隐藏期间仍要跟随播放推进缓存：回桌面重建时
+  /// 拿到的才是当前句，而不是切前台那一刻的旧句。
+  void cacheLyrics({
+    required String current,
+    required String next,
+    required bool activeOnBottom,
+  }) {
+    _cachedCurrent = current;
+    _cachedNext = next;
+    _cachedActiveOnBottom = activeOnBottom;
+  }
+
+  /// 把当前歌词写进原生缓存，只缓存、绝不建窗。
+  ///
+  /// App 在前台时悬浮窗必须保持隐藏，但原生侧"回桌面自愈重建"用的缓存也要
+  /// 跟着播放走：否则切歌后回桌面会先拿旧句把窗口画出来，等下一次推送才纠正，
+  /// 而伴奏（间奏）期根本没有下一次推送。
+  Future<void> cacheNativeLyrics({
+    required String current,
+    required String next,
+    required bool activeOnBottom,
+  }) async {
+    cacheLyrics(current: current, next: next, activeOnBottom: activeOnBottom);
+    if (!isSupportedPlatform || _isDesktopBridge) return;
+    try {
+      await _channel.invokeMethod<void>('cacheLyrics', {
+        'current': current,
+        'next': next,
+        'activeOnBottom': activeOnBottom,
+      });
+    } on MissingPluginException {
+      // ignore
+    }
+  }
+
+  /// 关闭悬浮窗。
+  ///
+  /// [transient] 为 true 表示“切前台”这类临时隐藏：原生侧保留自愈标记
+  /// 与缓存歌词，回桌面时可即时重建（伴奏空白期无歌词推送，show 一旦丢失
+  /// 就会“消失到下一句才突然弹出”）；显式关闭（关开关/无歌/退出）必须用
+  /// false，原生侧会清除标记与缓存，避免把已关闭的悬浮窗复活。
+  Future<void> hide({bool transient = false}) async {
     if (!isSupportedPlatform) return;
     if (_isDesktopBridge) {
       await _windowsBridge?.hide();
       return;
     }
     try {
-      await _channel.invokeMethod<void>('hide');
+      await _channel.invokeMethod<void>('hide', {'transient': transient});
     } on MissingPluginException {
       // ignore
     }
@@ -456,6 +516,8 @@ class DesktopLyricsService {
     required String next,
     required bool activeOnBottom,
   }) async {
+    // 无论平台是否支持、窗口是否可见，主窗侧缓存都要跟上（见字段注释）。
+    cacheLyrics(current: current, next: next, activeOnBottom: activeOnBottom);
     if (!isSupportedPlatform) return;
     if (_isDesktopBridge) {
       await _windowsBridge?.updateLyrics(

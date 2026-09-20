@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -289,6 +290,115 @@ void main() {
       service.setOpenSettingsHandler(null);
       expect(changedSettings, isNull);
       expect(openSettingsCalled, isFalse);
+    });
+  });
+
+  group('DesktopLyricsService hide', () {
+    const channel = MethodChannel('shiyin_music/desktop_lyrics');
+
+    test('hide 会透传 transient 标记（切前台临时隐藏 vs 显式关闭）', () async {
+      // 伪装 Android 走 MethodChannel 分支（宿主是桌面系统时会走子窗桥接）。
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+      });
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      final service = DesktopLyricsService();
+      await service.hide();
+      await service.hide(transient: true);
+
+      expect(calls.map((c) => c.method).toList(), ['hide', 'hide']);
+      expect(calls[0].arguments, {'transient': false});
+      expect(calls[1].arguments, {'transient': true});
+    });
+  });
+
+  group('DesktopLyricsService show', () {
+    const channel = MethodChannel('shiyin_music/desktop_lyrics');
+
+    /// 伪装 Android 走 MethodChannel 分支并记录通道调用。
+    List<MethodCall> mockChannel() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (MethodCall call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        messenger.setMockMethodCallHandler(channel, null);
+      });
+      return calls;
+    }
+
+    test('show 请求自带最近一次歌词内容（回桌面重建窗口即刻有字）', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      // 悬浮窗可见期间正常推送，主窗侧缓存随之更新。
+      await service.updateLyrics(current: '第一句', next: '第二句', activeOnBottom: false);
+      // App 切前台：悬浮窗被隐藏，此期间只更新主窗侧缓存（不发平台调用）。
+      service.cacheLyrics(current: '第三句', next: '第四句', activeOnBottom: true);
+      await service.show(title: '歌名', artist: '歌手');
+
+      expect(calls.map((c) => c.method).toList(), ['updateLyrics', 'show']);
+      // 缓存期间不得产生平台调用：前台推送 updateLyrics 会把悬浮窗弹到应用上。
+      expect(calls.first.arguments['current'], '第一句');
+      expect(calls.last.arguments, {
+        'title': '歌名',
+        'artist': '歌手',
+        'current': '第三句',
+        'next': '第四句',
+        'activeOnBottom': true,
+        'lyricPayload': true,
+      });
+    });
+
+    test('无歌词时 show 仍标记 lyricPayload，避免原生回退到上一首的缓存', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      await service.updateLyrics(current: '上一首', next: '', activeOnBottom: false);
+      service.cacheLyrics(current: '', next: '', activeOnBottom: false);
+      await service.show(title: '纯音乐', artist: '');
+
+      final showCall = calls.last;
+      expect(showCall.arguments['current'], '');
+      expect(showCall.arguments['next'], '');
+      expect(showCall.arguments['lyricPayload'], true);
+    });
+
+    test('cacheNativeLyrics 只下发 cacheLyrics（原生只缓存、不建窗）', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      await service.cacheNativeLyrics(
+        current: '第三句',
+        next: '第四句',
+        activeOnBottom: true,
+      );
+      // 缓存也要写进主窗侧镜像：随后 show 重建窗口带的就是这一句。
+      await service.show(title: '歌名', artist: '歌手');
+
+      expect(calls.map((c) => c.method).toList(), ['cacheLyrics', 'show']);
+      expect(calls.first.arguments, {
+        'current': '第三句',
+        'next': '第四句',
+        'activeOnBottom': true,
+      });
+      expect(calls.last.arguments['current'], '第三句');
     });
   });
 

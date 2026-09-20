@@ -194,12 +194,20 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   @override
   Future<void> _syncDesktopLyricsVisibility() async {
     if (!_shouldShowDesktopLyrics) {
-      await _desktopLyrics.hide();
+      // transient=true 仅当“本会展示、只因 App 在前台而隐藏”：原生保留
+      // 自愈标记与缓存歌词，回桌面可即时重建；关开关/无歌是显式关闭，
+      // 原生清除标记与缓存，不复活。
+      await _desktopLyrics.hide(
+        transient: desktopLyricsEnabled && currentSong != null,
+      );
       return;
     }
 
     final song = currentSong;
     if (song == null) return;
+    // 建窗前先把当前句写进主窗侧缓存：show 请求随内容一起下发，窗口一建出来
+    // 就有字（伴奏期没有换句推送，空窗会一直挂到下一句）。
+    _syncDesktopLyrics();
     final shown = await _desktopLyrics.show(
       title: song.title,
       artist: song.artist,
@@ -209,6 +217,11 @@ mixin _PlayerDesktop on _PlayerControllerBase {
         '[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限',
       );
     } else {
+      // 悬浮窗每次创建都是原生默认值（白字/双行/不透明度 0.8）：用户在设置页
+      // 调好的配色/行数/透明度只在“设置变更”时下发，首次显示（冷启动、切歌
+      // 拉起服务）会用原生默认把高亮颜色盖错——这里显示成功后补推一次当前
+      // 设置，保证卡拉 OK 高亮色第一次就正确。Windows 子窗同理（幂等重建）。
+      unawaited(_desktopLyrics.updateSettings(desktopLyricsSettings));
       _syncDesktopLyrics();
       _syncDesktopPlayState();
       _syncDesktopKaraokeProgress();
@@ -217,23 +230,69 @@ mixin _PlayerDesktop on _PlayerControllerBase {
 
   @override
   void _syncDesktopLyrics() {
-    if (!_shouldShowDesktopLyrics) return;
     final index = activeLyricIndex;
     if (lyrics.isEmpty) {
-      _desktopLyrics.updateLyrics(current: '', next: '', activeOnBottom: false);
+      // 无歌词也要把缓存清成空：否则切到没歌词的歌后回桌面，重建出来的是
+      // 上一首的句子（show 请求自带空内容，原生不会再回退到旧缓存）。
+      // 隐藏期间只写缓存，不发"上屏"类推送（悬浮窗本来就不在）。
+      if (_shouldShowDesktopLyrics) {
+        _desktopLyrics.updateLyrics(
+          current: '',
+          next: '',
+          activeOnBottom: false,
+        );
+      } else if (desktopLyricsEnabled) {
+        unawaited(
+          _desktopLyrics.cacheNativeLyrics(
+            current: '',
+            next: '',
+            activeOnBottom: false,
+          ),
+        );
+      } else {
+        _desktopLyrics.cacheLyrics(
+          current: '',
+          next: '',
+          activeOnBottom: false,
+        );
+      }
       return;
     }
     final clamped = index.clamp(0, lyrics.length - 1);
     final current = lyrics[clamped].text;
     final nextIndex = clamped + 1;
     final next = nextIndex < lyrics.length ? lyrics[nextIndex].text : '';
+    // 双行交替（乒乓）高亮：偶数句落在上行、奇数句落在下行。子窗据此把
+    // 逐字进度交给"正在唱的那一行"，另一行换成下一句 —— 正在唱的那句
+    // 文字始终不移动（历史实现里它每句都要从下行跳到上行）。
+    final activeOnBottom = clamped.isOdd;
+    if (!_shouldShowDesktopLyrics) {
+      // App 在前台：悬浮窗被原生隐藏（移动端产品行为），但内容缓存必须继续
+      // 跟随播放。回桌面时原生用这份缓存即刻重建 —— 伴奏（间奏）期间没有
+      // 换句推送，只有缓存里存着"最后一次唱到的句子"，窗口才不会空到下一句。
+      // 歌词开着时同步推给原生（原生只缓存、不建窗）；关开关时不推，避免
+      // 无谓地把服务拉起来。
+      if (desktopLyricsEnabled) {
+        unawaited(
+          _desktopLyrics.cacheNativeLyrics(
+            current: current,
+            next: next,
+            activeOnBottom: activeOnBottom,
+          ),
+        );
+      } else {
+        _desktopLyrics.cacheLyrics(
+          current: current,
+          next: next,
+          activeOnBottom: activeOnBottom,
+        );
+      }
+      return;
+    }
     _desktopLyrics.updateLyrics(
       current: current,
       next: next,
-      // 双行交替（乒乓）高亮：偶数句落在上行、奇数句落在下行。子窗据此把
-      // 逐字进度交给"正在唱的那一行"，另一行换成下一句 —— 正在唱的那句
-      // 文字始终不移动（历史实现里它每句都要从下行跳到上行）。
-      activeOnBottom: clamped.isOdd,
+      activeOnBottom: activeOnBottom,
     );
   }
 
@@ -243,14 +302,18 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   }
 
   void _maybeSyncDesktopLyricFromPosition() {
-    if (!_shouldShowDesktopLyrics || lyrics.isEmpty) return;
+    // 换句检测不按可见性提前返回：App 在前台（悬浮窗被原生隐藏）时也要把
+    // 新句子送进缓存，回桌面重建才能立刻显示当前句（伴奏期的关键）。
+    if (lyrics.isEmpty) return;
     final index = activeLyricIndex;
     if (index != _lastDesktopLyricIndex) {
       _lastDesktopLyricIndex = index;
       _syncDesktopLyrics();
     }
     // Karaoke progress for current line
-    _syncDesktopKaraokeProgress();
+    if (_shouldShowDesktopLyrics) {
+      _syncDesktopKaraokeProgress();
+    }
   }
 
   void _syncDesktopKaraokeProgress() {

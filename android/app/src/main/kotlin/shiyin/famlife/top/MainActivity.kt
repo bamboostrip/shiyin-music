@@ -362,19 +362,34 @@ class MainActivity : AudioServiceActivity() {
                         }
                         val title = call.argument<String>("title") ?: ""
                         val artist = call.argument<String>("artist") ?: ""
+                        // 新版 Flutter 的 show 请求自带当前歌词内容：新建窗口
+                        // 立刻上屏，不依赖紧随其后的 updateLyrics（那一次推送
+                        // 可能被服务 stop/start 竞态吞掉，伴奏期没有后续推送
+                        // 兜底，窗口会空到下一句）。
+                        val hasLyricPayload = call.hasArgument("lyricPayload")
+                        val current = call.argument<String>("current") ?: ""
+                        val next = call.argument<String>("next") ?: ""
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_LYRICS
                             putExtra(LyricsOverlayService.EXTRA_TITLE, title)
                             putExtra(LyricsOverlayService.EXTRA_ARTIST, artist)
-                            putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, "")
-                            putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, "")
+                            putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
+                            putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
+                            putExtra(
+                                LyricsOverlayService.EXTRA_LYRIC_PAYLOAD,
+                                hasLyricPayload
+                            )
                         }
                         startService(intent)
                         result.success(null)
                     }
                     "hide" -> {
+                        // transient=true：切前台等临时隐藏，原生保留自愈标记与
+                        // 缓存歌词；false（关开关/无歌/退出）则彻底清除不复活。
+                        val transient = call.argument<Boolean>("transient") ?: false
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_HIDE
+                            putExtra(LyricsOverlayService.EXTRA_TRANSIENT_HIDE, transient)
                         }
                         startService(intent)
                         result.success(null)
@@ -384,6 +399,19 @@ class MainActivity : AudioServiceActivity() {
                         val next = call.argument<String>("next") ?: ""
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_LYRICS
+                            putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
+                            putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
+                        }
+                        startService(intent)
+                        result.success(null)
+                    }
+                    "cacheLyrics" -> {
+                        // 只缓存不建窗：App 在前台时悬浮窗必须保持隐藏，但原生
+                        // 侧回桌面自愈重建要用的歌词缓存需持续跟随播放。
+                        val current = call.argument<String>("current") ?: ""
+                        val next = call.argument<String>("next") ?: ""
+                        val intent = Intent(this, LyricsOverlayService::class.java).apply {
+                            action = LyricsOverlayService.ACTION_CACHE_LYRICS
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
                         }
@@ -416,18 +444,32 @@ class MainActivity : AudioServiceActivity() {
                         result.success(null)
                     }
                     "updateSettings" -> {
-                        val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0.8f
+                        // 缺键回退与 Flutter 侧 DesktopLyricsSettings 默认对齐
+                        //（透明底、单行）；正常流程 Flutter 恒传显式值。
+                        val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0f
                         val locked = call.argument<Boolean>("locked") ?: false
                         val passthrough = call.argument<Boolean>("passthrough") ?: false
-                        val textColorLong = call.argument<Long>("textColor") ?: 0xFFFFFFFF
+                        // 旧版 Flutter 只发 textColor（= 未播放色），新版发双色键；
+                        // 缺键时用旧键回退，保证升级前后外观一致。
+                        val legacyTextColor = call.argument<Long>("textColor")
+                        val unplayedColorLong = call.argument<Long>("unplayedTextColor")
+                            ?: legacyTextColor ?: 0xFFFFFFFF
+                        val playedColorLong = call.argument<Long>("playedTextColor")
+                            ?: legacyTextColor ?: 0xFFFFFFFF
                         val backgroundColorLong = call.argument<Long>("backgroundColor") ?: 0xFF1A1A2E
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 16f
+                        val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
+                        val singleLine = call.argument<Boolean>("singleLine") ?: true
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_SETTINGS
                             putExtra(LyricsOverlayService.EXTRA_OPACITY, opacity)
                             putExtra(LyricsOverlayService.EXTRA_LOCKED, locked)
                             putExtra(LyricsOverlayService.EXTRA_PASSTHROUGH, passthrough)
-                            putExtra(LyricsOverlayService.EXTRA_TEXT_COLOR, textColorLong.toInt())
+                            putExtra(LyricsOverlayService.EXTRA_TEXT_COLOR, unplayedColorLong.toInt())
+                            putExtra(LyricsOverlayService.EXTRA_UNPLAYED_TEXT_COLOR, unplayedColorLong.toInt())
+                            putExtra(LyricsOverlayService.EXTRA_PLAYED_TEXT_COLOR, playedColorLong.toInt())
+                            putExtra(LyricsOverlayService.EXTRA_TEXT_OPACITY, textOpacity)
+                            putExtra(LyricsOverlayService.EXTRA_SINGLE_LINE, singleLine)
                             putExtra(LyricsOverlayService.EXTRA_BACKGROUND_COLOR, backgroundColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_FONT_SIZE, fontSize)
                         }
