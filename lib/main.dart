@@ -459,9 +459,12 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         // 且副作用仅在桌面歌词开启时生效；若这里加开关门槛，后台关闭歌词后
         // _isAppForeground 会滞留为 false，重新开启歌词时弹窗遮挡前台应用。
         _player.setAppForeground(true);
+      // inactive/hidden 是瞬时失焦（下拉通知栏、权限弹窗、分屏失焦等，
+      // 应用仍可见），不能当"回桌面"处理——否则悬浮窗会弹到应用之上。
+      // 真正退后台（Home/切其他应用/锁屏）必经 paused，在这里统一触发。
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
-        if (_player.desktopLyricsEnabled) _player.setAppForeground(false);
+        break;
       case AppLifecycleState.paused:
         _player.setAppForeground(false);
         // 图片缓存内存保护（后台驻留时不长期占用大量解码位图）：
