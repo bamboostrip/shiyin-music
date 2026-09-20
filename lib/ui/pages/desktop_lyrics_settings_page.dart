@@ -112,34 +112,39 @@ class _DesktopLyricsSettingsPageState
               }),
             ),
             _SettingsDivider(),
-            _SegmentTile<String>(
-              icon: Icons.format_align_center_rounded,
-              iconColor: colorScheme.primary,
-              title: '对齐方式',
-              selected: _displayAlignment,
-              segments: [
-                const ButtonSegment(
-                  value: DesktopLyricsAlignment.center,
-                  label: Text('居中'),
-                ),
-                const ButtonSegment(
-                  value: DesktopLyricsAlignment.left,
-                  label: Text('左对齐'),
-                ),
-                const ButtonSegment(
-                  value: DesktopLyricsAlignment.right,
-                  label: Text('右对齐'),
-                ),
-                // 仅双行显示时可选：上行居左、下行居右。
-                if (!_settings.singleLine)
+            // 对齐方式是 PC 桌面悬浮窗专属：移动端原生悬浮窗恒为左对齐
+            // （KaraokeTextView 定宽左排 + 跑马灯），实现对齐需要重写绘制
+            // 与滚动逻辑，风险高，移动端直接隐藏该行。
+            if (isDesktopFormFactor) ...[
+              _SegmentTile<String>(
+                icon: Icons.format_align_center_rounded,
+                iconColor: colorScheme.primary,
+                title: '对齐方式',
+                selected: _displayAlignment,
+                segments: [
                   const ButtonSegment(
-                    value: DesktopLyricsAlignment.split,
-                    label: Text('左右分离'),
+                    value: DesktopLyricsAlignment.center,
+                    label: Text('居中'),
                   ),
-              ],
-              onChanged: (v) => _update((s) => s.copyWith(alignment: v)),
-            ),
-            _SettingsDivider(),
+                  const ButtonSegment(
+                    value: DesktopLyricsAlignment.left,
+                    label: Text('左对齐'),
+                  ),
+                  const ButtonSegment(
+                    value: DesktopLyricsAlignment.right,
+                    label: Text('右对齐'),
+                  ),
+                  // 仅双行显示时可选：上行居左、下行居右。
+                  if (!_settings.singleLine)
+                    const ButtonSegment(
+                      value: DesktopLyricsAlignment.split,
+                      label: Text('左右分离'),
+                    ),
+                ],
+                onChanged: (v) => _update((s) => s.copyWith(alignment: v)),
+              ),
+              _SettingsDivider(),
+            ],
             _SliderTile(
               key: const Key('slider_font_size'),
               icon: Icons.format_size_rounded,
@@ -329,10 +334,14 @@ class _DesktopLyricsSettingsPageState
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '桌面歌词窗口支持自由拖拽缩放与锁定穿透，悬浮工具栏可快捷调节播放并进入设置。'
-              '双行显示时高亮会在上下两行交替：正在唱的那句始终留在原地，'
-              '另一行换成下一句；对齐可选两行同侧（居中/左/右）或左右分离（上行居左、下行居右）。'
-              '调乱了可点右上角「恢复默认」一键还原外观。',
+              isDesktopFormFactor
+                  ? '桌面歌词窗口支持自由拖拽缩放与锁定穿透，悬浮工具栏可快捷调节播放并进入设置。'
+                      '双行显示时高亮会在上下两行交替：正在唱的那句始终留在原地，'
+                      '另一行换成下一句；对齐可选两行同侧（居中/左/右）或左右分离（上行居左、下行居右）。'
+                      '调乱了可点右上角「恢复默认」一键还原外观。'
+                  : '歌词悬浮窗支持拖动与右下角手柄缩放。单行只显示当前句，'
+                      '双行会同时显示下一句；锁定后无法拖动，点击悬浮窗锁图标可解锁。'
+                      '调乱了可点右上角「恢复默认」一键还原外观。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     height: 1.4,
@@ -936,13 +945,18 @@ class _LyricsPreviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final playedColor = Color(settings.playedTextColor);
     final unplayedColor = Color(settings.unplayedTextColor);
-    final isSplit = DesktopLyricsAlignment.isSplit(settings.alignment);
-    final textAlign = switch (settings.alignment) {
+    // 移动端原生悬浮窗恒为左对齐（设置页已隐藏对齐选项），预览必须与
+    // 真实悬浮窗一致；PC 则按设置值渲染。
+    final effectiveAlignment = isDesktopFormFactor
+        ? settings.alignment
+        : DesktopLyricsAlignment.left;
+    final isSplit = DesktopLyricsAlignment.isSplit(effectiveAlignment);
+    final textAlign = switch (effectiveAlignment) {
       DesktopLyricsAlignment.left => TextAlign.left,
       DesktopLyricsAlignment.right => TextAlign.right,
       _ => TextAlign.center,
     };
-    final lineAlignment = switch (settings.alignment) {
+    final lineAlignment = switch (effectiveAlignment) {
       DesktopLyricsAlignment.left => Alignment.centerLeft,
       DesktopLyricsAlignment.right => Alignment.centerRight,
       _ => Alignment.center,

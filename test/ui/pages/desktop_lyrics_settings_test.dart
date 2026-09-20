@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/services/desktop_lyrics_service.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
+import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/desktop_lyrics_settings_page.dart';
 
 class _FakePlayerController extends ChangeNotifier
@@ -439,6 +440,49 @@ void main() {
           closeTo(player.desktopLyricsSettings.fontSize * 0.82, 0.01),
         );
         expect(secondLine.fontWeight, FontWeight.bold);
+      },
+    );
+
+    testWidgets(
+      'mobile form factor hides PC-only alignment but keeps supported rows',
+      (tester) async {
+        // 移动端形态：对齐方式是 PC 桌面悬浮窗专属，隐藏；其余行
+        // （行数/字号/透明度/颜色/锁定/穿透）移动端原生均已支持，保留。
+        debugDesktopFormFactorOverride = false;
+        addTearDown(() {
+          debugDesktopFormFactorOverride = null;
+        });
+        await pumpSettingsPage(tester);
+
+        expect(find.text('对齐方式'), findsNothing);
+        expect(find.text('居中'), findsNothing);
+        expect(find.text('左对齐'), findsNothing);
+        expect(find.text('右对齐'), findsNothing);
+
+        expect(find.text('显示行数'), findsOneWidget);
+        expect(find.text('单行显示'), findsOneWidget);
+        expect(find.text('双行显示'), findsOneWidget);
+        expect(find.text('字体大小'), findsOneWidget);
+        expect(find.text('文字透明度'), findsOneWidget);
+        expect(find.text('背景透明度'), findsOneWidget);
+        expect(find.text('背景颜色'), findsOneWidget);
+        expect(find.text('歌词配色'), findsOneWidget);
+        expect(find.text('歌词颜色'), findsOneWidget);
+        expect(find.text('高亮颜色'), findsOneWidget);
+        expect(find.text('锁定位置'), findsOneWidget);
+        expect(find.text('触摸穿透'), findsOneWidget);
+
+        // 预览与移动端原生悬浮窗一致：恒为左对齐（即使存量值是 split）。
+        final line = tester.widget<LyricsKaraokeLine>(
+          find.byType(LyricsKaraokeLine),
+        );
+        expect(line.alignment, TextAlign.left);
+
+        // 行数切换在移动端仍可用：切双行后预览出现下一句。
+        await tester.tap(find.text('双行显示'));
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.singleLine, isFalse);
+        expect(find.text('让音乐更自由'), findsWidgets);
       },
     );
   });
