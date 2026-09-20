@@ -11,7 +11,9 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.view.Choreographer
 import android.view.LayoutInflater
@@ -72,6 +74,10 @@ class LyricsOverlayService : Service() {
         // show 请求是否自带歌词内容（新版 Flutter 恒带）：带了就以请求内容为
         // 准，没带才回退到服务内缓存，避免旧版下发空歌词时闪“暂无歌词”。
         const val EXTRA_LYRIC_PAYLOAD = "lyric_payload"
+
+        // 停服前的静默等待：留给同一批 intent（前后台切换、冷启动设置同步）
+        // 落地的窗口，避免 stopSelf 把已排队的 START 命令一起吞掉。
+        private const val STOP_SETTLE_MS = 300L
 
         private const val PREFS_NAME = "lyrics_overlay_prefs"
         private const val KEY_POS_X = "pos_x"
@@ -187,6 +193,27 @@ class LyricsOverlayService : Service() {
         lastProgress = karaokeView?.progress ?: karaokeAnchorProgress
         lastLineDurationMs = karaokeLineDurationMs
         lastPlaying = karaokePlaying
+    }
+
+    // 停服延迟二次确认：前后台切换/冷启动设置同步会把多条 intent 挤在极短的
+    // 时间里，若在其中一条的处理里立刻 stopSelf，AMS 会把已排队但尚未派发的
+    // START 命令连实例一起丢掉（ActivityThread.handleServiceArgs 找不到实例
+    // 即静默丢弃），表现就是"回桌面 show 丢失、悬浮窗空到下一句"。改为等这一
+    // 批 intent 静默下来再确认一次；期间若悬浮窗/意图状态被改回来就不停服。
+    // 空转期没有通知，所以延迟停服对用户不可见。
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val stopRunnable = Runnable {
+        if (!isShowing && !overlayWanted) {
+            stopSelf()
+        }
+    }
+
+    private fun scheduleStopIfIdle() {
+        if (isShowing || overlayWanted) return
+        // 重新计时（debounce）：同批 intent 里任意一条到达都顺延，避免把
+        // 紧随其后的 intent 连同实例一起停掉。
+        mainHandler.removeCallbacks(stopRunnable)
+        mainHandler.postDelayed(stopRunnable, STOP_SETTLE_MS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -347,12 +374,11 @@ class LyricsOverlayService : Service() {
         // 服务存活裁决：悬浮窗在展示就继续；不在展示但“本应展示”（App 在
         // 前台，回桌面要立刻重建）也继续；只有明确不需要时才停 —— 停服会
         // 连歌词缓存一起丢掉，所以它只能是显式关闭（关开关/无歌/用户关闭）
-        // 或与悬浮窗无关的散装 intent 的收尾。
+        // 或与悬浮窗无关的散装 intent 的收尾，且延迟二次确认（见
+        // scheduleStopIfIdle），避免吞掉紧随其后的 intent。
         // 注意悬浮窗的真实存活由 Flutter 侧 _shouldShowDesktopLyrics gate，
         // 播放器播控/歌词推送只在该条件成立时下发，这里只做兜底。
-        if (!isShowing && !overlayWanted) {
-            stopSelf()
-        }
+        scheduleStopIfIdle()
         // 常驻拉活对悬浮窗无意义：进程死后 Flutter 侧的歌词内容/播态全丢，
         // 拉活只能得到空通知 + 空窗（且 audio_service 的播控是独立服务，
         // 后台播歌不受本返回值影响），故用 NOT_STICKY。
@@ -852,6 +878,8 @@ class LyricsOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        // 实例将销毁：撤掉在途的延迟停服回调，避免它对已销毁的实例再操作。
+        mainHandler.removeCallbacks(stopRunnable)
         hideOverlay()
         super.onDestroy()
     }
