@@ -744,10 +744,19 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   bool _isUserSelecting = false;
   // 与竖屏 LyricViewport 同理：记录已下发进度，屏蔽冷启动定位起播加载期的回 0 闪动。
   Duration _lastSentProgress = Duration.zero;
+  // 已加载歌词快照：面板自己监听 player，切歌后歌词到达不再依赖父级 rebuild
+  // 透传（此前全靠 PlayerPage 顶层 AnimatedBuilder 顺带刷新，一旦复用位置变动
+  // 或父级不再重建，就会卡在"正在准备音乐..."）。
+  List<LyricLine> _loadedLyrics = const [];
+  // 准备态快照：歌词为空时 isPreparing 翻转（"正在准备音乐..."→"暂无歌词"）
+  // 也要自刷新，否则空歌词歌曲的状态文本不会更新。
+  bool _lastPreparing = false;
 
   @override
   void initState() {
     super.initState();
+    _loadedLyrics = widget.lyrics;
+    _lastPreparing = widget.player.isPreparing;
     _lyricController = LyricController();
     _lyricController.setOnTapLineCallback((position) {
       _lastSentProgress = position;
@@ -755,6 +764,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
       widget.player.seekToAndPlay(position);
     });
     _lyricController.isSelectingNotifier.addListener(_onSelectingChanged);
+    widget.player.addListener(_onPlayerChanged);
     _syncLyrics();
     _ticker = Ticker(_onTick);
     _syncTicker();
@@ -763,10 +773,16 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   @override
   void didUpdateWidget(covariant LandscapeLyricPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.player != widget.player) {
+      oldWidget.player.removeListener(_onPlayerChanged);
+      widget.player.addListener(_onPlayerChanged);
+      _lastPreparing = widget.player.isPreparing;
+    }
     if (oldWidget.songHash != widget.songHash ||
         oldWidget.showTranslation != widget.showTranslation ||
         oldWidget.showRomanization != widget.showRomanization ||
         !_sameLyricContent(oldWidget.lyrics, widget.lyrics)) {
+      _loadedLyrics = widget.lyrics;
       _syncLyrics();
     }
     _syncTicker();
@@ -774,6 +790,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
 
   @override
   void dispose() {
+    widget.player.removeListener(_onPlayerChanged);
     _lyricController.isSelectingNotifier.removeListener(_onSelectingChanged);
     _ticker.dispose();
     _lyricController.dispose();
@@ -785,8 +802,29 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     _syncTicker();
   }
 
+  /// player 状态变化（切歌清空/歌词到达/准备态翻转）时自刷新，不依赖父级 rebuild。
+  ///
+  /// 歌词以 player 持有的为准（`loadLyrics` 落定即 `notifyListeners`），快照比对
+  /// 去重后才 `setState`，高频通知只走轻量 `_syncTicker`（启停判断），不开销重建。
+  void _onPlayerChanged() {
+    if (!mounted) return;
+    final current = widget.player.lyrics;
+    final preparing = widget.player.isPreparing;
+    if (!_sameLyricContent(current, _loadedLyrics) ||
+        preparing != _lastPreparing) {
+      _loadedLyrics = current;
+      _lastPreparing = preparing;
+      setState(() {
+        _syncLyrics();
+        _syncTicker();
+      });
+      return;
+    }
+    _syncTicker();
+  }
+
   void _syncLyrics() {
-    final lyrics = widget.lyrics;
+    final lyrics = _loadedLyrics;
     if (lyrics.isNotEmpty) {
       final model = convertToFlutterLyricModel(
         lyrics,
@@ -813,7 +851,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   void _syncTicker() {
     final shouldTick =
         widget.player.isPlaying &&
-        widget.lyrics.isNotEmpty &&
+        _loadedLyrics.isNotEmpty &&
         !widget.player.isScrubbing &&
         !_isUserSelecting;
     if (shouldTick && !_ticker.isActive) {
@@ -841,7 +879,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
   @override
   Widget build(BuildContext context) {
     final player = widget.player;
-    final lyrics = widget.lyrics;
+    final lyrics = _loadedLyrics;
     if (lyrics.isEmpty) {
       return Align(
         alignment: Alignment.centerLeft,
