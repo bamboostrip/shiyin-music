@@ -316,11 +316,13 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     }
   }
 
+  @override
   void _syncDesktopKaraokeProgress() {
     if (!_shouldShowDesktopLyrics || lyrics.isEmpty) return;
     final index = activeLyricIndex;
     final line = lyrics[index.clamp(0, lyrics.length - 1)];
-    final position = smoothPosition;
+    // 用带偏移的歌词位置：偏移只作用于歌词，不改变真实播放进度条。
+    final position = lyricPosition;
     final lineDuration = line.duration ?? _estimatedLineDuration(index);
     // 有逐字时间时按字符占比分段映射（字间间隙停住不动），无逐字时间才
     // 退回整行线性推进。历史实现里 word 分支算的是与行级完全相同的线性
@@ -402,6 +404,14 @@ mixin _PlayerDesktop on _PlayerControllerBase {
         unawaited(togglePlay());
       case 'next':
         unawaited(next());
+      // 悬浮窗快捷菜单的歌词进度调整：主窗是偏移的唯一真相源，子窗只发指令，
+      // 调整结果沿既有推送链路（换行文本 + 逐字进度）自动回流到悬浮窗。
+      case 'lyricOffsetEarlier':
+        unawaited(adjustLyricOffset(kLyricOffsetStep));
+      case 'lyricOffsetLater':
+        unawaited(adjustLyricOffset(-kLyricOffsetStep));
+      case 'lyricOffsetReset':
+        unawaited(resetLyricOffset());
       default:
         debugPrint('[时音][player] 未知桌面歌词播控指令: $action');
     }

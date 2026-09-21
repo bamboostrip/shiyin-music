@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import '../form_factor.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/desktop_anchored_menu.dart';
@@ -11,6 +14,7 @@ import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
+import 'lyric_offset_sheet.dart';
 import 'player_controls.dart';
 
 class PlayerPageIndicator extends StatelessWidget {
@@ -257,6 +261,34 @@ void showPlayerMoreSheet({
         isGrid: true,
         onTap: () => showSleepTimerSheet(context: context, player: player),
       ),
+      // 歌词进度：第三方曲库的歌词偶有整体偏差，属"低频修正"操作，
+      // 放详情弹层而不是播放页主界面（截图位：与倍速/音质同排）。
+      SongSheetAction(
+        icon: Icons.sync_rounded,
+        title: '歌词进度',
+        subtitle: player.hasLyricOffset ? player.lyricOffsetLabel : null,
+        isGrid: true,
+        onTap: () {
+          // 注意：不要在这里 pop —— 详情弹层的关闭由 _GridItem /
+          // _SongActionTile / 桌面级联菜单统一负责，这里再 pop 会把
+          // 底下的播放页也一起退出（移动端开歌词进度就闪退即此因）。
+          if (!context.mounted) return;
+          if (isDesktopFormFactor) {
+            // PC：在同一个锚点弹出锚定面板，与封面 `调` 按钮/歌词右键一致。
+            unawaited(
+              showLyricOffsetMenu(
+                context,
+                player: player,
+                anchor: anchor ?? anchorBelow(context),
+              ),
+            );
+          } else {
+            unawaited(
+              showLyricOffsetSheet(context, player: player, song: song),
+            );
+          }
+        },
+      ),
 
       if (player.isDesktopLyricsSupported) ...[
         SongSheetAction(
@@ -266,7 +298,7 @@ void showPlayerMoreSheet({
           title: '桌面歌词',
           isGrid: true,
           onTap: () async {
-            Navigator.of(context).pop();
+            // 同上：菜单壳已负责关闭，这里不再手动 pop，避免连带退出播放页。
             await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
           },
         ),

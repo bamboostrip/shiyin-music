@@ -107,6 +107,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     errorMessage = null;
     _tailSkipExhausted = false;
     currentSong = song;
+    // 装载这首歌自己的歌词进度偏移（歌词列表/桌面歌词都按它定位）。
+    _loadLyricOffsetForSong(song);
     final queueChanged = queue != null && !listEquals(this.queue, queue);
     if (queue != null && queue.isNotEmpty) {
       this.queue = queue;

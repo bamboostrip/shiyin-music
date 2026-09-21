@@ -409,7 +409,7 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
   @override
   void initState() {
     super.initState();
-    _position = widget.player.smoothPosition;
+    _position = widget.player.lyricPosition;
     _ticker = Ticker(_onTick);
     _syncTicker();
   }
@@ -418,7 +418,7 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
   void didUpdateWidget(covariant PosterLyricPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!widget.player.isScrubbing) {
-      _position = widget.player.smoothPosition;
+      _position = widget.player.lyricPosition;
     }
     _syncTicker();
   }
@@ -448,7 +448,7 @@ class _PosterLyricPreviewState extends State<PosterLyricPreview> {
     }
     // 歌词高亮按字推进，~30Hz 刷新视觉足够；无阈值逐帧 setState 会把
     // 预览子树在高刷屏上推到 165Hz 重建（对齐 mobile_lyric_list 的做法）。
-    final next = widget.player.smoothPosition;
+    final next = widget.player.lyricPosition;
     if ((next - _position).abs() < const Duration(milliseconds: 20)) {
       return;
     }

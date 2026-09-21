@@ -11,6 +11,7 @@ import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
 import 'desktop_lyric_list.dart';
 import 'lyric_bottom_bar.dart';
 import 'lyric_display_mode.dart';
+import 'lyric_offset_sheet.dart';
 import 'mobile_lyric_list.dart';
 import 'player_controls.dart';
 
@@ -206,6 +207,11 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
     final hasRomanization = lyrics.any(
       (l) => l.romanization != null && l.romanization!.isNotEmpty,
     );
+    // 歌词进度入口之一：长按歌词行 / PC 右键歌词 —— 与详情弹层里的
+    // 「歌词进度」同一个弹层（移动端主入口在详情弹层，见 player_top_bar）。
+    void openLyricOffsetSheet() => unawaited(
+      showLyricOffsetSheet(context, player: widget.player, song: widget.song),
+    );
 
     if (lyrics.isEmpty) {
       return Column(
@@ -254,6 +260,13 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
             showRomanization: _showRomanization,
           ),
           lyricScale: _lyricScale,
+          onSecondaryTapLine: (position) => unawaited(
+            showLyricOffsetMenu(
+              context,
+              player: widget.player,
+              anchor: position,
+            ),
+          ),
         ),
       );
     }
@@ -273,6 +286,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
               showRomanization: _showRomanization,
               lyricScale: _lyricScale,
               isPageVisible: widget.isPageVisible,
+              onLongPressLine: openLyricOffsetSheet,
             ),
           ),
         ),

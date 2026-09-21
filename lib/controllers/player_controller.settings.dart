@@ -374,6 +374,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     bluetoothLyricsEnabled =
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;
+    // 逐曲歌词进度偏移：先恢复整张映射，当前歌的装载放到方法末尾
+    // （此刻桌面歌词等设置已就绪，补推不会拿着半成品设置）。
+    _restoreLyricOffsets(prefs);
     playbackSpeed = prefs.getDouble(_playbackSpeedSettingKey) ?? playbackSpeed;
     userVolume = (prefs.getDouble(_userVolumeSettingKey) ?? userVolume).clamp(
       0.0,
@@ -449,6 +452,14 @@ mixin _PlayerSettings on _PlayerControllerBase {
     unawaited(_refreshEqualizerConfig());
     unawaited(_applyEqualizer());
     unawaited(_applyBassBoost());
+    // 映射恢复完再对齐当前歌：构造函数里 _restorePlaybackState 也是
+    // unawaited 发起，可能已经先把 currentSong 落定（那时映射还是空的）。
+    // 只在映射里确有此歌时才装载：当前歌没有记录意味着原始进度，直接调用
+    // 会把启动瞬间用户刚调好的偏移抹回 0（那次调整一定已经写进映射）。
+    final offsetSong = currentSong;
+    if (offsetSong != null && _lyricOffsets.containsKey(offsetSong.hash)) {
+      _loadLyricOffsetForSong(offsetSong);
+    }
     notifyListeners();
   }
 
@@ -497,6 +508,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
       notifyListeners();
       final restored = currentSong;
       if (restored != null) {
+        // 恢复出来的这首歌可能带过歌词进度偏移（映射此刻通常已就绪；
+        // 万一晚到，_restoreSettings 末尾还会再对齐一次）。
+        _loadLyricOffsetForSong(restored);
         unawaited(loadLyrics(restored));
         unawaited(_loadClimax(restored));
       }

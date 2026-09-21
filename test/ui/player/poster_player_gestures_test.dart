@@ -120,6 +120,25 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   MusicApi get api => _FakeApi();
 
+  // 歌词进度偏移（PlayerController 接口）：测试默认零偏移。
+  @override
+  Duration get lyricPosition => smoothPosition;
+
+  @override
+  Duration lyricOffset = Duration.zero;
+
+  @override
+  bool get hasLyricOffset => false;
+
+  @override
+  String get lyricOffsetLabel => '无偏移';
+
+  @override
+  Future<void> adjustLyricOffset(Duration delta) async {}
+
+  @override
+  Future<void> resetLyricOffset() async {}
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

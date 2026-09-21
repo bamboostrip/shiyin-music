@@ -78,8 +78,9 @@ class WindowsDesktopLyricsBridge {
   static const double overlayLyricsHeight = 88;
   static const double overlayHeight = lyricsTopInset + overlayLyricsHeight;
 
-  /// 快捷设置菜单面板高度：菜单带高度（历史 172）。
-  static const double overlayMenuPanelHeight = 172;
+  /// 快捷设置菜单面板高度：菜单带高度（历史 172；新增「歌词进度」行后
+  /// 为 212 —— 菜单是整块常驻高度里浮出来的，行数变了这块必须跟着长）。
+  static const double overlayMenuPanelHeight = 212;
 
   /// 窗口常驻总高度（菜单带 + 卡片带）。窗口不再随菜单收展改变尺寸。
   static const double overlayWindowHeight =

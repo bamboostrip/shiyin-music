@@ -116,12 +116,24 @@ const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
 const _autoPlayOnDeviceConnectedSettingKey =
     'settings.auto_play_on_device_connected';
 const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
+// 歌词进度偏移：按歌曲 hash 保存毫秒值（正 = 歌词提前），见 lyricOffset。
+const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
 const _listenTimeReportInterval = Duration(minutes: 30);
 const _listenTimeCheckInterval = Duration(minutes: 1);
 const _defaultEqualizerLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+/// 歌词进度调节步进（一次点按的调整量，主流播放器惯例 0.5 秒）。
+const Duration kLyricOffsetStep = Duration(milliseconds: 500);
+
+/// 歌词进度偏移上下限：±20 秒。再大就不只是"歌词有点偏差"，
+/// 整段都会错位，钳住可避免用户长按连点后歌词飞出十万八千里。
+const Duration kLyricOffsetLimit = Duration(seconds: 20);
+
+/// 逐曲偏移的持久化条数上限：超出按插入序淘汰最旧（更新即置为最新）。
+const int kLyricOffsetStoreLimit = 200;
 
 /// 播放器控制器：状态拆分见 [_PlayerControllerBase]，职责分片见各 part 文件。
 class PlayerController extends _PlayerControllerBase
@@ -456,6 +468,19 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 进行中的歌词拉取（按歌曲 hash 去重），防止进页兜底与并发触发重复请求。
   String? _lyricsFetchInFlightHash;
 
+  /// 当前歌曲的歌词进度偏移（正 = 歌词提前，负 = 歌词延后）。
+  ///
+  /// 调节入口：移动端播放页「详情」弹层的「歌词进度」（另支持长按歌词行），
+  /// PC 端封面开关列 `调` 按钮 / 歌词列表右键 / 桌面歌词悬浮窗快捷菜单。
+  /// 实际生效位置是 [lyricPosition] —— 歌词定位与卡拉OK逐字进度必须同源，
+  /// 否则会"换行已提前、扫字仍延后"。
+  Duration lyricOffset = Duration.zero;
+
+  /// 逐曲偏移的持久化镜像（song.hash → 毫秒）。
+  ///
+  /// 只在内存里维护，落盘见 [_persistLyricOffsets]，启动恢复见 [_restoreSettings]。
+  final Map<String, int> _lyricOffsets = <String, int>{};
+
   Song? currentSong;
   List<Song> queue = const [];
   List<LyricLine> lyrics = const [];
@@ -682,7 +707,28 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   }
 
   int get activeLyricIndex =>
-      PlayerLyricLogic.activeIndex(lyrics, smoothPosition);
+      PlayerLyricLogic.activeIndex(lyrics, lyricPosition);
+
+  /// 歌词定位/卡拉OK专用位置：真实平滑进度叠加 [lyricOffset]。
+  ///
+  /// 偏移为正即"歌词提前"——真实进度 10.0s 处显示 10.5s 那一句（与 QQ 音乐
+  /// PC 的「歌词提前 0.5 秒」语义一致）。夹取到 `[0, duration]`：负偏移不能
+  /// 让开头几句永远点不亮，正偏移也不该把进度推到曲尾之后。
+  Duration get lyricPosition {
+    var value = smoothPosition + lyricOffset;
+    if (value < Duration.zero) {
+      value = Duration.zero;
+    } else if (duration > Duration.zero && value > duration) {
+      value = duration;
+    }
+    return value;
+  }
+
+  /// 当前歌曲是否带有非零歌词偏移（入口据此显示"已调整"）。
+  bool get hasLyricOffset => lyricOffset != Duration.zero;
+
+  /// 偏移的中文描述：`歌词提前 0.5 秒` / `歌词延后 1 秒` / `无偏移`。
+  String get lyricOffsetLabel => PlayerLyricOffsetLogic.describe(lyricOffset);
 
   Duration? _estimatedLineDuration(int index) =>
       PlayerLyricLogic.estimatedLineDuration(lyrics, duration, index);
@@ -777,7 +823,20 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   Future<void> loadLyrics(Song song);
 
+  // 歌词进度偏移（lyrics 分片实现；playback/settings/desktop 分片都要访问）。
+  Future<void> adjustLyricOffset(Duration delta);
+
+  Future<void> setLyricOffset(Duration value);
+
+  Future<void> resetLyricOffset();
+
+  void _loadLyricOffsetForSong(Song? song);
+
+  void _restoreLyricOffsets(SharedPreferences prefs);
+
   void _syncDesktopLyrics();
+
+  void _syncDesktopKaraokeProgress();
 
   Future<void> _syncDesktopLyricsVisibility();
 

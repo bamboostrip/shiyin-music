@@ -18,7 +18,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('WindowsDesktopLyricsBridge dimensions', () {
-    test('悬浮窗尺寸为宽 780、常驻高 296（菜单带 172 + 卡片带 124）', () {
+    test('悬浮窗尺寸为宽 780、常驻高 336（菜单带 212 + 卡片带 124）', () {
       expect(WindowsDesktopLyricsBridge.overlayWidth, 780);
       // 历史 88 高度下 30px 按钮（y2~36）与双行歌词（约 y20~74）恒重叠
       // 约 16px，故卡片带顶部辟出工具栏专属带（36 + 88 = 124）。
@@ -27,8 +27,9 @@ void main() {
       expect(WindowsDesktopLyricsBridge.overlayHeight, 124);
       // 常驻菜单带 + 卡片带 = 窗口常驻总高度：菜单收展纯 Flutter 动画，
       // 窗口不再 resize（消除 DWM 拉伸中间帧导致的"点设置闪一下"）。
-      expect(WindowsDesktopLyricsBridge.overlayMenuPanelHeight, 172);
-      expect(WindowsDesktopLyricsBridge.overlayWindowHeight, 296);
+      // 菜单带 212：新增「歌词进度」行后比历史 172 高一档。
+      expect(WindowsDesktopLyricsBridge.overlayMenuPanelHeight, 212);
+      expect(WindowsDesktopLyricsBridge.overlayWindowHeight, 336);
     });
   });
 
@@ -1993,6 +1994,15 @@ void main() {
   });
 
   group('锁定态靠近悬浮「🔒 解锁」胶囊与鼠标动态穿透', () {
+    /// 卡片带顶边的全局坐标 = 窗口顶边 + 常驻菜单带高度。
+    ///
+    /// 光标坐标全部由它推导：菜单带高度变化（历史上 172 → 212）时不必
+    /// 逐个改硬编码数字，测试也不至于因为窗口长高 40px 就假失败。
+    double cardBandTop(Offset windowPos) =>
+        windowPos.dy +
+        (WindowsDesktopLyricsBridge.overlayWindowHeight -
+            WindowsDesktopLyricsBridge.overlayHeight);
+
     testWidgets('光标在窗口外时胶囊不可见 (opacity 0.0)', (tester) async {
       Offset? cursorPos = const Offset(0, 0);
       const windowPos = Offset(100, 100);
@@ -2051,8 +2061,8 @@ void main() {
       );
       expect(tester.widget<AnimatedOpacity>(opacityFinder).opacity, 0.0);
 
-      // 光标移入卡片带内（窗口底部 124 高：y272~396，非胶囊区 (200, 300)）
-      cursorPos = const Offset(200, 300);
+      // 光标移入卡片带内（卡片带 = 窗口底部 124 高，非胶囊横向范围 (200, …)）
+      cursorPos = Offset(200, cardBandTop(windowPos) + 60);
       await tester.pump(const Duration(milliseconds: 80));
       // 推进 AnimatedOpacity 动画 180ms
       await tester.pump(const Duration(milliseconds: 180));
@@ -2104,8 +2114,8 @@ void main() {
     });
 
     testWidgets('光标悬浮在胶囊上时触发 setIgnoreMouseEvents(false)', (tester) async {
-      Offset? cursorPos = const Offset(200, 300);
       const windowPos = Offset(100, 100);
+      Offset? cursorPos = Offset(200, cardBandTop(windowPos) + 60);
       final mouseEventsCalls = <bool>[];
 
       await tester.pumpWidget(
@@ -2130,24 +2140,24 @@ void main() {
       expect(mouseEventsCalls, isEmpty);
 
       // 胶囊水平居中于卡片带顶：pillLeft = 100 + (780 - 84)/2 = 448,
-      // 卡片带顶 = 100 + 172 = 272，pillTop = 272 + 2 = 274, pillHeight = 24
-      // 光标移入胶囊矩形内 (450, 275)
-      cursorPos = const Offset(450, 275);
+      // 卡片带顶 = 100 + 212 = 312，pillTop = 312 + 2 = 314, pillHeight = 24
+      // 光标移入胶囊矩形内 (450, 320)
+      cursorPos = Offset(450, cardBandTop(windowPos) + 8);
       await tester.pump(const Duration(milliseconds: 80));
 
       expect(mouseEventsCalls, contains(false));
       expect(mouseEventsCalls.last, isFalse);
 
-      // 光标在胶囊上方但在卡片带内 (450, 273) 恢复穿透
-      // （卡片带顶 272 <= 273 < pillTop = 274）
-      cursorPos = const Offset(450, 273);
+      // 光标在胶囊上方但在卡片带内 (450, 312) 恢复穿透
+      // （卡片带顶 312 <= 312 < pillTop = 314）
+      cursorPos = Offset(450, cardBandTop(windowPos));
       await tester.pump(const Duration(milliseconds: 80));
       expect(mouseEventsCalls.last, isTrue);
     });
 
     testWidgets('设置外部重推后胶囊悬浮可恢复（穿透死锁回归）', (tester) async {
-      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
+      Offset? cursorPos = Offset(450, cardBandTop(windowPos) + 8);
       final mouseEventsCalls = <bool>[];
 
       Widget buildWith({required double opacity}) => MaterialApp(
@@ -2184,8 +2194,8 @@ void main() {
     });
 
     testWidgets('点击胶囊触发 onToggleLock(false)', (tester) async {
-      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
+      Offset? cursorPos = Offset(450, cardBandTop(windowPos) + 8);
       bool? toggledLock;
 
       await tester.pumpWidget(
@@ -2215,8 +2225,8 @@ void main() {
     });
 
     testWidgets('光标离开窗口时胶囊淡出且恢复 setIgnoreMouseEvents(true)', (tester) async {
-      Offset? cursorPos = const Offset(450, 275);
       const windowPos = Offset(100, 100);
+      Offset? cursorPos = Offset(450, cardBandTop(windowPos) + 8);
       final mouseEventsCalls = <bool>[];
 
       await tester.pumpWidget(

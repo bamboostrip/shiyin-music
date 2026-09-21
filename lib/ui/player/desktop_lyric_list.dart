@@ -29,6 +29,7 @@ class DesktopLyricList extends StatefulWidget {
     required this.activeIndex,
     required this.displayMode,
     required this.lyricScale,
+    this.onSecondaryTapLine,
   });
 
   final PlayerController player;
@@ -37,6 +38,9 @@ class DesktopLyricList extends StatefulWidget {
   final int activeIndex;
   final LyricDisplayMode displayMode;
   final double lyricScale;
+
+  /// 右键歌词行（PC 端在指针处弹出「歌词进度」锚定面板）。
+  final ValueChanged<Offset>? onSecondaryTapLine;
 
   @override
   State<DesktopLyricList> createState() => _DesktopLyricListState();
@@ -70,12 +74,15 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     if (_activeLyricIndex < 0 && widget.activeIndex >= 0) {
       _activeLyricIndex = widget.activeIndex;
     }
-    _smoothPosition = widget.player.smoothPosition;
+    _smoothPosition = widget.player.lyricPosition;
 
     final initialOffset = _estimateOffsetForIndex(_activeLyricIndex);
     _scrollController = ScrollController(initialScrollOffset: initialOffset);
 
     widget.player.positionListenable.addListener(_onPositionChanged);
+    // 歌词进度偏移调整走 player 通知：暂停时没有位置流事件，不监听的话
+    // 逐字扫色要等下一次位置回调才与新的行起点对齐。
+    widget.player.addListener(_onPlayerNotified);
     _ticker = createTicker(_onTick);
     _syncTicker();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -97,8 +104,17 @@ class _DesktopLyricListState extends State<DesktopLyricList>
 
   void _onTick(Duration elapsed) {
     if (!mounted || widget.player.isScrubbing) return;
-    final pos = widget.player.smoothPosition;
+    final pos = widget.player.lyricPosition;
     if ((_smoothPosition.inMilliseconds - pos.inMilliseconds).abs() > 20) {
+      setState(() => _smoothPosition = pos);
+    }
+  }
+
+  /// player 通知（含歌词进度偏移调整）后刷新偏移派生的逐字位置。
+  void _onPlayerNotified() {
+    if (!mounted) return;
+    final pos = widget.player.lyricPosition;
+    if (pos != _smoothPosition) {
       setState(() => _smoothPosition = pos);
     }
   }
@@ -126,6 +142,8 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     if (oldWidget.player != widget.player) {
       oldWidget.player.positionListenable.removeListener(_onPositionChanged);
       widget.player.positionListenable.addListener(_onPositionChanged);
+      oldWidget.player.removeListener(_onPlayerNotified);
+      widget.player.addListener(_onPlayerNotified);
     }
     if (oldWidget.songHash != widget.songHash) {
       _rowKeys.clear();
@@ -138,7 +156,7 @@ class _DesktopLyricListState extends State<DesktopLyricList>
       if (_activeLyricIndex < 0 && widget.activeIndex >= 0) {
         _activeLyricIndex = widget.activeIndex;
       }
-      _smoothPosition = widget.player.smoothPosition;
+      _smoothPosition = widget.player.lyricPosition;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToActive(animate: false);
       });
@@ -177,6 +195,7 @@ class _DesktopLyricListState extends State<DesktopLyricList>
   void dispose() {
     _ticker.dispose();
     widget.player.positionListenable.removeListener(_onPositionChanged);
+    widget.player.removeListener(_onPlayerNotified);
     _resumeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -463,6 +482,13 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                         _activeLyricIndex = index;
                         _resumeNow();
                       },
+                      // 右键歌词：PC 端习惯的"属性菜单"入口，在指针处弹出
+                      // 「歌词进度」锚定面板（对齐 QQ 音乐 PC 的时间偏移）。
+                      onSecondaryTapUp: widget.onSecondaryTapLine == null
+                          ? null
+                          : (details) => widget.onSecondaryTapLine!(
+                              details.globalPosition,
+                            ),
                       child: MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: Padding(

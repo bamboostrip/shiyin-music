@@ -1282,6 +1282,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
                           padding: const EdgeInsets.only(bottom: 4, right: 8),
                           child: _OverlayQuickSettingsMenu(
                             settings: settings,
+                            onControlPlayback: widget.onControlPlayback,
                             onUpdateSettings: (newSettings) {
                               _updateSettings(newSettings);
                             },
@@ -1632,15 +1633,21 @@ class _ToolbarButtonState extends State<_ToolbarButton> {
 @visibleForTesting
 typedef OverlayQuickSettingsMenu = _OverlayQuickSettingsMenu;
 
-/// 桌面歌词悬浮工具栏快捷调节菜单（字号加减、歌词配色方案、单双行切换、更多设置）。
+/// 桌面歌词悬浮工具栏快捷调节菜单（字号加减、歌词进度、歌词配色方案、
+/// 单双行切换、更多设置）。
 class _OverlayQuickSettingsMenu extends StatelessWidget {
   const _OverlayQuickSettingsMenu({
     required this.settings,
+    required this.onControlPlayback,
     required this.onUpdateSettings,
     required this.onOpenDetailedSettings,
   });
 
   final DesktopLyricsSettings settings;
+
+  /// 播控/进度指令下发通道（复用悬浮窗既有的 controlPlayback 动作通道，
+  /// 由主窗把它们落到 PlayerController.lyricOffset）。
+  final ValueChanged<String> onControlPlayback;
   final ValueChanged<DesktopLyricsSettings> onUpdateSettings;
   final VoidCallback onOpenDetailedSettings;
 
@@ -1706,6 +1713,40 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
                   );
                   onUpdateSettings(settings.copyWith(fontSize: newSize));
                 },
+              ),
+            ],
+          ),
+          Divider(
+            height: 12,
+            thickness: 0.5,
+            color: Colors.white.withValues(alpha: 0.10),
+          ),
+          // 2. 歌词进度（时间偏移）：与播放页共用同一份偏移状态，子窗只发
+          //    指令，结果沿既有歌词推送回流（见 PlayerController 的
+          //    lyricOffsetEarlier/Later/Reset）。
+          Row(
+            children: [
+              const Text(
+                '歌词进度',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const Spacer(),
+              _buildStepButton(
+                icon: Icons.keyboard_double_arrow_left_rounded,
+                tooltip: '歌词延后 0.5 秒',
+                onTap: () => onControlPlayback('lyricOffsetLater'),
+              ),
+              const SizedBox(width: 6),
+              _buildStepButton(
+                icon: Icons.restart_alt_rounded,
+                tooltip: '恢复歌词原始进度',
+                onTap: () => onControlPlayback('lyricOffsetReset'),
+              ),
+              const SizedBox(width: 6),
+              _buildStepButton(
+                icon: Icons.keyboard_double_arrow_right_rounded,
+                tooltip: '歌词提前 0.5 秒',
+                onTap: () => onControlPlayback('lyricOffsetEarlier'),
               ),
             ],
           ),
@@ -1805,8 +1846,9 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
   Widget _buildStepButton({
     required IconData icon,
     required VoidCallback onTap,
+    String? tooltip,
   }) {
-    return InkWell(
+    final button = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Container(
@@ -1820,6 +1862,8 @@ class _OverlayQuickSettingsMenu extends StatelessWidget {
         child: Icon(icon, size: 14, color: Colors.white),
       ),
     );
+    if (tooltip == null) return button;
+    return Tooltip(message: tooltip, child: button);
   }
 
   /// 配色方案圆点：左右对半双色（左=歌词色，右=高亮色），一眼看出

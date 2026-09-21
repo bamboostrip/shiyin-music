@@ -127,6 +127,36 @@ abstract final class PlayerLyricProgressLogic {
   }
 }
 
+/// 歌词进度偏移（无状态纯逻辑）。
+///
+/// 语义：偏移为正 = 歌词提前。定位时用 `播放位置 + 偏移` 去比对歌词行时间，
+/// 于是 +0.5s 让真实进度 10.0s 处显示 10.5s 那一句（提前 0.5 秒唱）。
+abstract final class PlayerLyricOffsetLogic {
+  /// 夹取偏移到 ±[limit]。
+  static Duration clamp(Duration value, Duration limit) {
+    if (value > limit) return limit;
+    if (value < -limit) return -limit;
+    return value;
+  }
+
+  /// 秒数文案：整数不带小数（`1 秒`），非整数保留一位（`0.5 秒`）。
+  static String formatSeconds(Duration value) {
+    final milliseconds = value.inMilliseconds.abs();
+    final seconds = milliseconds / 1000;
+    final text = seconds == seconds.roundToDouble()
+        ? seconds.round().toString()
+        : seconds.toStringAsFixed(1);
+    return '$text 秒';
+  }
+
+  /// 完整描述：`歌词提前 0.5 秒` / `歌词延后 1 秒` / `无偏移`。
+  static String describe(Duration value) {
+    if (value == Duration.zero) return '无偏移';
+    final direction = value > Duration.zero ? '提前' : '延后';
+    return '歌词$direction ${formatSeconds(value)}';
+  }
+}
+
 /// 进度换算。
 abstract final class PlayerPositionLogic {  /// 把进度夹取到 [0, duration]；时长未知（<= 0）时只夹下界。
   static Duration clamp(Duration value, Duration duration) {

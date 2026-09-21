@@ -27,6 +27,7 @@ class MobileLyricList extends StatefulWidget {
     required this.showRomanization,
     required this.lyricScale,
     required this.isPageVisible,
+    this.onLongPressLine,
   });
 
   final PlayerController player;
@@ -37,6 +38,9 @@ class MobileLyricList extends StatefulWidget {
   final bool showRomanization;
   final double lyricScale;
   final bool isPageVisible;
+
+  /// 长按歌词行（打开「调整歌词进度」弹层；与详情弹层入口同一个）。
+  final VoidCallback? onLongPressLine;
 
   @override
   State<MobileLyricList> createState() => _MobileLyricListState();
@@ -66,12 +70,15 @@ class _MobileLyricListState extends State<MobileLyricList>
         : (widget.activeIndex >= 0
               ? widget.activeIndex
               : widget.player.activeLyricIndex);
-    _smoothPosition = widget.player.smoothPosition;
+    _smoothPosition = widget.player.lyricPosition;
 
     final initialOffset = _estimateOffsetForIndex(_activeLyricIndex);
     _scrollController = ScrollController(initialScrollOffset: initialOffset);
 
     widget.player.positionListenable.addListener(_onPositionListenableChanged);
+    // 歌词进度偏移变更走 player 通知（暂停时没有位置流事件），
+    // 不监听的话偏移调整后逐字扫色要等下一次位置回调才对齐。
+    widget.player.addListener(_onPlayerNotified);
 
     _ticker = createTicker(_onTick);
     _syncTicker();
@@ -96,7 +103,7 @@ class _MobileLyricListState extends State<MobileLyricList>
 
   void _onTick(Duration elapsed) {
     if (!mounted || widget.player.isScrubbing) return;
-    final pos = widget.player.smoothPosition;
+    final pos = widget.player.lyricPosition;
     final newIndex = widget.player.activeLyricIndex;
 
     var needSetState = false;
@@ -121,7 +128,7 @@ class _MobileLyricListState extends State<MobileLyricList>
   void _onPositionListenableChanged() {
     if (!mounted) return;
     final newIndex = widget.player.activeLyricIndex;
-    final pos = widget.player.position;
+    final pos = widget.player.lyricPosition;
 
     if (newIndex != _activeLyricIndex || _smoothPosition != pos) {
       setState(() {
@@ -131,6 +138,16 @@ class _MobileLyricListState extends State<MobileLyricList>
       if (!_userHolding && !_ticker.isActive) {
         _scrollToActive(animate: true);
       }
+    }
+  }
+
+  /// player 通知（含歌词进度偏移调整）后刷新偏移派生位置，
+  /// 让逐字扫色在当前行内立刻按新偏移对齐。
+  void _onPlayerNotified() {
+    if (!mounted) return;
+    final pos = widget.player.lyricPosition;
+    if (pos != _smoothPosition) {
+      setState(() => _smoothPosition = pos);
     }
   }
 
@@ -144,6 +161,8 @@ class _MobileLyricListState extends State<MobileLyricList>
       widget.player.positionListenable.addListener(
         _onPositionListenableChanged,
       );
+      oldWidget.player.removeListener(_onPlayerNotified);
+      widget.player.addListener(_onPlayerNotified);
     }
     if (oldWidget.songHash != widget.songHash) {
       _rowKeys.clear();
@@ -155,7 +174,7 @@ class _MobileLyricListState extends State<MobileLyricList>
           : (widget.activeIndex >= 0
                 ? widget.activeIndex
                 : widget.player.activeLyricIndex);
-      _smoothPosition = widget.player.smoothPosition;
+      _smoothPosition = widget.player.lyricPosition;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToActive(animate: false);
       });
@@ -191,6 +210,7 @@ class _MobileLyricListState extends State<MobileLyricList>
     widget.player.positionListenable.removeListener(
       _onPositionListenableChanged,
     );
+    widget.player.removeListener(_onPlayerNotified);
     _resumeTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -532,6 +552,9 @@ class _MobileLyricListState extends State<MobileLyricList>
                         _activeLyricIndex = index;
                         _resumeNow();
                       },
+                      // 长按歌词：调整歌词进度的快捷入口（主流 App 习惯，
+                      // 与详情弹层里的「歌词进度」同一个弹层）。
+                      onLongPress: widget.onLongPressLine,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8.5),
                         child: Column(

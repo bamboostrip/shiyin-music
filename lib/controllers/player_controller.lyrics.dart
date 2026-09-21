@@ -154,6 +154,107 @@ mixin _PlayerLyrics on _PlayerControllerBase {
     }
   }
 
+  // ---- 歌词进度偏移 ----
+  // 设计见 docs/superpowers/specs/2026-09-21-lyric-progress-offset-design.md。
+
+  /// 步进调节当前歌曲的歌词进度（[delta] 为正 = 歌词提前，例如
+  /// [kLyricOffsetStep] 表示提前 0.5 秒）。
+  @override
+  Future<void> adjustLyricOffset(Duration delta) =>
+      setLyricOffset(lyricOffset + delta);
+
+  /// 直接把当前歌曲的偏移设为 [value]（超过 ±[kLyricOffsetLimit] 会被夹取）。
+  ///
+  /// 偏移落定后按歌曲持久化：0 即删除记录，非 0 记录毫秒值（酷狗/QQ 音乐
+  /// 同款"这首歌字幕偏了"的一次性修正，换歌不受影响、下次播放仍生效）。
+  @override
+  Future<void> setLyricOffset(Duration value) async {
+    final next = PlayerLyricOffsetLogic.clamp(value, kLyricOffsetLimit);
+    if (next == lyricOffset) return;
+    lyricOffset = next;
+    final song = currentSong;
+    if (song != null) {
+      // 先删再插：Map 保持插入序，重新插入即把该歌顶到 LRU 最新端。
+      _lyricOffsets.remove(song.hash);
+      if (next != Duration.zero) {
+        _lyricOffsets[song.hash] = next.inMilliseconds;
+      }
+      while (_lyricOffsets.length > kLyricOffsetStoreLimit) {
+        _lyricOffsets.remove(_lyricOffsets.keys.first);
+      }
+    }
+    _notifyLyricOffsetChanged();
+    await _persistLyricOffsets();
+  }
+
+  /// 重置当前歌曲的歌词进度（回到"以歌词自带时间为准"）。
+  @override
+  Future<void> resetLyricOffset() => setLyricOffset(Duration.zero);
+
+  /// 装载某首歌自己的偏移（切歌、启动恢复时调用）；无记录即归零。
+  @override
+  void _loadLyricOffsetForSong(Song? song) {
+    final next = Duration(
+      milliseconds: song == null ? 0 : (_lyricOffsets[song.hash] ?? 0),
+    );
+    if (next == lyricOffset) return;
+    lyricOffset = next;
+    _notifyLyricOffsetChanged();
+  }
+
+  /// 偏移变更后的统一广播。
+  ///
+  /// 三路"上一句"缓存必须一起失效：否则悬浮窗/超级歌词/蓝牙要等到下一句
+  /// 才换文本；再主动补推一次，让当前句与逐字进度立刻按新偏移重排。
+  void _notifyLyricOffsetChanged() {
+    if (_disposed) return;
+    _lastDesktopLyricIndex = -1;
+    _lastSuperLyricIndex = -1;
+    _lastBluetoothLyricIndex = -1;
+    notifyListeners();
+    _syncDesktopLyrics();
+    _syncDesktopKaraokeProgress();
+    _syncSuperLyricFromPosition();
+    _syncBluetoothLyricsFromPosition();
+  }
+
+  Future<void> _persistLyricOffsets() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_lyricOffsets.isEmpty) {
+      // 全部归零就把键删掉，不给下次启动留一份空 JSON。
+      await prefs.remove(_lyricOffsetsSettingKey);
+      return;
+    }
+    await prefs.setString(_lyricOffsetsSettingKey, jsonEncode(_lyricOffsets));
+  }
+
+  /// 启动恢复逐曲偏移映射。恢复后由调用方再对齐当前歌（构造函数里
+  /// [_restoreSettings] 与 [_restorePlaybackState] 都是 unawaited 发起，
+  /// 恢复映射时可能已经有歌在播了）。
+  ///
+  /// **不清空内存镜像**：读取落盘值之前，用户可能已经在播放页调过偏移，
+  /// 那是更新的真值（磁盘上要么还没有这个键、要么还是旧值），所以按
+  /// "内存优先"合并——否则启动瞬间的调整会被恢复流程抹回 0。
+  @override
+  void _restoreLyricOffsets(SharedPreferences prefs) {
+    final raw = prefs.getString(_lyricOffsetsSettingKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        for (final entry in decoded.entries) {
+          final key = entry.key;
+          final value = entry.value;
+          if (key is String && value is num) {
+            _lyricOffsets.putIfAbsent(key, () => value.round());
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint('[时音][歌词] 歌词进度偏移恢复失败（跳过）: $error');
+    }
+  }
+
   void _syncSuperLyricFromPosition() {
     if (currentSong == null) return;
     if (lyrics.isEmpty) {
