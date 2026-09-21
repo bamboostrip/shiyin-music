@@ -106,18 +106,32 @@ class Song {
               asString(json['singer_name']) ??
               '未知艺人';
 
-    final rawTitle =
+    // 首选酷狗原始歌名：OriSongName 本身不带歌手前缀，Suffix 为「(Live)」
+    // 等版本后缀；后缀为空时直接用歌名，避免多余空格。此路径已是纯净歌名，
+    // 不再走前缀剥离。字段缺失（非标内容/历史接口）时回退到备选字段链，
+    // 再经 cleanSongTitle 剥离「歌手 - 」前缀兜底。
+    final oriSongName = asString(json['OriSongName']);
+    final suffix = asString(json['Suffix']) ?? '';
+    final oriTitle = oriSongName == null || oriSongName.isEmpty
+        ? null
+        : (suffix.isNotEmpty ? '$oriSongName $suffix' : oriSongName);
+
+    final fallbackRaw =
         asString(json['songname']) ??
         asString(json['SongName']) ??
         asString(json['FileName']) ??
         asString(json['name']) ??
         asString(json['audio_name']) ??
         '未知歌曲';
-    final cleanedTitle = cleanSongTitle(
-      rawTitle,
-      artist: resolvedArtist,
-      artists: artists,
-    );
+
+    final rawTitle = oriTitle ?? fallbackRaw;
+    final cleanedTitle =
+        oriTitle ??
+        cleanSongTitle(
+          fallbackRaw,
+          artist: resolvedArtist,
+          artists: artists,
+        );
 
     return Song(
       id: songId ?? hash,
