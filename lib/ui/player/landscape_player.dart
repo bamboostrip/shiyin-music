@@ -13,6 +13,7 @@ import '../../services/lyric_converter.dart';
 import '../form_factor.dart';
 import '../desktop/desktop_player_bar.dart' hide formatDuration;
 import '../pages/desktop_lyrics_settings_page.dart';
+import '../pages/song_detail_page.dart';
 import '../widgets/artwork.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/desktop_anchored_menu.dart';
@@ -28,6 +29,7 @@ import 'lyric_seek_pointer_button.dart';
 import 'lyric_views.dart'
     show kLyricShowRomanizationPrefKey, kLyricShowTranslationPrefKey;
 import 'player_controls.dart';
+import 'song_info_sheet.dart';
 
 /// PC / 车机分栏播放页主体。
 ///
@@ -186,12 +188,22 @@ class _LandscapePlayerContentState extends State<LandscapePlayerContent> {
               ),
             ),
             // 播放页内复用常驻底栏：禁止再进一层播放页，最左加「收起」返回主界面。
+            // 桌面端歌名可点进歌曲详情页：内嵌处拿不到内容区 Navigator，
+            // 发请求走 shell（先退播放页、再推入内容区，侧栏保留）；
+            // 车机保持不可点（详情页是桌面版式）。
             DesktopPlayerBar(
               player: widget.player,
               auth: widget.auth,
               overlayDark: true,
               openPlayerPageEnabled: false,
               onCollapse: widget.onClose,
+              onOpenSongDetail: isDesktopFormFactor
+                  ? (song, tab) =>
+                        widget.player.openSongDetailRequest.value = (
+                          song: song,
+                          commentsTab: tab == SongDetailTab.comments,
+                        )
+                  : null,
             ),
           ],
         );
@@ -328,6 +340,18 @@ class LandscapeHeader extends StatelessWidget {
               ? '播完歌曲后停止'
               : null,
           onTap: () => showSleepTimerSheet(context: context, player: player),
+        ),
+        // 歌曲信息：车机偶尔也要看（与移动端详情弹层入口对齐）。
+        SongSheetAction(
+          icon: Icons.info_outline_rounded,
+          title: '歌曲信息',
+          subtitle: '歌手 · 专辑 · 发行年份',
+          onTap: () => showSongInfoSheet(
+            context: context,
+            player: player,
+            auth: auth,
+            song: song,
+          ),
         ),
         if (player.isDesktopLyricsSupported) ...[
           SongSheetAction(

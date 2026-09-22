@@ -17,6 +17,7 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
 import 'lyric_offset_sheet.dart';
 import 'player_controls.dart';
+import 'song_info_sheet.dart';
 
 class PlayerPageIndicator extends StatelessWidget {
   const PlayerPageIndicator({
@@ -225,7 +226,17 @@ void showPlayerMoreSheet({
     song: song,
     anchor: anchor,
     actions: [
-      // Grid actions
+      // 宫格固定 4 位（按顺序取前 4 个 isGrid）：添加到歌单常驻第一位，
+      // 后面跟倍速/音质/歌曲信息；其余一律平铺，不标 isGrid。
+      // 高潮/音效不在顶部占位：高潮低频、音效播放页就能调。
+      if (song.source == SongSource.kugou)
+        SongSheetAction(
+          icon: Icons.playlist_add_rounded,
+          title: '添加到歌单',
+          isGrid: true,
+          onTap: () =>
+              showAddToPlaylistSheet(context: context, auth: auth, song: song),
+        ),
       SongSheetAction(
         icon: Icons.speed_rounded,
         title: '倍速',
@@ -240,39 +251,48 @@ void showPlayerMoreSheet({
         isGrid: true,
         onTap: () => showAudioQualityPicker(context, player),
       ),
-      if (player.isAudioEffectsSupported)
-        SongSheetAction(
-          icon: Icons.graphic_eq_rounded,
-          title: '音效',
-          isGrid: true,
-          onTap: () => showAudioEffectsSheet(context: context, player: player),
+      SongSheetAction(
+        icon: Icons.info_outline_rounded,
+        title: '歌曲信息',
+        isGrid: true,
+        onTap: () => showSongInfoSheet(
+          context: context,
+          player: player,
+          auth: auth,
+          song: song,
         ),
+      ),
+      // List actions
       SongSheetAction(
         icon: Icons.auto_awesome_rounded,
         title: '高潮',
-        isGrid: true,
         onTap: () async {
           final ok = await player.playClimaxPreview();
           if (!ok) Toast.error('暂无高潮片段');
         },
       ),
+      if (player.isAudioEffectsSupported)
+        SongSheetAction(
+          icon: Icons.graphic_eq_rounded,
+          title: '音效',
+          onTap: () => showAudioEffectsSheet(context: context, player: player),
+        ),
+      // 定时是低频操作：下沉到平铺列表，不占宫格位。
       SongSheetAction(
         icon: Icons.bedtime_rounded,
         title: '定时',
-        isGrid: true,
         onTap: () => showSleepTimerSheet(context: context, player: player),
       ),
       // 歌词进度：第三方曲库的歌词偶有整体偏差，属"低频修正"操作，
-      // 放详情弹层而不是播放页主界面（截图位：与倍速/音质同排）。
+      // 放详情弹层的平铺列表里。
       // 图标用秒表（时间校准的具象 pictogram，替代原来抽象的循环箭头）；
       // 副标题用短读数（`0 秒` / `+0.5 秒`，与倍速「1x」、音质「320K」
-      // 同一量级）；调过的歌点亮宫格图块（active）。
+      // 同一量级）；调过的歌点亮入口（active）。
       SongSheetAction(
         icon: Icons.timer_rounded,
         title: '歌词进度',
         subtitle: PlayerLyricOffsetLogic.formatSigned(player.lyricOffset),
         active: player.hasLyricOffset,
-        isGrid: true,
         onTap: () {
           // 注意：不要在这里 pop —— 详情弹层的关闭由 _GridItem /
           // _SongActionTile / 桌面级联菜单统一负责，这里再 pop 会把
@@ -301,7 +321,6 @@ void showPlayerMoreSheet({
               ? Icons.lyrics_rounded
               : Icons.lyrics_outlined,
           title: '桌面歌词',
-          isGrid: true,
           onTap: () async {
             // 同上：菜单壳已负责关闭，这里不再手动 pop，避免连带退出播放页。
             await player.setDesktopLyricsEnabled(!player.desktopLyricsEnabled);
@@ -311,7 +330,6 @@ void showPlayerMoreSheet({
           SongSheetAction(
             icon: Icons.tune_rounded,
             title: '歌词设置',
-            isGrid: true,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => DesktopLyricsSettingsPage(player: player),
@@ -319,14 +337,6 @@ void showPlayerMoreSheet({
             ),
           ),
       ],
-      // List actions
-      if (song.source == SongSource.kugou)
-        SongSheetAction(
-          icon: Icons.playlist_add_rounded,
-          title: '添加到歌单',
-          onTap: () =>
-              showAddToPlaylistSheet(context: context, auth: auth, song: song),
-        ),
     ],
   );
 }

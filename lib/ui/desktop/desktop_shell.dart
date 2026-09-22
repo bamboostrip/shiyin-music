@@ -11,6 +11,7 @@ import '../../services/identify_service.dart';
 import '../../services/music_api.dart';
 import '../pages/comment_page.dart';
 import '../pages/artist_detail_page.dart';
+import '../pages/song_detail_page.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../pages/downloaded_songs_page.dart';
 import '../pages/home_page.dart';
@@ -115,6 +116,11 @@ class _DesktopShellState extends State<DesktopShell> {
       widget.player.openLyricsSettingsRequest
           .addListener(_onOpenLyricsSettingsRequested);
     } catch (_) {}
+    try {
+      widget.player.openSongDetailRequest.addListener(
+        _onOpenSongDetailRequested,
+      );
+    } catch (_) {}
   }
 
   @override
@@ -128,6 +134,16 @@ class _DesktopShellState extends State<DesktopShell> {
       try {
         widget.player.openLyricsSettingsRequest
             .addListener(_onOpenLyricsSettingsRequested);
+      } catch (_) {}
+      try {
+        oldWidget.player.openSongDetailRequest.removeListener(
+          _onOpenSongDetailRequested,
+        );
+      } catch (_) {}
+      try {
+        widget.player.openSongDetailRequest.addListener(
+          _onOpenSongDetailRequested,
+        );
       } catch (_) {}
     }
   }
@@ -167,6 +183,11 @@ class _DesktopShellState extends State<DesktopShell> {
     try {
       widget.player.openLyricsSettingsRequest
           .removeListener(_onOpenLyricsSettingsRequested);
+    } catch (_) {}
+    try {
+      widget.player.openSongDetailRequest.removeListener(
+        _onOpenSongDetailRequested,
+      );
     } catch (_) {}
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -209,6 +230,28 @@ class _DesktopShellState extends State<DesktopShell> {
     popped.whenComplete(() {
       if (mounted) _lyricsSettingsPageOpen = false;
     });
+  }
+
+  /// 全屏播放页内嵌底栏点歌名/评论：先退播放页（根导航整屏路由会盖住
+  /// 内容区），再把详情页推入内容区 Navigator（保留侧栏+底栏）。
+  void _onOpenSongDetailRequested() {
+    final request = widget.player.openSongDetailRequest.value;
+    if (request == null) return;
+    widget.player.openSongDetailRequest.value = null;
+    popPlayerRouteIfTop(context);
+    if (!mounted) return;
+    _pushContent(
+      context,
+      SongDetailPage(
+        api: widget.api,
+        auth: widget.auth,
+        player: widget.player,
+        song: request.song,
+        initialTab: request.commentsTab
+            ? SongDetailTab.comments
+            : SongDetailTab.detail,
+      ),
+    );
   }
 
   /// 回到内容根页（切换侧栏分区时关闭已打开的歌单/搜索等详情）。
@@ -521,13 +564,24 @@ class _DesktopShellState extends State<DesktopShell> {
                                 auth: widget.auth,
                                 onOpenPlayerPage: () =>
                                     _openPlayerPage(context),
-                                // 评论/歌手等详情页推入内容区 Navigator，保留侧栏；
+                                // 评论/歌手/歌曲详情页推入内容区 Navigator，保留侧栏；
                                 // 根 Navigator 会整窗全屏盖住侧栏。
                                 onOpenComment: (mixsongid) => _pushContent(
                                   context,
                                   CommentPage(
                                     api: widget.api,
                                     mixsongid: mixsongid,
+                                  ),
+                                ),
+                                // 底栏歌名点进「详情」tab，评论按钮点进「评论」tab。
+                                onOpenSongDetail: (song, tab) => _pushContent(
+                                  context,
+                                  SongDetailPage(
+                                    api: widget.api,
+                                    auth: widget.auth,
+                                    player: widget.player,
+                                    song: song,
+                                    initialTab: tab,
                                   ),
                                 ),
                                 onOpenArtist: (artist) => _pushContent(

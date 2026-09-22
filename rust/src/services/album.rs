@@ -48,7 +48,7 @@ pub async fn album_info(
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
+/// 专辑详情（歌曲信息页：专辑名 / 发行时间 / 简介 / 语种）。
 pub async fn album_detail(
     client: &reqwest::Client,
     session: &KgSession,

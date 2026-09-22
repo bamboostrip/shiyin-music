@@ -371,6 +371,7 @@ class PlayerController extends _PlayerControllerBase
     _desktopLyrics.setOpenSettingsHandler(null);
     positionListenable.dispose();
     openLyricsSettingsRequest.dispose();
+    openSongDetailRequest.dispose();
     unawaited(
       _audioEffects.configureEqualizer(
         audioSessionId:
@@ -525,6 +526,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   final ValueNotifier<bool> openLyricsSettingsRequest = ValueNotifier<bool>(
     false,
   );
+
+  /// 请求主界面打开歌曲详情页（全屏播放页内嵌底栏点歌名/评论触发，
+  /// 内嵌处拿不到内容区 Navigator，走 shell 统一消费）。
+  /// shell 消费后置回 null；commentsTab 为 true 时落「评论」tab。
+  final ValueNotifier<({Song song, bool commentsTab})?>
+  openSongDetailRequest = ValueNotifier(null);
 
   /// 外部界面可注册该回调或者监听 [openLyricsSettingsRequest]。
   VoidCallback? onOpenDesktopLyricsSettings;

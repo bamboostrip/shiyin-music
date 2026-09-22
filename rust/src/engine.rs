@@ -477,6 +477,15 @@ impl KugouEngine {
             ("GET", "/rank/top") => rank::rank_top(client, session).await,
 
             ("GET", "/album/shop") => album::album_shop(client, session).await,
+            ("GET", "/album/detail") => {
+                // 歌曲信息页：专辑名 / 发行时间 / 简介（与 /album/songs 同一套 id 契约）。
+                let album_id = params
+                    .get("album_id")
+                    .or_else(|| params.get("id"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                album::album_detail(client, session, album_id).await
+            }
             ("GET", "/album/songs") => {
                 // Dart 侧契约参数为 id（旧服务器同款）；兼容 album_id 旧名。
                 let album_id = params

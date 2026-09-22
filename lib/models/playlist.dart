@@ -407,6 +407,7 @@ class ArtistAlbum {
     this.authorName,
     this.publishDate,
     this.intro,
+    this.language,
   });
 
   final String id;
@@ -415,6 +416,9 @@ class ArtistAlbum {
   final String? authorName;
   final String? publishDate;
   final String? intro;
+
+  /// 语种（如 `国语` / `英语`，album_detail 的 language 字段）。
+  final String? language;
 
   factory ArtistAlbum.fromJson(Map<String, dynamic> json) {
     return ArtistAlbum(
@@ -428,6 +432,7 @@ class ArtistAlbum {
       authorName: asString(json['author_name']),
       publishDate: asString(json['publish_date']),
       intro: asString(json['intro']),
+      language: asString(json['language']),
     );
   }
 }

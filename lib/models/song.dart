@@ -901,6 +901,43 @@ class LyricLine {
   }
 }
 
+/// 词曲作者（从歌词正文提取的弱数据：有就展示，无则隐藏对应行）。
+class LyricCredits {
+  const LyricCredits({this.lyricist, this.composer});
+
+  /// 作词。
+  final String? lyricist;
+
+  /// 作曲。
+  final String? composer;
+
+  bool get isEmpty => lyricist == null && composer == null;
+}
+
+/// 从歌词正文提取词曲作者：大量 LRC/KRC 头部即 `作词：xxx` / `作曲：xxx`。
+///
+/// 只扫前 [maxLines] 行（署名行都在头部）；冒号兼容半角/全角；
+/// 命中多条时取第一条。无命中返回空 [LyricCredits]，调用方隐藏对应行。
+LyricCredits extractLyricCredits(List<LyricLine> lines, {int maxLines = 12}) {
+  String? lyricist;
+  String? composer;
+  // 行首允许残留时间标签（如 `[00:00.00]`，未解析的原始行也能处理）。
+  final pattern = RegExp(r'^(?:\[[^\]]*\]\s*)*(作词|作曲)\s*[:：]\s*(.+?)\s*$');
+  for (final line in lines.take(maxLines)) {
+    final match = pattern.firstMatch(line.text.trim());
+    if (match == null) continue;
+    final name = match.group(2)!.trim();
+    if (name.isEmpty) continue;
+    if (match.group(1) == '作词') {
+      lyricist ??= name;
+    } else {
+      composer ??= name;
+    }
+    if (lyricist != null && composer != null) break;
+  }
+  return LyricCredits(lyricist: lyricist, composer: composer);
+}
+
 class LyricWord {
   const LyricWord({
     required this.time,

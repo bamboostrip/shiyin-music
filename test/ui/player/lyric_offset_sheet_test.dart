@@ -180,7 +180,7 @@ void main() {
   });
 
   group('移动端详情弹层入口', () {
-    testWidgets('详情里有「歌词进度」宫格项，点开即打开调整弹层并带出当前偏移', (tester) async {
+    testWidgets('详情里有「歌词进度」入口，点开即打开调整弹层并带出当前偏移', (tester) async {
       // 形态判定跟着宿主 OS 走（测试跑在 Windows 上恒为桌面），这里显式
       // 覆盖成移动形态，走的才是手机上的底部弹层分支。
       debugDesktopFormFactorOverride = false;
@@ -210,9 +210,12 @@ void main() {
       await tester.tap(find.text('more'));
       await tester.pumpAndSettle();
 
-      // 顶部 4 宫之外平铺的「歌词进度」行，副标题是短读数（与「1x」/「320K」同量级）。
+      // 列表里的「歌词进度」行，副标题是短读数（与「1x」/「320K」同量级）。
+      // 行在小视口下可能首屏外：先滚出来再点（真机上用户也是上滑后点）。
       expect(find.text('歌词进度'), findsOneWidget);
       expect(find.text('+0.5 秒'), findsOneWidget);
+      await tester.ensureVisible(find.text('歌词进度'));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('歌词进度'));
       await tester.pumpAndSettle();
@@ -236,8 +239,8 @@ void main() {
       debugDesktopFormFactorOverride = false;
       addTearDown(() => debugDesktopFormFactorOverride = null);
 
-      // 8 个入口（7 个宫格候选 + 添加到歌单）：前 4 个留一行 4 列的宫格
-      // （倍速/音质/音效/高潮），其余 4 个全部平铺成 ListTile。
+      // 9 个入口（4 宫格 + 5 平铺）：宫格固定为添加到歌单/倍速/音质/
+      // 歌曲信息；其余 5 个（高潮/音效/定时/歌词进度/桌面歌词）平铺成 ListTile。
       final player = _FakePlayerFull();
       final auth = _FakeAuthController();
 
@@ -260,13 +263,54 @@ void main() {
       await tester.tap(find.text('more'));
       await tester.pumpAndSettle();
 
-      // 8 个入口全部可见：宫格 4 个（到「高潮」为止）+ 平铺 4 行。
-      expect(find.text('音效'), findsOneWidget);
+      // 9 个入口全部可见：宫格 4 个（添加到歌单/倍速/音质/歌曲信息）+
+      // 平铺 5 行（高潮/音效/定时/歌词进度/桌面歌词）。
+      expect(find.text('添加到歌单'), findsOneWidget);
+      expect(find.text('歌曲信息'), findsOneWidget);
       expect(find.text('高潮'), findsOneWidget);
+      expect(find.text('音效'), findsOneWidget);
+      expect(find.text('定时'), findsOneWidget);
       expect(find.text('歌词进度'), findsOneWidget);
       expect(find.text('桌面歌词'), findsOneWidget);
+      expect(find.byType(ListTile), findsNWidgets(5));
+    });
+
+    testWidgets('无音效时宫格仍为固定 4 位，高潮/定时下沉到列表', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      addTearDown(() => debugDesktopFormFactorOverride = null);
+
+      // 无音效无桌面歌词：宫格仍是添加到歌单/倍速/音质/歌曲信息，
+      // 高潮/定时/歌词进度平铺 3 行。
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        _host(
+          Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showPlayerMoreSheet(
+                context: context,
+                player: player,
+                auth: auth,
+                song: player.currentSong!,
+              ),
+              child: const Text('more'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('more'));
+      await tester.pumpAndSettle();
+
       expect(find.text('添加到歌单'), findsOneWidget);
-      expect(find.byType(ListTile), findsNWidgets(4));
+      expect(find.text('高潮'), findsOneWidget);
+      expect(find.text('定时'), findsOneWidget);
+      expect(find.text('歌词进度'), findsOneWidget);
+      expect(find.text('歌曲信息'), findsOneWidget);
+      // 添加到歌单与歌曲信息进了宫格而非列表：
+      // 列表只剩高潮/定时/歌词进度 3 行。
+      expect(find.byType(ListTile), findsNWidgets(3));
     });
   });
 

@@ -5,6 +5,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../pages/artist_detail_page.dart';
+import '../pages/song_detail_page.dart';
 import '../player/player_comment_button.dart';
 import '../player/player_route.dart';
 
@@ -59,6 +60,7 @@ class DesktopPlayerBar extends StatelessWidget {
     this.onOpenPlayerPage,
     this.onOpenComment,
     this.onOpenArtist,
+    this.onOpenSongDetail,
     this.onCollapse,
     this.openPlayerPageEnabled = true,
     this.overlayDark = false,
@@ -75,6 +77,10 @@ class DesktopPlayerBar extends StatelessWidget {
   /// 打开歌手页。桌面由 shell 传入，推入内容区 Navigator（保留侧栏）；
   /// 未传时退回根 Navigator（全屏）。
   final ValueChanged<ArtistRef>? onOpenArtist;
+
+  /// 打开歌曲详情页（歌名点进「详情」tab，评论按钮点进「评论」tab）。
+  /// 桌面由 shell 传入；未传时歌名/评论走各自旧行为（播放页/评论页）。
+  final void Function(Song song, SongDetailTab tab)? onOpenSongDetail;
 
   /// 最左侧「收起」按钮回调。非空时在最左渲染收起键（播放页用于返回主界面）。
   final VoidCallback? onCollapse;
@@ -173,6 +179,7 @@ class DesktopPlayerBar extends StatelessWidget {
                                 : null,
                             onOpenComment: onOpenComment,
                             onOpenArtist: onOpenArtist,
+                            onOpenSongDetail: onOpenSongDetail,
                             showCover: onCollapse == null,
                           ),
                         ),
@@ -399,6 +406,7 @@ class SongInfo extends StatefulWidget {
     this.auth,
     this.onOpenComment,
     this.onOpenArtist,
+    this.onOpenSongDetail,
     this.showCover = true,
   });
 
@@ -409,6 +417,9 @@ class SongInfo extends StatefulWidget {
   final AuthController? auth;
   final ValueChanged<String>? onOpenComment;
   final ValueChanged<ArtistRef>? onOpenArtist;
+
+  /// 打开歌曲详情页（见 DesktopPlayerBar.onOpenSongDetail）。
+  final void Function(Song song, SongDetailTab tab)? onOpenSongDetail;
 
   /// 是否渲染 48x48 封面（含悬停放大提示）。播放页内嵌态传 false。
   final bool showCover;
@@ -428,6 +439,14 @@ class _SongInfoState extends State<SongInfo> {
     final iconColor = colorScheme.onSurfaceVariant;
     // 不可进播放页时不展示「展开」提示，也不给点击反馈。
     final openable = song != null && widget.onTap != null;
+    // 歌名行：有歌曲详情页入口时点歌名进「详情」tab（封面仍进播放页）；
+    // 否则沿旧行为点进播放页。
+    final openDetail = widget.onOpenSongDetail;
+    final detailOpenable = song != null && openDetail != null;
+    final onTitleTap = detailOpenable
+        ? () => openDetail(song, SongDetailTab.detail)
+        : (openable ? widget.onTap : null);
+    final titleClickable = detailOpenable || openable;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -495,9 +514,9 @@ class _SongInfoState extends State<SongInfo> {
                 children: [
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: openable ? widget.onTap : null,
+                    onTap: onTitleTap,
                     child: MouseRegion(
-                      cursor: openable
+                      cursor: titleClickable
                           ? SystemMouseCursors.click
                           : SystemMouseCursors.basic,
                       child: MarqueeText(
@@ -546,7 +565,12 @@ class _SongInfoState extends State<SongInfo> {
                           song: song,
                           iconSize: 18.0,
                           iconColor: iconColor,
-                          onOpenComment: widget.onOpenComment,
+                          // 有歌曲详情页入口时，评论按钮直达「评论」tab；
+                          // 否则沿旧行为走 onOpenComment/评论页。
+                          onOpenComment: detailOpenable
+                              ? (_) =>
+                                    openDetail(song, SongDetailTab.comments)
+                              : widget.onOpenComment,
                         ),
                         const SizedBox(width: 12),
                         SongMoreButton(

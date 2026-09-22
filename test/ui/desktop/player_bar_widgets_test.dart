@@ -5,7 +5,9 @@ import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart' hide formatDuration;
 import 'package:shiyin_music/ui/desktop/desktop_player_bar.dart';
 import 'package:shiyin_music/ui/desktop/player_bar_widgets.dart';
+import 'package:shiyin_music/ui/pages/song_detail_page.dart';
 import 'package:shiyin_music/ui/widgets/artwork.dart';
+import 'package:shiyin_music/ui/widgets/marquee_text.dart';
 
 void main() {
   group('playbackModeIcon', () {
@@ -240,8 +242,7 @@ void main() {
       expect(find.byType(ExpandDetailIcon), findsNothing);
     });
 
-    testWidgets('无歌曲时悬停不展示 ExpandDetailIcon，点击不触发 onTap', (tester) async {
-      bool tapped = false;
+    testWidgets('无歌曲时悬停不展示 ExpandDetailIcon，点击不触发 onTap', (tester) async {      bool tapped = false;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -273,6 +274,64 @@ void main() {
       await tester.tap(find.byType(Artwork));
       await tester.pump();
       expect(tapped, isFalse);
+    });
+
+    testWidgets('传入 onOpenSongDetail 时点歌名进详情页，不再走 onTap（播放页）', (tester) async {
+      var tappedPlayerPage = false;
+      Song? detailSong;
+      SongDetailTab? detailTab;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: Row(
+                children: [
+                  SongInfo(
+                    song: testSong,
+                    colorScheme: const ColorScheme.light(),
+                    onTap: () => tappedPlayerPage = true,
+                    onOpenSongDetail: (song, tab) {
+                      detailSong = song;
+                      detailTab = tab;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byType(MarqueeText));
+      await tester.pump();
+      expect(detailSong?.title, '测试曲目');
+      expect(detailTab, SongDetailTab.detail);
+      expect(tappedPlayerPage, isFalse);
+    });
+
+    testWidgets('未传 onOpenSongDetail 时点歌名沿旧行为进播放页', (tester) async {
+      var tappedPlayerPage = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: Row(
+                children: [
+                  SongInfo(
+                    song: testSong,
+                    colorScheme: const ColorScheme.light(),
+                    onTap: () => tappedPlayerPage = true,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byType(MarqueeText));
+      await tester.pump();
+      expect(tappedPlayerPage, isTrue);
     });
   });
 }

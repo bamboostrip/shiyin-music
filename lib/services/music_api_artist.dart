@@ -35,6 +35,26 @@ mixin _MusicApiArtist on _MusicApiBase {
         .toList();
   }
 
+  /// 专辑详情（歌曲信息页：发行时间 / 简介 / 语种）。
+  ///
+  /// 上游按 album_id 精确返回，无数据（空 albumId / 空结果）返回 null，
+  /// 调用方直接隐藏对应行，不抛错。
+  Future<ArtistAlbum?> albumDetail(String albumId) async {
+    if (albumId.trim().isEmpty) return null;
+    final raw = await _client.get('/album/detail', {'album_id': albumId});
+    final json = asMap(raw);
+    final items = raw is List
+        ? raw
+        : asList(
+            json['data'] ?? json['albums'] ?? json['list'] ?? _firstListValue(json),
+          );
+    for (final item in items.whereType<Map<String, dynamic>>()) {
+      final album = ArtistAlbum.fromJson(item);
+      if (album.id.isNotEmpty) return album;
+    }
+    return null;
+  }
+
   Future<List<Song>> artistAudios(
     String id, {
     int page = 1,
