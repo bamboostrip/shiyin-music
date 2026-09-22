@@ -59,6 +59,12 @@ const Duration _kAutoSkipWallClockBudget = Duration(seconds: 60);
 /// 重试也只能补这 1.5s，直接进下一首是更好的 UX，故不按错误类型分流。
 const Duration _kNearEndDecodeErrorThreshold = Duration(milliseconds: 1500);
 
+/// 曲末停滞 watchdog：兜底 timer 到点后引擎位置仍冻结时的复检间隔与次数。
+/// 连续 [_kTailStallMaxChecks] 次仍停滞即强制按播完推进（总静默 ≈ 曲末
+/// 兜底 180ms + 4×1.5s ≈ 6.2s——比它更短的重缓冲不会被误判）。
+const int _kTailStallMaxChecks = 3;
+const Duration _kTailStallRecheckInterval = Duration(milliseconds: 1500);
+
 /// 「起播请求」平台确认的结果（见 [_PlayerControllerBase._requestPlayback]）。
 enum PlayConfirm {
   /// 平台在限时内回执确认。
@@ -233,6 +239,19 @@ class PlayerController extends _PlayerControllerBase
       isPlaying =
           value.playing &&
           value.processingState != ProcessingState.completed;
+      // 「重新出声作废完成去重」：系统播放键（通知栏/锁屏/耳机媒体键）曲末
+      // 重播不经 togglePlay/_resetCompletionLatchForReplay（应用内入口会自
+      // 己清），若不随这轮真实起播作废上一轮的完成标记，这首第二次播完的
+      // completed 会被 [_willHandleCompletion] 去重吞掉，队列再次停在曲尾。
+      // 只在「同一首歌的新一轮真出声」时命中：切歌后标记与新歌 hash 不等，
+      // 天然不命中；完成流程在途由 _isHandlingCompletion 单独把关，不受影响。
+      if (value.playing &&
+          value.processingState != ProcessingState.completed &&
+          _completedSongHash != null &&
+          _completedSongHash == currentSong?.hash) {
+        _completedSongHash = null;
+        _nextLog('重新出声 → 作废上一轮完成去重: ${currentSong?.title}');
+      }
       // 诊断：引擎上报的状态变化（实机排查"completed 到底有没有来"的第一手
       // 证据）。只在组合变化时记，避免每 tick 刷屏。
       final stateTrace = '${value.playing}/${value.processingState.name}';
@@ -343,6 +362,7 @@ class PlayerController extends _PlayerControllerBase
     _becomingNoisySub?.cancel();
     _devicesSub?.cancel();
     _completionFallbackTimer?.cancel();
+    _nearEndStallRecheck?.cancel();
     _saveStateTimer?.cancel();
     _desktopLyrics.setVisibilityChangedHandler(null);
     _desktopLyrics.setPlaybackActionHandler(null);
@@ -445,6 +465,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 当前歌曲的高潮片段时间（用于进度条标记），可能为 null。
   SongClimax? climax;
   Timer? _completionFallbackTimer;
+
+  /// 兜底 timer 建立时刻的引擎位置：曲末停滞 watchdog（playback 分片的
+  /// [_PlayerPlayback._checkTailStall]）以它为基准判定「位置是否原地冻结」。
+  Duration? _fallbackTimerBuiltAtPosition;
+
+  /// 曲末停滞已复检次数与复检 timer（见 _checkTailStall）。
+  int _nearEndStallChecks = 0;
+  Timer? _nearEndStallRecheck;
   Timer? _listenTimeTimer;
   DateTime? _listenTimeStartedAt;
   Duration _pendingListenTime = Duration.zero;

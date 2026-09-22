@@ -170,6 +170,50 @@ abstract final class PlayerPositionLogic {  /// 把进度夹取到 [0, duration]
   }
 }
 
+/// 曲末推进与重播判定（无状态纯逻辑）。
+abstract final class PlayerPlaybackLogic {
+  /// 系统播放键（通知栏/锁屏/耳机媒体键）在「引擎已到曲尾（completed）且
+  /// 位置停在尾部」时是否应按「重播本曲」处理。
+  ///
+  /// 背景：移动端原生 just_audio 在 EOF 只把 processingState 置 completed、
+  /// 不动 playing（陈旧 true），`play()` 首行 `if (playing) return` 会把
+  /// 重新起播整体短路——通知栏/耳机的播放键在曲末按了毫无反应（应用内
+  /// togglePlay 有专门的 completed 分支，系统媒体键路径此前直接透传）。
+  ///
+  /// 只在「位置停在尾部」时才回零重播：seekToAndPlay/_ensurePlaying 已把
+  /// 位置定位到曲中（歌词点击、高潮试听）的 completed 状态必须原地续播，
+  /// 不能被回零冲掉。时长未知（<= 0）时按重播处理——此时续播只会瞬间再次
+  /// completed，听感等于没反应。
+  static bool shouldRestartTrackOnPlay({
+    required bool completed,
+    required Duration? duration,
+    required Duration position,
+  }) {
+    if (!completed) return false;
+    if (duration == null || duration <= Duration.zero) return true;
+    return position >= duration - const Duration(milliseconds: 250);
+  }
+
+  /// 曲末停滞 watchdog 判定：兜底 timer 建立后，引擎位置是否自基准
+  /// [builtAt] 起原地停滞（控制器仍在播、位置在 ±[positionEpsilon] 内
+  /// 纹丝不动）。
+  ///
+  /// 实机形态：CDN 尾部断供时引擎位置冻结在曲尾前 1~2 秒、playerState
+  /// 停在 ready/buffering——completed 永远不来，位置也不再触发新的兜底
+  /// 窗口（remaining > 750ms），队列永久停在曲尾。控制器不在播（用户
+  /// 暂停）时恒为不停滞：暂停停在曲尾不得被误判为播完而自动切歌。
+  static bool isTailStalled({
+    required bool ctrlPlaying,
+    required Duration builtAt,
+    required Duration now,
+    Duration positionEpsilon = const Duration(milliseconds: 150),
+  }) {
+    if (!ctrlPlaying) return false;
+    return (now - builtAt).inMilliseconds.abs() <=
+        positionEpsilon.inMilliseconds;
+  }
+}
+
 /// 音质降级档位。
 abstract final class PlayerQualityLogic {
   /// 返回更低一档的音质；已是最低档时返回 null。

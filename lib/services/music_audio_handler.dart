@@ -7,9 +7,23 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../config/app_config.dart';
+import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
+
+/// 代理转发上游响应头的最长等待：超时按网关故障处理（502），不让引擎
+/// 在打开媒体源时无限悬挂（load 自身另有 15s 超时兜底，这里是源头）。
+const Duration _upstreamHeaderTimeout = Duration(seconds: 15);
+
+/// 代理转发上游数据流的「空闲」超时：相邻数据块间隔超过它视为上游断供。
+///
+/// 动机：CDN 尾部断供时这条响应会无限挂起——引擎等不到最后几百字节就
+/// 到不了 EOF，completed 永远不触发，队列停在曲尾。Stream.timeout 判定
+/// 的是事件间隔而非总时长：慢速但持续的传输（弱网听整首歌）不受影响；
+/// 真断流超时后把错误注入响应，引擎收到的是截断错误而非无限等待，交给
+/// 上层曲末/中途错误链路处置。
+const Duration _upstreamIdleTimeout = Duration(seconds: 20);
 
 /// 网易云域名（页 API/外链 CDN）统一在此判断：163 页面系（music.163.com）
 /// 与音频 CDN 系（*.music.126.net）都要求 Referer，缺失时部分节点 403。
@@ -344,7 +358,10 @@ class MusicAudioHandler extends BaseAudioHandler
       if (range != null) {
         upstream.headers.set(HttpHeaders.rangeHeader, range);
       }
-      final resp = await upstream.close();
+      final resp = await upstream.close().timeout(
+        _upstreamHeaderTimeout,
+        onTimeout: () => throw Exception('上游响应头超 $_upstreamHeaderTimeout 未返回'),
+      );
 
       req.response.statusCode = resp.statusCode;
       String? upstreamContentType;
@@ -368,7 +385,20 @@ class MusicAudioHandler extends BaseAudioHandler
       );
       req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
 
-      await resp.pipe(req.response);
+      // 空闲超时注入错误结束响应：此时响应头多半已发出（502 写不进去，
+      // 外层 catch 里的写状态码会被吞掉），连接被关闭后引擎侧表现为流
+      // 截断错误——正是我们想要的「响亮失败」。
+      await resp
+          .timeout(
+            _upstreamIdleTimeout,
+            onTimeout: (sink) {
+              sink.addError(
+                StateError('上游数据流停滞超 $_upstreamIdleTimeout'),
+              );
+              sink.close();
+            },
+          )
+          .pipe(req.response);
     } catch (e) {
       try {
         req.response.statusCode = HttpStatus.badGateway;
@@ -540,6 +570,30 @@ class MusicAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> play() async {
+    // 曲末恢复：completed 且位置停在尾部时，移动端原生 just_audio 的
+    // playing 是陈旧 true（EOF 不回写），直接 play() 会被其首行
+    // `if (playing) return` 短路——通知栏/锁屏/耳机媒体键的播放键在曲末
+    // 按了毫无反应。与应用内 togglePlay 的 completed 分支同构：pause 归位
+    // 后 seek(0) 重播本曲（去重标记由控制器「重新出声作废」不变式清掉）。
+    // 只在「停在尾部」时回零：seekToAndPlay/_ensurePlaying 已把位置定位到
+    // 曲中的 completed 状态必须原地续播，不能被回零冲掉（判定见
+    // PlayerPlaybackLogic.shouldRestartTrackOnPlay）。复位失败不阻断起播。
+    final restart = PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+      completed: audioPlayer.processingState == ProcessingState.completed,
+      duration: audioPlayer.duration,
+      position: audioPlayer.position,
+    );
+    if (restart) {
+      debugPrint('[AudioHandler] 曲末收到播放指令 → pause+seek(0) 后重播本曲');
+      try {
+        if (audioPlayer.playing) {
+          await audioPlayer.pause();
+        }
+        await audioPlayer.seek(Duration.zero);
+      } catch (e) {
+        debugPrint('[AudioHandler][ERROR] 曲末重播复位失败: $e');
+      }
+    }
     await audioPlayer.play();
   }
 

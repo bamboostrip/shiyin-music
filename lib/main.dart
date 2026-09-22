@@ -17,6 +17,7 @@ import 'controllers/local_music_controller.dart';
 import 'controllers/theme_controller.dart';
 import 'core/api_client_interface.dart';
 import 'core/rust_api_client.dart';
+import 'services/app_log_service.dart';
 import 'services/cache_service.dart';
 import 'services/desktop_system_integration.dart';
 import 'services/desktop_system_media.dart';
@@ -54,6 +55,11 @@ Future<void> main(List<String> args) async {
     return;
   }
   WidgetsFlutterBinding.ensureInitialized();
+  // 落盘日志尽早接管 debugPrint：现有诊断（[shiyin][next]/SYNOTIF/代理错误）
+  // 零改动同步落文件，用户侧偶发问题（曲末不跳、通知按钮失灵）事后才有
+  // 现场可取证。接管同步先行、路径解析异步不阻塞——之前的启动日志先进
+  // 内存缓冲，落盘就绪后随下一轮 flush 一并写入。
+  unawaited(AppLogService.install());
   // 全局未捕获异步异常兜底：此前无任何 onError，异常只进控制台且 release
   // 下不可见。这里仅记录并标记已处理（返回 true），不改变既有降级行为。
   PlatformDispatcher.instance.onError = (error, stack) {

@@ -60,6 +60,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       climax = null;
     }
     _completionFallbackTimer?.cancel();
+    _nearEndStallRecheck?.cancel();
+    _fallbackTimerBuiltAtPosition = null;
+    _nearEndStallChecks = 0;
     _completedSongHash = null;
     // 新一轮播放：曲尾诊断日志重新允许记录（同曲重播也要能看到）。
     _endOfSongLoggedForHash = null;
@@ -811,6 +814,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   void _resetCompletionLatchForReplay() {
     _completedSongHash = null;
     _completionFallbackTimer?.cancel();
+    _nearEndStallRecheck?.cancel();
     _tailSkipExhausted = false;
     errorMessage = null;
   }
@@ -849,6 +853,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     _isHandlingCompletion = true;
     _handlingCompletedHash = song.hash;
     _completionFallbackTimer?.cancel();
+    _nearEndStallRecheck?.cancel();
     _completedSongHash = song.hash;
     _nextLog(
       '完成处理开始: ${song.title} mode=${playbackMode.name} '
@@ -962,6 +967,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           const Duration(milliseconds: 180);
       // 建 timer 时绑定歌曲：触发时已切歌则丢弃，避免旧 timer 推新歌连跳
       final songHash = currentSong?.hash;
+      // watchdog 基准：以此判定引擎位置是否自此刻起原地冻结（见 _checkTailStall）。
+      _fallbackTimerBuiltAtPosition = value;
+      _nearEndStallChecks = 0;
       _nextLog(
         '建立曲末兜底 timer: delay=${delay.inMilliseconds}ms '
         'remaining=${remaining.inMilliseconds}ms song=${currentSong?.title}',
@@ -1014,9 +1022,64 @@ mixin _PlayerPlayback on _PlayerControllerBase {
             'enginePos=${currentPosition.inMilliseconds}ms '
             'dur=${duration.inMilliseconds}ms',
           );
+          _checkTailStall(songHash);
         }
       });
     }
+  }
+
+  /// 曲末兜底 timer 到点、引擎既未 completed 也不在 220ms 判距内时的
+  /// 停滞复检（watchdog）。
+  ///
+  /// 覆盖的实机形态：CDN 尾部断供（代理上游卡死）时引擎位置冻结在曲尾前
+  /// 1~2 秒、playerState 停在 ready/buffering——completed 永远不来，位置
+  /// 不再前进也不会再触发新的兜底窗口（remaining > 750ms），队列永久停在
+  /// 曲尾、重启才能恢复。这里在「控制器仍在播、位置自兜底 timer 建立起
+  /// 纹丝不动」时按 [_kTailStallRecheckInterval] 复检，连续
+  /// [_kTailStallMaxChecks] 次仍停滞即强制按播完推进；位置恢复前进或用户
+  /// 暂停则立即放弃判定（与主 timer 相同的「暂停不误判为播完」约束）。
+  void _checkTailStall(String? songHash) {
+    final builtAt = _fallbackTimerBuiltAtPosition;
+    final stalled =
+        builtAt != null &&
+        PlayerPlaybackLogic.isTailStalled(
+          ctrlPlaying: isPlaying,
+          builtAt: builtAt,
+          now: audioPlayer.position,
+        );
+    if (!stalled) {
+      _nearEndStallChecks = 0;
+      _nextLog(
+        '曲末停滞 watchdog 放弃(位置已前进或已暂停): ctrlPlaying=$isPlaying '
+        'builtAt=${builtAt?.inMilliseconds}ms '
+        'now=${audioPlayer.position.inMilliseconds}ms | ${_nextSnapshot()}',
+      );
+      return;
+    }
+    if (_nearEndStallChecks >= _kTailStallMaxChecks) {
+      _nearEndStallChecks = 0;
+      _nextLog(
+        '曲末停滞 watchdog → 强制按播完推进: '
+        'pos=${audioPlayer.position.inMilliseconds}ms '
+        'dur=${duration.inMilliseconds}ms | ${_nextSnapshot()}',
+      );
+      unawaited(_handleCompleted());
+      return;
+    }
+    _nearEndStallChecks++;
+    _nextLog(
+      '曲末停滞 watchdog 复检($_nearEndStallChecks/$_kTailStallMaxChecks): '
+      'pos=${audioPlayer.position.inMilliseconds}ms | ${_nextSnapshot()}',
+    );
+    _nearEndStallRecheck?.cancel();
+    _nearEndStallRecheck = Timer(_kTailStallRecheckInterval, () {
+      if (_disposed || _isSeeking || _isScrubbing) return;
+      if (currentSong?.hash != songHash) return;
+      // 复检窗口里引擎自行走到 completed（或兜底已推进）：一切交给既有
+      // 完成链，watchdog 不再介入。
+      if (audioPlayer.processingState == ProcessingState.completed) return;
+      _checkTailStall(songHash);
+    });
   }
 
   /// 试听当前歌曲的高潮片段：定位到高潮开始并播放，到高潮结束自动暂停。

@@ -429,4 +429,125 @@ void main() {
       );
     });
   });
+
+  group('PlayerPlaybackLogic.shouldRestartTrackOnPlay（系统播放键曲末恢复判定）', () {
+    test('非 completed 一律不重播（暂停中/播放中的系统播放键走普通续播）', () {
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: false,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 300),
+        ),
+        isFalse,
+      );
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: false,
+          duration: null,
+          position: Duration.zero,
+        ),
+        isFalse,
+      );
+    });
+
+    test('completed 且位置停在尾部（含 250ms 容差）→ 重播回零', () {
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 300),
+        ),
+        isTrue,
+      );
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 299, milliseconds: 800),
+        ),
+        isTrue,
+      );
+    });
+
+    test('completed 但位置在容差之外 → 原地续播（seekToAndPlay 已定位曲中）', () {
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 299, milliseconds: 700),
+        ),
+        isFalse,
+      );
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 42),
+        ),
+        isFalse,
+      );
+    });
+
+    test('completed 但时长未知（<=0）→ 按重播处理（续播只会瞬间再 completed）', () {
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: null,
+          position: Duration.zero,
+        ),
+        isTrue,
+      );
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: Duration.zero,
+          position: Duration.zero,
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('PlayerPlaybackLogic.isTailStalled（曲末停滞 watchdog 判定）', () {
+    test('控制器不在播（用户已暂停）→ 永不停滞，不误切', () {
+      expect(
+        PlayerPlaybackLogic.isTailStalled(
+          ctrlPlaying: false,
+          builtAt: const Duration(seconds: 299, milliseconds: 600),
+          now: const Duration(seconds: 299, milliseconds: 600),
+        ),
+        isFalse,
+      );
+    });
+
+    test('位置自基准起纹丝不动（±150ms 内）→ 停滞', () {
+      expect(
+        PlayerPlaybackLogic.isTailStalled(
+          ctrlPlaying: true,
+          builtAt: const Duration(seconds: 299, milliseconds: 600),
+          now: const Duration(seconds: 299, milliseconds: 600),
+        ),
+        isTrue,
+      );
+      expect(
+        PlayerPlaybackLogic.isTailStalled(
+          ctrlPlaying: true,
+          builtAt: const Duration(seconds: 299, milliseconds: 600),
+          now: const Duration(seconds: 299, milliseconds: 700),
+        ),
+        isTrue,
+      );
+    });
+
+    test('位置恢复了前进（超出容差）→ 不停滞', () {
+      expect(
+        PlayerPlaybackLogic.isTailStalled(
+          ctrlPlaying: true,
+          builtAt: const Duration(seconds: 299, milliseconds: 600),
+          now: const Duration(seconds: 299, milliseconds: 800),
+        ),
+        isFalse,
+      );
+    });
+  });
 }
