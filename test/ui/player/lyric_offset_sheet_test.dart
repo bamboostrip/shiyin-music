@@ -1,8 +1,9 @@
 // 「调整歌词进度」UI：移动端详情弹层入口与底部弹层、PC 锚定弹层、
 // PC 两个入口（封面开关列 `调` / 歌词列表右键）。
 //
-// 面板形态对齐倍速 / 定时弹层：大读数 + `− 0.5 秒` / `+ 0.5 秒` 步进键 +
-// `恢复原始进度` 文字按钮 + 偏移状态说明；状态与重置可用态自监听 PlayerController。
+// 面板形态对齐酷狗「调整歌词进度」极简三键：一行三枚圆角方钮
+// （`− 0.5 秒` / `重置` / `+ 0.5 秒`，标签在钮下），仅已调偏移时亮一行短状态；
+// 状态与重置可用态自监听 PlayerController。
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -111,37 +112,50 @@ class _FakeAuthController extends ChangeNotifier implements AuthController {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// 真机形态：音效（均衡器）与桌面歌词都可用 → 宫格候选 7 个（超过 6 宫封顶）。
+class _FakePlayerFull extends _FakePlayerController {
+  @override
+  bool get isAudioEffectsSupported => true;
+
+  @override
+  bool get isDesktopLyricsSupported => true;
+}
+
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-/// 弹层里三键的图标 → 稳定命中（`0.5 秒` 文案有两个）。
+/// 弹层里三键的图标 → 稳定命中（标签 `0.5 秒` 有两处，靠图标区分）。
 const _addIcon = Icons.add_rounded;
 const _minusIcon = Icons.remove_rounded;
 const _resetIcon = Icons.restart_alt_rounded;
 
+/// 状态行：仅在已调偏移时出现，短读数 + 记忆提示。
+String _status(Duration offset) =>
+    '${PlayerLyricOffsetLogic.formatSigned(offset)} · 已为本首歌记忆';
+
 void main() {
   group('LyricOffsetControl', () {
-    testWidgets('步进键与状态文案：点按即改偏移并即时刷新读数', (tester) async {
+    testWidgets('三键与状态行：点按即改偏移并即时刷新状态', (tester) async {
       final player = _FakePlayerController();
       await tester.pumpWidget(_host(LyricOffsetControl(player: player)));
 
-      expect(find.text('无偏移'), findsOneWidget);
-      expect(
-        find.text('「+」歌词提前 · 「−」歌词延后，长按可连续调整'),
-        findsOneWidget,
-      );
+      // 默认态极简：无状态行，标签齐备。
+      expect(find.textContaining('已为本首歌记忆'), findsNothing);
+      expect(find.text('0.5 秒'), findsNWidgets(2));
+      expect(find.text('重置'), findsOneWidget);
 
       await tester.tap(find.byIcon(_addIcon));
       await tester.pump();
       expect(player.lyricOffset, kLyricOffsetStep);
       expect(player.adjustCalls, 1);
-      expect(find.text('+0.5 秒'), findsOneWidget);
-      expect(find.text('歌词提前 0.5 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(find.text(_status(kLyricOffsetStep)), findsOneWidget);
 
       await tester.tap(find.byIcon(_addIcon));
       await tester.pump();
       expect(player.lyricOffset, const Duration(seconds: 1));
-      expect(find.text('+1 秒'), findsOneWidget);
-      expect(find.text('歌词提前 1 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(
+        find.text(_status(const Duration(seconds: 1))),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byIcon(_minusIcon));
       await tester.pump();
@@ -151,7 +165,7 @@ void main() {
       await tester.pump();
       expect(player.resetCalls, 1);
       expect(player.lyricOffset, Duration.zero);
-      expect(find.text('无偏移'), findsOneWidget);
+      expect(find.textContaining('已为本首歌记忆'), findsNothing);
     });
 
     testWidgets('无偏移时重置不可用（点了也不触发 reset）', (tester) async {
@@ -196,9 +210,9 @@ void main() {
       await tester.tap(find.text('more'));
       await tester.pumpAndSettle();
 
-      // 与倍速/音质同排的宫格入口，副标题带出当前偏移。
+      // 顶部 4 宫之外平铺的「歌词进度」行，副标题是短读数（与「1x」/「320K」同量级）。
       expect(find.text('歌词进度'), findsOneWidget);
-      expect(find.text('歌词提前 0.5 秒'), findsOneWidget);
+      expect(find.text('+0.5 秒'), findsOneWidget);
 
       await tester.tap(find.text('歌词进度'));
       await tester.pumpAndSettle();
@@ -207,12 +221,52 @@ void main() {
       // 注意：底层页面仍在（「more」还在树里），只断言详情内容已走、弹层已来。
       expect(find.text('倍速'), findsNothing, reason: '详情弹层应已关闭');
       expect(find.text('调整歌词进度'), findsOneWidget);
-      expect(find.text('歌词提前 0.5 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(find.text(_status(kLyricOffsetStep)), findsOneWidget);
 
       await tester.tap(find.byIcon(_addIcon));
       await tester.pumpAndSettle();
       expect(player.lyricOffset, const Duration(seconds: 1));
-      expect(find.text('歌词提前 1 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(
+        find.text(_status(const Duration(seconds: 1))),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('顶部只留 4 宫：其余入口全部平铺为菜单行', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      addTearDown(() => debugDesktopFormFactorOverride = null);
+
+      // 8 个入口（7 个宫格候选 + 添加到歌单）：前 4 个留一行 4 列的宫格
+      // （倍速/音质/音效/高潮），其余 4 个全部平铺成 ListTile。
+      final player = _FakePlayerFull();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        _host(
+          Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showPlayerMoreSheet(
+                context: context,
+                player: player,
+                auth: auth,
+                song: player.currentSong!,
+              ),
+              child: const Text('more'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('more'));
+      await tester.pumpAndSettle();
+
+      // 8 个入口全部可见：宫格 4 个（到「高潮」为止）+ 平铺 4 行。
+      expect(find.text('音效'), findsOneWidget);
+      expect(find.text('高潮'), findsOneWidget);
+      expect(find.text('歌词进度'), findsOneWidget);
+      expect(find.text('桌面歌词'), findsOneWidget);
+      expect(find.text('添加到歌单'), findsOneWidget);
+      expect(find.byType(ListTile), findsNWidgets(4));
     });
   });
 
@@ -242,13 +296,12 @@ void main() {
       expect(find.byIcon(_minusIcon), findsOneWidget);
       expect(find.byIcon(_resetIcon), findsOneWidget);
       expect(find.byIcon(_addIcon), findsOneWidget);
-      expect(find.text('0.5 秒'), findsNWidgets(2));
-      expect(find.text('恢复原始进度'), findsOneWidget);
+      expect(find.text('重置'), findsOneWidget);
 
       await tester.tap(find.byIcon(_addIcon));
       await tester.pumpAndSettle();
       expect(player.lyricOffset, kLyricOffsetStep);
-      expect(find.text('歌词提前 0.5 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(find.text(_status(kLyricOffsetStep)), findsOneWidget);
     });
   });
 
@@ -279,7 +332,10 @@ void main() {
       await tester.tap(find.byIcon(_minusIcon));
       await tester.pumpAndSettle();
       expect(player.lyricOffset, -kLyricOffsetStep);
-      expect(find.text('歌词延后 0.5 秒 · 已为本首歌记忆'), findsOneWidget);
+      expect(
+        find.text(_status(-kLyricOffsetStep)),
+        findsOneWidget,
+      );
     });
   });
 

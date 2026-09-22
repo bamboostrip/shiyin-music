@@ -20,6 +20,7 @@ class SongSheetAction {
     this.tooltip,
     this.danger = false,
     this.isGrid = false,
+    this.active = false,
     this.selected = false,
     this.closeOnTap = true,
     this.onTap,
@@ -40,6 +41,11 @@ class SongSheetAction {
   final String? tooltip;
   final bool danger;
   final bool isGrid;
+
+  /// 点亮态：入口背后的功能当前**已生效**时置 true —— 宫格图块换主题色
+  /// 淡底 + 主题色图标、副标题同色点亮（如「歌词进度」已调过偏移）。
+  /// 与 [selected]（二级菜单勾选语义）无关，级联菜单忽略本字段。
+  final bool active;
 
   /// 二级菜单叶子项是否选中（显示勾）。
   final bool selected;
@@ -124,26 +130,52 @@ Future<void> showSongActionSheet({
     );
   }
 
-  final gridActions = actions.where((a) => a.isGrid).toList();
-  final listActions = actions.where((a) => !a.isGrid).toList();
+  // 常用的放上面当宫格按钮（顶部固定 4 个、一行 4 列），其余全部平铺成菜单行 ——
+  // 真机上「音效」「桌面歌词」等入口会让候选涨到 7~8 个，与其挑 6 个摆两行、
+  // 末行看情况多一个少一个，不如一行 4 个定版，其余顺延到下方列表
+  // （桌面形态的级联菜单不受影响）。
+  const gridLimit = 4;
+  final gridActions = <SongSheetAction>[];
+  final listActions = <SongSheetAction>[];
+  var gridCount = 0;
+  for (final action in actions) {
+    if (action.isGrid && gridCount < gridLimit) {
+      gridActions.add(action);
+      gridCount++;
+    } else {
+      listActions.add(action);
+    }
+  }
 
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
+    // 参考稿（截图 2）：浅蓝灰底 + 白色浮起按钮/卡片。
+    // 浅色用 surfaceContainer（#F4F7FB）做底，白按钮/白列表卡浮在上面；
+    // 深色沿用同一 token 对（底 surfaceContainer / 浮层 surfaceContainerHighest）。
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
     builder: (sheetContext) {
       final colorScheme = Theme.of(sheetContext).colorScheme;
+      final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+      // 宫格浮起钮：浅色纯白 + 柔阴影（参考稿的悬浮质感），深色用最高层 + 细边框。
+      final floatColor = isDark
+          ? colorScheme.surfaceContainerHighest
+          : Colors.white;
       return SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 26),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Song info
+                // Song info：标题 18 加粗 + 歌手 13 灰（对齐参考稿标题字阶）
                 Row(
                   children: [
-                    Artwork(url: song.coverUrl, size: 52, borderRadius: 10),
+                    Artwork(url: song.coverUrl, size: 48, borderRadius: 12),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -154,72 +186,81 @@ Future<void> showSongActionSheet({
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(sheetContext).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w800),
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 18,
+                                  height: 1.25,
+                                ),
                           ),
-                          const SizedBox(height: 3),
+                          const SizedBox(height: 4),
                           Text(
                             song.artist,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(sheetContext).textTheme.bodyMedium
-                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                                ?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 13,
+                                  height: 1.2,
+                                ),
                           ),
                         ],
                       ),
                     ),
                   ],
                 ),
-                // Actions card (grid + list in one unified card)
-                if (gridActions.isNotEmpty || listActions.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Material(
-                    color: colorScheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(16),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Grid actions (icon + text, 3-column grid)
-                        if (gridActions.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 10,
-                              horizontal: 12,
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (var row = 0;
-                                    row * 3 < gridActions.length;
-                                    row++)
-                                  Row(
-                                    children: [
-                                      for (var col = 0; col < 3; col++)
-                                        Expanded(
-                                          child: row * 3 + col < gridActions.length
-                                              ? _GridItem(
-                                                  action: gridActions[row * 3 + col],
-                                                )
-                                              : const SizedBox.shrink(),
-                                        ),
-                                    ],
-                                  ),
-                              ],
+                // 快捷宫格：白色浮起方钮 + 柔阴影，直接落在底色上（参考稿样式）
+                if (gridActions.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var row = 0; row * 4 < gridActions.length; row++)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: (row + 1) * 4 < gridActions.length ? 16 : 0,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (var col = 0; col < 4; col++)
+                                Expanded(
+                                  child: row * 4 + col < gridActions.length
+                                      ? _GridItem(
+                                          action: gridActions[row * 4 + col],
+                                          floatColor: floatColor,
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                // 列表区：平面直铺，和抽屉底融为一体（不要浮起卡片），
+                // 只用细分割线断开，和上面的悬浮宫格拉开质感对比。
+                if (listActions.isNotEmpty) ...[
+                  SizedBox(height: gridActions.isNotEmpty ? 12 : 8),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var index = 0;
+                          index < listActions.length;
+                          index++) ...[
+                        _SongActionTile(action: listActions[index]),
+                        if (index != listActions.length - 1)
+                          Divider(
+                            height: 1,
+                            thickness: 1,
+                            indent: 52,
+                            endIndent: 4,
+                            color: colorScheme.outlineVariant.withValues(
+                              alpha: 0.7,
                             ),
                           ),
-                        // Divider between grid and list
-                        if (gridActions.isNotEmpty && listActions.isNotEmpty)
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                        // List actions
-                        for (var index = 0;
-                            index < listActions.length;
-                            index++) ...[
-                          _SongActionTile(action: listActions[index]),
-                          if (index != listActions.length - 1)
-                            const Divider(height: 1, indent: 58),
-                        ],
                       ],
-                    ),
+                    ],
                   ),
                 ],
               ],
@@ -232,14 +273,21 @@ Future<void> showSongActionSheet({
 }
 
 class _GridItem extends StatelessWidget {
-  const _GridItem({required this.action});
+  const _GridItem({required this.action, required this.floatColor});
 
   final SongSheetAction action;
+  final Color floatColor;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final color = action.danger ? colorScheme.error : colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final active = action.active;
+    final iconColor = action.danger
+        ? colorScheme.error
+        : active
+        ? colorScheme.primary
+        : colorScheme.onSurface;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -256,38 +304,66 @@ class _GridItem extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          // 参考稿：白色大方钮 + 柔阴影（60px / 20 圆角，图标 26 黑）；
+          // 点亮态换主题色淡底 + 主题色图标，一眼看出「已生效」。
           Container(
-            width: 42,
-            height: 42,
+            width: 60,
+            height: 60,
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withValues(alpha: .6),
-              borderRadius: BorderRadius.circular(12),
+              color: active
+                  ? colorScheme.primary.withValues(alpha: .12)
+                  : floatColor,
+              borderRadius: BorderRadius.circular(20),
+              border: active
+                  ? Border.all(
+                      color: colorScheme.primary.withValues(alpha: .35),
+                    )
+                  : isDark
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    )
+                  : null,
+              boxShadow: active || isDark
+                  ? null
+                  : const [
+                      BoxShadow(
+                        color: Color(0x140F1E3D),
+                        blurRadius: 14,
+                        offset: Offset(0, 5),
+                      ),
+                    ],
             ),
-            child: Icon(action.icon, color: color, size: 21),
+            child: Icon(action.icon, color: iconColor, size: 26),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 8),
           Text(
             action.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: color,
+              color: colorScheme.onSurface,
               fontWeight: FontWeight.w600,
-              fontSize: 12,
+              fontSize: 12.5,
+              height: 1.2,
             ),
           ),
-          if (action.subtitle != null)
+          if (action.subtitle != null) ...[
+            const SizedBox(height: 2),
             Text(
               action.subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 10,
+                color: active ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 11,
+                height: 1.2,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
+          ],
         ],
       ),
     );
@@ -623,10 +699,40 @@ class _SongActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final color = action.danger ? colorScheme.error : colorScheme.onSurface;
+    // 点亮态（如「歌词进度」已调偏移）：图标与副标题换主题色，
+    // 与宫格图块的点亮语义一致。
+    final active = action.active;
+    final accent = colorScheme.primary;
+    // 平面行（无浮起卡）：直接落在抽屉底上，只靠细分割线断开。
     return ListTile(
-      leading: Icon(action.icon, color: color),
-      title: Text(action.title, style: TextStyle(color: color)),
-      subtitle: action.subtitle == null ? null : Text(action.subtitle!),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      minLeadingWidth: 32,
+      leading: Icon(action.icon, color: active ? accent : color, size: 23),
+      title: Text(
+        action.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+          fontSize: 15.5,
+          height: 1.25,
+        ),
+      ),
+      subtitle: action.subtitle == null
+          ? null
+          : Text(
+              action.subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: active ? accent : colorScheme.onSurfaceVariant,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                fontSize: 12.5,
+                height: 1.2,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
       onTap: action.onTap == null
           ? null
           : () {
@@ -722,10 +828,13 @@ class _CarGridActionItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final active = action.active;
     final color = action.danger ? colorScheme.error : colorScheme.onSurface;
 
     return Material(
-      color: colorScheme.surfaceContainer,
+      color: active
+          ? colorScheme.primary.withValues(alpha: .10)
+          : colorScheme.surfaceContainer,
       borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -743,7 +852,11 @@ class _CarGridActionItem extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(action.icon, color: color, size: 22),
+              Icon(
+                action.icon,
+                color: active ? colorScheme.primary : color,
+                size: 22,
+              ),
               const SizedBox(height: 6),
               Text(
                 action.title,
@@ -763,8 +876,12 @@ class _CarGridActionItem extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                    color: active
+                        ? colorScheme.primary
+                        : colorScheme.onSurfaceVariant,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                     fontSize: 9,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
             ],

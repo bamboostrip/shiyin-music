@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../controllers/player_logic.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
@@ -263,10 +264,14 @@ void showPlayerMoreSheet({
       ),
       // 歌词进度：第三方曲库的歌词偶有整体偏差，属"低频修正"操作，
       // 放详情弹层而不是播放页主界面（截图位：与倍速/音质同排）。
+      // 图标用秒表（时间校准的具象 pictogram，替代原来抽象的循环箭头）；
+      // 副标题用短读数（`0 秒` / `+0.5 秒`，与倍速「1x」、音质「320K」
+      // 同一量级）；调过的歌点亮宫格图块（active）。
       SongSheetAction(
-        icon: Icons.sync_rounded,
+        icon: Icons.timer_rounded,
         title: '歌词进度',
-        subtitle: player.hasLyricOffset ? player.lyricOffsetLabel : null,
+        subtitle: PlayerLyricOffsetLogic.formatSigned(player.lyricOffset),
+        active: player.hasLyricOffset,
         isGrid: true,
         onTap: () {
           // 注意：不要在这里 pop —— 详情弹层的关闭由 _GridItem /

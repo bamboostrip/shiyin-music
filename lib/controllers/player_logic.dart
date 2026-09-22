@@ -155,6 +155,14 @@ abstract final class PlayerLyricOffsetLogic {
     final direction = value > Duration.zero ? '提前' : '延后';
     return '歌词$direction ${formatSeconds(value)}';
   }
+
+  /// 短读数（面板大读数 / 详情宫格副标题共用）：
+  /// `+0.5 秒` / `−1 秒` / 零为 `0 秒`（减号用 U+2212，与排版数字对齐）。
+  static String formatSigned(Duration value) {
+    if (value == Duration.zero) return '0 秒';
+    final sign = value > Duration.zero ? '+' : '−';
+    return '$sign${formatSeconds(value)}';
+  }
 }
 
 /// 进度换算。

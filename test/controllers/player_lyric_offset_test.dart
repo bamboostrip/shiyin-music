@@ -188,6 +188,22 @@ void main() {
         '歌词提前 2 秒',
       );
     });
+
+    test('短读数：宫格副标题/面板大读数共用，零显示 0 秒', () {
+      expect(PlayerLyricOffsetLogic.formatSigned(Duration.zero), '0 秒');
+      expect(
+        PlayerLyricOffsetLogic.formatSigned(const Duration(milliseconds: 500)),
+        '+0.5 秒',
+      );
+      expect(
+        PlayerLyricOffsetLogic.formatSigned(const Duration(seconds: -1)),
+        '−1 秒',
+      );
+      expect(
+        PlayerLyricOffsetLogic.formatSigned(const Duration(milliseconds: -1500)),
+        '−1.5 秒',
+      );
+    });
   });
 
   group('PlayerController 歌词进度偏移', () {
