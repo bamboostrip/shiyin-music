@@ -496,7 +496,7 @@ pub mod desktop {
                 }
             };
             println!("Config: {config:?}");
-            let cfg: cpal::StreamConfig = config.clone().into();
+            let cfg: cpal::StreamConfig = config.into();
 
             // First start an output stream playing a sine wave so WASAPI engine renders audio
             let sample_rate = config.sample_rate() as f32;
@@ -504,7 +504,7 @@ pub mod desktop {
             let mut sample_clock = 0f32;
             let out_stream = out
                 .build_output_stream(
-                    cfg.clone(),
+                    cfg,
                     move |data: &mut [f32], _| {
                         for frame in data.chunks_mut(channels) {
                             let value = (sample_clock * 440.0 * 2.0 * std::f32::consts::PI
