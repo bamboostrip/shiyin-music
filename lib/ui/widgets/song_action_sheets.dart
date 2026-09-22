@@ -166,17 +166,17 @@ Future<void> showSongActionSheet({
           : Colors.white;
       return SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 26),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 20),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Song info：标题 18 加粗 + 歌手 13 灰（对齐参考稿标题字阶）
+                // Song info：标题 16 加粗 + 歌手 12 灰（紧凑档，不做适老化大字）
                 Row(
                   children: [
-                    Artwork(url: song.coverUrl, size: 48, borderRadius: 12),
-                    const SizedBox(width: 12),
+                    Artwork(url: song.coverUrl, size: 44, borderRadius: 10),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -188,11 +188,11 @@ Future<void> showSongActionSheet({
                             style: Theme.of(sheetContext).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   height: 1.25,
                                 ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             song.artist,
                             maxLines: 1,
@@ -200,7 +200,7 @@ Future<void> showSongActionSheet({
                             style: Theme.of(sheetContext).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
-                                  fontSize: 13,
+                                  fontSize: 12.5,
                                   height: 1.2,
                                 ),
                           ),
@@ -211,14 +211,14 @@ Future<void> showSongActionSheet({
                 ),
                 // 快捷宫格：白色浮起方钮 + 柔阴影，直接落在底色上（参考稿样式）
                 if (gridActions.isNotEmpty) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 14),
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       for (var row = 0; row * 4 < gridActions.length; row++)
                         Padding(
                           padding: EdgeInsets.only(
-                            bottom: (row + 1) * 4 < gridActions.length ? 16 : 0,
+                            bottom: (row + 1) * 4 < gridActions.length ? 12 : 0,
                           ),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,7 +241,7 @@ Future<void> showSongActionSheet({
                 // 列表区：平面直铺，和抽屉底融为一体（不要浮起卡片），
                 // 只用细分割线断开，和上面的悬浮宫格拉开质感对比。
                 if (listActions.isNotEmpty) ...[
-                  SizedBox(height: gridActions.isNotEmpty ? 12 : 8),
+                  SizedBox(height: gridActions.isNotEmpty ? 10 : 6),
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -253,7 +253,7 @@ Future<void> showSongActionSheet({
                           Divider(
                             height: 1,
                             thickness: 1,
-                            indent: 52,
+                            indent: 50,
                             endIndent: 4,
                             color: colorScheme.outlineVariant.withValues(
                               alpha: 0.7,
@@ -304,16 +304,16 @@ class _GridItem extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 参考稿：白色大方钮 + 柔阴影（60px / 20 圆角，图标 26 黑）；
+          // 参考稿：白色大方钮 + 柔阴影（54px / 18 圆角，图标 24 黑）；
           // 点亮态换主题色淡底 + 主题色图标，一眼看出「已生效」。
           Container(
-            width: 60,
-            height: 60,
+            width: 54,
+            height: 54,
             decoration: BoxDecoration(
               color: active
                   ? colorScheme.primary.withValues(alpha: .12)
                   : floatColor,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(18),
               border: active
                   ? Border.all(
                       color: colorScheme.primary.withValues(alpha: .35),
@@ -333,9 +333,9 @@ class _GridItem extends StatelessWidget {
                       ),
                     ],
             ),
-            child: Icon(action.icon, color: iconColor, size: 26),
+            child: Icon(action.icon, color: iconColor, size: 24),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             action.title,
             maxLines: 1,
@@ -344,12 +344,12 @@ class _GridItem extends StatelessWidget {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w600,
-              fontSize: 12.5,
+              fontSize: 12,
               height: 1.2,
             ),
           ),
           if (action.subtitle != null) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
             Text(
               action.subtitle!,
               maxLines: 1,
@@ -358,7 +358,7 @@ class _GridItem extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: active ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 11,
+                fontSize: 10.5,
                 height: 1.2,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
@@ -704,10 +704,11 @@ class _SongActionTile extends StatelessWidget {
     final active = action.active;
     final accent = colorScheme.primary;
     // 平面行（无浮起卡）：直接落在抽屉底上，只靠细分割线断开。
+    // 紧凑档：图标 21、标题 14.5，行高跟内容走。
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      minLeadingWidth: 32,
-      leading: Icon(action.icon, color: active ? accent : color, size: 23),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      minLeadingWidth: 30,
+      leading: Icon(action.icon, color: active ? accent : color, size: 21),
       title: Text(
         action.title,
         maxLines: 1,
@@ -715,7 +716,7 @@ class _SongActionTile extends StatelessWidget {
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
           color: color,
           fontWeight: FontWeight.w600,
-          fontSize: 15.5,
+          fontSize: 14.5,
           height: 1.25,
         ),
       ),
@@ -728,7 +729,7 @@ class _SongActionTile extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: active ? accent : colorScheme.onSurfaceVariant,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-                fontSize: 12.5,
+                fontSize: 12,
                 height: 1.2,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
