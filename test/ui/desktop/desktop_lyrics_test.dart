@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/services/desktop_lyrics_service.dart';
 import 'package:shiyin_music/services/windows_desktop_lyrics_bridge.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
@@ -1990,6 +1991,238 @@ void main() {
             fallback: const Offset(100, 100),
           );
       expect(origin, const Offset(2500, 900));
+    });
+  });
+
+  group('存量位置语义迁移（loadStoredOverlayOrigin）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+    const fallback = Offset(570, 624);
+
+    Future<SharedPreferences> mockPrefs(Map<String, Object> values) async {
+      SharedPreferences.setMockInitialValues(values);
+      return SharedPreferences.getInstance();
+    }
+
+    bool semanticsKeysAllSet(SharedPreferences prefs) =>
+        prefs.getBool(WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey) ==
+            true &&
+        prefs.getBool(WindowsDesktopLyricsBridge.windowTallMigratedPrefKey) ==
+            true &&
+        prefs.getBool(
+              WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey,
+            ) ==
+            true;
+
+    test('全新安装（无存量坐标）：不写坐标，但三枚语义键置位', () async {
+      final prefs = await mockPrefs(<String, Object>{});
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+      );
+
+      expect(origin, isNull, reason: '无存量位置时由调用方落主屏默认点');
+      // 回归：全新安装的首次坐标由子窗落盘（拖动/关窗），语义键不置位
+      // 会让第二次启动把它当迁移前旧值再减 248px。
+      expect(semanticsKeysAllSet(prefs), isTrue);
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        isNull,
+      );
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        isNull,
+      );
+    });
+
+    test('迁移前旧语义（三键全 false）→ top 一次性减 36+212 并置键', () async {
+      final prefs = await mockPrefs(<String, Object>{
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: 400.0,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: 900.0,
+      });
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+      );
+
+      const expectedTop =
+          900.0 -
+          WindowsDesktopLyricsBridge.lyricsTopInset -
+          WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
+      expect(origin, const Offset(400, 652));
+      expect(expectedTop, 652.0); // 36（工具栏带）+ 212（常驻菜单带）
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        expectedTop,
+      );
+      expect(semanticsKeysAllSet(prefs), isTrue);
+    });
+
+    test('v3.0.7 存量（菜单带 172 已迁移）→ 只补减 212-172', () async {
+      final prefs = await mockPrefs(<String, Object>{
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: 400.0,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: 900.0,
+        WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowTallMigratedPrefKey: true,
+      });
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+      );
+
+      // 迁移（三）只补减菜单带增量：212 - 172 = 40（不再减 36+212）。
+      final expectedTop =
+          900.0 -
+          (WindowsDesktopLyricsBridge.overlayMenuPanelHeight -
+              WindowsDesktopLyricsBridge.overlayMenuPanelHeightBeforeProgressRow);
+      expect(origin, Offset(400, expectedTop));
+      expect(expectedTop, 860.0);
+      expect(semanticsKeysAllSet(prefs), isTrue);
+    });
+
+    test('三键已置位 → 坐标原样返回、不重复迁移', () async {
+      const stored = Offset(300, 700);
+      final prefs = await mockPrefs(<String, Object>{
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: stored.dx,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: stored.dy,
+        WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowTallMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey: true,
+      });
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+      );
+
+      expect(origin, stored);
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        stored.dy,
+      );
+    });
+
+    test('存量位置在已拔掉的副屏 → 钳回可见区并回写', () async {
+      final prefs = await mockPrefs(<String, Object>{
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: 3840.0,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: 2000.0,
+        WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowTallMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey: true,
+      });
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+      );
+
+      expect(origin, Offset(primary.right - 80, primary.bottom - 80));
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        primary.right - 80,
+      );
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        primary.bottom - 80,
+      );
+    });
+  });
+
+  group('persistOverlayWindowPosition（活坐标落盘必带语义键）', () {
+    test('落盘活窗口坐标的同时置位三枚语义键', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      const channel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'getBounds') {
+              return <String, dynamic>{
+                'x': 123.0,
+                'y': 456.0,
+                'width': WindowsDesktopLyricsBridge.overlayWidth,
+                'height': WindowsDesktopLyricsBridge.overlayWindowHeight,
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      await persistOverlayWindowPosition();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        123.0,
+      );
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        456.0,
+      );
+      // 活坐标 = 现行语义：三枚键必须同一次落盘置位（漏置会让下次启动
+      // 把该坐标当迁移前旧值再减 248px）。
+      expect(
+        prefs.getBool(WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey),
+        isTrue,
+      );
+      expect(
+        prefs.getBool(WindowsDesktopLyricsBridge.windowTallMigratedPrefKey),
+        isTrue,
+      );
+      expect(
+        prefs.getBool(
+          WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey,
+        ),
+        isTrue,
+      );
+    });
+
+    test('全链路回归：全新安装首次落盘后，第二次启动不再上跳 248px', () async {
+      // 复现历史 bug 的最小链路：全新安装 → 子窗落盘活坐标（用户拖动，或
+      // 关闭悬浮窗时的补存）→ 第二次启动。旧实现在第三步会把现行语义坐标
+      // 再迁移一遍，歌词整体上跳 36+212=248px。
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+      const defaultOrigin = Offset(570, 624);
+      const channel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'getBounds') {
+              return <String, dynamic>{
+                'x': 400.0,
+                'y': 700.0,
+                'width': WindowsDesktopLyricsBridge.overlayWidth,
+                'height': WindowsDesktopLyricsBridge.overlayWindowHeight,
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      // 1) 首次启动：无存量坐标，用默认落点，只置位语义键。
+      final firstStart =
+          await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+            visibleAreas: const [primary],
+            fallback: defaultOrigin,
+          );
+      expect(firstStart, isNull);
+
+      // 2) 子窗落盘用户的活坐标 (400, 700)。
+      await persistOverlayWindowPosition();
+
+      // 3) 第二次启动：坐标原样恢复，不再迁移。
+      final secondStart =
+          await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+            visibleAreas: const [primary],
+            fallback: defaultOrigin,
+          );
+      expect(secondStart, const Offset(400, 700));
     });
   });
 

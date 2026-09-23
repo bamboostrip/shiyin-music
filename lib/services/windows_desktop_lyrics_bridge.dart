@@ -86,12 +86,24 @@ class WindowsDesktopLyricsBridge {
   static const double overlayWindowHeight =
       overlayHeight + overlayMenuPanelHeight;
 
-  /// 悬浮窗拖动位置的持久化键（子窗 window_manager 逻辑坐标；
-  /// 主窗侧钳制后回写，子窗启动时读取恢复）。
+  /// 悬浮窗拖动位置的持久化键（子窗 window_manager 逻辑坐标；主窗侧
+  /// 迁移+钳制后回写，子窗启动时读取恢复）。
+  ///
+  /// 存值恒为**现行窗口语义**（窗口顶边，含常驻菜单带）——由下面的三枚
+  /// 一次性迁移键标记，见 [markOverlayPositionSemanticsCurrent] 的写入职责。
   static const String windowLeftPrefKey = 'desktop_lyrics.window.left';
   static const String windowTopPrefKey = 'desktop_lyrics.window.top';
 
-  /// 位置语义迁移标记：124 高度之前，窗口顶边 == 歌词带顶边；
+  /// 位置语义迁移标记（下面三枚一次性开关）：三者为 true 表示 prefs 里的
+  /// [windowTopPrefKey] 已是**现行窗口语义**，无需再迁移。
+  ///
+  /// 写入职责（唯一契约，见 [markOverlayPositionSemanticsCurrent]）：凡是把
+  /// 现行语义坐标写进 prefs 的路径，都必须在同一次落盘里置位这三枚键——
+  /// 主窗 [loadStoredOverlayOrigin] 完成存量迁移/钳制之后，以及子窗落盘
+  /// **活窗口坐标**时。漏置一次，下次启动就会把这个坐标当成迁移前旧值再减
+  /// 一遍；多置一次是幂等的。
+  ///
+  /// 位置语义迁移（一）：124 高度之前，窗口顶边 == 歌词带顶边；
   /// 现在窗口顶边之上多了 [lyricsTopInset] 的工具栏带，存量位置必须
   /// 一次性减去该偏移，否则升级后歌词整体下沉 36px。
   static const String windowInsetMigratedPrefKey =
@@ -100,7 +112,8 @@ class WindowsDesktopLyricsBridge {
   /// 位置语义迁移标记（二）：常驻高度改造之前，记忆的 top 是 124 高
   /// 卡片带窗口的顶边；现在窗口顶边之上多了常驻菜单带，存量位置必须
   /// 一次性减去 [overlayMenuPanelHeight]，否则升级后歌词整体下沉
-  /// 172px。必须先于 createWindow 落盘——子窗启动时直接读 prefs。
+  /// 172px。迁移由 [loadStoredOverlayOrigin] 在 createWindow 之前落盘——
+  /// 子窗启动时直接读 prefs。
   static const String windowTallMigratedPrefKey =
       'desktop_lyrics.window.tall_migrated';
 
@@ -194,6 +207,11 @@ class WindowsDesktopLyricsBridge {
       _overlayReady = false;
       // 懒注册主窗侧消息处理（先于子窗可能的 windowClosed 上报）。
       _ensureMethodHandler();
+      // 初始 frame 必须先于 createWindow 算好：_initialFrame 会读取存量位置、
+      // 做一次性语义迁移并回写 prefs，而子窗启动时直接读 prefs 恢复位置。
+      // 反过来（先建窗后迁移）子窗有机会读到迁移前的旧语义坐标，并把那个
+      // 坐标当"活坐标"再落盘，旧语义就被永久焊死。
+      final initialFrame = await _initialFrame();
       final window = await DesktopMultiWindow.createWindow(
         jsonEncode(<String, dynamic>{
           'settings': _settings.toMap(),
@@ -209,9 +227,9 @@ class WindowsDesktopLyricsBridge {
         // 子引擎就绪需数百毫秒，且悬浮窗入口在完成无标题栏样式/尺寸/位置
         // 恢复后会自行 show()（见 lyrics_overlay_window.dart 入口末尾）。
         // 主窗侧不得提前 show()，否则会闪现白底带标题栏的默认 720x120 窗口；
-        // 此处预置初始位置：记忆位置（已主窗侧钳制）或底部居中默认值，
+        // 此处预置初始位置：记忆位置（已主窗侧迁移+钳制）或底部居中默认值，
         // 后续由悬浮窗自行 setPosition 覆盖为记忆位置（逻辑坐标）。
-        await window.setFrame(await _initialFrame());
+        await window.setFrame(initialFrame);
       } on Exception catch (e) {
         debugPrint('[桌面歌词主窗] setFrame 失败: $e，关闭已创建窗口');
         // 布局/显示阶段失败：先关闭已创建的原生窗口，避免控制器被丢弃后
@@ -424,13 +442,109 @@ class WindowsDesktopLyricsBridge {
     });
   }
 
+  /// 置位三枚一次性位置语义迁移键。
+  ///
+  /// 调用语义：**此刻 prefs 里存储的 [windowTopPrefKey] 已是现行窗口语义**。
+  /// 只允许两类调用点：
+  /// 1. 主窗 [loadStoredOverlayOrigin] 完成存量迁移/钳制之后（无存量坐标的
+  ///    全新安装也要置位：此刻起 prefs 里不会再有旧语义坐标，之后由子窗落
+  ///    盘的活坐标必为现行语义）；
+  /// 2. 子窗落盘活窗口坐标时（lyrics_overlay_window.dart 的
+  ///    persistOverlayWindowPosition）——活坐标按定义就是现行语义。
+  ///
+  /// 这个契约是位置相关 bug 的唯一根源：漏置一次，下次启动就把现行坐标当
+  /// 迁移前旧值再减一遍（[lyricsTopInset] + [overlayMenuPanelHeight]，
+  /// 历史上表现为整体上跳 248px）；多置是幂等的。
+  static Future<void> markOverlayPositionSemanticsCurrent(
+    SharedPreferences prefs,
+  ) async {
+    // 已置位就不再写盘：prefs 每次 set 都会整文件落盘，而稳态下（升级后
+    // 的每一次拖动/关窗）这三枚键早已为 true，这里省掉 3 次无谓写盘。
+    if (prefs.getBool(windowInsetMigratedPrefKey) != true) {
+      await prefs.setBool(windowInsetMigratedPrefKey, true);
+    }
+    if (prefs.getBool(windowTallMigratedPrefKey) != true) {
+      await prefs.setBool(windowTallMigratedPrefKey, true);
+    }
+    if (prefs.getBool(windowMenuProgressRowMigratedPrefKey) != true) {
+      await prefs.setBool(windowMenuProgressRowMigratedPrefKey, true);
+    }
+  }
+
+  /// 读取存量悬浮窗位置 → 一次性语义迁移 → 钳制可见区 → 回写 prefs
+  /// （坐标 + 三枚语义键）。返回最终逻辑原点；无存量位置（全新安装）返回
+  /// null，由调用方落主屏默认落点。
+  ///
+  /// 记忆位置的主窗侧钳制不可省：悬浮窗侧（子引擎）只有 window_manager
+  /// 可用（无 screen_retriever 插件注册），无法自行判断显示器配置变化，
+  /// 不钳制的话拔掉副显示器后悬浮窗会恢复到屏幕外成为不可见的"僵尸窗"
+  /// （锁定态全穿透，用户没有任何入口找回）。
+  ///
+  /// **必须先于 createWindow 调用**（见 [_showInner]）：子窗启动时直接读
+  /// prefs 恢复位置，迁移晚于建窗会让子窗读到迁移前的旧语义坐标，之后它
+  /// 落盘的"活坐标"就把旧语义永久焊死。
+  @visibleForTesting
+  static Future<Offset?> loadStoredOverlayOrigin({
+    required List<Rect> visibleAreas,
+    required Offset fallback,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedLeft = prefs.getDouble(windowLeftPrefKey);
+      final storedTop = prefs.getDouble(windowTopPrefKey);
+      if (storedLeft == null || storedTop == null) {
+        // 全新安装：没有存量坐标要迁移，但语义键必须置位——本次会话随后由
+        // 子窗落盘的活坐标是现行语义，不置位就会在第二次启动被误迁移。
+        await markOverlayPositionSemanticsCurrent(prefs);
+        return null;
+      }
+      // 一次性语义迁移（一）：88px 高时代窗口顶边 == 歌词带顶边；后来
+      // 顶边之上多了 [lyricsTopInset] 的工具栏带，存量值需减去该偏移。
+      var top = storedTop;
+      if (!(prefs.getBool(windowInsetMigratedPrefKey) ?? false)) {
+        top -= lyricsTopInset;
+      }
+      // 一次性语义迁移（二）：常驻高度改造前记忆的 top 是 124 高窗口
+      // 顶边 == 卡片带顶边；现在顶边之上多了常驻菜单带，再减去
+      // [overlayMenuPanelHeight] 保歌词屏幕位置不变。
+      // tallMigratedBefore 供迁移（三）区分“老版本已迁移（172）”与
+      // “本次启动刚迁移（现行高度）”，后者不得再补减。
+      final tallMigratedBefore =
+          prefs.getBool(windowTallMigratedPrefKey) ?? false;
+      if (!tallMigratedBefore) {
+        top -= overlayMenuPanelHeight;
+      } else if (!(prefs.getBool(windowMenuProgressRowMigratedPrefKey) ??
+          false)) {
+        // 一次性语义迁移（三）：菜单带 172→212（新增「歌词进度」行）。
+        // 老版本已走过迁移（二）的位置少减了 40px，这里补减差值；
+        // 本次启动刚走迁移（二）的位置已按现行高度全额补偿，跳过。
+        top -=
+            overlayMenuPanelHeight - overlayMenuPanelHeightBeforeProgressRow;
+      }
+      final clamped = clampOverlayOriginToVisibleAreas(
+        Offset(storedLeft, top),
+        visibleAreas,
+        fallback: fallback,
+      );
+      // 迁移+钳制的最终值与原值一致时不必重复写盘：少一次写盘就少一个
+      // “坐标已写、语义键未写”的中间态窗口（进程随时可能被硬终止）。
+      if (clamped.dx != storedLeft || clamped.dy != storedTop) {
+        await prefs.setDouble(windowLeftPrefKey, clamped.dx);
+        await prefs.setDouble(windowTopPrefKey, clamped.dy);
+      }
+      await markOverlayPositionSemanticsCurrent(prefs);
+      return clamped;
+    } on Exception catch (e) {
+      debugPrint('[桌面歌词主窗] 读取/钳制记忆位置失败，用默认位置: $e');
+      return null;
+    }
+  }
+
   /// 悬浮窗初始 frame（物理像素，供 desktop_multi_window 的 setFrame）。
   ///
-  /// 优先恢复记忆的拖动位置；无记忆时落主显示器底部居中。记忆位置在
-  /// 主窗侧先行钳制到可见显示器区域并回写——悬浮窗侧（子引擎）只有
-  /// window_manager 可用（无 screen_retriever 插件注册），无法自行判断
-  /// 显示器配置变化，不钳制的话拔掉副显示器后悬浮窗会恢复到屏幕外成为
-  /// 不可见的"僵尸窗"（锁定态全穿透，用户没有任何入口找回）。
+  /// 优先恢复记忆的拖动位置；无记忆时落主显示器底部居中。存量位置的读取/
+  /// 语义迁移/钳制/回写全部由 [loadStoredOverlayOrigin] 承担，且必须先于
+  /// createWindow 完成。
   Future<Rect> _initialFrame() async {
     var origin = const Offset(100, 100);
     var scaleFactor = 1.0;
@@ -469,63 +583,14 @@ class WindowsDesktopLyricsBridge {
       debugPrint('[桌面歌词主窗] 获取显示器信息失败，用固定位置: $e');
       // 拿不到显示器信息时无从钳制/换算，退回固定逻辑位置。
     }
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      var left = prefs.getDouble(windowLeftPrefKey);
-      var top = prefs.getDouble(windowTopPrefKey);
-      if (left != null && top != null) {
-        // 一次性语义迁移（一）：88px 高时代窗口顶边 == 歌词带顶边；后来
-        // 顶边之上多了 [lyricsTopInset] 的工具栏带，存量值需减去该偏移。
-        // 每步迁移立即落盘：中途中断（如随后取显示器信息失败）不能让
-        // 下次启动重复减一遍。
-        final insetMigrated =
-            prefs.getBool(windowInsetMigratedPrefKey) ?? false;
-        if (!insetMigrated) {
-          top -= lyricsTopInset;
-          await prefs.setBool(windowInsetMigratedPrefKey, true);
-          await prefs.setDouble(windowTopPrefKey, top);
-        }
-        // 一次性语义迁移（二）：常驻高度改造前记忆的 top 是 124 高窗口
-        // 顶边 == 卡片带顶边；现在顶边之上多了常驻菜单带，再减去
-        // [overlayMenuPanelHeight] 保歌词屏幕位置不变。
-        // tallMigratedBefore 供迁移（三）区分“老版本已迁移（172）”与
-        // “本次启动刚迁移（现行高度）”，后者不得再补减。
-        final tallMigratedBefore =
-            prefs.getBool(windowTallMigratedPrefKey) ?? false;
-        if (!tallMigratedBefore) {
-          top -= overlayMenuPanelHeight;
-          await prefs.setBool(windowTallMigratedPrefKey, true);
-          await prefs.setDouble(windowTopPrefKey, top);
-        }
-        // 一次性语义迁移（三）：菜单带 172→212（新增「歌词进度」行）。
-        // 老版本已走过迁移（二）的位置少减了 40px，这里补减差值；
-        // 本次启动刚走迁移（二）的位置已按现行高度全额补偿，跳过。
-        final menuProgressMigrated =
-            prefs.getBool(windowMenuProgressRowMigratedPrefKey) ?? false;
-        if (!menuProgressMigrated) {
-          if (tallMigratedBefore) {
-            top -=
-                overlayMenuPanelHeight -
-                overlayMenuPanelHeightBeforeProgressRow;
-            await prefs.setDouble(windowTopPrefKey, top);
-          }
-          await prefs.setBool(windowMenuProgressRowMigratedPrefKey, true);
-        }
-        final clamped = clampOverlayOriginToVisibleAreas(
-          Offset(left, top),
-          visibleAreas,
-          fallback: origin,
-        );
-        if (clamped.dx != left || clamped.dy != top) {
-          await prefs.setDouble(windowLeftPrefKey, clamped.dx);
-          await prefs.setDouble(windowTopPrefKey, clamped.dy);
-        }
-        origin = clamped;
-        scaleFactor =
-            scaleForLogicalOrigin(displayScales, origin) ?? scaleFactor;
-      }
-    } on Exception catch (e) {
-      debugPrint('[桌面歌词主窗] 读取/钳制记忆位置失败，用默认位置: $e');
+    final storedOrigin = await loadStoredOverlayOrigin(
+      visibleAreas: visibleAreas,
+      fallback: origin,
+    );
+    if (storedOrigin != null) {
+      origin = storedOrigin;
+      scaleFactor =
+          scaleForLogicalOrigin(displayScales, origin) ?? scaleFactor;
     }
     // desktop_multi_window 的 setFrame 底层是 MoveWindow（物理像素），
     // 而 screen_retriever/window_manager 记忆位置都是逻辑坐标：必须按
