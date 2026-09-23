@@ -383,7 +383,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       isPlaying = false;
       notifyListeners();
       // 本次「完成」若会被 _handleCompleted 去重掉（同曲已完成过/正在处理），
-      // 它不会推进任何东西：先判掉，别白扣预算。
+      // 它不会推进任何东西：先判掉，别做无意义的推进尝试，也别让下面的
+      // 预算清零被一次不会推进的事件消费掉。
       if (!_willHandleCompletion(song)) {
         _nextLog(
           '曲末错误按播完处理，但完成会被去重吞掉 → 不推进: ${song.title} '
@@ -392,24 +393,18 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         );
         return;
       }
-      // 计入独立的曲末跳过预算，防止系统性坏尾在长队列里无限静默跳歌；
+      // 引擎已到真实 EOF：libmpv（Windows/Linux 的 media_kit 后端）与部分
+      // CDN 会在最后一帧之后报 `(1) Error decoding audio.`，而用户其实已
+      // 完整听完——这是正常播完，不是「坏尾」，因此**不扣**曲末跳过预算，
+      // 反而要把计数清零。否则每首都会命中本分支、每首扣一次额度，5 首之后
+      // 自动切歌在本次会话内永久失效（3.0.8 实机日志：1/5 → 5/5 → 停住，
+      // 进度停在曲尾，手动续播也救不回，只能重启 App——因为计数器只在自然
+      // completed 归零，而本路径永远不会走到那里）。
       // 不计入 _consecutivePlayFailures，避免误弹「暂无可播放音源」。
-      if (!_tryConsumeNearEndSkipBudget(song)) {
-        // 预算耗尽：停住并给持久提示（Toast 瞬态，errorMessage 持久），
-        // 进度钳到 duration，避免 errorPosition 取 max 后 305.1/305 式的视觉溢出。
-        // 不 seek(0)：留在尾部可 fail-fast，用户点播只需验证最后 1s，
-        // 不必重听整首；若用户手动播完这 1s 触发自然 completed，预算会正常重置。
-        errorMessage = '连续多次在曲末播放失败，已停止自动切歌';
-        _tailSkipExhausted = true;
-        final clamped = errorPosition > songDuration
-            ? songDuration
-            : errorPosition;
-        _setPositionBase(clamped, playing: false);
-        _lastSmoothPosition = clamped;
-        _emitPosition();
-        notifyListeners();
-        return;
-      }
+      // 真正的「坏尾」（CDN 尾部断供、引擎位置冻结、completed 永不到达）
+      // 不经本分支，走 [_checkTailStall]，预算在那条路上继续承重。
+      _consecutiveNearEndSkips = 0;
+      _nearEndSkipStreakSince = null;
       debugPrint(
         '[时音][player] 曲末解码失败，按播完自动切歌: ${song.title} '
         '(${errorPosition.inMilliseconds}/${songDuration.inMilliseconds}ms, $error)',
@@ -443,12 +438,18 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   }
 
   /// 曲末自动切歌预算：用独立计数 [_consecutiveNearEndSkips]，避免
-  /// 系统性坏尾（CDN 截断/整目录坏帧）在长队列里无限静默跳歌。
+  /// 系统性坏尾（CDN 尾部断供/整目录坏帧）在长队列里无限静默跳歌。
+  ///
+  /// 唯一调用点是曲末停滞 watchdog（[_checkTailStall]）——那才是真的没播完
+  /// （位置冻结、completed 永不到达）。曲末解码错误那条路是引擎已到真实 EOF
+  /// 的正常播完，不扣额度并清零本计数（见 [_handleMidPlaybackError]）；
+  /// 把它也算进预算，就是 3.0.8 实机「播到曲末不再跳转」的成因。
   ///
   /// 不计入 [_consecutivePlayFailures]（避免误弹「没有音源」）；
   /// 也不随 playSong 成功清零——那会让每首起播成功就重置预算。
-  /// 计数只在自然 completed 时清零；墙钟起点则在每次起播成功时重新起算
-  /// （见 playSong：曲末失败这条路不会再走自然播完，若只在 completed 清，
+  /// 计数在自然 completed（player_controller.dart 的 processingState 监听）
+  /// 与真实 EOF 的曲末解码错误处清零；墙钟起点则在每次起播成功时重新起算
+  /// （见 playSong：停滞这条路不会走自然播完，若只在 completed 清，
   /// 预算必然跨曲累积、一首歌之后就永久判超预算）。返回 false 表示应停住并提示。
   bool _tryConsumeNearEndSkipBudget(Song song) {
     if (_disposed) return false;

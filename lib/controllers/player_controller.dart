@@ -573,10 +573,11 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 停下报错，不做无限循环（坏源/断网时"跳一次失败一次"会瞬间扫光队列）。
   int _autoSkippedInStreak = 0;
 
-  /// 连续「曲末解码失败自动切歌」次数。
+  /// 连续「曲末停滞 watchdog 强制推进」次数（[_tryConsumeNearEndSkipBudget]）。
   ///
   /// 不随 playSong 成功清零（那会让系统性坏尾每首起播成功就重置预算、
-  /// 无限静默跳歌），只在自然 completed 时重置。
+  /// 无限静默跳歌），只在自然 completed、或「引擎已到真实 EOF 的曲末解码
+  /// 错误」时重置——后者是正常播完，见 [_handleMidPlaybackError]。
   int _consecutiveNearEndSkips = 0;
 
   /// 曲末跳过这一路自己的墙钟起点，与 [_autoSkipStreakSince] 分开：[_autoSkipStreakSince]

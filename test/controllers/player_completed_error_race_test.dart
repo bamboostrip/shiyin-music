@@ -460,17 +460,25 @@ void main() {
     expect(handler.playCount, 1);
   });
 
-  test('系统性曲末失败受跳过预算限制，不会无限静默切歌', () async {
+  test('曲末 EOF 解码错误属正常播完：不扣跳过预算，超过上限仍继续切歌', () async {
     final songs = [_song(1), _song(2)];
     controller.queue = songs;
-    controller.duration = const Duration(seconds: 300);
 
-    // 连续对「当前曲」触发曲末解码失败；上限 = min(2, 5) = 2
+    // 实机形态（3.0.8 Windows）：libmpv 在真实 EOF 报
+    // `(1) Error decoding audio.`，位置距引擎时长约 300ms。曲末跳过预算的
+    // 上限 = min(队列长度 2, 5) = 2，若这条路径扣额度，第 3 次就会停住不再
+    // 切歌——这正是「播到曲末不跳转」的成因（计数器只在自然 completed 归零，
+    // 而本路径永远走不到那里 → 每个会话固定只能连播 5 首）。
+    // 「系统性坏尾受预算限制」的防护由停滞 watchdog 承重，回归见
+    // player_tail_stall_test.dart「系统性坏尾：watchdog 强制推进计入曲末跳过预算」。
     for (var attempt = 0; attempt < 4; attempt++) {
       final current = controller.currentSong ?? songs[0];
       controller.currentSong = current;
-      controller.position = const Duration(milliseconds: 299000);
-      fakeAudioPlayer.setPosition(const Duration(milliseconds: 299000));
+      final songDuration = current.duration!;
+      controller.duration = songDuration;
+      final nearEnd = songDuration - const Duration(milliseconds: 300);
+      controller.position = nearEnd;
+      fakeAudioPlayer.setPosition(nearEnd);
       fakeAudioPlayer.emitPlayerState(
         playing: true,
         state: ProcessingState.ready,
@@ -485,12 +493,15 @@ void main() {
       }
     }
 
-    // 预算 = min(队列长度 2, 5) = 2：只有前两次触发自动切歌（每次一首），
-    // 后两次应当被截断。只断言 <= 4 的话，循环本身就只跑 4 次，永远成立。
     expect(
       handler.loadedHashes.length,
-      2,
-      reason: '预算耗尽后不得再自动切歌',
+      4,
+      reason: '曲末 EOF 解码错误不计入跳过预算，4 次都应自动切歌',
+    );
+    expect(
+      controller.errorMessage,
+      isNot('连续多次在曲末播放失败，已停止自动切歌'),
+      reason: '正常播完不得报「已停止自动切歌」',
     );
   });
 }
