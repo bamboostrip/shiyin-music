@@ -43,7 +43,16 @@ bool _overlayCloseInFlight = false;
 /// 立即持久化当前窗口位置（防抖取消失效时与关闭前补存共用）。
 ///
 /// 窗口常驻固定高度（菜单收展不再移动/缩放窗口），top 直接落盘即可。
-Future<void> persistOverlayWindowPosition() async {
+///
+/// [markPositionSemanticsCurrent]：随位置一并置位三个一次性迁移键——
+/// **只在用户拖动路径置 true**。拖动落盘的位置必是现行窗口语义，标记后
+/// 下次启动不会再对它跑「减工具栏带/菜单带」的一次性迁移（全新安装用户
+/// 首次拖动保存后，第二次启动曾被误判成迁移前语义而整体上跳 248px）。
+/// 启动恢复/关闭补存必须保持 false：主窗 createWindow 先于迁移落盘，
+/// 子窗启动恢复读到的可能是迁移前的旧值，标了会把旧语义位置永久焊死。
+Future<void> persistOverlayWindowPosition({
+  bool markPositionSemanticsCurrent = false,
+}) async {
   try {
     final position = await windowManager.getPosition();
     final prefs = await SharedPreferences.getInstance();
@@ -55,9 +64,44 @@ Future<void> persistOverlayWindowPosition() async {
       WindowsDesktopLyricsBridge.windowTopPrefKey,
       position.dy,
     );
+    if (markPositionSemanticsCurrent) {
+      await prefs.setBool(
+        WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey,
+        true,
+      );
+      await prefs.setBool(
+        WindowsDesktopLyricsBridge.windowTallMigratedPrefKey,
+        true,
+      );
+      await prefs.setBool(
+        WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey,
+        true,
+      );
+    }
   } on Exception {
     // 位置持久化失败不影响展示。
   }
+}
+
+/// 启动恢复位置的那次 programmatic move 会触发 onWindowMoved：不抑制的
+/// 话它会被当成用户拖动走标记路径（见上）。单次 setPosition 只产生一条
+/// WM_MOVE，一次性标志即可；若恢复位置与现状相同（无 WM_MOVE），标志
+/// 残留到用户首次拖动也只是吞掉第一条事件——拖动是连续 move 流，后续
+/// 事件照常防抖落盘，最终位置不丢。
+bool _suppressNextMovePersist = false;
+
+/// 用户拖动的防抖落盘是否 pending：onWindowMoved 调度防抖时同步置位，
+/// 防抖触发（带标记落盘）后清零。关闭补存（拖动 500ms 内就关窗）凭它
+/// 决定是否带标记——否则“拖动后立刻点 ✕”会丢标记（关闭补存默认
+/// false，而防抖 timer 随子引擎销毁再也不会触发）。
+/// 标记只会置 true、永不清除：多带一次是幂等的，漏带一次才是 bug。
+bool _userDragPersistPending = false;
+
+/// 取走待定的拖动标记（关闭补存用，读后即清）。
+bool _takeUserDragPersistPending() {
+  final pending = _userDragPersistPending;
+  _userDragPersistPending = false;
+  return pending;
 }
 
 /// desktop_multi_window 子窗口参数判定（约定见包源码：
@@ -198,6 +242,10 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     final left = prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey);
     final top = prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey);
     if (left != null && top != null) {
+      // 抑制这次 programmatic move 的持久化：此刻 prefs 里可能还是主窗
+      // 迁移落盘前的旧语义值（createWindow 先于迁移，见 persist 注释），
+      // 保存它无妨（下次启动迁移会重跑），但不能带语义标记保存。
+      _suppressNextMovePersist = true;
       await windowManager.setPosition(Offset(left, top));
     }
   } catch (e) {
@@ -390,8 +438,10 @@ Future<void> closeLyricsOverlayWindow() async {
   if (_overlayCloseInFlight) return;
   _overlayCloseInFlight = true;
   // 原生销毁不会执行 Dart dispose：先补存位置（拖动防抖 500ms 内的
-  // 最后一次移动在此落盘）。
-  await persistOverlayWindowPosition();
+  // 最后一次移动在此落盘，标记意图一并带上，见 _userDragPersistPending）。
+  await persistOverlayWindowPosition(
+    markPositionSemanticsCurrent: _takeUserDragPersistPending(),
+  );
   try {
     await DesktopMultiWindow.invokeMethod(0, 'windowClosed');
   } on Exception {
@@ -523,9 +573,14 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
 
   @override
   void dispose() {
-    // 取消未触发的防抖保存并立即补存一次，避免最后一次移动丢失。
+    // 取消未触发的防抖保存并立即补存一次，避免最后一次移动丢失；
+    // 标记意图一并带上（见 _userDragPersistPending）。
     _persistDebounce?.cancel();
-    unawaited(persistOverlayWindowPosition());
+    unawaited(
+      persistOverlayWindowPosition(
+        markPositionSemanticsCurrent: _takeUserDragPersistPending(),
+      ),
+    );
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -535,9 +590,19 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
   // WM_MOVE 期间会密集回调，防抖合并为停止 500ms 后的一次落盘。
   @override
   void onWindowMoved() {
+    if (_suppressNextMovePersist) {
+      _suppressNextMovePersist = false;
+      return;
+    }
     _persistDebounce?.cancel();
+    _userDragPersistPending = true;
     _persistDebounce = Timer(_kPersistDebounce, () {
-      unawaited(persistOverlayWindowPosition());
+      _userDragPersistPending = false;
+      // 用户拖动落盘：位置必为现行窗口语义，连带置位迁移键（见
+      // persistOverlayWindowPosition 的参数说明）。
+      unawaited(
+        persistOverlayWindowPosition(markPositionSemanticsCurrent: true),
+      );
     });
   }
 

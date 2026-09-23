@@ -1,5 +1,4 @@
 {
-    "cmake.sourceDirectory": "E:/Project/Flutter/kgka_music_hl/linux",
     // 不把 Flutter SDK 自身的 git 仓库收进 Source Control：
     // 调试进框架源码（如 packages/flutter/lib/src/widgets/debug.dart）
     // 时 VSCode 会自动发现 SDK 所在仓库，导致源代码管理里出现两个仓库。
