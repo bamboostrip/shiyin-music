@@ -27,8 +27,14 @@ class CommentListView extends StatefulWidget {
   State<CommentListView> createState() => _CommentListViewState();
 }
 
-class _CommentListViewState extends State<CommentListView> {
+class _CommentListViewState extends State<CommentListView>
+    with AutomaticKeepAliveClientMixin {
   static const _pageSize = 30;
+
+  // 切 tab 不丢分页与滚动位置：TabBarView 切出缓存即 dispose，
+  // 无 keep-alive 的话切回就重建、重请求第 1 页。
+  @override
+  bool get wantKeepAlive => true;
 
   final _scrollController = ScrollController();
   final _comments = <MusicCommentItem>[];
@@ -137,6 +143,7 @@ class _CommentListViewState extends State<CommentListView> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }

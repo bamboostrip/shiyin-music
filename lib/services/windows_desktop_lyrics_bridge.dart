@@ -104,6 +104,18 @@ class WindowsDesktopLyricsBridge {
   static const String windowTallMigratedPrefKey =
       'desktop_lyrics.window.tall_migrated';
 
+  /// 位置语义迁移标记（三）：「歌词进度」行把菜单带从 172 撑到 212 时，
+  /// [windowTallMigratedPrefKey] 已对 v3.0.7 存量位置置位、不会再补偿。
+  /// 这批位置需再减去差值（212-172），否则升级后歌词整体下沉 40px。
+  /// 判定必须用“本次启动前”的旧键值：新用户首次落盘会在同一次启动里
+  /// 先走迁移（二)（已按现行高度全额补偿），不能再补减。
+  static const String windowMenuProgressRowMigratedPrefKey =
+      'desktop_lyrics.window.menu_progress_row_migrated';
+
+  /// 「歌词进度」行加入前的菜单带高度（[overlayMenuPanelHeight] 的旧值，
+  /// 仅迁移（三）计算差值用）。
+  static const double overlayMenuPanelHeightBeforeProgressRow = 172;
+
   /// 钳制时至少保留的可见像素（与主窗 kMinVisibleEdge 语义一致）。
   static const double _kMinVisibleEdge = 80;
 
@@ -476,11 +488,28 @@ class WindowsDesktopLyricsBridge {
         // 一次性语义迁移（二）：常驻高度改造前记忆的 top 是 124 高窗口
         // 顶边 == 卡片带顶边；现在顶边之上多了常驻菜单带，再减去
         // [overlayMenuPanelHeight] 保歌词屏幕位置不变。
-        final tallMigrated = prefs.getBool(windowTallMigratedPrefKey) ?? false;
-        if (!tallMigrated) {
+        // tallMigratedBefore 供迁移（三）区分“老版本已迁移（172）”与
+        // “本次启动刚迁移（现行高度）”，后者不得再补减。
+        final tallMigratedBefore =
+            prefs.getBool(windowTallMigratedPrefKey) ?? false;
+        if (!tallMigratedBefore) {
           top -= overlayMenuPanelHeight;
           await prefs.setBool(windowTallMigratedPrefKey, true);
           await prefs.setDouble(windowTopPrefKey, top);
+        }
+        // 一次性语义迁移（三）：菜单带 172→212（新增「歌词进度」行）。
+        // 老版本已走过迁移（二）的位置少减了 40px，这里补减差值；
+        // 本次启动刚走迁移（二）的位置已按现行高度全额补偿，跳过。
+        final menuProgressMigrated =
+            prefs.getBool(windowMenuProgressRowMigratedPrefKey) ?? false;
+        if (!menuProgressMigrated) {
+          if (tallMigratedBefore) {
+            top -=
+                overlayMenuPanelHeight -
+                overlayMenuPanelHeightBeforeProgressRow;
+            await prefs.setDouble(windowTopPrefKey, top);
+          }
+          await prefs.setBool(windowMenuProgressRowMigratedPrefKey, true);
         }
         final clamped = clampOverlayOriginToVisibleAreas(
           Offset(left, top),

@@ -39,6 +39,15 @@ void clearCommentCountCacheForTest() {
   _commentCountInFlight.clear();
 }
 
+/// 读会话内评论数缓存：歌曲详情页 Tab 标题据此秒显 `评论NNN`，
+/// 不再依赖评论列表是否构建过（TabBarView 懒构建）。
+int? cachedCommentCount(String mixsongid) => _commentCountCache[mixsongid];
+
+/// 评论列表拿到总数后回写，同一首歌在底栏/详情页之间共享。
+void cacheCommentCount(String mixsongid, int count) {
+  if (count > 0) _commentCountCache[mixsongid] = count;
+}
+
 dynamic _safeApi(PlayerController player) {
   try {
     return player.api;

@@ -94,6 +94,23 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
     // 无平台通道时 path_provider 抛 MissingPluginException → 静默降级 null。
     final path = await AppLogService.resolveLogFilePath();
-    expect(path, anyOf(isNull, endsWith('logs')));
+    expect(
+      path,
+      anyOf(isNull, endsWith('logs${Platform.pathSeparator}app.log')),
+    );
+  });
+
+  test('单条超长日志截断：整段堆栈一行不撑爆内存缓冲', () async {
+    final path = '${tempDir.path}${Platform.pathSeparator}app.log';
+    final service = AppLogService.createForTest(filePath: path);
+
+    final giant = List.filled(20000, 'x').join();
+    service.log(giant);
+    await service.flush();
+
+    final content = await File(path).readAsString();
+    expect(content, contains('单条截断'));
+    // 16KB 上限 + 时间戳/后缀余量：落盘行远小于原 20000 字。
+    expect(content.length, lessThan(20000));
   });
 }

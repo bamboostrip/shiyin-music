@@ -15,7 +15,9 @@ import 'package:path_provider/path_provider.dart';
 /// - 文件位置与下载目录同源（Android 取 app 专属外部存储——文件管理器
 ///   可见、无需权限；桌面取文档目录，见 [resolveLogFilePath]），用户用
 ///   文件管理器即可把日志发出来，不需要 root 或 adb；
-/// - 上限双保险：内存 [_kMaxBufferLines] 行环形缓冲；文件超 [_kMaxFileBytes]
+/// - 上限三保险：内存 [_kMaxBufferLines] 行环形缓冲；单条超
+///   [_kMaxMessageChars] 截断（整段堆栈一次 debugPrint 即一行，
+///   不截的话 2000 行巨栈内存无界）；文件超 [_kMaxFileBytes]
 ///   轮转为 `.old`（保留上一代），磁盘占用有界（≈1MB）；
 /// - 任何落盘失败一律静默降级（丢日志不丢功能），绝不反噬播放主流程。
 class AppLogService {
@@ -35,6 +37,10 @@ class AppLogService {
 
   static const int _kMaxBufferLines = 2000;
   static const int _kMaxFileBytes = 512 * 1024;
+
+  /// 单条日志上限：main 里整段堆栈一次 debugPrint 即单行（见 fatal 分支），
+  /// 不截断的话 2000 行“巨行”内存无界。16KB 足够保留有效帧，超长只丢尾部。
+  static const int _kMaxMessageChars = 16 * 1024;
   static const Duration _flushInterval = Duration(milliseconds: 500);
 
   @visibleForTesting
@@ -101,6 +107,10 @@ class AppLogService {
   /// 追加一条日志（自动加毫秒级时间戳）。任意线程安全仅限主 isolate——
   /// 与 debugPrint 的调用约定一致。
   void log(String message) {
+    if (message.length > _kMaxMessageChars) {
+      message =
+          '${message.substring(0, _kMaxMessageChars)}…（单条截断，共${message.length}字）';
+    }
     final timestamp = DateTime.now().toIso8601String();
     _pending.add('${timestamp.substring(0, 23)} $message');
     while (_pending.length > _maxBufferLines) {

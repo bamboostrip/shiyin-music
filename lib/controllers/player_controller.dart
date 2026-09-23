@@ -60,8 +60,10 @@ const Duration _kAutoSkipWallClockBudget = Duration(seconds: 60);
 const Duration _kNearEndDecodeErrorThreshold = Duration(milliseconds: 1500);
 
 /// 曲末停滞 watchdog：兜底 timer 到点后引擎位置仍冻结时的复检间隔与次数。
-/// 连续 [_kTailStallMaxChecks] 次仍停滞即强制按播完推进（总静默 ≈ 曲末
-/// 兜底 180ms + 4×1.5s ≈ 6.2s——比它更短的重缓冲不会被误判）。
+/// 首次检查在兜底 timer 回调内同步执行，不另耗时间；连续
+/// [_kTailStallMaxChecks] 次仍停滞即强制按播完推进（总静默 ≈ 曲末
+/// 兜底 delay（remaining≤750ms＋180ms）＋ 3×1.5s ≈ 4.7~5.4s——
+/// 比它更短的重缓冲不会被误判）。
 const int _kTailStallMaxChecks = 3;
 const Duration _kTailStallRecheckInterval = Duration(milliseconds: 1500);
 
@@ -140,6 +142,9 @@ const Duration kLyricOffsetLimit = Duration(seconds: 20);
 
 /// 逐曲偏移的持久化条数上限：超出按插入序淘汰最旧（更新即置为最新）。
 const int kLyricOffsetStoreLimit = 200;
+
+/// 偏移落盘连调合并窗口（见 _PlayerLyrics._scheduleLyricOffsetPersist）。
+const Duration _kLyricOffsetPersistWindow = Duration(milliseconds: 500);
 
 /// 播放器控制器：状态拆分见 [_PlayerControllerBase]，职责分片见各 part 文件。
 class PlayerController extends _PlayerControllerBase
@@ -243,14 +248,27 @@ class PlayerController extends _PlayerControllerBase
       // 重播不经 togglePlay/_resetCompletionLatchForReplay（应用内入口会自
       // 己清），若不随这轮真实起播作废上一轮的完成标记，这首第二次播完的
       // completed 会被 [_willHandleCompletion] 去重吞掉，队列再次停在曲尾。
-      // 只在「同一首歌的新一轮真出声」时命中：切歌后标记与新歌 hash 不等，
-      // 天然不命中；完成流程在途由 _isHandlingCompletion 单独把关，不受影响。
+      // 完成标记只在「同一首歌的新一轮真出声」时命中：切歌后标记与新歌
+      // hash 不等，天然不命中；完成流程在途由 _isHandlingCompletion 单独
+      // 把关，不受影响。
+      // 曲末耗尽态（[_tailSkipExhausted]）必须单独覆盖：预算耗尽路径
+      // （曲末错误/watchdog 强推）在 _handleCompleted 之前就返回，
+      // _completedSongHash 保持 null——上面的 hash 判定天然不命中，但残留
+      // 的持久错误横幅与「抑制网络恢复自动重播」同样要随重新出声清掉。
+      final invalidatesCompletionLatch =
+          _completedSongHash != null &&
+          _completedSongHash == currentSong?.hash;
+      final clearsTailSkipExhaustion =
+          _tailSkipExhausted && errorMessage != null && currentSong != null;
       if (value.playing &&
           value.processingState != ProcessingState.completed &&
-          _completedSongHash != null &&
-          _completedSongHash == currentSong?.hash) {
-        _completedSongHash = null;
-        _nextLog('重新出声 → 作废上一轮完成去重: ${currentSong?.title}');
+          (invalidatesCompletionLatch || clearsTailSkipExhaustion)) {
+        // 同应用内重播语义：新一轮真出声是全新尝试，连带清掉曲末跳过
+        // 耗尽态与持久错误（否则残留横幅不消失、网络恢复自动重播被抑制），
+        // 并取消上一轮的曲末兜底/watchdog timer（同曲同 hash 下旧 timer
+        // 会在新一轮内开火）。
+        _resetCompletionLatchForReplay();
+        _nextLog('重新出声 → 作废上一轮完成去重/耗尽态: ${currentSong?.title}');
       }
       // 诊断：引擎上报的状态变化（实机排查"completed 到底有没有来"的第一手
       // 证据）。只在组合变化时记，避免每 tick 刷屏。
@@ -349,6 +367,7 @@ class PlayerController extends _PlayerControllerBase
     _loudnessSerial++;
     _pauseListeningTimeTracker();
     _flushPendingVolumePersist();
+    _flushPendingLyricOffsetPersist();
     _networkRestoredSub?.cancel();
     _autoResumeTimer?.cancel();
     _sleepTimer?.cancel();
@@ -625,6 +644,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 音量落盘防抖（见 _PlayerPlayback.setUserVolume）与最近落盘值。
   Timer? _volumePersistDebounce;
   double _persistedUserVolume = 1.0;
+
+  /// 歌词偏移落盘防抖（见 _PlayerLyrics.setLyricOffset）：`− / +`
+  /// 长按连调 130ms 一步，直接落盘的话 20 秒长按≈150 次磁盘写。
+  /// 首调立即写（单击语义不变），窗口内后调合并为一次尾写。
+  Timer? _lyricOffsetPersistDebounce;
+  bool _lyricOffsetPersistDirty = false;
 
   // SuperLyric/蓝牙歌词同步状态
   int _lastSuperLyricIndex = -1;

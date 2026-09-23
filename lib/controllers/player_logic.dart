@@ -192,6 +192,12 @@ abstract final class PlayerPlaybackLogic {
   /// 位置定位到曲中（歌词点击、高潮试听）的 completed 状态必须原地续播，
   /// 不能被回零冲掉。时长未知（<= 0）时按重播处理——此时续播只会瞬间再次
   /// completed，听感等于没反应。
+  ///
+  /// 容差取 1s（而非 220ms 级判距）：引擎 position 回调有颗粒度
+  /// （Android 约 0.5~1s 一跳），completed 到达时上报位置可能滞后真实
+  /// 尾部近 1s；容差过窄会导致“位置差几百 ms → 不回零 → play() 被陈旧
+  /// playing 短路 → 通知栏播放键按了没反应”。曲中定位（seekToAndPlay）
+  /// 落在尾部 1s 内的概率可忽略，误回零风险远小于按键失灵。
   static bool shouldRestartTrackOnPlay({
     required bool completed,
     required Duration? duration,
@@ -199,7 +205,7 @@ abstract final class PlayerPlaybackLogic {
   }) {
     if (!completed) return false;
     if (duration == null || duration <= Duration.zero) return true;
-    return position >= duration - const Duration(milliseconds: 250);
+    return position >= duration - const Duration(seconds: 1);
   }
 
   /// 曲末停滞 watchdog 判定：兜底 timer 建立后，引擎位置是否自基准

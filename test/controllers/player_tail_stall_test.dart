@@ -327,4 +327,60 @@ void main() {
     );
     expect(handler.loadedHashes, contains(songs[1].hash));
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('系统性坏尾：watchdog 强制推进计入曲末跳过预算，耗尽即停住并提示', () async {
+    // 两首队列 → 预算上限 min(2, 5) = 2：前两次强制推进放行，
+    // 第三次（回到第一首又停滞）必须停住，不能静默抽干队列。
+    final songs = [_song(1), _song(2)];
+    await startPlayingNearEnd(songs);
+
+    // 把指定歌曲推到曲末兜底窗口并冻结（每轮约 5.1s 后强制推进）。
+    Future<void> stallCurrent() async {
+      engine.emitPosition(const Duration(seconds: 299, milliseconds: 600));
+      await settle();
+      await Future<void>.delayed(const Duration(milliseconds: 6500));
+      await settle();
+    }
+
+    // 第 1 首停滞 → 强制推进到第 2 首（预算 1/2）。
+    await stallCurrent();
+    expect(controller.currentSong?.hash, songs[1].hash);
+
+    // 第 2 首同样停滞 → 强制绕回第 1 首（预算 2/2）。
+    await stallCurrent();
+    expect(controller.currentSong?.hash, songs[0].hash);
+
+    // 第 1 首再次停滞 → 预算耗尽：停住、不再加载、不再推进。
+    await stallCurrent();
+    expect(
+      controller.currentSong?.hash,
+      songs[0].hash,
+      reason: '预算耗尽必须停在当前首，不静默抽干',
+    );
+    expect(controller.isPlaying, isFalse, reason: '耗尽后应暂停在冻结处');
+    expect(
+      controller.errorMessage,
+      contains('曲末'),
+      reason: '耗尽后应有持久错误提示',
+    );
+    expect(
+      handler.loadedHashes,
+      ['hash_1', 'hash_2', 'hash_1'],
+      reason: '耗尽后不得再触发任何加载',
+    );
+
+    // 耗尽态下按通知栏播放键（不经 togglePlay 的重新出声）：持久错误横幅
+    // 与耗尽标记必须随之清掉——耗尽路径在 _handleCompleted 之前返回、
+    // _completedSongHash 为 null，完成去重那条「重新出声」判定天然不命中，
+    // 得靠曲末耗尽专属判定。否则横幅残留、网络恢复自动重播被持续抑制。
+    // （跳过计数不重置：再停滞会立即再次耗尽，语义见 _tryConsumeNearEndSkipBudget。）
+    await handler.play();
+    await settle();
+    expect(controller.isPlaying, isTrue, reason: '媒体键起播应恢复播放态');
+    expect(
+      controller.errorMessage,
+      isNull,
+      reason: '重新出声必须清掉曲末耗尽错误横幅',
+    );
+  }, timeout: const Timeout(Duration(seconds: 90)));
 }

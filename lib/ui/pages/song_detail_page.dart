@@ -13,6 +13,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
 import '../widgets/artwork.dart';
+import '../player/player_comment_button.dart';
 import 'artist_detail_page.dart';
 import 'comment_list_view.dart';
 import 'playlist_detail_page.dart';
@@ -65,6 +66,10 @@ class _SongDetailPageState extends State<SongDetailPage>
       vsync: this,
       initialIndex: widget.initialTab == SongDetailTab.comments ? 0 : 1,
     );
+    // 标题计数不依赖评论 tab 是否构建过：会话内已有（底栏/别处拉过）
+    // 就秒显 `评论NNN`，否则等 CommentListView 首屏回报。
+    final mixsongid = _mixsongid;
+    if (mixsongid != null) _commentCount = cachedCommentCount(mixsongid);
     _loadDetail();
   }
 
@@ -74,15 +79,33 @@ class _SongDetailPageState extends State<SongDetailPage>
     super.dispose();
   }
 
+  /// 可复用的 player 内存歌词：与正在播放同一首且内存已有歌词时直接取
+  /// 词曲，零请求（本地 .lrc/内嵌歌词只在 loadLyrics 走，直调 api 反而
+  /// 拿不到）。单测 fake 未实现 currentSong/lyrics 时会抛，此时按
+  /// “无缓存”降级走网络（与 _safeApi 同类守卫）。
+  List<LyricLine> _reusablePlayerLyrics() {
+    try {
+      if (widget.player.currentSong?.hash == _song.hash) {
+        return widget.player.lyrics;
+      }
+    } catch (_) {
+      // fake 未实现 → 无缓存可用，走网络。
+    }
+    return const [];
+  }
+
   /// 专辑详情与歌词并行拉取；失败不抛，缺行隐藏。
   Future<void> _loadDetail() async {
     final albumFuture = _song.albumId?.isNotEmpty == true
         ? widget.api.albumDetail(_song.albumId!).catchError((_) => null)
         : Future<ArtistAlbum?>.value();
-    final lyricsFuture = widget.api
-        .lyrics(_song)
-        .then<LyricCredits>(extractLyricCredits)
-        .catchError((_) => const LyricCredits());
+    final playerLyrics = _reusablePlayerLyrics();
+    final lyricsFuture = playerLyrics.isNotEmpty
+        ? Future<LyricCredits>.value(extractLyricCredits(playerLyrics))
+        : widget.api
+              .lyrics(_song)
+              .then<LyricCredits>(extractLyricCredits)
+              .catchError((_) => const LyricCredits());
     final results = await Future.wait([albumFuture, lyricsFuture]);
     if (!mounted) return;
     setState(() {
@@ -249,6 +272,11 @@ class _SongDetailPageState extends State<SongDetailPage>
                           mixsongid: mixsongid,
                           onCountChanged: (count) {
                             if (!mounted || count == _commentCount) return;
+                            // 回写会话缓存：同一首歌在底栏/详情页之间共享，
+                            // 下次进详情页标题秒显，不必等列表构建。
+                            if (count != null) {
+                              cacheCommentCount(mixsongid, count);
+                            }
                             setState(() => _commentCount = count);
                           },
                         ),

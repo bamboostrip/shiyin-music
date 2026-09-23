@@ -116,9 +116,15 @@ class LyricOffsetControl extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 状态行：仅在已调偏移时出现（默认态保持极简，无说明长文）。
-            if (hasOffset)
-              Padding(
+            // 状态行：无偏移时占位透明（maintainSize），面板高度恒定——
+            // PC 锚定弹层只在打开瞬间量一次尺寸，内容长高会被固定几何
+            // 裁成可滚区域（首次点 ± 后底部标签被挤出首屏）。
+            Visibility(
+              visible: hasOffset,
+              maintainSize: true,
+              maintainAnimation: true,
+              maintainState: true,
+              child: Padding(
                 padding: EdgeInsets.only(bottom: compact ? 10 : 14),
                 child: Text(
                   '${PlayerLyricOffsetLogic.formatSigned(offset)} · 已为本首歌记忆',
@@ -133,6 +139,7 @@ class LyricOffsetControl extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
             Align(
               alignment: Alignment.center,
               // 移动端顶满整排 + spaceBetween：三钮分别贴左/中/右，
@@ -401,36 +408,44 @@ class _LyricOffsetSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final target = song ?? player.currentSong;
 
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          '调整歌词进度',
-          textAlign: TextAlign.center,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          target == null || target.artist.isEmpty
-              ? '校准结果按歌曲单独记忆'
-              : '${target.artist} · ${target.title}',
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: colorScheme.onSurfaceVariant,
-            fontSize: 13,
-            height: 1.2,
-          ),
-        ),
-        const SizedBox(height: 20),
-        LyricOffsetControl(player: player),
-      ],
+    // 副标题必须跟按钮的实际作用对象（实时 currentSong）一致：
+    // 面板开着时可能自动切歌，入口快照 song 会过期，而按钮经
+    // adjustLyricOffset 永远写到 currentSong 的 hash 上。
+    final content = AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final target = player.currentSong ?? song;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '调整歌词进度',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              target == null || target.artist.isEmpty
+                  ? '校准结果按歌曲单独记忆'
+                  : '${target.artist} · ${target.title}',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 13,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 20),
+            LyricOffsetControl(player: player),
+          ],
+        );
+      },
     );
 
     if (inDialog) {

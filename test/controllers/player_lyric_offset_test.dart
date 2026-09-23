@@ -375,6 +375,24 @@ void main() {
       restored.dispose();
     });
 
+    test('连调合并落盘：窗口内多次调整只产生首写＋尾写，最终值一致', () async {
+      final song1 = _song(1);
+      controller.queue = [song1];
+      await controller.playSong(song1, queue: [song1]);
+      await settle();
+
+      // 背靠背三连调（同防抖窗口内）：内存每次都跟手。
+      await controller.setLyricOffset(kLyricOffsetStep);
+      await controller.setLyricOffset(kLyricOffsetStep * 2);
+      await controller.setLyricOffset(kLyricOffsetStep * 3);
+      expect(controller.lyricOffset, kLyricOffsetStep * 3);
+
+      // 尾写在窗口结束后：等窗口过去再断言落盘（500ms 窗口＋余量）。
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(_offsetPrefsKey), '{"hash_1":1500}');
+    });
+
     test('偏移变更立即把当前句与逐字进度重推给桌面歌词', () async {
       controller.desktopLyricsEnabled = true;
       controller.setAppForeground(false);

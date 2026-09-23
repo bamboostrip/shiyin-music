@@ -242,7 +242,8 @@ void main() {
       expect(find.byType(ExpandDetailIcon), findsNothing);
     });
 
-    testWidgets('无歌曲时悬停不展示 ExpandDetailIcon，点击不触发 onTap', (tester) async {      bool tapped = false;
+    testWidgets('无歌曲时悬停不展示 ExpandDetailIcon，点击不触发 onTap', (tester) async {
+      bool tapped = false;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

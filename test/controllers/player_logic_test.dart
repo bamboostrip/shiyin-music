@@ -450,7 +450,7 @@ void main() {
       );
     });
 
-    test('completed 且位置停在尾部（含 250ms 容差）→ 重播回零', () {
+    test('completed 且位置停在尾部（含 1s 容差，覆盖 position 回调颗粒度滞后）→ 重播回零', () {
       expect(
         PlayerPlaybackLogic.shouldRestartTrackOnPlay(
           completed: true,
@@ -467,6 +467,14 @@ void main() {
         ),
         isTrue,
       );
+      expect(
+        PlayerPlaybackLogic.shouldRestartTrackOnPlay(
+          completed: true,
+          duration: const Duration(seconds: 300),
+          position: const Duration(seconds: 299, milliseconds: 200),
+        ),
+        isTrue,
+      );
     });
 
     test('completed 但位置在容差之外 → 原地续播（seekToAndPlay 已定位曲中）', () {
@@ -474,7 +482,7 @@ void main() {
         PlayerPlaybackLogic.shouldRestartTrackOnPlay(
           completed: true,
           duration: const Duration(seconds: 300),
-          position: const Duration(seconds: 299, milliseconds: 700),
+          position: const Duration(seconds: 298, milliseconds: 900),
         ),
         isFalse,
       );

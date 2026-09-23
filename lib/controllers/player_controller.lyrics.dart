@@ -184,12 +184,65 @@ mixin _PlayerLyrics on _PlayerControllerBase {
       }
     }
     _notifyLyricOffsetChanged();
+    await _scheduleLyricOffsetPersist();
+  }
+
+  /// 偏移落盘调度：空闲态首调立即写（单击语义与旧版一致，可确定性断言），
+  /// 随后开 [_kLyricOffsetPersistWindow] 窗口；窗口内的后调只记脏。
+  /// 窗口结束时若脏则尾写一次并按需续窗——`− / +` 长按连调 130ms 一步，
+  /// 不合并的话 20 秒长按≈150 次 SharedPreferences 写，合并后首写＋尾写
+  /// 共 2 次。并发重入（理论上只有连点才碰得到）：后调记脏合并，
+  /// 最坏多一次幂等的全量覆盖，无正确性问题。
+  Future<void> _scheduleLyricOffsetPersist() async {
+    if (_lyricOffsetPersistDebounce != null) {
+      _lyricOffsetPersistDirty = true;
+      return;
+    }
     await _persistLyricOffsets();
+    if (_disposed) return;
+    _lyricOffsetPersistDebounce = Timer(
+      _kLyricOffsetPersistWindow,
+      _onLyricOffsetPersistWindow,
+    );
+  }
+
+  void _onLyricOffsetPersistWindow() {
+    _lyricOffsetPersistDebounce = null;
+    if (_lyricOffsetPersistDirty) {
+      _lyricOffsetPersistDirty = false;
+      unawaited(_persistLyricOffsets());
+      if (!_disposed) {
+        _lyricOffsetPersistDebounce = Timer(
+          _kLyricOffsetPersistWindow,
+          _onLyricOffsetPersistWindow,
+        );
+      }
+    }
+  }
+
+  /// 尽快落盘窗口内未写入的偏移（dispose 时防抖窗口还有脏值）。
+  void _flushPendingLyricOffsetPersist() {
+    final pending = _lyricOffsetPersistDebounce?.isActive ?? false;
+    _lyricOffsetPersistDebounce?.cancel();
+    _lyricOffsetPersistDebounce = null;
+    if (pending && _lyricOffsetPersistDirty) {
+      _lyricOffsetPersistDirty = false;
+      unawaited(_persistLyricOffsets());
+    }
   }
 
   /// 重置当前歌曲的歌词进度（回到"以歌词自带时间为准"）。
+  ///
+  /// 重置是 deliberate 的单次动作（按钮不可长按连调）：先取消防抖窗口
+  /// 再走正常落盘，保证语义确定、可断言；否则紧跟 ± 后的重置会被记脏、
+  /// 延迟到窗口结束才生效。
   @override
-  Future<void> resetLyricOffset() => setLyricOffset(Duration.zero);
+  Future<void> resetLyricOffset() async {
+    _lyricOffsetPersistDebounce?.cancel();
+    _lyricOffsetPersistDebounce = null;
+    _lyricOffsetPersistDirty = false;
+    await setLyricOffset(Duration.zero);
+  }
 
   /// 装载某首歌自己的偏移（切歌、启动恢复时调用）；无记录即归零。
   @override

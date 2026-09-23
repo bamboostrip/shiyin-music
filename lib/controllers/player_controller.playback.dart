@@ -1058,6 +1058,35 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
     if (_nearEndStallChecks >= _kTailStallMaxChecks) {
       _nearEndStallChecks = 0;
+      final song = currentSong;
+      if (song == null || song.hash != songHash) return;
+      // 本次强制推进若会被 _handleCompleted 去重掉（同曲已完成过/正在处理），
+      // 它不会推进任何东西：先判掉，别白扣预算（与曲末错误路径同理）。
+      if (!_willHandleCompletion(song)) {
+        _nextLog(
+          '曲末停滞 watchdog 强制推进，但完成会被去重吞掉 → 不推进: ${song.title} '
+          'completedHash=$_completedSongHash handling=$_isHandlingCompletion '
+          'handlingHash=$_handlingCompletedHash',
+        );
+        return;
+      }
+      // 计入曲末跳过预算：系统性坏尾（CDN 尾部断供）下每首都会停滞，
+      // 不扣预算的话长队列会被无提示地静默抽干、单曲循环会无限重播
+      // （与曲末解码错误路径共用同一预算，见 _tryConsumeNearEndSkipBudget）。
+      if (!_tryConsumeNearEndSkipBudget(song)) {
+        // 预算耗尽：停住并给持久提示（Toast 瞬态，errorMessage 持久）。
+        // 不 seek(0)：留在冻结处可 fail-fast，用户点播只需验证尾部，
+        // 不必重听整首；若用户手动播完触发自然 completed，预算会正常重置。
+        unawaited(_audioHandler.pause());
+        isPlaying = false;
+        errorMessage = '连续多次在曲末播放失败，已停止自动切歌';
+        _tailSkipExhausted = true;
+        _setPositionBase(audioPlayer.position, playing: false);
+        _lastSmoothPosition = audioPlayer.position;
+        _emitPosition();
+        notifyListeners();
+        return;
+      }
       _nextLog(
         '曲末停滞 watchdog → 强制按播完推进: '
         'pos=${audioPlayer.position.inMilliseconds}ms '

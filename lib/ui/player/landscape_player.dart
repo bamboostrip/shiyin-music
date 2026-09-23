@@ -361,7 +361,8 @@ class LandscapeHeader extends StatelessWidget {
             title: '桌面歌词',
             subtitle: player.desktopLyricsEnabled ? '已开启' : '已关闭',
             onTap: () async {
-              Navigator.of(context).pop();
+              // 菜单壳已负责关闭（先 pop + 120ms 后回调），这里不再手动 pop，
+              // 否则会连带退出播放页（与 player_top_bar 同款修复）。
               await player.setDesktopLyricsEnabled(
                 !player.desktopLyricsEnabled,
               );

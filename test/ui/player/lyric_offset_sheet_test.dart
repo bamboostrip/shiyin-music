@@ -138,8 +138,12 @@ void main() {
       final player = _FakePlayerController();
       await tester.pumpWidget(_host(LyricOffsetControl(player: player)));
 
-      // 默认态极简：无状态行，标签齐备。
-      expect(find.textContaining('已为本首歌记忆'), findsNothing);
+      // 默认态极简：状态行占位但不可见（面板高度恒定，PC 锚定弹层
+      // 打开瞬间量的尺寸在首次点 ± 后依然成立，底部标签不被挤出）。
+      Visibility statusRow() =>
+          tester.widget<Visibility>(find.byType(Visibility));
+      expect(find.textContaining('已为本首歌记忆'), findsOneWidget);
+      expect(statusRow().visible, isFalse);
       expect(find.text('0.5 秒'), findsNWidgets(2));
       expect(find.text('重置'), findsOneWidget);
 
@@ -148,6 +152,7 @@ void main() {
       expect(player.lyricOffset, kLyricOffsetStep);
       expect(player.adjustCalls, 1);
       expect(find.text(_status(kLyricOffsetStep)), findsOneWidget);
+      expect(statusRow().visible, isTrue);
 
       await tester.tap(find.byIcon(_addIcon));
       await tester.pump();
@@ -165,7 +170,7 @@ void main() {
       await tester.pump();
       expect(player.resetCalls, 1);
       expect(player.lyricOffset, Duration.zero);
-      expect(find.textContaining('已为本首歌记忆'), findsNothing);
+      expect(statusRow().visible, isFalse);
     });
 
     testWidgets('无偏移时重置不可用（点了也不触发 reset）', (tester) async {

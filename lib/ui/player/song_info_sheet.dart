@@ -58,6 +58,22 @@ class _SongInfoSheetState extends State<_SongInfoSheet> {
     _load();
   }
 
+  /// 可复用的 player 内存歌词：与正在播放同一首且内存已有歌词时直接取
+  /// 词曲，零请求（本地 .lrc/内嵌歌词只在 loadLyrics 走，直调 api 反而
+  /// 拿不到；看的是别的歌时 hash 对不上，仍走网络）。
+  /// 单测 fake 未实现 currentSong/lyrics 时会抛，此时按“无缓存”降级
+  /// 走网络（与 _safeApi 同类守卫）。
+  List<LyricLine> _reusablePlayerLyrics(Song song) {
+    try {
+      if (widget.player.currentSong?.hash == song.hash) {
+        return widget.player.lyrics;
+      }
+    } catch (_) {
+      // fake 未实现 → 无缓存可用，走网络。
+    }
+    return const [];
+  }
+
   /// 专辑详情与歌词并行拉取；任何一路失败都不影响弹层展示，
   /// 对应行直接隐藏（无数据不抛错）。
   Future<void> _load() async {
@@ -67,10 +83,13 @@ class _SongInfoSheetState extends State<_SongInfoSheet> {
             (_) => null,
           )
         : Future<ArtistAlbum?>.value();
-    final lyricsFuture = widget.player.api
-        .lyrics(song)
-        .then<LyricCredits>(extractLyricCredits)
-        .catchError((_) => const LyricCredits());
+    final playerLyrics = _reusablePlayerLyrics(song);
+    final lyricsFuture = playerLyrics.isNotEmpty
+        ? Future<LyricCredits>.value(extractLyricCredits(playerLyrics))
+        : widget.player.api
+              .lyrics(song)
+              .then<LyricCredits>(extractLyricCredits)
+              .catchError((_) => const LyricCredits());
     final results = await Future.wait([albumFuture, lyricsFuture]);
     if (!mounted) return;
     setState(() {
@@ -182,7 +201,7 @@ class _SongInfoSheetState extends State<_SongInfoSheet> {
                   label: '作曲',
                   value: _credits.composer!,
                 ),
-              if (song.albumName?.isNotEmpty == true)
+              if ((_album?.name ?? song.albumName)?.isNotEmpty == true)
                 _InfoRow(
                   icon: const Icon(Icons.album_outlined),
                   label: '专辑',

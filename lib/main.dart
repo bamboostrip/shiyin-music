@@ -387,6 +387,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
       // 500ms 防抖落盘，硬终止前必须立即刷写，否则快速切歌后退出会回退
       // 到上一首。
       DesktopWindow.registerPreQuitFlusher(_player.flushPlaybackState);
+      // 落盘日志同队列刷写：quitGracefully 末尾硬终止进程，500ms 防抖
+      // 缓冲来不及落地——诊断日志（曲末 watchdog 等）恰恰要在退出前留住。
+      DesktopWindow.registerPreQuitFlusher(AppLogService.instance.flush);
       unawaited(DesktopTray.init(player: _player));
       // 桌面系统集成：下载完成通知 + 主窗标题随播放。
       // local_notifier 初始化失败时降级为无通知，不影响其余功能。
@@ -483,6 +486,8 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         }
       case AppLifecycleState.detached:
         if (_player.desktopLyricsEnabled) _player.setAppForeground(false);
+        // 进程结束前尽力把诊断日志落盘（best-effort，时序不保证）。
+        unawaited(AppLogService.instance.flush());
     }
   }
 
