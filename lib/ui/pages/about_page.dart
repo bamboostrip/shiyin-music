@@ -37,7 +37,9 @@ class _AboutPageState extends State<AboutPage> {
       final content = await rootBundle.loadString('update.md');
       if (mounted) {
         setState(() {
-          _versions = ChangelogVersion.parse(content);
+          // 只铺较新的版本（见 ChangelogVersion.oldestShownVersion）：update.md
+          // 仍是全量发布历史，关于页不再把老版本一路列到底。
+          _versions = ChangelogVersion.parseForAbout(content);
           _changelogLoaded = true;
         });
       }
@@ -567,6 +569,12 @@ class ChangelogVersion {
   /// 该版本的更新条目（已去掉 `- ` 前缀）。
   final List<String> lines;
 
+  /// 关于页展示的最老版本（含）：比它更早的版本不再上屏。
+  ///
+  /// update.md 仍是全量发布历史（发版照常追加），这里只决定关于页铺到哪
+  /// 一代——版本信息越滚越长会让这一页变成流水账。要放开更早历史改这里。
+  static const String oldestShownVersion = 'v2.4.0';
+
   /// 解析 markdown 更新日志，按 `## vX.X.X` 分块。
   static List<ChangelogVersion> parse(String content) {
     final lines = content.replaceAll('\r\n', '\n').split('\n');
@@ -617,5 +625,33 @@ class ChangelogVersion {
     }
 
     return versions;
+  }
+
+  /// 解析并只保留关于页要展示的版本（[oldestShownVersion] 及更新）。
+  ///
+  /// 顺序沿用 update.md（新版本在前），页面据此把最新一版默认展开。
+  static List<ChangelogVersion> parseForAbout(String content) {
+    return [
+      for (final version in parse(content))
+        if (_compareVersions(version.version, oldestShownVersion) >= 0) version,
+    ];
+  }
+
+  /// 版本号比较（`v1.2.3` 形态，段数不足按 0 补）：a > b 返回正数、相等 0、
+  /// a < b 返回负数。非数字段（如 `v2.4.0-beta`）按前缀数字解析。
+  static int _compareVersions(String a, String b) {
+    List<int> segments(String version) => [
+      for (final segment
+          in version.replaceFirst(RegExp(r'^[vV]'), '').split('.'))
+        int.tryParse(RegExp(r'^\d+').stringMatch(segment) ?? '') ?? 0,
+    ];
+    final left = segments(a);
+    final right = segments(b);
+    for (var i = 0; i < 3; i++) {
+      final l = i < left.length ? left[i] : 0;
+      final r = i < right.length ? right[i] : 0;
+      if (l != r) return l - r;
+    }
+    return 0;
   }
 }
