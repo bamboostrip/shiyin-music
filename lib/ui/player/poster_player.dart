@@ -77,6 +77,13 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxHeight < 650;
+          // 矮横屏（手机开横屏模式、矮高平板）：固定块（歌名/歌词预览/
+          // 操作栏/进度/控制按钮）合计约 340dp，Spacer 已无弹性可收，
+          // 控制按钮会被整段挤出屏幕（对齐上游 PR#111 的问题）。
+          // short 档封面改 Expanded+FittedBox 弹性缩放吸收高度缺口；
+          // tiny 档再隐藏歌词预览与操作栏，优先保证歌名与控制按钮完整。
+          final short = constraints.maxHeight < 560;
+          final tiny = constraints.maxHeight < 400;
           final horizontalPadding = compact ? 20.0 : 28.0;
 
           final maxArtworkHeight =
@@ -89,6 +96,24 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
             maxArtworkHeight,
           );
 
+          final cover = GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              HapticFeedback.lightImpact();
+              widget.onCoverTap?.call();
+            },
+            child: Hero(
+              tag: 'player_cover',
+              child: Artwork(
+                url: widget.song.coverUrl,
+                size: double.infinity,
+                borderRadius: 8,
+                // 播放页海报大图：任何形态都保持 2x/600 解码档。
+                highRes: true,
+              ),
+            ),
+          );
+
           return Padding(
             padding: EdgeInsets.fromLTRB(
               horizontalPadding,
@@ -98,30 +123,24 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
             ),
             child: Column(
               children: [
-                const Spacer(),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: artworkMaxWidth),
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        widget.onCoverTap?.call();
-                      },
-                      child: Hero(
-                        tag: 'player_cover',
-                        child: Artwork(
-                          url: widget.song.coverUrl,
-                          size: double.infinity,
-                          borderRadius: 8,
-                          // 播放页海报大图：任何形态都保持 2x/600 解码档。
-                          highRes: true,
+                if (!short) const Spacer(),
+                if (short)
+                  Expanded(
+                    child: Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox.square(
+                          dimension: artworkMaxWidth,
+                          child: cover,
                         ),
                       ),
                     ),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: artworkMaxWidth),
+                    child: AspectRatio(aspectRatio: 1, child: cover),
                   ),
-                ),
                 SizedBox(height: compact ? 12 : 20),
                 PosterSongInfoRow(
                   song: widget.song,
@@ -129,26 +148,29 @@ class _PosterPlayerPageState extends State<PosterPlayerPage>
                   auth: widget.auth,
                   onArtistTap: widget.onArtistTap,
                 ),
-                SizedBox(height: compact ? 8 : 14),
-                PosterLyricPreview(
-                  player: widget.player,
-                  onLyricTap: widget.onLyricTap,
-                  compact: compact,
-                  isPageVisible: widget.isPageVisible,
-                ),
-                SizedBox(height: compact ? 8 : 12),
-                PosterActionRail(
-                  player: widget.player,
-                  song: widget.song,
-                  auth: widget.auth,
-                ),
-                const Spacer(),
+                if (!tiny) ...[
+                  SizedBox(height: compact ? 8 : 14),
+                  PosterLyricPreview(
+                    player: widget.player,
+                    onLyricTap: widget.onLyricTap,
+                    compact: compact,
+                    isPageVisible: widget.isPageVisible,
+                  ),
+                  SizedBox(height: compact ? 8 : 12),
+                  PosterActionRail(
+                    player: widget.player,
+                    song: widget.song,
+                    auth: widget.auth,
+                  ),
+                ],
+                if (!short) const Spacer(),
                 Progress(player: widget.player, bright: true),
                 SizedBox(height: compact ? 6 : 10),
                 Controls(
                   player: widget.player,
                   bright: true,
                   onQueue: widget.onQueue,
+                  compactOverride: short,
                 ),
               ],
             ),

@@ -388,4 +388,126 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('PosterPlayerPage 横屏矮分辨率', () {
+    // 上游 PR#111：横屏矮分辨率下固定尺寸封面把进度条与控制按钮
+    // 挤出屏幕。本仓海报页固定块合计约 340dp，横屏手机可用高度仅
+    // 280~360dp，同样溢出。
+    testWidgets('横屏手机高度 (800x360) 无溢出且控制按钮完整可见', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          player: player,
+          auth: auth,
+          song: testSong,
+          size: const Size(800, 360),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+
+      // 控制按钮整行必须落在屏幕内（修复前被挤出底部）。
+      final nextRect = tester.getRect(find.byIcon(Icons.skip_next_rounded));
+      expect(nextRect.bottom, lessThanOrEqualTo(360));
+      expect(nextRect.top, greaterThanOrEqualTo(0));
+      final pauseRect = tester.getRect(find.byIcon(Icons.pause_rounded));
+      expect(pauseRect.bottom, lessThanOrEqualTo(360));
+    });
+
+    testWidgets('更高一些的横屏 (800x412) 同样无溢出、控制按钮可见', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          player: player,
+          auth: auth,
+          song: testSong,
+          size: const Size(800, 412),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      final nextRect = tester.getRect(find.byIcon(Icons.skip_next_rounded));
+      expect(nextRect.bottom, lessThanOrEqualTo(412));
+      expect(nextRect.top, greaterThanOrEqualTo(0));
+    });
+
+    testWidgets('极矮横屏 (800x280) 隐藏歌词预览与操作栏，歌名与控制按钮仍可见', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          player: player,
+          auth: auth,
+          song: testSong,
+          size: const Size(800, 280),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+
+      // 极矮档丢弃次要内容，换取核心内容完整。
+      expect(find.byType(PosterLyricPreview), findsNothing);
+      expect(find.byIcon(Icons.playlist_add_rounded), findsNothing);
+
+      // 歌名与控制按钮仍在屏幕内。
+      expect(find.text('晴天'), findsOneWidget);
+      final titleRect = tester.getRect(find.text('晴天'));
+      expect(titleRect.top, greaterThanOrEqualTo(0));
+      final nextRect = tester.getRect(find.byIcon(Icons.skip_next_rounded));
+      expect(nextRect.bottom, lessThanOrEqualTo(280));
+
+      // 封面仍存在（FittedBox 缩小而非消失）。
+      expect(find.byType(Hero), findsOneWidget);
+    });
+
+    testWidgets('中等矮高度 (800x430) 保留歌词预览与操作栏且无溢出', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          player: player,
+          auth: auth,
+          song: testSong,
+          size: const Size(800, 430),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(PosterLyricPreview), findsOneWidget);
+      expect(find.byIcon(Icons.playlist_add_rounded), findsOneWidget);
+      final nextRect = tester.getRect(find.byIcon(Icons.skip_next_rounded));
+      expect(nextRect.bottom, lessThanOrEqualTo(430));
+    });
+
+    testWidgets('常规竖屏 (390x844) 布局不受横屏适配影响', (tester) async {
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        buildTestWidget(
+          player: player,
+          auth: auth,
+          song: testSong,
+          size: const Size(390, 844),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      // 常规分支的完整内容都还在。
+      expect(find.byType(PosterLyricPreview), findsOneWidget);
+      expect(find.byIcon(Icons.playlist_add_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+    });
+  });
 }
