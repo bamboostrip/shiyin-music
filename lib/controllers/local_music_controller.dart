@@ -60,13 +60,6 @@ class LocalMusicController extends ChangeNotifier {
   // debug 构建抛错（与 DownloadController._disposed 同款防护）。
   bool _disposed = false;
 
-  // 本地专辑封面字节缓存上限（LRU，按插入顺序淘汰最早项）。
-  // 50 → 100：封面为压缩字节（常见 500×500 JPEG ≈ 50-200KB），
-  // 100 张 ≈ 5-20MB，换取滚动本地歌曲列表时更少触发原生
-  // content provider 查询（该查询较慢，是列表滚动的卡顿来源之一）。
-  static const _maxAlbumArtCacheSize = 100;
-  final _albumArtCache = <String, Uint8List>{};
-
   /// 规范化文件夹路径 -> 原始大小写路径（仅用于界面展示）。
   final Map<String, String> _folderDisplayNames = {};
 
@@ -253,29 +246,6 @@ class LocalMusicController extends ChangeNotifier {
     final normalized = FolderFilter.normalizeFolderPath(rawParent);
     if (normalized != null) {
       _folderDisplayNames.putIfAbsent(normalized, () => rawParent);
-    }
-  }
-
-  /// 获取本地歌曲的专辑封面字节数据（带缓存）。
-  Future<Uint8List?> getAlbumArt(String albumId) async {
-    if (!Platform.isAndroid) return null;
-    if (_albumArtCache.containsKey(albumId)) {
-      return _albumArtCache[albumId];
-    }
-    try {
-      final bytes = await _channel.invokeMethod<Uint8List>('getAlbumArt', {
-        'albumId': int.tryParse(albumId),
-      });
-      if (bytes != null) {
-        _albumArtCache[albumId] = bytes;
-        if (_albumArtCache.length > _maxAlbumArtCacheSize) {
-          _albumArtCache.remove(_albumArtCache.keys.first);
-        }
-      }
-      return bytes;
-    } catch (e) {
-      debugPrint('Error getting album art: $e');
-      return null;
     }
   }
 
