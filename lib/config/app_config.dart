@@ -2,11 +2,11 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '时音';
-  static const appVersion = '3.0.10';
+  static const appVersion = '3.0.11';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。3.0.10 → 3000010。
-  static const appVersionCode = '3000010';
+  /// 的 semverToCode 与 docs/release-process.md）。3.0.11 → 3000011。
+  static const appVersionCode = '3000011';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
