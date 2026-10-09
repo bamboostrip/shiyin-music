@@ -42,24 +42,30 @@ bool _overlayCloseInFlight = false;
 
 /// 立即持久化当前窗口位置（防抖取消失效时与关闭前补存共用）。
 ///
-/// 窗口常驻固定高度（菜单收展不再移动/缩放窗口），top 直接落盘即可。
+/// 落盘**窗口底边左角**（逻辑坐标）。窗口高度现恒定
+/// （[WindowsDesktopLyricsBridge.overlayFixedWindowHeight]），底边语义是
+/// 迁移（四）引入并保留的锚点——对窗口高度未来演进免疫；恢复时按恒定
+/// 窗口高度反推顶边。高度取自活窗口实测值，不直读常量，窗口高度若再
+/// 演进此处无需改动。
 ///
-/// 落盘同时置位三枚一次性位置语义迁移键：本函数写入的是**活窗口坐标**，
+/// 落盘同时置位四枚一次性位置语义迁移键：本函数写入的是**活窗口坐标**，
 /// 按定义必为现行窗口语义（主窗侧已在 createWindow 之前完成存量迁移，见
 /// [WindowsDesktopLyricsBridge.loadStoredOverlayOrigin]）。不置位的话，
 /// 全新安装用户首次落盘后，第二次启动会把这个坐标当迁移前旧值再减
 /// 36+212=248px。
 Future<void> persistOverlayWindowPosition() async {
   try {
-    final position = await windowManager.getPosition();
+    // 单次 getBounds 取全量几何：getPosition/getSize 底层各自再发一次
+    // getBounds 原生调用，拆开是两次往返，读数间窗口若在移动可能撕裂。
+    final bounds = await windowManager.getBounds();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(
-      WindowsDesktopLyricsBridge.windowLeftPrefKey,
-      position.dx,
+      WindowsDesktopLyricsBridge.windowBottomLeftPrefKey,
+      bounds.left,
     );
     await prefs.setDouble(
-      WindowsDesktopLyricsBridge.windowTopPrefKey,
-      position.dy,
+      WindowsDesktopLyricsBridge.windowBottomYPrefKey,
+      bounds.bottom,
     );
     await WindowsDesktopLyricsBridge.markOverlayPositionSemanticsCurrent(prefs);
   } on Exception {
@@ -180,10 +186,14 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     debugPrint('[桌面歌词悬浮窗] setTitle 失败: $e');
   }
   try {
+    // 窗口高度恒定（容纳最大卡片）：设置（模式/字号）变化只在 Flutter 层
+    // 重排，原生窗口永不因此 resize —— 透明无框窗原生 resize 时 DWM 会
+    // 用旧帧拉伸合成新尺寸，步进连点表现为一卡一卡（历史上菜单收展
+    // 原生 124↔296 切换闪帧同源，当时已改为常驻高度）。
     await windowManager.setSize(
       const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayWindowHeight,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       ),
     );
   } catch (e) {
@@ -211,10 +221,22 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   // 拖动的 moved（每次拖动仅此一条）白白吞掉——已移除。
   try {
     final prefs = await SharedPreferences.getInstance();
-    final left = prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey);
-    final top = prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey);
-    if (left != null && top != null) {
-      await windowManager.setPosition(Offset(left, top));
+    final left = prefs.getDouble(
+      WindowsDesktopLyricsBridge.windowBottomLeftPrefKey,
+    );
+    final bottom = prefs.getDouble(
+      WindowsDesktopLyricsBridge.windowBottomYPrefKey,
+    );
+    if (left != null && bottom != null) {
+      // 记忆的是窗口底边：按恒定窗口高度反推顶边。主窗侧已在
+      // createWindow 之前完成一次性语义迁移与可见区钳制，这里直接信任
+      // prefs 的值。
+      await windowManager.setPosition(
+        Offset(
+          left,
+          bottom - WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+        ),
+      );
     }
   } catch (e) {
     debugPrint('[桌面歌词悬浮窗] 恢复窗口位置失败: $e');
@@ -818,15 +840,21 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
 
       if (!mounted || cursorPos == null || windowPos == null) return;
 
-      // 命中判定只认卡片带（窗口底部 overlayHeight 高）：常驻菜单带在
-      // 锁定态无内容且穿透，光标扫过菜单带不应触发解锁胶囊淡入。
+      // 命中判定只认卡片带（窗口底部 overlayHeightFor 高，随设置伸缩）：
+      // 其上是常驻菜单带与卡片伸缩预留的透明死区，锁定态无内容且穿透，
+      // 光标扫过不应触发解锁胶囊淡入。
+      final cardBandHeight = WindowsDesktopLyricsBridge.overlayHeightFor(
+        widget.settings,
+      );
       final cardBandTop =
-          windowPos.dy + WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
+          windowPos.dy +
+          WindowsDesktopLyricsBridge.overlayFixedWindowHeight -
+          cardBandHeight;
       final winRect = Rect.fromLTWH(
         windowPos.dx,
         cardBandTop,
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayHeight,
+        cardBandHeight,
       );
       const pillWidth = 84.0;
       const pillHeight = 24.0;
@@ -875,20 +903,23 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = widget.settings;
     return SizedBox(
       width: WindowsDesktopLyricsBridge.overlayWidth,
-      height: WindowsDesktopLyricsBridge.overlayWindowHeight,
+      // 窗口恒高（容纳最大卡片）；卡片贴窗口底，设置变化只在 Flutter 层
+      // 把卡片在本 SizedBox 内伸缩，原生窗口不 resize（避免 DWM 撕裂）。
+      height: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       child: Stack(
         children: [
-          // 歌词主体限定在卡片带（窗口底部 124 高）：窗口常驻展开高度后
-          // 不能再任由其填满整窗（上方是常驻菜单带，锁定态无内容）。
+          // 歌词主体限定在卡片带（窗口底部，高度随模式/字号动态）：上方
+          // 是常驻菜单带 + 伸缩预留死区（锁定态无内容且穿透）。
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            height: WindowsDesktopLyricsBridge.overlayHeight,
+            height: WindowsDesktopLyricsBridge.overlayHeightFor(settings),
             child: buildOverlayLyricsBody(
-              settings: widget.settings,
+              settings: settings,
               current: widget.current,
               next: widget.next,
               progress: widget.progress,
@@ -899,7 +930,7 @@ class _LockedLyricsBodyState extends State<LockedLyricsBody> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: WindowsDesktopLyricsBridge.overlayLyricsHeight,
+            bottom: WindowsDesktopLyricsBridge.overlayLyricsHeightFor(settings),
             height: WindowsDesktopLyricsBridge.lyricsTopInset,
             child: Align(
               alignment: Alignment.topCenter,
@@ -1105,10 +1136,12 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 
   /// 光标轮询：命中测试 + hover + 移出收起。
   ///
-  /// 命中区域（窗口逻辑坐标）：
-  /// - 卡片带 = [top + menuPanelHeight, top + overlayWindowHeight]（底部
-  ///   [overlayHeight] 高）—— 恒为交互区（hover 卡片/工具栏/拖动）；
-  /// - 菜单带 = 卡片带上方 —— 仅在菜单展开时并入交互区（点菜单项）。
+  /// 命中区域（窗口逻辑坐标；卡片带高度随设置伸缩，恒定窗口的其余部分
+  /// 是菜单带与透明死区）：
+  /// - 卡片带 = 窗口底部 [overlayHeightFor] 高 —— 恒为交互区
+  ///   （hover 卡片/工具栏/拖动）；
+  /// - 菜单带 + 死区 = 卡片带上方 —— 仅在菜单展开时并入交互区（点菜单
+  ///   项/点空白收起）；收起态穿透，不挡下层应用点击。
   Future<void> _pollCursor() async {
     if (_polling) return;
     _polling = true;
@@ -1117,19 +1150,20 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
       final windowPos = await _getWindowPosition();
       if (!mounted || cursorPos == null || windowPos == null) return;
 
-      final cardBandTop =
-          windowPos.dy + WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
+      const windowHeight = WindowsDesktopLyricsBridge.overlayFixedWindowHeight;
+      final cardBandHeight = WindowsDesktopLyricsBridge.overlayHeightFor(
+        widget.settings,
+      );
+      final cardBandTop = windowPos.dy + windowHeight - cardBandHeight;
       final inCard =
           cursorPos.dy >= cardBandTop &&
-          cursorPos.dy <=
-              windowPos.dy + WindowsDesktopLyricsBridge.overlayWindowHeight &&
+          cursorPos.dy <= windowPos.dy + windowHeight &&
           cursorPos.dx >= windowPos.dx &&
           cursorPos.dx <=
               windowPos.dx + WindowsDesktopLyricsBridge.overlayWidth;
       final inWindow =
           cursorPos.dy >= windowPos.dy &&
-          cursorPos.dy <=
-              windowPos.dy + WindowsDesktopLyricsBridge.overlayWindowHeight &&
+          cursorPos.dy <= windowPos.dy + windowHeight &&
           cursorPos.dx >= windowPos.dx &&
           cursorPos.dx <=
               windowPos.dx + WindowsDesktopLyricsBridge.overlayWidth;
@@ -1259,27 +1293,31 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 
     final showToolbar = _hovering || _showSettingsMenu;
 
-    // 布局契约：窗口常驻展开高度（菜单带 + 卡片带），卡片带贴窗口底，
-    // 全部锚点以窗口底边为基准 —— 与 MediaQuery 无关，彻底杜绝
-    // "窗口几何与 metrics 到达时序不同步"的中间帧（历史实现读
-    // MediaQuery.sizeOf，resize 落地与 metrics 更新之间的任何 rebuild
-    // 都会按旧高度推卡片位置，跳一帧）。
+    // 布局契约：窗口恒高（菜单带 + 最大卡片带，原生不随设置 resize），
+    // 卡片带贴窗口底、在预分配空间内随模式/字号伸缩，全部锚点以窗口
+    // 底边为基准 —— 与 MediaQuery 无关，彻底杜绝"窗口几何与 metrics
+    // 到达时序不同步"的中间帧（历史实现读 MediaQuery.sizeOf，resize
+    // 落地与 metrics 更新之间的任何 rebuild 都会按旧高度推卡片位置，
+    // 跳一帧）。
     return SizedBox(
       width: WindowsDesktopLyricsBridge.overlayWidth,
-      height: WindowsDesktopLyricsBridge.overlayWindowHeight,
+      height: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       child: Material(
         type: MaterialType.transparency,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // 菜单带（卡片带上方）：快捷菜单在此淡入/滑出。收起态整带
-            // 透明且 IgnorePointer + 原生穿透（见 _pollCursor），不挡
-            // 下层应用点击；展开态点带内空白即收起。
+            // 菜单带（含卡片伸缩预留死区）：快捷菜单在此淡入/滑出，底边
+            // 恰为卡片顶（菜单内容 bottomRight 对齐）。收起态整带透明且
+            // IgnorePointer + 原生穿透（见 _pollCursor），不挡下层应用
+            // 点击；展开态点带内空白即收起。
             Positioned(
               left: 0,
               right: 0,
               top: 0,
-              height: WindowsDesktopLyricsBridge.overlayMenuPanelHeight,
+              height:
+                  WindowsDesktopLyricsBridge.overlayFixedWindowHeight -
+                  WindowsDesktopLyricsBridge.overlayHeightFor(settings),
               child: IgnorePointer(
                 ignoring: !_showSettingsMenu,
                 child: GestureDetector(
@@ -1318,12 +1356,12 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
                 ),
               ),
             ),
-            // 卡片带：贴窗口底（恒定 124 高，菜单收展不影响其几何）。
+            // 卡片带：贴窗口底（高度随模式/字号动态，菜单收展不影响其几何）。
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              height: WindowsDesktopLyricsBridge.overlayHeight,
+              height: WindowsDesktopLyricsBridge.overlayHeightFor(settings),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeInOut,
@@ -1355,7 +1393,9 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: WindowsDesktopLyricsBridge.overlayLyricsHeight,
+              bottom: WindowsDesktopLyricsBridge.overlayLyricsHeightFor(
+                settings,
+              ),
               height: WindowsDesktopLyricsBridge.lyricsTopInset,
               child: AnimatedOpacity(
                 opacity: showToolbar ? 1.0 : 0.0,
@@ -1445,12 +1485,12 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
 
 /// 歌词主体（锁定/未锁定两套子树共用）：单行居中或双行交替（乒乓）高亮排版。
 ///
-/// 布局契约：紧约束 SizedBox(780x124) + 顶部 [WindowsDesktopLyricsBridge
-/// .lyricsTopInset] 留给工具栏/解锁胶囊 + 水平 24 Padding + FittedBox(scaleDown)
-/// + 固定宽度（悬浮窗宽 - 48）的容器。
+/// 布局契约：紧约束 SizedBox(780 x overlayHeightFor(settings)) + 顶部
+/// [WindowsDesktopLyricsBridge.lyricsTopInset] 留给工具栏/解锁胶囊 + 水平
+/// 24 Padding + FittedBox(scaleDown) + 固定宽度（悬浮窗宽 - 48）的容器。
 /// 顶部留白是"按钮不再压住歌词"的关键：历史 88px 单带布局下 30px 按钮
 /// （y2~36）与双行歌词渲染区（约 y20~74）恒重叠约 16px，调位置无解。
-/// 紧约束保证内容超过歌词带高度（系统字体缩放/48sp 大字号）时整体等比
+/// 紧约束保证内容超过歌词带高度（系统字体缩放/超大字号）时整体等比
 /// 缩小，而不是 RenderFlex 垂直溢出（溢出黄黑条纹会常驻窗口底部）。
 ///
 /// 双行排布（[activeOnBottom] 由主窗按"当前句下标奇偶"下发）：
@@ -1508,14 +1548,19 @@ Widget buildOverlayLyricsBody({
       fontWeight: FontWeight.bold,
     );
   } else {
-    // 双行交替排版：上下两行统一字号（settings.fontSize * 0.82）与 bold 字重，
-    // 仅用"已播放金黄高亮 / 未播放天蓝降透明度"区分正在唱与下一句。
+    // 双行交替排版：上行取设置字号原值，下行打 [dualLineStaggerFactor]
+    // 折扣（QQ 音乐式上下行错落；行位置定字号，乒乓换句时正在唱的行
+    // 不跳字号），bold 字重，仅用"已播放金黄高亮 / 未播放天蓝降透明度"
+    // 区分正在唱与下一句。
     final dualLineWidth = contentWidth - 60.0;
-    final dualFontSize = settings.fontSize * 0.82;
+    final topFontSize = settings.fontSize;
+    final bottomFontSize =
+        settings.fontSize * WindowsDesktopLyricsBridge.dualLineStaggerFactor;
     final activeText = current.isEmpty ? '暂无歌词' : current;
 
     Widget dualLine({
       required String text,
+      required double fontSize,
       required bool active,
       required Alignment align,
       required TextAlign textAlign,
@@ -1527,7 +1572,7 @@ Widget buildOverlayLyricsBody({
         alignment: align,
         child: LyricsKaraokeLine(
           text: text,
-          fontSize: dualFontSize,
+          fontSize: fontSize,
           playedColor: playedColor,
           unplayedColor: active
               ? unplayedColor
@@ -1546,6 +1591,7 @@ Widget buildOverlayLyricsBody({
       children: [
         dualLine(
           text: activeOnBottom ? next : activeText,
+          fontSize: topFontSize,
           active: !activeOnBottom,
           align: isSplit ? Alignment.centerLeft : sharedAlign,
           textAlign: isSplit ? TextAlign.left : sharedTextAlign,
@@ -1553,6 +1599,7 @@ Widget buildOverlayLyricsBody({
         const SizedBox(height: 4),
         dualLine(
           text: activeOnBottom ? activeText : next,
+          fontSize: bottomFontSize,
           active: activeOnBottom,
           align: isSplit ? Alignment.centerRight : sharedAlign,
           textAlign: isSplit ? TextAlign.right : sharedTextAlign,
@@ -1566,7 +1613,11 @@ Widget buildOverlayLyricsBody({
   return RepaintBoundary(
     child: SizedBox(
       width: WindowsDesktopLyricsBridge.overlayWidth,
-      height: WindowsDesktopLyricsBridge.overlayHeight,
+      // 卡片带随模式/字号在 Flutter 层伸缩（单行恒 88，双行随字号长高）；
+      // 窗口原生高度恒定（overlayFixedWindowHeight）、卡片贴窗口底，设置
+      // 变化绝不触发原生 resize。此处必须与穿透轮询的命中区取同一函数值，
+      // 两处不一致会出现死区穿透错位或 FittedBox 无谓缩小。
+      height: WindowsDesktopLyricsBridge.overlayHeightFor(settings),
       child: Padding(
         // 顶部 lyricsTopInset 是工具栏/解锁胶囊的专属带（锁定态为负空间）：
         // 歌词只在下方歌词带内居中，与按钮彻底脱开。

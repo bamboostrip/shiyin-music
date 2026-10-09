@@ -8,7 +8,7 @@ import 'package:shiyin_music/services/windows_desktop_lyrics_bridge.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_overlay_window.dart';
 
-/// 快捷菜单测试假具：窗口 780x400 画布、窗口原点 (0,0)，
+/// 快捷菜单测试假具：窗口 780x408 画布（恒定窗口高）、窗口原点 (0,0)，
 /// hover 由光标轮询 mock 驱动（未锁定态命中测试不再走 MouseRegion）。
 class _QuickSettingsHarness {
   _QuickSettingsHarness({required this.moveCursor});
@@ -30,6 +30,41 @@ void main() {
       // 窗口不再 resize（消除 DWM 拉伸中间帧导致的"点设置闪一下"）。
       // 菜单带 212：新增「歌词进度」行后比历史 172 高一档。
       expect(WindowsDesktopLyricsBridge.overlayMenuPanelHeight, 212);
+      expect(WindowsDesktopLyricsBridge.overlayWindowHeight, 336);
+    });
+
+    test('歌词带随模式与字号在 Flutter 层伸缩：单行恒 88，双行 48 → 135.68；窗口恒高 408', () {
+      // 单行：歌词带恒 88（历史行为不变）。
+      const single = DesktopLyricsSettings(singleLine: true, fontSize: 48);
+      expect(WindowsDesktopLyricsBridge.overlayLyricsHeightFor(single), 88);
+
+      // 双行默认字号 24：公式落在钳制下限 → 存量用户默认观感零变化。
+      const dualDefault = DesktopLyricsSettings();
+      expect(WindowsDesktopLyricsBridge.overlayLyricsHeightFor(dualDefault), 88);
+
+      // 双行 48（滑杆上限）：上行 48 + 下行 43.2 两行行高（1.4 设计系数）
+      // + 间距呼吸 8 = 135.68，歌词带在窗口内长高，双行大字号不再被
+      // FittedBox 压扁（历史 88 带高把双行每行物理封顶在 ~30px）。
+      const dualMax = DesktopLyricsSettings(singleLine: false, fontSize: 48);
+      expect(
+        WindowsDesktopLyricsBridge.overlayLyricsHeightFor(dualMax),
+        closeTo(48 * 1.4 * 1.9 + 8, 0.001),
+      );
+
+      // 上限钳制：极端字号歌词带不再增长（FittedBox 兜底等比缩小）。
+      const huge = DesktopLyricsSettings(singleLine: false, fontSize: 72);
+      expect(WindowsDesktopLyricsBridge.overlayLyricsHeightFor(huge), 160);
+
+      // 卡片带 = 工具栏 36 + 歌词带。
+      expect(WindowsDesktopLyricsBridge.overlayHeightFor(dualMax),
+          closeTo(36 + 48 * 1.4 * 1.9 + 8, 0.001));
+      expect(WindowsDesktopLyricsBridge.overlayHeightFor(huge), 36 + 160);
+
+      // 窗口恒高：容纳最大卡片（菜单带 212 + 工具栏 36 + 歌词带上限 160）。
+      // 原生窗口不随设置 resize——透明无框窗原生 resize 会 DWM 旧帧拉伸，
+      // 步进连点一卡一卡（历史上菜单收展闪帧同源）。
+      expect(WindowsDesktopLyricsBridge.overlayFixedWindowHeight, 408);
+      // 336 是 v3.0.10 存量位置对应的窗口高度，仅迁移（四）换算用。
       expect(WindowsDesktopLyricsBridge.overlayWindowHeight, 336);
     });
   });
@@ -911,10 +946,11 @@ void main() {
       double textScale = 1.0,
       double progress = 0.0,
     }) async {
-      tester.view.physicalSize = const Size(
+      const windowSize = Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayWindowHeight,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
+      tester.view.physicalSize = windowSize;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
@@ -924,7 +960,7 @@ void main() {
           data: MediaQueryData(
             size: const Size(
               WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayWindowHeight,
+              WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
             ),
             textScaler: TextScaler.linear(textScale),
           ),
@@ -996,25 +1032,34 @@ void main() {
       double progress = 0.0,
       bool activeOnBottom = false,
     }) async {
-      tester.view.physicalSize = const Size(
+      const windowSize = Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayWindowHeight,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
+      tester.view.physicalSize = windowSize;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: DesktopLyricsOverlayContent(
-            settings: settings,
-            current: current,
-            next: next,
-            isPlaying: true,
-            progress: progress,
-            activeOnBottom: activeOnBottom,
-            onControlPlayback: (_) {},
-            onToggleLock: (_) {},
-            onClose: () {},
+        MediaQuery(
+          data: const MediaQueryData(
+            size: Size(
+              WindowsDesktopLyricsBridge.overlayWidth,
+              WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+            ),
+          ),
+          child: MaterialApp(
+            home: DesktopLyricsOverlayContent(
+              settings: settings,
+              current: current,
+              next: next,
+              isPlaying: true,
+              progress: progress,
+              activeOnBottom: activeOnBottom,
+              onControlPlayback: (_) {},
+              onToggleLock: (_) {},
+              onClose: () {},
+            ),
           ),
         ),
       );
@@ -1022,13 +1067,11 @@ void main() {
     }
 
     /// 歌词主体所在的 Column（限定在卡片带内：菜单常驻菜单带后，
-    /// 树里还有菜单自己的 Column，不能直接按类型找）。
+    /// 树里还有菜单自己的 Column，不能直接按类型找；卡片带是全树唯一
+    /// bottom: 0 的 Positioned，高度随模式/字号动态故不比对固定值）。
     final lyricsColumnFinder = find.descendant(
       of: find.byWidgetPredicate(
-        (w) =>
-            w is Positioned &&
-            w.height == WindowsDesktopLyricsBridge.overlayHeight &&
-            w.bottom == 0.0,
+        (w) => w is Positioned && w.bottom == 0.0,
       ),
       matching: find.byType(Column),
     );
@@ -1084,7 +1127,7 @@ void main() {
       expect(line2Align.alignment, Alignment.centerRight);
     });
 
-    testWidgets('双行交错模式 (singleLine: false)：上下两行统一字号与 bold 字重', (tester) async {
+    testWidgets('双行交错模式 (singleLine: false)：上行原字号、下行 ×0.9 错落', (tester) async {
       const fontSize = 24.0;
       await pumpCustomOverlay(
         tester,
@@ -1103,11 +1146,19 @@ void main() {
       final currentLine = karaokeLines[0];
       final nextLine = karaokeLines[1];
 
-      // 上下两行字体大小统一且字重均为 bold
+      // 字号按行位置错落：上行（当前句）取设置字号原值，下行（下一句）
+      // 打 dualLineStaggerFactor 折扣；不再乘历史 0.82（窗口高度已随
+      // 字号动态增长，大字号双行不再被 FittedBox 压扁）。
       expect(currentLine.fontWeight, FontWeight.bold);
       expect(nextLine.fontWeight, FontWeight.bold);
-      expect(currentLine.fontSize, nextLine.fontSize);
-      expect(currentLine.fontSize, closeTo(fontSize * 0.82, 0.001));
+      expect(currentLine.fontSize, closeTo(fontSize, 0.001));
+      expect(
+        nextLine.fontSize,
+        closeTo(
+          fontSize * WindowsDesktopLyricsBridge.dualLineStaggerFactor,
+          0.001,
+        ),
+      );
       // 基础（未播放）色 RGB 一致，"下一句"轻度弱化（0.85）但保持可读，
       // 不再叠 textOpacity 折扣（背景全透明的悬浮窗上双重压暗会看不清）。
       expect(currentLine.unplayedColor.r, nextLine.unplayedColor.r);
@@ -1117,6 +1168,33 @@ void main() {
       expect(nextLine.unplayedColor.a, closeTo(0.85, 0.001));
       expect(currentLine.textOpacity, 1.0);
       expect(nextLine.textOpacity, 1.0);
+    });
+
+    testWidgets('双行行字号随行位置恒定：乒乓换句（activeOnBottom 翻转）不跳字号', (tester) async {
+      Future<List<double>> pumpAndCollect({required bool activeOnBottom}) async {
+        await pumpCustomOverlay(
+          tester,
+          settings: const DesktopLyricsSettings(singleLine: false, fontSize: 48),
+          current: '当前句歌词内容',
+          next: '下一句歌词内容',
+          activeOnBottom: activeOnBottom,
+        );
+        return tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .map((line) => line.fontSize)
+            .toList();
+      }
+
+      // 正在唱的句在哪一行，哪一行就带该行的字号——行字号只由行位置
+      // 决定，换句瞬间正在唱的文字不会变大变小（历史 0.85/0.75 按角色
+      // 定字号的观感问题）。
+      final topActive = await pumpAndCollect(activeOnBottom: false);
+      expect(topActive[0], closeTo(48, 0.001));
+      expect(topActive[1], closeTo(48 * 0.9, 0.001));
+
+      final bottomActive = await pumpAndCollect(activeOnBottom: true);
+      expect(bottomActive[0], closeTo(48, 0.001));
+      expect(bottomActive[1], closeTo(48 * 0.9, 0.001));
     });
 
     testWidgets('双行交替高亮：当前句在下行时，上行让位给下一句（文字不搬家）', (tester) async {
@@ -1323,7 +1401,7 @@ void main() {
     testWidgets('双行模式下 48sp 与 2.0 textScale 同样不溢出', (tester) async {
       tester.view.physicalSize = const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        WindowsDesktopLyricsBridge.overlayWindowHeight,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -1333,7 +1411,7 @@ void main() {
           data: const MediaQueryData(
             size: Size(
               WindowsDesktopLyricsBridge.overlayWidth,
-              WindowsDesktopLyricsBridge.overlayWindowHeight,
+              WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
             ),
             textScaler: TextScaler.linear(2.0),
           ),
@@ -1367,12 +1445,12 @@ void main() {
     }) async {
       tester.view.physicalSize = const Size(
         WindowsDesktopLyricsBridge.overlayWidth,
-        400,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      var cursor = const Offset(390, 240);
+      var cursor = const Offset(390, 340);
       const windowManagerChannel = MethodChannel('window_manager');
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(windowManagerChannel, (call) async {
@@ -1389,7 +1467,8 @@ void main() {
                 'x': 0.0,
                 'y': 0.0,
                 'width': WindowsDesktopLyricsBridge.overlayWidth,
-                'height': 400.0,
+                'height':
+                    WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
               };
             }
             return null;
@@ -1784,7 +1863,8 @@ void main() {
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
 
-      // 根容器恒为常驻窗口高度（不读 MediaQuery，杜绝 metrics 竞态中间帧）。
+      // 根容器恒为常驻窗口高度 408（容纳最大卡片；不读 MediaQuery，杜绝
+      // metrics 竞态中间帧；原生窗口不随设置 resize，避免 DWM 撕裂）。
       final rootSizedBox = tester.widget<SizedBox>(
         find.descendant(
           of: find.byType(HoverableOverlay),
@@ -1793,29 +1873,37 @@ void main() {
       );
       expect(
         rootSizedBox.height,
-        WindowsDesktopLyricsBridge.overlayWindowHeight,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
-      // 歌词卡片贴窗口底（bottom: 0），高度恒 124。
+      // 歌词卡片贴窗口底（bottom: 0），默认设置下高 124。
       final lyricsCardFinder = find.descendant(
         of: find.byType(HoverableOverlay),
         matching: find.byWidgetPredicate(
           (w) =>
               w is Positioned &&
-              w.height == WindowsDesktopLyricsBridge.overlayHeight &&
+              w.height ==
+                  WindowsDesktopLyricsBridge.overlayHeightFor(
+                    const DesktopLyricsSettings(locked: false),
+                  ) &&
               w.bottom == 0.0,
         ),
       );
       expect(lyricsCardFinder, findsOneWidget);
 
-      // 菜单带恒占窗口顶部 172（top: 0、height: 菜单面板高度）。
+      // 菜单带（含卡片伸缩预留死区）恒占窗口顶部（top: 0），底边恰为
+      // 卡片顶：恒定窗口高 - 卡片带高。
       final menuBandFinder = find.descendant(
         of: find.byType(HoverableOverlay),
         matching: find.byWidgetPredicate(
           (w) =>
               w is Positioned &&
               w.top == 0.0 &&
-              w.height == WindowsDesktopLyricsBridge.overlayMenuPanelHeight,
+              w.height ==
+                  WindowsDesktopLyricsBridge.overlayFixedWindowHeight -
+                      WindowsDesktopLyricsBridge.overlayHeightFor(
+                        const DesktopLyricsSettings(locked: false),
+                      ),
         ),
       );
       expect(menuBandFinder, findsOneWidget);
@@ -1915,17 +2003,19 @@ void main() {
       expect(ignoreCalls.last, isTrue);
 
       // 光标回到卡片带 → 解除穿透（hover 卡片/工具栏/拖动）。
-      harness.moveCursor(const Offset(390, 240));
+      // 卡片带 = 窗口底部 overlayHeightFor 高（默认设置 [284, 408]）。
+      harness.moveCursor(const Offset(390, 340));
       await tester.pump(const Duration(milliseconds: 80));
       expect(ignoreCalls.last, isFalse);
 
-      // 光标进入菜单带（菜单收起）→ 仍穿透。
+      // 光标进入菜单带/死区（菜单收起）→ 仍穿透。
       harness.moveCursor(const Offset(390, 100));
       await tester.pump(const Duration(milliseconds: 80));
       expect(ignoreCalls.last, isTrue);
 
       // 菜单展开期间，光标在菜单带内也保持可交互（能点到菜单项）。
-      harness.moveCursor(const Offset(390, 240));
+      // 先回卡片带让 hover 工具栏出现，才能点开菜单。
+      harness.moveCursor(const Offset(390, 340));
       await tester.pump(const Duration(milliseconds: 80));
       await tester.tap(find.byIcon(Icons.settings_rounded));
       await tester.pumpAndSettle();
@@ -1935,62 +2025,96 @@ void main() {
     });
   });
 
-  group('clampOverlayOriginToVisibleAreas（拔显示器/屏幕外位置钳制）', () {
+  group('clampOverlayOriginToVisibleAreas（拔显示器/屏幕外位置钳制，底边语义）', () {
     const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+    // 窗口完整矩形由底边反推：底边 - 窗口高（恒 408，非设置的函数）。
+    Future<Offset> clamp(
+      Offset origin,
+      List<Rect> areas, {
+      Offset fallback = const Offset(100, 100),
+      double windowHeight = WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+    }) async =>
+        WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+          origin,
+          areas,
+          fallback: fallback,
+          windowHeight: windowHeight,
+        );
 
-    test('主屏内可见位置原样返回', () {
-      final origin =
-          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-            const Offset(500, 900),
-            [primary],
-            fallback: const Offset(100, 100),
-          );
+    test('主屏内可见位置原样返回', () async {
+      // 底边 (500, 900)：顶边 = 900 - 408 = 492，整窗在主屏内。
+      final origin = await clamp(const Offset(500, 900), [primary]);
       expect(origin, const Offset(500, 900));
     });
 
-    test('位置在已拔掉的副屏（屏幕外）→ 钳回主屏右下可见区', () {
-      final origin =
-          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-            const Offset(3840, 2000),
-            [primary],
-            fallback: const Offset(100, 100),
-          );
-      // 右/下至少留 80px 可见。
+    test('位置在已拔掉的副屏（屏幕外）→ 钳回主屏右下可见区', () async {
+      final origin = await clamp(const Offset(3840, 2000), [primary]);
+      // 右/下至少留 80px 可见（底边语义钳的是底边）。
       expect(origin.dx, primary.right - 80);
       expect(origin.dy, primary.bottom - 80);
     });
 
-    test('与主屏仅数像素交集（DPI 换算贴边残余）→ 钳回可见区', () {
+    test('与主屏仅数像素交集（DPI 换算贴边残余）→ 钳回可见区', () async {
       // 窗口宽 780：左沿 1915 只剩 5px 可见。
-      final origin =
-          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-            const Offset(1915, 500),
-            [primary],
-            fallback: const Offset(100, 100),
-          );
+      final origin = await clamp(const Offset(1915, 500), [primary]);
       expect(origin.dx, primary.right - 80);
       expect(origin.dy, 500);
     });
 
-    test('无显示器信息时返回 fallback（无从钳制）', () {
-      final origin =
-          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-            const Offset(-5000, -5000),
-            const <Rect>[],
-            fallback: const Offset(100, 100),
-          );
+    test('底边在屏内但可见不足 80px → 仍判不可见并钳回（底边语义回归）', () async {
+      // 底边 (500, 79)：顶边 = 79 - 408 = -329，屏内只剩 79px < 80px
+      // 可见阈值。旧顶边语义下 (500, 79) 会被误判为可见——底边语义的
+      // 专属回归位。点钳制取安全带下沿：底边 = 区域顶 + 80。
+      final origin = await clamp(const Offset(500, 79), [primary]);
+      expect(origin.dx, 500);
+      expect(origin.dy, primary.top + 80);
+    });
+
+    test('无显示器信息时返回 fallback（无从钳制）', () async {
+      final origin = await clamp(
+        const Offset(-5000, -5000),
+        const <Rect>[],
+      );
       expect(origin, const Offset(100, 100));
     });
 
-    test('多显示器：副屏内可见位置不误钳', () {
+    test('多显示器：副屏内可见位置不误钳', () async {
       const secondary = Rect.fromLTWH(1920, 0, 1920, 1080);
-      final origin =
-          WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
-            const Offset(2500, 900),
-            [primary, secondary],
-            fallback: const Offset(100, 100),
-          );
+      final origin = await clamp(
+        const Offset(2500, 900),
+        [primary, secondary],
+      );
       expect(origin, const Offset(2500, 900));
+    });
+  });
+
+  group('降级路径（screenRetriever 不可用时的固定落点）', () {
+    // screenRetriever 抛异常时 _initialFrame 拿不到显示器信息：钳制退化
+    // （visibleAreas 为空时 clamp 原样返回 fallback），窗口按本组断言的
+    // 固定原点落位，且该原点会经 clamp→loadStoredOverlayOrigin 回写进
+    // prefs——必须是底边语义，否则窗口大半出屏、存量位置被回写成坏值。
+    test('降级原点是底边语义：换算 frame 后窗口完整落在 (100, 100)', () {
+      final frame = WindowsDesktopLyricsBridge.overlayFrameForBottomOrigin(
+        WindowsDesktopLyricsBridge.overlayDegradedFallbackOrigin,
+        scaleFactor: 1,
+      );
+      expect(frame.topLeft, const Offset(100, 100));
+      expect(
+        frame.size,
+        const Size(
+          WindowsDesktopLyricsBridge.overlayWidth,
+          WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+        ),
+      );
+    });
+
+    test('高 DPI 下降级原点按显示器缩放整体放大仍不出屏', () {
+      final frame = WindowsDesktopLyricsBridge.overlayFrameForBottomOrigin(
+        WindowsDesktopLyricsBridge.overlayDegradedFallbackOrigin,
+        scaleFactor: 1.5,
+      );
+      expect(frame.topLeft, const Offset(150, 150));
+      expect(frame.height, 1.5 * WindowsDesktopLyricsBridge.overlayFixedWindowHeight);
     });
   });
 
@@ -2011,14 +2135,19 @@ void main() {
         prefs.getBool(
               WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey,
             ) ==
+            true &&
+        prefs.getBool(
+              WindowsDesktopLyricsBridge.windowBottomMigratedPrefKey,
+            ) ==
             true;
 
-    test('全新安装（无存量坐标）：不写坐标，但三枚语义键置位', () async {
+    test('全新安装（无存量坐标）：不写坐标，但四枚语义键置位', () async {
       final prefs = await mockPrefs(<String, Object>{});
 
       final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
         visibleAreas: const [primary],
         fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
       expect(origin, isNull, reason: '无存量位置时由调用方落主屏默认点');
@@ -2026,16 +2155,16 @@ void main() {
       // 会让第二次启动把它当迁移前旧值再减 248px。
       expect(semanticsKeysAllSet(prefs), isTrue);
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomLeftPrefKey),
         isNull,
       );
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
         isNull,
       );
     });
 
-    test('迁移前旧语义（三键全 false）→ top 一次性减 36+212 并置键', () async {
+    test('迁移前旧语义（各键全 false）→ top 减 36+212 后按迁移（四）加 336 转底边', () async {
       final prefs = await mockPrefs(<String, Object>{
         WindowsDesktopLyricsBridge.windowLeftPrefKey: 400.0,
         WindowsDesktopLyricsBridge.windowTopPrefKey: 900.0,
@@ -2044,22 +2173,27 @@ void main() {
       final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
         visibleAreas: const [primary],
         fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
-      const expectedTop =
-          900.0 -
-          WindowsDesktopLyricsBridge.lyricsTopInset -
-          WindowsDesktopLyricsBridge.overlayMenuPanelHeight;
-      expect(origin, const Offset(400, 652));
-      expect(expectedTop, 652.0); // 36（工具栏带）+ 212（常驻菜单带）
+      // 顶边链：900 - 36（工具栏带）- 212（常驻菜单带）= 652（固定 336 高
+      // 窗口的顶边）；迁移（四）：底边 = 652 + 336 = 988。屏幕位置不变
+      // （窗口底边本就是 652 + 336）。
+      expect(origin, const Offset(400, 988));
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
-        expectedTop,
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomLeftPrefKey),
+        400.0,
       );
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
+        988.0,
+      );
+      // 旧键冻结停写（保留仅供排查）。
+      expect(prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey), 900);
       expect(semanticsKeysAllSet(prefs), isTrue);
     });
 
-    test('v3.0.7 存量（菜单带 172 已迁移）→ 只补减 212-172', () async {
+    test('v3.0.7 存量（菜单带 172 已迁移）→ 只补减 212-172 再转底边', () async {
       final prefs = await mockPrefs(<String, Object>{
         WindowsDesktopLyricsBridge.windowLeftPrefKey: 400.0,
         WindowsDesktopLyricsBridge.windowTopPrefKey: 900.0,
@@ -2070,23 +2204,19 @@ void main() {
       final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
         visibleAreas: const [primary],
         fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
-      // 迁移（三）只补减菜单带增量：212 - 172 = 40（不再减 36+212）。
-      final expectedTop =
-          900.0 -
-          (WindowsDesktopLyricsBridge.overlayMenuPanelHeight -
-              WindowsDesktopLyricsBridge.overlayMenuPanelHeightBeforeProgressRow);
-      expect(origin, Offset(400, expectedTop));
-      expect(expectedTop, 860.0);
+      // 迁移（三）只补减菜单带增量 212 - 172 = 40 → 顶边 860；
+      // 迁移（四）：底边 = 860 + 336 = 1196。
+      expect(origin, const Offset(400, 1196));
       expect(semanticsKeysAllSet(prefs), isTrue);
     });
 
-    test('三键已置位 → 坐标原样返回、不重复迁移', () async {
-      const stored = Offset(300, 700);
+    test('固定高度存量（三键已置位）→ 迁移（四）转底边，幂等不重复迁移', () async {
       final prefs = await mockPrefs(<String, Object>{
-        WindowsDesktopLyricsBridge.windowLeftPrefKey: stored.dx,
-        WindowsDesktopLyricsBridge.windowTopPrefKey: stored.dy,
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: 300.0,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: 700.0,
         WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey: true,
         WindowsDesktopLyricsBridge.windowTallMigratedPrefKey: true,
         WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey: true,
@@ -2095,16 +2225,46 @@ void main() {
       final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
         visibleAreas: const [primary],
         fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
-      expect(origin, stored);
-      expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
-        stored.dy,
+      // 顶边 700 不再补偿 → 底边 = 700 + 336 = 1036。
+      expect(origin, const Offset(300, 1036));
+      expect(semanticsKeysAllSet(prefs), isTrue);
+
+      // 第二次启动走底边快速路径：结果一致，不重复迁移。
+      final second = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
+      expect(second, const Offset(300, 1036));
     });
 
-    test('存量位置在已拔掉的副屏 → 钳回可见区并回写', () async {
+    test('底边语义键已存在（新版自身落盘）→ 直接使用，旧键不再参与', () async {
+      final prefs = await mockPrefs(<String, Object>{
+        // 新键是当前事实；旧键是迁移遗留的陈值，必须被忽略。
+        WindowsDesktopLyricsBridge.windowBottomLeftPrefKey: 500.0,
+        WindowsDesktopLyricsBridge.windowBottomYPrefKey: 900.0,
+        WindowsDesktopLyricsBridge.windowLeftPrefKey: 300.0,
+        WindowsDesktopLyricsBridge.windowTopPrefKey: 700.0,
+        WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowTallMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey: true,
+        WindowsDesktopLyricsBridge.windowBottomMigratedPrefKey: true,
+      });
+
+      final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
+        visibleAreas: const [primary],
+        fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+      );
+
+      expect(origin, const Offset(500, 900));
+      expect(prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey), 700);
+    });
+
+    test('存量位置在已拔掉的副屏 → 底边钳回可见区并回写新键', () async {
       final prefs = await mockPrefs(<String, Object>{
         WindowsDesktopLyricsBridge.windowLeftPrefKey: 3840.0,
         WindowsDesktopLyricsBridge.windowTopPrefKey: 2000.0,
@@ -2116,22 +2276,23 @@ void main() {
       final origin = await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
         visibleAreas: const [primary],
         fallback: fallback,
+        windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
       );
 
       expect(origin, Offset(primary.right - 80, primary.bottom - 80));
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomLeftPrefKey),
         primary.right - 80,
       );
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
         primary.bottom - 80,
       );
     });
   });
 
   group('persistOverlayWindowPosition（活坐标落盘必带语义键）', () {
-    test('落盘活窗口坐标的同时置位三枚语义键', () async {
+    test('落盘活窗口坐标为底边语义，同时置位四枚语义键', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       const channel = MethodChannel('window_manager');
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -2141,7 +2302,7 @@ void main() {
                 'x': 123.0,
                 'y': 456.0,
                 'width': WindowsDesktopLyricsBridge.overlayWidth,
-                'height': WindowsDesktopLyricsBridge.overlayWindowHeight,
+                'height': WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
               };
             }
             return null;
@@ -2154,15 +2315,16 @@ void main() {
       await persistOverlayWindowPosition();
 
       final prefs = await SharedPreferences.getInstance();
+      // 底边语义：bottom = 顶边 456 + 活窗口高度 408 = 864。
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowLeftPrefKey),
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomLeftPrefKey),
         123.0,
       );
       expect(
-        prefs.getDouble(WindowsDesktopLyricsBridge.windowTopPrefKey),
-        456.0,
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
+        864.0,
       );
-      // 活坐标 = 现行语义：三枚键必须同一次落盘置位（漏置会让下次启动
+      // 活坐标 = 现行语义：四枚键必须同一次落盘置位（漏置会让下次启动
       // 把该坐标当迁移前旧值再减 248px）。
       expect(
         prefs.getBool(WindowsDesktopLyricsBridge.windowInsetMigratedPrefKey),
@@ -2176,6 +2338,10 @@ void main() {
         prefs.getBool(
           WindowsDesktopLyricsBridge.windowMenuProgressRowMigratedPrefKey,
         ),
+        isTrue,
+      );
+      expect(
+        prefs.getBool(WindowsDesktopLyricsBridge.windowBottomMigratedPrefKey),
         isTrue,
       );
     });
@@ -2195,7 +2361,7 @@ void main() {
                 'x': 400.0,
                 'y': 700.0,
                 'width': WindowsDesktopLyricsBridge.overlayWidth,
-                'height': WindowsDesktopLyricsBridge.overlayWindowHeight,
+                'height': WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
               };
             }
             return null;
@@ -2210,31 +2376,35 @@ void main() {
           await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
             visibleAreas: const [primary],
             fallback: defaultOrigin,
+            windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
           );
       expect(firstStart, isNull);
 
-      // 2) 子窗落盘用户的活坐标 (400, 700)。
+      // 2) 子窗落盘用户的活坐标 (400, 700)：底边 = 700 + 408 = 1108。
       await persistOverlayWindowPosition();
 
-      // 3) 第二次启动：坐标原样恢复，不再迁移。
+      // 3) 第二次启动：底边坐标原样恢复，不再迁移。
       final secondStart =
           await WindowsDesktopLyricsBridge.loadStoredOverlayOrigin(
             visibleAreas: const [primary],
             fallback: defaultOrigin,
+            windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
           );
-      expect(secondStart, const Offset(400, 700));
+      expect(secondStart, const Offset(400, 1108));
     });
   });
 
   group('锁定态靠近悬浮「🔒 解锁」胶囊与鼠标动态穿透', () {
-    /// 卡片带顶边的全局坐标 = 窗口顶边 + 常驻菜单带高度。
+    /// 卡片带顶边的全局坐标 = 窗口顶边 + (恒定窗口高 - 卡片带高)。
     ///
-    /// 光标坐标全部由它推导：菜单带高度变化（历史上 172 → 212）时不必
-    /// 逐个改硬编码数字，测试也不至于因为窗口长高 40px 就假失败。
+    /// 光标坐标全部由它推导：卡片带随设置在窗口内伸缩（窗口恒高）时不必
+    /// 逐个改硬编码数字，测试也不至于因为窗口长高就假失败。
     double cardBandTop(Offset windowPos) =>
         windowPos.dy +
-        (WindowsDesktopLyricsBridge.overlayWindowHeight -
-            WindowsDesktopLyricsBridge.overlayHeight);
+        (WindowsDesktopLyricsBridge.overlayFixedWindowHeight -
+            WindowsDesktopLyricsBridge.overlayHeightFor(
+              const DesktopLyricsSettings(locked: true),
+            ));
 
     testWidgets('光标在窗口外时胶囊不可见 (opacity 0.0)', (tester) async {
       Offset? cursorPos = const Offset(0, 0);
@@ -2372,17 +2542,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 80));
       expect(mouseEventsCalls, isEmpty);
 
-      // 胶囊水平居中于卡片带顶：pillLeft = 100 + (780 - 84)/2 = 448,
-      // 卡片带顶 = 100 + 212 = 312，pillTop = 312 + 2 = 314, pillHeight = 24
-      // 光标移入胶囊矩形内 (450, 320)
+      // 胶囊水平居中于卡片带顶：pillLeft = 100 + (780 - 84)/2 = 448，
+      // 卡片带顶 = 窗口顶 100 + (408 - 默认卡片 124) = 384，
+      // pillTop = 384 + 2 = 386, pillHeight = 24
+      // 光标移入胶囊矩形内 (450, 392)
       cursorPos = Offset(450, cardBandTop(windowPos) + 8);
       await tester.pump(const Duration(milliseconds: 80));
 
       expect(mouseEventsCalls, contains(false));
       expect(mouseEventsCalls.last, isFalse);
 
-      // 光标在胶囊上方但在卡片带内 (450, 312) 恢复穿透
-      // （卡片带顶 312 <= 312 < pillTop = 314）
+      // 光标在胶囊上方但在卡片带内 (450, 384) 恢复穿透
+      // （卡片带顶 384 <= 384 < pillTop = 386）
       cursorPos = Offset(450, cardBandTop(windowPos));
       await tester.pump(const Duration(milliseconds: 80));
       expect(mouseEventsCalls.last, isTrue);

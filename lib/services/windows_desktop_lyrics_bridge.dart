@@ -1,8 +1,9 @@
 // Windows 桌面歌词主窗侧桥接。
 //
 // 职责：把 DesktopLyricsService 门面 API 一比一映射到 desktop_multi_window
-// 悬浮窗（lib/ui/desktop/lyrics_overlay_window.dart）。仅 Windows 分支使用；
-// Android 路径不经此类。
+// 悬浮窗（lib/ui/desktop/lyrics_overlay_window.dart）。Windows/Linux 桌面
+// 共用（门控见 DesktopLyricsService._isDesktopBridge，DWM 拉伸规避等注释
+// 以 Windows 为主）；Android 路径不经此类。
 //
 // 消息协议（与悬浮窗侧约定一致）：
 // - main -> sub：updateLyric {current, next, isPlaying, activeOnBottom} /
@@ -59,12 +60,14 @@ class WindowsDesktopLyricsBridge {
   final ValueChanged<DesktopLyricsSettings>? _onSettingsChanged;
   final VoidCallback? _onOpenSettings;
 
-  /// 悬浮窗固定尺寸（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
+  /// 悬浮窗尺寸基准（与悬浮窗侧约定一致；主窗/子窗共用的唯一定义处）。
   ///
-  /// 窗口纵向分三带：[0, overlayMenuPanelHeight] 是**常驻菜单带**（平时
-  /// 透明且穿透，快捷菜单展开时菜单淡入于此），之下 [overlayWindowHeight
-  /// - overlayHeight, overlayWindowHeight] 是卡片带（= 历史 124px 窗口的
-  /// 全部内容：工具栏/解锁胶囊专属带 + 歌词带）。
+  /// 宽度恒定；高度自 v3.0.11 起同样恒定（[overlayFixedWindowHeight]，见
+  /// 该常量注释），下列常量为**下限/单行**基准值，同时是位置语义迁移的
+  /// 冻结锚点。窗口纵向分两带：[0, overlayMenuPanelHeight] 是**常驻菜单带**
+  /// （平时透明且穿透，快捷菜单展开时菜单淡入于此），之下直到窗口底边是
+  /// 卡片带（= 历史 124px 窗口的全部内容：工具栏/解锁胶囊专属带 + 歌词带，
+  /// 底边对齐、随模式/字号在预分配空间内伸缩）。
   ///
   /// 历史版本窗口只有卡片带高度（124），快捷菜单展开/收起时原生
   /// setBounds 在 124↔296 间切换——Windows DWM 在 Flutter 新帧产出前会用
@@ -83,16 +86,77 @@ class WindowsDesktopLyricsBridge {
   static const double overlayMenuPanelHeight = 212;
 
   /// 窗口常驻总高度（菜单带 + 卡片带）。窗口不再随菜单收展改变尺寸。
+  ///
+  /// v3.0.11 起现行窗口恒为 [overlayFixedWindowHeight]（408，容纳最大
+  /// 卡片）；本值 336 是 v3.0.10 及之前所有存量位置对应的窗口高度，仅
+  /// 供位置语义迁移（四）换算（旧顶边 + 336 = 底边），不再用于建窗。
   static const double overlayWindowHeight =
       overlayHeight + overlayMenuPanelHeight;
+
+  /// 歌词带/卡片随模式与字号在 **Flutter 层**伸缩（v3.0.11 起），但窗口
+  /// 高度恒定：[overlayFixedWindowHeight] = 菜单带 212 + 最大卡片 196
+  /// （工具栏 36 + 歌词带上限 160）。卡片贴窗口底、在预分配的透明空间内
+  /// 向上伸缩，原生窗口**永不因设置变化 resize** —— 透明无框窗原生
+  /// resize 时 DWM 会用旧帧拉伸合成新尺寸（Alacritty#7898 同源），历史
+  /// 上"菜单收展原生 124↔296 切换"因此闪帧，收展改纯 Flutter 动画后才
+  /// 消除；字号动态高度若走原生 resize 会原样复发（步进连点一卡一卡）。
+  ///
+  /// 歌词带高度函数族（单行恒 88；双行 = fontSize×1.4×(1+stagger)+8，
+  /// 钳 [88,160]）只约束 Flutter 布局，与原生窗口尺寸解耦。默认字号 24
+  /// 落钳制下限 88 —— 存量用户默认观感零变化；字号调大歌词带在窗口内
+  /// 长高、多出的窗口空间透明且穿透（菜单收起态）。
+  static const double dualLineStaggerFactor = 0.9;
+  static const double lyricsLineHeightFactor = 1.4;
+  static const double maxOverlayLyricsHeight = 160;
+
+  /// 歌词带高度（逻辑 px）：单行恒 [overlayLyricsHeight]；双行 =
+  /// 上行 + 下行（×[dualLineStaggerFactor]）两行行高 + 行距 4 + 呼吸 4
+  /// （公式合计 +8），钳制 [overlayLyricsHeight, maxOverlayLyricsHeight]。
+  static double overlayLyricsHeightFor(DesktopLyricsSettings settings) {
+    if (settings.singleLine) return overlayLyricsHeight;
+    final h =
+        settings.fontSize *
+            lyricsLineHeightFactor *
+            (1 + dualLineStaggerFactor) +
+        8.0;
+    return h.clamp(overlayLyricsHeight, maxOverlayLyricsHeight);
+  }
+
+  /// 卡片带高度（工具栏带 + 歌词带）。
+  static double overlayHeightFor(DesktopLyricsSettings settings) =>
+      lyricsTopInset + overlayLyricsHeightFor(settings);
+
+  /// 窗口常驻总高度（菜单带 + 最大卡片带）。设置变化只在 Flutter 层
+  /// 重排，原生窗口高度恒为此值。
+  static const double overlayFixedWindowHeight =
+      overlayMenuPanelHeight + lyricsTopInset + maxOverlayLyricsHeight;
+
+  /// screenRetriever 不可用（异常/插件未注册）时的降级停靠原点（**底边
+  /// 左角**语义）：经 [overlayFrameForBottomOrigin] 换算后窗口应完整落在
+  /// 虚拟屏 (100, 100) 内侧，与历史顶边语义时代的固定位置 (100,100) 同款
+  /// 落点。此值同时充当 [clampOverlayOriginToVisibleAreas] 在无显示器信息
+  /// 时的 [fallback]：若误用顶边语义，窗口会大半移出屏外，且（有存量
+  /// 位置时）prefs 会被回写成同款坏值。
+  static const Offset overlayDegradedFallbackOrigin =
+      Offset(100, 100 + overlayFixedWindowHeight);
 
   /// 悬浮窗拖动位置的持久化键（子窗 window_manager 逻辑坐标；主窗侧
   /// 迁移+钳制后回写，子窗启动时读取恢复）。
   ///
-  /// 存值恒为**现行窗口语义**（窗口顶边，含常驻菜单带）——由下面的三枚
-  /// 一次性迁移键标记，见 [markOverlayPositionSemanticsCurrent] 的写入职责。
+  /// 存值恒为**现行窗口语义**：歌词带动态化之前是「窗口顶边」（含常驻
+  /// 菜单带），之后改为**窗口底边**（= 卡片底边；窗口高度现已恒定，底边
+  /// 语义保留是对窗口高度未来演进——如菜单带再加行——的免疫）——由
+  /// 下面的一次性迁移键标记，见
+  /// [markOverlayPositionSemanticsCurrent] 的写入职责。
   static const String windowLeftPrefKey = 'desktop_lyrics.window.left';
   static const String windowTopPrefKey = 'desktop_lyrics.window.top';
+
+  /// 窗口底边语义的持久化键（迁移（四）起启用，旧 top 键停写保留供迁移
+  /// 换算）。已知取舍：用户降级回旧版移动窗口后再升级，旧版只写 top 键，
+  /// 本仓仍优先读底边键，位置会回退到降级前——换取正向升级路径的稳定。
+  static const String windowBottomLeftPrefKey =
+      'desktop_lyrics.window.bottom.left';
+  static const String windowBottomYPrefKey = 'desktop_lyrics.window.bottom.y';
 
   /// 位置语义迁移标记（下面三枚一次性开关）：三者为 true 表示 prefs 里的
   /// [windowTopPrefKey] 已是**现行窗口语义**，无需再迁移。
@@ -128,6 +192,16 @@ class WindowsDesktopLyricsBridge {
   /// 「歌词进度」行加入前的菜单带高度（[overlayMenuPanelHeight] 的旧值，
   /// 仅迁移（三）计算差值用）。
   static const double overlayMenuPanelHeightBeforeProgressRow = 172;
+
+  /// 位置语义迁移（四）：v3.0.10 及之前窗口恒为 [overlayWindowHeight]
+  /// （336）高、记忆窗口顶边；现行窗口恒为 [overlayFixedWindowHeight]、
+  /// 改存**窗口底边**（= 卡片底边，卡片屏幕位置的自然锚点）。存量顶边
+  /// 一次性加 336 换算为底边（冻结高度即迁移当时的 [overlayWindowHeight]）。
+  ///
+  /// 迁移（四）一次性开关：为 true 表示 prefs 已有 [windowBottomYPrefKey]
+  /// 底边坐标（由本函数迁移写入或子窗落盘的活坐标），旧 top 键不再读取。
+  static const String windowBottomMigratedPrefKey =
+      'desktop_lyrics.window.bottom_migrated';
 
   /// 钳制时至少保留的可见像素（与主窗 kMinVisibleEdge 语义一致）。
   static const double _kMinVisibleEdge = 80;
@@ -442,9 +516,10 @@ class WindowsDesktopLyricsBridge {
     });
   }
 
-  /// 置位三枚一次性位置语义迁移键。
+  /// 置位四枚一次性位置语义迁移键。
   ///
-  /// 调用语义：**此刻 prefs 里存储的 [windowTopPrefKey] 已是现行窗口语义**。
+  /// 调用语义：**此刻 prefs 里的位置坐标已是现行窗口语义**（迁移（四）后
+  /// 为 [windowBottomYPrefKey] 底边；此前为 [windowTopPrefKey] 顶边）。
   /// 只允许两类调用点：
   /// 1. 主窗 [loadStoredOverlayOrigin] 完成存量迁移/钳制之后（无存量坐标的
   ///    全新安装也要置位：此刻起 prefs 里不会再有旧语义坐标，之后由子窗落
@@ -459,7 +534,7 @@ class WindowsDesktopLyricsBridge {
     SharedPreferences prefs,
   ) async {
     // 已置位就不再写盘：prefs 每次 set 都会整文件落盘，而稳态下（升级后
-    // 的每一次拖动/关窗）这三枚键早已为 true，这里省掉 3 次无谓写盘。
+    // 的每一次拖动/关窗）这四枚键早已为 true，这里省掉无谓写盘。
     if (prefs.getBool(windowInsetMigratedPrefKey) != true) {
       await prefs.setBool(windowInsetMigratedPrefKey, true);
     }
@@ -469,11 +544,14 @@ class WindowsDesktopLyricsBridge {
     if (prefs.getBool(windowMenuProgressRowMigratedPrefKey) != true) {
       await prefs.setBool(windowMenuProgressRowMigratedPrefKey, true);
     }
+    if (prefs.getBool(windowBottomMigratedPrefKey) != true) {
+      await prefs.setBool(windowBottomMigratedPrefKey, true);
+    }
   }
 
   /// 读取存量悬浮窗位置 → 一次性语义迁移 → 钳制可见区 → 回写 prefs
-  /// （坐标 + 三枚语义键）。返回最终逻辑原点；无存量位置（全新安装）返回
-  /// null，由调用方落主屏默认落点。
+  /// （坐标 + 四枚语义键）。返回最终**逻辑底边左角**（窗口底边语义）；
+  /// 无存量位置（全新安装）返回 null，由调用方落主屏默认落点。
   ///
   /// 记忆位置的主窗侧钳制不可省：悬浮窗侧（子引擎）只有 window_manager
   /// 可用（无 screen_retriever 插件注册），无法自行判断显示器配置变化，
@@ -483,13 +561,35 @@ class WindowsDesktopLyricsBridge {
   /// **必须先于 createWindow 调用**（见 [_showInner]）：子窗启动时直接读
   /// prefs 恢复位置，迁移晚于建窗会让子窗读到迁移前的旧语义坐标，之后它
   /// 落盘的"活坐标"就把旧语义永久焊死。
+  ///
+  /// [windowHeight] 为窗口完整逻辑高度（现行恒为 [overlayFixedWindowHeight]）：
+  /// 钳制按窗口完整矩形判定，由调用方传入本会话实际建窗的高度——窗口
+  /// 高度若再演进（如菜单带加行），随之传新值即自动兼容。
   @visibleForTesting
   static Future<Offset?> loadStoredOverlayOrigin({
     required List<Rect> visibleAreas,
     required Offset fallback,
+    required double windowHeight,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final bottomLeft = prefs.getDouble(windowBottomLeftPrefKey);
+      final bottomY = prefs.getDouble(windowBottomYPrefKey);
+      if (bottomLeft != null && bottomY != null) {
+        // 底边语义（迁移（四）后由本函数或子窗落盘写入）：直接钳制回写。
+        final clamped = clampOverlayOriginToVisibleAreas(
+          Offset(bottomLeft, bottomY),
+          visibleAreas,
+          fallback: fallback,
+          windowHeight: windowHeight,
+        );
+        if (clamped.dx != bottomLeft || clamped.dy != bottomY) {
+          await prefs.setDouble(windowBottomLeftPrefKey, clamped.dx);
+          await prefs.setDouble(windowBottomYPrefKey, clamped.dy);
+        }
+        await markOverlayPositionSemanticsCurrent(prefs);
+        return clamped;
+      }
       final storedLeft = prefs.getDouble(windowLeftPrefKey);
       final storedTop = prefs.getDouble(windowTopPrefKey);
       if (storedLeft == null || storedTop == null) {
@@ -521,17 +621,19 @@ class WindowsDesktopLyricsBridge {
         top -=
             overlayMenuPanelHeight - overlayMenuPanelHeightBeforeProgressRow;
       }
+      // 一次性语义迁移（四）：336 高时代记忆的顶边 + 迁移当时的窗口高度 =
+      // 窗口底边（卡片底边）。**必须落盘新键**：语义键在本路径置位
+      // 后旧 top 键即冻结，若因"钳制前后一致"跳过写入，下次启动会读不到
+      // 底边键、把旧 top 键再迁移一遍，位置每次启动 +336 漂移。
+      final bottom = top + overlayWindowHeight;
       final clamped = clampOverlayOriginToVisibleAreas(
-        Offset(storedLeft, top),
+        Offset(storedLeft, bottom),
         visibleAreas,
         fallback: fallback,
+        windowHeight: windowHeight,
       );
-      // 迁移+钳制的最终值与原值一致时不必重复写盘：少一次写盘就少一个
-      // “坐标已写、语义键未写”的中间态窗口（进程随时可能被硬终止）。
-      if (clamped.dx != storedLeft || clamped.dy != storedTop) {
-        await prefs.setDouble(windowLeftPrefKey, clamped.dx);
-        await prefs.setDouble(windowTopPrefKey, clamped.dy);
-      }
+      await prefs.setDouble(windowBottomLeftPrefKey, clamped.dx);
+      await prefs.setDouble(windowBottomYPrefKey, clamped.dy);
       await markOverlayPositionSemanticsCurrent(prefs);
       return clamped;
     } on Exception catch (e) {
@@ -544,14 +646,17 @@ class WindowsDesktopLyricsBridge {
   ///
   /// 优先恢复记忆的拖动位置；无记忆时落主显示器底部居中。存量位置的读取/
   /// 语义迁移/钳制/回写全部由 [loadStoredOverlayOrigin] 承担，且必须先于
-  /// createWindow 完成。
+  /// createWindow 完成。记忆/默认位置统一为**底边左角**语义（对窗口高度
+  /// 未来演进免疫的锚点），在此经 [overlayFrameForBottomOrigin] 换算顶边。
   Future<Rect> _initialFrame() async {
-    var origin = const Offset(100, 100);
+    var origin = overlayDegradedFallbackOrigin;
     var scaleFactor = 1.0;
     var visibleAreas = const <Rect>[];
     // 逻辑可见区 → 该屏缩放比：混合缩放多屏下，记忆位置落在副屏时必须按
     // 副屏缩放换算（此前恒用主屏缩放，副屏上会整体偏移）。
     var displayScales = const <({Rect area, double scale})>[];
+    // 窗口高度恒定（容纳最大卡片）；设置变化只在 Flutter 层重排。
+    const windowHeight = overlayFixedWindowHeight;
     try {
       final primary = await screenRetriever.getPrimaryDisplay();
       final all = await screenRetriever.getAllDisplays();
@@ -569,15 +674,12 @@ class WindowsDesktopLyricsBridge {
           ),
       ];
       scaleFactor = (primary.scaleFactor ?? 1.0).toDouble();
-      // 默认停靠：卡片带底部距主屏底边 80px（与历史版本一致），窗口顶边
-      // 之上再多留常驻菜单带的高度。
+      // 默认停靠：窗口底边（= 卡片带底部）距主屏底边 80px（与历史版本
+      // 一致；旧式顶边算法 top = bottom - overlayHeight - 80 - 菜单带，
+      // 换算底边恰好同为 bottom - 80）。
       origin = Offset(
         primaryArea.left + (primaryArea.width - overlayWidth) / 2,
-        primaryArea.top +
-            primaryArea.height -
-            overlayHeight -
-            80 -
-            overlayMenuPanelHeight,
+        primaryArea.top + primaryArea.height - 80,
       );
     } on Exception catch (e) {
       debugPrint('[桌面歌词主窗] 获取显示器信息失败，用固定位置: $e');
@@ -586,17 +688,15 @@ class WindowsDesktopLyricsBridge {
     final storedOrigin = await loadStoredOverlayOrigin(
       visibleAreas: visibleAreas,
       fallback: origin,
+      windowHeight: windowHeight,
     );
     if (storedOrigin != null) {
       origin = storedOrigin;
       scaleFactor =
           scaleForLogicalOrigin(displayScales, origin) ?? scaleFactor;
     }
-    // desktop_multi_window 的 setFrame 底层是 MoveWindow（物理像素），
-    // 而 screen_retriever/window_manager 记忆位置都是逻辑坐标：必须按
-    // **窗口最终落点所在显示器**的缩放换算（见 scaleForLogicalOrigin）。
-    return Offset(origin.dx * scaleFactor, origin.dy * scaleFactor) &
-        Size(overlayWidth * scaleFactor, overlayWindowHeight * scaleFactor);
+    // 底边左角 → 顶边左角 + 物理像素换算（纯函数，供单测）。
+    return overlayFrameForBottomOrigin(origin, scaleFactor: scaleFactor);
   }
 
   /// 取逻辑原点所在显示器的缩放比（纯函数，供单测）。
@@ -616,6 +716,26 @@ class WindowsDesktopLyricsBridge {
     return null;
   }
 
+  /// 底边左角原点 → 供 desktop_multi_window setFrame 的窗口 frame（物理
+  /// 像素，纯函数，供单测）。
+  ///
+  /// desktop_multi_window 的 setFrame 底层是 MoveWindow（物理像素），而
+  /// screen_retriever/window_manager 记忆位置都是逻辑坐标：必须按**窗口
+  /// 最终落点所在显示器**的缩放（[scaleForLogicalOrigin]）换算。setFrame
+  /// 吃窗口顶边，先按恒定窗口高度自底边反推顶边。
+  @visibleForTesting
+  static Rect overlayFrameForBottomOrigin(
+    Offset origin, {
+    required double scaleFactor,
+  }) {
+    final top = origin.dy - overlayFixedWindowHeight;
+    return Offset(origin.dx * scaleFactor, top * scaleFactor) &
+        Size(
+          overlayWidth * scaleFactor,
+          overlayFixedWindowHeight * scaleFactor,
+        );
+  }
+
   /// 显示器的可见区域：优先 visiblePosition/visibleSize，缺失时退回原点/整屏。
   static Rect _visibleAreaOf(Display display) {
     final position = display.visiblePosition ?? Offset.zero;
@@ -623,20 +743,30 @@ class WindowsDesktopLyricsBridge {
     return Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
   }
 
-  /// 把悬浮窗原点钳制到至少留出 [_kMinVisibleEdge] 可见边（纯函数，供单测）。
+  /// 把悬浮窗**底边左角**钳制到至少留出 [_kMinVisibleEdge] 可见边（纯函数，
+  /// 供单测）。
   ///
-  /// 与任一可见区域有足量交集 → 原样返回；否则钳入第一个区域
-  /// （右/下至少留 80px，窗口比区域宽时贴左/上）。无显示器信息时
-  /// 返回 [fallback]。
+  /// 底边语义（= 卡片底边）：模式/字号引起的窗口高度变化都锚定这条边，
+  /// 钳制判定的完整窗口矩形按 [windowHeight]（当前设置的窗口逻辑高度）
+  /// 从底边反推顶边构建。与任一可见区域有足量交集 → 原样返回；否则钳入
+  /// 第一个区域（右/下至少留 80px，窗口比区域宽时贴左/上）。无显示器
+  /// 信息时返回 [fallback]。
   @visibleForTesting
   static Offset clampOverlayOriginToVisibleAreas(
     Offset origin,
     List<Rect> visibleAreas, {
     required Offset fallback,
+    required double windowHeight,
   }) {
     if (visibleAreas.isEmpty) return fallback;
-    // 钳制按常驻窗口（含菜单带）的完整矩形判定可见性。
-    final windowRect = origin & const Size(overlayWidth, overlayWindowHeight);
+    // 钳制按常驻窗口（含菜单带）的完整矩形判定可见性；origin 是底边
+    // 左角，顶边 = 底边 - 窗口高度。
+    final windowRect = Rect.fromLTWH(
+      origin.dx,
+      origin.dy - windowHeight,
+      overlayWidth,
+      windowHeight,
+    );
     for (final area in visibleAreas) {
       final intersection = area.intersect(windowRect);
       if (intersection.width >= _kMinVisibleEdge &&
@@ -648,9 +778,17 @@ class WindowsDesktopLyricsBridge {
     final clampedLeft = origin.dx
         .clamp(area.left, math.max(area.left, area.right - _kMinVisibleEdge))
         .toDouble();
-    final clampedTop = origin.dy
-        .clamp(area.top, math.max(area.top, area.bottom - _kMinVisibleEdge))
+    // 底边语义：窗口自底边向上延伸，底边钳入 [区域顶 + 80, 区域底 - 80]
+    // 才保证至少 80px 窗口可见（旧顶边语义钳 [区域顶, 区域底 - 80]）。
+    final clampedBottom = origin.dy
+        .clamp(
+          area.top + _kMinVisibleEdge,
+          math.max(
+            area.top + _kMinVisibleEdge,
+            area.bottom - _kMinVisibleEdge,
+          ),
+        )
         .toDouble();
-    return Offset(clampedLeft, clampedTop);
+    return Offset(clampedLeft, clampedBottom);
   }
 }
