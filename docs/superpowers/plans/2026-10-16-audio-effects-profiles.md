@@ -355,7 +355,7 @@ private fun releaseVirtualizer() {
 
 - [ ] **Step 3: 编译与静态检查**
 
-Run: `cd android && ./gradlew.bat compileDebugKotlin`（Git Bash；回到根目录再跑下一步）
+Run: `cd android && ./gradlew.bat :app:compileImpellerDebugKotlin`（Git Bash；app 模块带 impeller/skia flavor，裸 `compileDebugKotlin` 只匹配插件子模块不编译 MainActivity.kt，是空转门。回到根目录再跑下一步）
 Expected: BUILD SUCCESSFUL。
 
 Run: `flutter analyze`
@@ -1162,7 +1162,7 @@ git commit -m "feat(effects): 桌面端经 mpv 滤镜链补齐均衡器与环绕
 
 Run: `flutter analyze` → 无新增告警。
 Run: `flutter test` → 全绿。
-Run: `cd android && ./gradlew.bat compileDebugKotlin` → BUILD SUCCESSFUL（确认 Task 2/3 期间未破坏）。
+Run: `cd android && ./gradlew.bat :app:compileImpellerDebugKotlin` → BUILD SUCCESSFUL（确认 Task 2/3 期间未破坏；裸 compileDebugKotlin 是空转门，见 Task 2 Step 3 说明）。
 
 - [ ] **Step 2: 检查遗留**
 
