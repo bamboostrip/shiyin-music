@@ -274,40 +274,74 @@ class _EqualizerPanel extends StatelessWidget {
   }
 
   Future<void> _showPresetPicker(BuildContext context) async {
-    final preset = await showModalBottomSheet<AudioEffectPreset>(
+    final result = await showModalBottomSheet<Object>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
+        final sheetTheme = Theme.of(sheetContext);
         return Material(
-          color: Theme.of(sheetContext).colorScheme.surface,
+          color: sheetTheme.colorScheme.surface,
           child: SafeArea(
             top: false,
-            child: ListView.separated(
+            child: ListView(
               shrinkWrap: true,
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              itemCount: PlayerController.equalizerPresets.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final preset = PlayerController.equalizerPresets[index];
-                return ListTile(
-                  leading: const Icon(Icons.tune_rounded),
-                  title: Text(preset.name),
-                  trailing: player.equalizerPresetName == preset.name
-                      ? Icon(
-                          Icons.check_rounded,
-                          color: Theme.of(context).colorScheme.primary,
-                        )
-                      : null,
-                  onTap: () => Navigator.of(sheetContext).pop(preset),
-                );
-              },
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(
+                    '音效',
+                    style: sheetTheme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                for (final profile in PlayerController.audioEffectProfiles)
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome_rounded),
+                    title: Text(profile.name),
+                    subtitle: Text(profile.description),
+                    trailing: player.equalizerPresetName == profile.name
+                        ? Icon(
+                            Icons.check_rounded,
+                            color: sheetTheme.colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () => Navigator.of(sheetContext).pop(profile),
+                  ),
+                const Divider(height: 24),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(
+                    '均衡器预设',
+                    style: sheetTheme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                for (final preset in PlayerController.equalizerPresets)
+                  ListTile(
+                    leading: const Icon(Icons.tune_rounded),
+                    title: Text(preset.name),
+                    dense: true,
+                    trailing: player.equalizerPresetName == preset.name
+                        ? Icon(
+                            Icons.check_rounded,
+                            color: sheetTheme.colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () => Navigator.of(sheetContext).pop(preset),
+                  ),
+              ],
             ),
           ),
         );
       },
     );
-    if (preset != null) {
-      await player.applyEqualizerPreset(preset);
+    if (result is AudioEffectProfile) {
+      await player.applyAudioEffectProfile(result);
+    } else if (result is AudioEffectPreset) {
+      await player.applyEqualizerPreset(result);
     }
   }
 }
@@ -408,6 +442,8 @@ class _EnhancePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final bassPercent = (player.bassBoostStrength * 100).round();
+    final surroundPercent = (player.surroundStrength * 100).round();
+    final surroundEnabled = player.surroundEnabled;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
@@ -444,6 +480,51 @@ class _EnhancePanel extends StatelessWidget {
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 26),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          secondary: Icon(
+            Icons.surround_sound_rounded,
+            color: colorScheme.primary,
+          ),
+          title: const Text('全景环绕'),
+          subtitle: Text(
+            surroundEnabled ? '环绕 $surroundPercent%' : '关闭',
+          ),
+          value: surroundEnabled,
+          onChanged: player.setSurroundEnabled,
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            const Text('环绕'),
+            Expanded(
+              child: Slider(
+                value: player.surroundStrength,
+                onChanged: surroundEnabled
+                    ? (value) => player.setSurroundStrength(
+                          value,
+                          persist: false,
+                        )
+                    : null,
+                onChangeEnd: surroundEnabled
+                    ? player.setSurroundStrength
+                    : null,
+              ),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text(
+                '$surroundPercent%',
+                textAlign: TextAlign.end,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
           ],
