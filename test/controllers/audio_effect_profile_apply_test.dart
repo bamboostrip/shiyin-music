@@ -190,4 +190,54 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
   });
+
+  test('档案清零强度后开启开关回退字段默认强度，非零强度不被改动', () async {
+    // 桌面分支锁定机制同上：空登记表 no-op，不触达通道。
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+
+    final fakeAudioPlayer = _FakeAudioPlayer();
+    final handler = _RecordingAudioHandler(fakeAudioPlayer);
+    final api = _MockMusicApi();
+    final controller = PlayerController(api, handler);
+    addTearDown(() {
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+    });
+
+    // 等构造函数 unawaited 的 _restoreSettings 落定（同上）。
+    for (var i = 0; i < 50; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    // 清澈人声档案不启用低音/环绕且强度为 0：此后直接打开开关若不回退
+    // 默认强度，会是开着却 0% 的死控件（须拖滑条才生效）。
+    final profile = PlayerController.audioEffectProfiles
+        .firstWhere((p) => p.name == '清澈人声');
+    await controller.applyAudioEffectProfile(profile);
+    expect(controller.bassBoostEnabled, isFalse);
+    expect(controller.bassBoostStrength, closeTo(0, 0.001));
+    expect(controller.surroundEnabled, isFalse);
+    expect(controller.surroundStrength, closeTo(0, 0.001));
+
+    await controller.setSurroundEnabled(true);
+    await controller.setBassBoostEnabled(true);
+    expect(controller.surroundStrength, closeTo(0.6, 0.001));
+    expect(controller.bassBoostStrength, closeTo(0.45, 0.001));
+
+    // 非零强度时开关往返不动用户强度：全景环绕的 0.8 关再开仍在。
+    final surroundProfile = PlayerController.audioEffectProfiles
+        .firstWhere((p) => p.name == '全景环绕');
+    await controller.applyAudioEffectProfile(surroundProfile);
+    await controller.setSurroundEnabled(false);
+    await controller.setSurroundEnabled(true);
+    expect(controller.surroundStrength, closeTo(0.8, 0.001));
+
+    // 清理持久化，避免污染其它用例。
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+  });
 }

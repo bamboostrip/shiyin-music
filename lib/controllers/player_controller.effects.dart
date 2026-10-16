@@ -28,8 +28,13 @@ mixin _PlayerEffects on _PlayerControllerBase {
       return;
     }
     bassBoostEnabled = enabled;
+    // 档案可将强度清零，开启即生效需要非零默认（否则开关开着却是 0%）。
+    if (enabled && bassBoostStrength < 0.05) {
+      bassBoostStrength = 0.45;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_bassBoostEnabledSettingKey, enabled);
+    await prefs.setDouble(_bassBoostStrengthSettingKey, bassBoostStrength);
     await _applyBassBoost();
     notifyListeners();
   }
@@ -180,8 +185,13 @@ mixin _PlayerEffects on _PlayerControllerBase {
       return;
     }
     surroundEnabled = enabled;
+    // 档案可将强度清零，开启即生效需要非零默认（否则开关开着却是 0%）。
+    if (enabled && surroundStrength < 0.05) {
+      surroundStrength = 0.6;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_surroundEnabledSettingKey, enabled);
+    await prefs.setDouble(_surroundStrengthSettingKey, surroundStrength);
     await _applySurround();
     notifyListeners();
   }
