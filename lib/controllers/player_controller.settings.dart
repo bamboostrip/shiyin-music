@@ -362,6 +362,10 @@ mixin _PlayerSettings on _PlayerControllerBase {
         prefs.getBool(_bassBoostEnabledSettingKey) ?? bassBoostEnabled;
     bassBoostStrength =
         prefs.getDouble(_bassBoostStrengthSettingKey) ?? bassBoostStrength;
+    surroundEnabled =
+        prefs.getBool(_surroundEnabledSettingKey) ?? surroundEnabled;
+    surroundStrength =
+        prefs.getDouble(_surroundStrengthSettingKey) ?? surroundStrength;
     audioInterruptionEnabled =
         prefs.getBool(_audioInterruptionEnabledSettingKey) ??
         audioInterruptionEnabled;
@@ -452,6 +456,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     unawaited(_refreshEqualizerConfig());
     unawaited(_applyEqualizer());
     unawaited(_applyBassBoost());
+    unawaited(_applySurround());
     // 映射恢复完再对齐当前歌：构造函数里 _restorePlaybackState 也是
     // unawaited 发起，可能已经先把 currentSong 落定（那时映射还是空的）。
     // 只在映射里确有此歌时才装载：当前歌没有记录意味着原始进度，直接调用

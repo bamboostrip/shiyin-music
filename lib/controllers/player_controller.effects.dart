@@ -4,6 +4,7 @@ part of 'player_controller.dart';
 mixin _PlayerEffects on _PlayerControllerBase {
   bool get isAudioEffectsSupported => _audioEffects.isAudioEffectsSupported;
   bool get isBassBoostSupported => _audioEffects.isBassBoostSupported;
+  bool get isSurroundSupported => _audioEffects.isSurroundSupported;
   bool get loudnessEnabled => _loudness.isEnabled;
   bool get isLoudnessAnalysisSupported => _loudness.isAnalysisSupported;
   String get audioEffectsLabel {
@@ -15,6 +16,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
     }
     if (bassBoostEnabled) {
       return 'Bass ${(bassBoostStrength * 100).round()}%';
+    }
+    if (surroundEnabled) {
+      return '环绕 ${(surroundStrength * 100).round()}%';
     }
     return '关闭';
   }
@@ -162,6 +166,79 @@ mixin _PlayerEffects on _PlayerControllerBase {
           _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
       enabled: bassBoostEnabled,
       strength: bassBoostStrength,
+    );
+  }
+
+  Future<void> setSurroundEnabled(bool enabled) async {
+    if (surroundEnabled == enabled) {
+      return;
+    }
+    surroundEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_surroundEnabledSettingKey, enabled);
+    await _applySurround();
+    notifyListeners();
+  }
+
+  Future<void> setSurroundStrength(
+    double strength, {
+    bool persist = true,
+  }) async {
+    final nextStrength = strength.clamp(0.0, 1.0);
+    if ((surroundStrength - nextStrength).abs() < 0.001) {
+      return;
+    }
+    surroundStrength = nextStrength;
+    if (surroundEnabled) {
+      unawaited(_applySurround());
+    }
+    notifyListeners();
+
+    if (persist) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_surroundStrengthSettingKey, nextStrength);
+    }
+  }
+
+  /// 应用命名音效档案：EQ/低音/环绕一次性落到位（issue #1 酷狗式音效的
+  /// 本仓实现）。应用后各子项仍可单独微调，微调 EQ 会走既有「自定义」路径。
+  Future<void> applyAudioEffectProfile(AudioEffectProfile profile) async {
+    equalizerEnabled = true;
+    equalizerPresetName = profile.name;
+    equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
+      profile.eqLevels,
+      equalizerLevels.length,
+    );
+    bassBoostEnabled = profile.bassBoost;
+    bassBoostStrength = profile.bassStrength;
+    surroundEnabled = profile.surround;
+    surroundStrength = profile.surroundStrength;
+    await _persistEqualizer();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_bassBoostEnabledSettingKey, bassBoostEnabled);
+    await prefs.setDouble(_bassBoostStrengthSettingKey, bassBoostStrength);
+    await prefs.setBool(_surroundEnabledSettingKey, surroundEnabled);
+    await prefs.setDouble(_surroundStrengthSettingKey, surroundStrength);
+    await _applyEqualizer();
+    await _applyBassBoost();
+    await _applySurround();
+    notifyListeners();
+  }
+
+  /// 与低音增强同范式：sessionId 变化/启动恢复/开关时把环绕状态挂到当前
+  /// 音频会话。本任务桌面门未放开（isSurroundSupported 仍 Android-only），
+  /// 桌面分支就位但走不到，Task 5 接管。
+  @override
+  Future<void> _applySurround() async {
+    if (!isSurroundSupported) {
+      return;
+    }
+
+    await _audioEffects.configureVirtualizer(
+      audioSessionId:
+          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+      enabled: surroundEnabled,
+      strength: surroundStrength,
     );
   }
 

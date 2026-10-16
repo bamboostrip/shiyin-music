@@ -124,6 +124,9 @@ const _equalizerLevelsSettingKey = 'settings.equalizer_levels';
 const _equalizerPresetSettingKey = 'settings.equalizer_preset';
 const _bassBoostEnabledSettingKey = 'settings.bass_boost_enabled';
 const _bassBoostStrengthSettingKey = 'settings.bass_boost_strength';
+// 环绕开关/强度与低音增强同范式落盘（见 _applySurround 与 _restoreSettings）。
+const _surroundEnabledSettingKey = 'settings.surround_enabled';
+const _surroundStrengthSettingKey = 'settings.surround_strength';
 const _audioInterruptionEnabledSettingKey =
     'settings.audio_interruption_enabled';
 const _autoResumeAfterInterruptionSettingKey =
@@ -426,6 +429,7 @@ class PlayerController extends _PlayerControllerBase
       unawaited(_refreshEqualizerConfig());
       unawaited(_applyEqualizer());
       unawaited(_applyBassBoost());
+      unawaited(_applySurround());
       unawaited(_applyLoudnessGain());
     });
     unawaited(_setupAudioSessionListeners());
@@ -487,6 +491,16 @@ class PlayerController extends _PlayerControllerBase
             _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
         enabled: false,
         strength: bassBoostStrength,
+      ),
+    );
+    // 环绕同理：dispose 必须显式释放，否则释放sessionId 后效果器仍挂着
+    // 已销毁会话，下次创建会话时系统可能复用旧强度（与低音增强同范式）。
+    unawaited(
+      _audioEffects.configureVirtualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: false,
+        strength: surroundStrength,
       ),
     );
     unawaited(_loudness.cancelAnalysis());
@@ -709,6 +723,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   );
   bool bassBoostEnabled = false;
   double bassBoostStrength = 0.45;
+  bool surroundEnabled = false;
+  double surroundStrength = 0.6;
   bool audioInterruptionEnabled = true;
   bool autoResumeAfterInterruption = false;
   bool autoPlayOnDeviceConnected = false;
@@ -1002,6 +1018,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Future<void> _applyEqualizer();
 
   Future<void> _applyBassBoost();
+
+  Future<void> _applySurround();
 
   Future<void> _analyzeAndApplyLoudness({
     required Song song,
