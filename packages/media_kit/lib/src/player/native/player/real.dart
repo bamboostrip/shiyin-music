@@ -905,6 +905,7 @@ class NativePlayer extends PlatformPlayer {
     if (disposed) {
       return;
     }
+    await waitForPlayerInitialization;
     _extraAudioFilters = List<String>.of(filters);
     await _updateAudioFilters();
   }
