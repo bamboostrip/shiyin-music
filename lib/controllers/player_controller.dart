@@ -337,6 +337,16 @@ class PlayerController extends _PlayerControllerBase
       isPlaying =
           value.playing &&
           value.processingState != ProcessingState.completed;
+      // 桌面滤镜链重放：系统停止（audio_service stop）/播放错误转 idle
+      // 会让 just_audio 销毁并重建平台实例（setPlatform → 全新
+      // MediaKitPlayer），新实例的 mpv af 从零开始，音效链静默丢失；Android
+      // 有 sessionId 重挂钩子，桌面没有。趁每次真实起播（false→true 跃迁）
+      // 幂等补写整链——_applyDesktopAudioFilters 内部按桌面门+在册实例自
+      // 守卫，重复写同一条 af 无副作用。
+      if (isPlaying && !_isPlayingForDesktopFilters) {
+        unawaited(_applyDesktopAudioFilters());
+      }
+      _isPlayingForDesktopFilters = isPlaying;
       // 「重新出声作废完成去重」：系统播放键（通知栏/锁屏/耳机媒体键）曲末
       // 重播不经 togglePlay/_resetCompletionLatchForReplay（应用内入口会自
       // 己清），若不随这轮真实起播作废上一轮的完成标记，这首第二次播完的
@@ -667,6 +677,11 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool isPlaying = false;
   bool isBuffering = false;
   bool isPreparing = false;
+
+  /// 上一事件周期的播放态副本，专供桌面滤镜链重放判跃迁（见 _stateSub
+  /// 监听里的 false→true 钩子）：isPlaying 在监听入口已被本事件覆盖，
+  /// 不能拿它当历史态。
+  bool _isPlayingForDesktopFilters = false;
 
   /// 换源深度计数（并发 playSong 各自持有 +1/-1）。
   ///
