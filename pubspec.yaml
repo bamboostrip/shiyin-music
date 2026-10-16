@@ -38,8 +38,10 @@ dependencies:
   #    deactivate，在途的下一首 load 会被打断）；
   # 7) completed 流的 false 分支 / seek 让 processingState 离开 completed，
   #    且 _position 只在真 completed 时清零（否则 seek 目标被自己清零）；
-  # 8) 新增 setAudioEffectFilters 透传（桌面音效 EQ/环绕滤镜链，与
-  #    变速 scaletempo 在 media_kit 侧合并写 af，见 media_kit 补丁）；
+  # 8) 新增静态实例登记表（构造登记入 _activeInstances、release 摘除，
+  #    供 app 侧触达 just_audio 不公开的平台实例）+ setAudioEffectFilters
+  #    透传（桌面音效 EQ/环绕滤镜链，与变速 scaletempo 在 media_kit 侧
+  #    合并写 af，见 media_kit 补丁）；
   # 升级上游版本时八处都需确认是否已包含/需重新移植。
   just_audio_media_kit: ^2.1.0
   media_kit_libs_linux: ^1.2.1

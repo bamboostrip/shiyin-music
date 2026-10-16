@@ -148,9 +148,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('applyAudioEffectProfile 一次性落 EQ/低音/环绕并置自定义前预设名', () async {
-    // 桌面分支锁定：音效桥接仍为 Android-only（isSurroundSupported=false），
-    // apply 路径不触达 MethodChannel；与 loudness_neutral_reset_test 同款
-    // 平台 override，并在测试体内复位（plain test 无 fake_async 兜底）。
+    // 桌面分支锁定：windows 下 isSurroundSupported 为 true，apply 走桌面
+    // 分支 _applyDesktopAudioFilters；单测没有 MediaKitPlayer 登记（实例
+    // 登记表为空），自然 no-op 不触达任何通道；与 loudness_neutral_reset_test
+    // 同款平台 override，并在测试体内复位（plain test 无 fake_async 兜底）。
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     addTearDown(() {
       debugDefaultTargetPlatformOverride = null;
