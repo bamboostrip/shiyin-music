@@ -62,9 +62,20 @@ class EqualizerConfig {
 class AudioEffectsService {
   static const _channel = MethodChannel('shiyin_music/audio_effects');
 
-  bool get isAudioEffectsSupported {
+  /// Android 原生通道（audiofx 系效果器）可用性。
+  bool get isAndroidEffectsChannel {
     return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   }
+
+  /// 桌面端 mpv 滤镜链可用性（Windows/Linux）。
+  bool get isDesktopEffectsPlatform {
+    return !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux);
+  }
+
+  bool get isAudioEffectsSupported =>
+      isAndroidEffectsChannel || isDesktopEffectsPlatform;
 
   bool get isBassBoostSupported => isAudioEffectsSupported;
 
@@ -73,7 +84,8 @@ class AudioEffectsService {
   Future<EqualizerConfig?> equalizerConfig({
     required int? audioSessionId,
   }) async {
-    if (!isAudioEffectsSupported) {
+    // 桌面走 mpv 滤镜链（fallback 10 段配置），不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return null;
     }
 
@@ -99,7 +111,8 @@ class AudioEffectsService {
     required bool enabled,
     required List<int> levels,
   }) async {
-    if (!isAudioEffectsSupported) {
+    // 桌面 EQ 由 mpv firequalizer 滤镜链实现，不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return false;
     }
 
@@ -123,7 +136,8 @@ class AudioEffectsService {
     required bool enabled,
     required double strength,
   }) async {
-    if (!isBassBoostSupported) {
+    // 桌面低音由 EQ 曲线低频搁架折算实现，不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return false;
     }
 
@@ -148,7 +162,8 @@ class AudioEffectsService {
     required bool enabled,
     required double strength,
   }) async {
-    if (!isSurroundSupported) {
+    // 桌面环绕由 mpv extrastereo 实现，不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return false;
     }
 

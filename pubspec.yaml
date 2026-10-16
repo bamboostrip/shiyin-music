@@ -22,7 +22,7 @@ dependencies:
   # docs/superpowers/specs/2026-09-11-windows-media-kit-migration-design.md）。
   # Linux 运行期依赖系统 libmpv2（发行版维护）；Windows 二进制由
   # media_kit_libs_windows_audio 构建期提供（见下）。
-  # 本地 vendored 副本（packages/just_audio_media_kit），含七处补丁：
+  # 本地 vendored 副本（packages/just_audio_media_kit），含八处补丁：
   # 1) load() 时清空 _setPosition（上游 2.1.0 跨歌残留 seek 目标 bug）；
   # 2) 新增线性→mpv 立方刻度的 setVolume/回读换算（mpv volume 实际
   #    增益=(volume/100)³，直接 ×100 会把增益 dB 放大 3 倍），另构造时
@@ -37,8 +37,10 @@ dependencies:
   # 6) completed 之后的 error 只记日志，不回退 idle（否则平台被
   #    deactivate，在途的下一首 load 会被打断）；
   # 7) completed 流的 false 分支 / seek 让 processingState 离开 completed，
-  #    且 _position 只在真 completed 时清零（否则 seek 目标被自己清零）。
-  # 升级上游版本时七处都需确认是否已包含/需重新移植。
+  #    且 _position 只在真 completed 时清零（否则 seek 目标被自己清零）；
+  # 8) 新增 setAudioEffectFilters 透传（桌面音效 EQ/环绕滤镜链，与
+  #    变速 scaletempo 在 media_kit 侧合并写 af，见 media_kit 补丁）；
+  # 升级上游版本时八处都需确认是否已包含/需重新移植。
   just_audio_media_kit: ^2.1.0
   media_kit_libs_linux: ^1.2.1
   # Windows libmpv 二进制（audio-only 构建，libmpv-2.dll 约 15MB）：构建期
@@ -102,6 +104,7 @@ dependency_overrides:
   # 1) !kReleaseMode（调试/性能测试模式）强制回退至 media_kit 原生具备的 InitializerIsolate
   #    （通过 Isolate.spawn + mpv_wait_event 轮询，不向 libmpv 注册任何 Dart 原生回调函数指针）；
   # 2) NativeReferenceHolder 热重启清理旧句柄发送 'quit' 之前主动置空 mpv_set_wakeup_callback。
+  # 3) real.dart: af 属性统一组装（scaletempo + 音效链），新增 setExtraAudioFilters 公开 API。
   media_kit:
     path: packages/media_kit
 

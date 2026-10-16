@@ -7,12 +7,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:just_audio/just_audio.dart';
+// 桌面（Windows/Linux）播放器是 just_audio_media_kit 的平台实现，音效
+// 滤镜链经 MediaKitPlayer.setAudioEffectFilters 透传给 mpv（Task 5）。
+// 注意：顶层 just_audio_media_kit.dart 不导出 MediaKitPlayer，须引
+// mediakit_player.dart；just_audio 0.10.x 也不公开 AudioPlayer.platform，
+// 桌面实例经 MediaKitPlayer.activeInstances 在册登记表触达。
+import 'package:just_audio_media_kit/mediakit_player.dart'
+    show MediaKitPlayer;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/music_models.dart';
 import '../services/audio_effects_service.dart';
 import '../services/cache_service.dart';
 import '../services/bluetooth_lyrics_service.dart';
+import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/music_api.dart';
@@ -503,6 +511,11 @@ class PlayerController extends _PlayerControllerBase
         strength: surroundStrength,
       ),
     );
+    // 桌面端清空 mpv 滤镜链（Android 走上面的通道 disable）。just_audio
+    // 不公开平台实例，经在册登记表触达（见 mediakit_player.dart 补丁）。
+    for (final player in MediaKitPlayer.activeInstances) {
+      unawaited(player.setAudioEffectFilters(const []));
+    }
     unawaited(_loudness.cancelAnalysis());
     unawaited(_loudness.releaseNative());
     unawaited(_superLyric.unregisterPublisher());

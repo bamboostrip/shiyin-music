@@ -121,7 +121,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
 
   @override
   Future<void> _refreshEqualizerConfig() async {
-    if (!isAudioEffectsSupported) {
+    // 桌面保持 fallback 10 段配置（mpv firequalizer 任意频点可用），
+    // 只有 Android 需要向原生通道查询设备真实段数。
+    if (!_audioEffects.isAndroidEffectsChannel) {
       return;
     }
     final config = await _audioEffects.equalizerConfig(
@@ -144,29 +146,33 @@ mixin _PlayerEffects on _PlayerControllerBase {
 
   @override
   Future<void> _applyEqualizer() async {
-    if (!isAudioEffectsSupported) {
+    // Android 走原生均衡器；桌面（Windows/Linux）把 EQ 编进 mpv 滤镜链。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureEqualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: equalizerEnabled,
+        levels: equalizerLevels,
+      );
       return;
     }
-    await _audioEffects.configureEqualizer(
-      audioSessionId:
-          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
-      enabled: equalizerEnabled,
-      levels: equalizerLevels,
-    );
+    await _applyDesktopAudioFilters();
   }
 
   @override
   Future<void> _applyBassBoost() async {
-    if (!isBassBoostSupported) {
+    // Android 走原生 BassBoost；桌面折算成 EQ 低频搁架（见
+    // DesktopAudioFilters 注释），随整条 mpv 滤镜链一起重算。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureBassBoost(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: bassBoostEnabled,
+        strength: bassBoostStrength,
+      );
       return;
     }
-
-    await _audioEffects.configureBassBoost(
-      audioSessionId:
-          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
-      enabled: bassBoostEnabled,
-      strength: bassBoostStrength,
-    );
+    await _applyDesktopAudioFilters();
   }
 
   Future<void> setSurroundEnabled(bool enabled) async {
@@ -226,20 +232,52 @@ mixin _PlayerEffects on _PlayerControllerBase {
   }
 
   /// 与低音增强同范式：sessionId 变化/启动恢复/开关时把环绕状态挂到当前
-  /// 音频会话。本任务桌面门未放开（isSurroundSupported 仍 Android-only），
-  /// 桌面分支就位但走不到，Task 5 接管。
+  /// 音频会话。桌面走 mpv extrastereo（Task 5 放开的桌面门）。
   @override
   Future<void> _applySurround() async {
-    if (!isSurroundSupported) {
+    // Android 走原生 Virtualizer；桌面映射为 mpv extrastereo。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureVirtualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: surroundEnabled,
+        strength: surroundStrength,
+      );
       return;
     }
+    await _applyDesktopAudioFilters();
+  }
 
-    await _audioEffects.configureVirtualizer(
-      audioSessionId:
-          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
-      enabled: surroundEnabled,
-      strength: surroundStrength,
-    );
+  /// 桌面端：把 EQ/低音/环绕统一编译成 mpv af 滤镜链（just_audio_media_kit
+  /// → media_kit → mpv）。任一音效状态变化后重算整链，与变速合并写入。
+  Future<void> _applyDesktopAudioFilters() async {
+    if (!_audioEffects.isDesktopEffectsPlatform) {
+      return;
+    }
+    // just_audio 不公开平台实例，经 MediaKitPlayer 在册登记表触达
+    //（无桌面播放器（平台尚未激活）时为空，自然 no-op）。
+    final players = MediaKitPlayer.activeInstances;
+    if (players.isEmpty) {
+      return;
+    }
+    try {
+      final filters = DesktopAudioFilters.build(
+        equalizerEnabled: equalizerEnabled,
+        centerHz: [
+          for (final band in equalizerConfig.bands) band.centerHz,
+        ],
+        levelsMillibels: equalizerLevels,
+        bassEnabled: bassBoostEnabled,
+        bassStrength: bassBoostStrength,
+        surroundEnabled: surroundEnabled,
+        surroundStrength: surroundStrength,
+      );
+      for (final player in players) {
+        await player.setAudioEffectFilters(filters);
+      }
+    } catch (error) {
+      debugPrint('[时音][audio-effects] Desktop filters failed: $error');
+    }
   }
 
   /// 切歌时并行分析响度,完成后应用增益(不阻塞 loadSong/播放)。
