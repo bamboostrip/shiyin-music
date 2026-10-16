@@ -88,6 +88,33 @@ class AudioEffectPreset {
   final List<int> levels;
 }
 
+/// 命名音效档案：EQ 曲线 + 低音增强 + 环绕的组合预设（issue #1，酷狗式
+/// 「全景环绕/超重低音」同类效果的开源复刻）。EQ 仍按 10 段标准倍频程
+/// 中心（31Hz..16kHz）定义，经 PlayerEqualizerLogic 重采样到设备段数。
+class AudioEffectProfile {
+  const AudioEffectProfile({
+    required this.name,
+    required this.description,
+    required this.eqLevels,
+    this.bassBoost = false,
+    this.bassStrength = 0,
+    this.surround = false,
+    this.surroundStrength = 0,
+  });
+
+  final String name;
+  final String description;
+  final List<int> eqLevels;
+  final bool bassBoost;
+
+  /// 低音增强强度（0..1，映射到 Android BassBoost strength 0..1000）。
+  final double bassStrength;
+  final bool surround;
+
+  /// 环绕强度（0..1，映射到 Android Virtualizer strength / 桌面 extrastereo）。
+  final double surroundStrength;
+}
+
 // PlayerController 的私有设置键/常量（原类内 static const，拆分后提升为库级常量，
 // 仅同库可见，引用方式不变）。
 const _listenTimeSettingKey = 'settings.add_listening_time_enabled';
@@ -180,6 +207,61 @@ class PlayerController extends _PlayerControllerBase
     AudioEffectPreset(
       name: '电子',
       levels: [650, 450, 120, -120, -180, 100, 350, 550, 650, 700],
+    ),
+    AudioEffectPreset(
+      name: '舞曲',
+      levels: [500, 400, 150, 0, -150, -300, -200, 100, 350, 450],
+    ),
+    AudioEffectPreset(
+      name: '爵士',
+      levels: [300, 200, 100, 0, 100, 100, 0, 100, 250, 300],
+    ),
+    AudioEffectPreset(
+      name: '金属',
+      levels: [450, 300, 50, -200, -250, -150, 150, 350, 450, 500],
+    ),
+    AudioEffectPreset(
+      name: '民谣',
+      levels: [100, 150, 250, 300, 250, 150, 100, 100, 150, 200],
+    ),
+    AudioEffectPreset(
+      name: '嘻哈',
+      levels: [650, 550, 300, 50, -100, -100, 100, 250, 400, 450],
+    ),
+  ];
+
+  /// 命名音效档案（均衡器页「预设」弹层顶部展示）。曲线为本仓库自写，
+  /// 禁止从酷狗/ViPER 等 GPL 或闭源来源拷贝参数文件。
+  static const audioEffectProfiles = [
+    AudioEffectProfile(
+      name: '全景环绕',
+      description: '声场展宽 + 轻低音，空间感增强',
+      eqLevels: [300, 200, 100, 0, 0, 0, 100, 200, 300, 250],
+      bassBoost: true,
+      bassStrength: 0.3,
+      surround: true,
+      surroundStrength: 0.8,
+    ),
+    AudioEffectProfile(
+      name: '超重低音',
+      description: '低频大幅增强，节奏感拉满',
+      eqLevels: [850, 750, 550, 250, 0, -100, -150, -200, -150, -100],
+      bassBoost: true,
+      bassStrength: 0.9,
+    ),
+    AudioEffectProfile(
+      name: '清澈人声',
+      description: '中频突出，人声靠前',
+      eqLevels: [-200, -100, 50, 250, 450, 550, 400, 150, 0, -100],
+    ),
+    AudioEffectProfile(
+      name: '现场氛围',
+      description: '环绕声场，还原现场听感',
+      eqLevels: [250, 150, 50, -50, -100, 0, 150, 250, 300, 200],
+      bassBoost: true,
+      bassStrength: 0.35,
+      surround: true,
+      surroundStrength: 0.55,
     ),
   ];
 
