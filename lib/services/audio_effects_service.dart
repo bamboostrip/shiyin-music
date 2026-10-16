@@ -68,6 +68,8 @@ class AudioEffectsService {
 
   bool get isBassBoostSupported => isAudioEffectsSupported;
 
+  bool get isSurroundSupported => isAudioEffectsSupported;
+
   Future<EqualizerConfig?> equalizerConfig({
     required int? audioSessionId,
   }) async {
@@ -135,6 +137,31 @@ class AudioEffectsService {
       return result ?? false;
     } on PlatformException catch (error) {
       debugPrint('[时音][audio-effects] BassBoost failed: $error');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  Future<bool> configureVirtualizer({
+    required int? audioSessionId,
+    required bool enabled,
+    required double strength,
+  }) async {
+    if (!isSurroundSupported) {
+      return false;
+    }
+
+    final normalizedStrength = strength.clamp(0.0, 1.0);
+    try {
+      final result = await _channel.invokeMethod<bool>('configureVirtualizer', {
+        'audioSessionId': audioSessionId,
+        'enabled': enabled,
+        'strength': (normalizedStrength * 1000).round(),
+      });
+      return result ?? false;
+    } on PlatformException catch (error) {
+      debugPrint('[时音][audio-effects] Virtualizer failed: $error');
       return false;
     } on MissingPluginException {
       return false;

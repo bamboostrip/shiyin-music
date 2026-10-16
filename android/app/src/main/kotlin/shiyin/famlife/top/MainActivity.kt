@@ -18,6 +18,7 @@ import android.provider.Settings
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
+import android.media.audiofx.Virtualizer
 import android.os.Handler
 import android.util.Log
 import android.os.Looper
@@ -51,6 +52,8 @@ class MainActivity : AudioServiceActivity() {
     private var equalizerSessionId: Int? = null
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var loudnessEnhancerSessionId: Int? = null
+    private var virtualizer: Virtualizer? = null
+    private var virtualizerSessionId: Int? = null
     // 当前响度分析的取消标志。切歌时调用 cancelLoudnessAnalysis 置 true,
     // 让解码循环立即结束,避免旧歌曲分析空跑占 CPU。
     @Volatile private var loudnessAnalysisCancelled: Boolean = false
@@ -198,6 +201,20 @@ class MainActivity : AudioServiceActivity() {
                         }.onFailure { error ->
                             releaseBassBoost()
                             result.error("bass_boost_failed", error.message, null)
+                        }
+                    }
+                    "configureVirtualizer" -> {
+                        val audioSessionId = call.argument<Int>("audioSessionId")
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val strength = call.argument<Int>("strength") ?: 0
+
+                        runCatching {
+                            configureVirtualizer(audioSessionId, enabled, strength)
+                        }.onSuccess { supported ->
+                            result.success(supported)
+                        }.onFailure { error ->
+                            releaseVirtualizer()
+                            result.error("virtualizer_failed", error.message, null)
                         }
                     }
                     "analyzeLoudness" -> {
@@ -1015,6 +1032,56 @@ class MainActivity : AudioServiceActivity() {
     }
 
     /**
+     * 配置环绕（Virtualizer）。API 31 起官方标记 deprecated 且推荐 Spatializer，
+     * 但 Spatializer 是系统级查询/控制接口、不能按音频会话插入效果，对本应用
+     * 场景不可用；Virtualizer 在 minSdk 26 全范围仍可工作。部分设备实现为空
+     * 操作，由 strengthSupported 表达，效果差异属设备行为。
+     */
+    @Suppress("DEPRECATION")
+    private fun configureVirtualizer(
+        audioSessionId: Int?,
+        enabled: Boolean,
+        strength: Int
+    ): Boolean {
+        if (!enabled) {
+            releaseVirtualizer()
+            return true
+        }
+        if (audioSessionId == null || audioSessionId <= 0) {
+            return false
+        }
+
+        val effect = if (virtualizerSessionId == audioSessionId && virtualizer != null) {
+            virtualizer!!
+        } else {
+            releaseVirtualizer()
+            Virtualizer(0, audioSessionId).also {
+                virtualizer = it
+                virtualizerSessionId = audioSessionId
+            }
+        }
+
+        val clampedStrength = strength.coerceIn(0, 1000).toShort()
+        if (effect.strengthSupported) {
+            effect.setStrength(clampedStrength)
+        } else {
+            effect.setStrength(if (clampedStrength > 0) 1000 else 0)
+        }
+        effect.enabled = true
+        return true
+    }
+
+    @Suppress("DEPRECATION")
+    private fun releaseVirtualizer() {
+        virtualizer?.runCatching {
+            enabled = false
+            release()
+        }
+        virtualizer = null
+        virtualizerSessionId = null
+    }
+
+    /**
      * 配置响度增益(基于已分析的 LUFS 差值)。
      * 使用 Android [LoudnessEnhancer] 仅放大轻歌(增益范围 0~1500 mB);
      * 响歌衰减由 Dart 侧 [AudioPlayer.setVolume] 完成,LoudnessEnhancer 不支持负增益。
@@ -1172,6 +1239,7 @@ class MainActivity : AudioServiceActivity() {
     override fun onDestroy() {
         releaseEqualizer()
         releaseBassBoost()
+        releaseVirtualizer()
         releaseLoudnessGain()
         if (superLyricRegistered) {
             runCatching { SuperLyricHelper.unregisterPublisher() }
