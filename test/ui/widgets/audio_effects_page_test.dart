@@ -39,8 +39,15 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   double bassBoostStrength = 0.5;
 
+  @override
+  bool surroundEnabled = false;
+
+  @override
+  double surroundStrength = 0.6;
+
   int setEqualizerEnabledCalls = 0;
   final List<AudioEffectPreset> appliedPresets = [];
+  final List<AudioEffectProfile> appliedProfiles = [];
   int resetEqualizerCalls = 0;
 
   @override
@@ -75,6 +82,24 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
     double strength, {
     bool persist = true,
   }) async {}
+
+  @override
+  Future<void> setSurroundEnabled(bool enabled) async {
+    surroundEnabled = enabled;
+  }
+
+  @override
+  Future<void> setSurroundStrength(
+    double strength, {
+    bool persist = true,
+  }) async {
+    surroundStrength = strength;
+  }
+
+  @override
+  Future<void> applyAudioEffectProfile(AudioEffectProfile profile) async {
+    appliedProfiles.add(profile);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -115,8 +140,9 @@ void main() {
     await tester.tap(find.text('增强'));
     await tester.pumpAndSettle();
     expect(find.text('低音增强'), findsOneWidget);
-    // 增强页只有一个 Bass 滑块。
-    expect(find.byType(Slider), findsOneWidget);
+    // 增强页有 Bass 与环绕两个滑块。
+    expect(find.text('全景环绕'), findsOneWidget);
+    expect(find.byType(Slider), findsNWidgets(2));
 
     await tester.tap(find.text('均衡器'));
     await tester.pumpAndSettle();
@@ -140,11 +166,35 @@ void main() {
 
     await tester.tap(find.text('预设'));
     await tester.pumpAndSettle();
-    expect(find.text('流行'), findsOneWidget);
+    // 弹层两段式：顶部音效档案，下方均衡器预设。
+    expect(find.text('音效'), findsOneWidget);
+    expect(find.text('全景环绕'), findsOneWidget);
+    // 两段内容超过弹层高度，滚动到均衡器预设段。
+    await tester.scrollUntilVisible(
+      find.text('流行'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('流行'));
     await tester.pumpAndSettle();
     expect(player.appliedPresets.map((p) => p.name), ['流行']);
+    // 选择后 bottom sheet 关闭，回到均衡器页。
+    expect(find.text('启用均衡器'), findsOneWidget);
+  });
+
+  testWidgets('预设弹层点音效档案透出 applyAudioEffectProfile', (tester) async {
+    final player = _FakePlayer();
+    await _pumpPage(tester, player);
+
+    await tester.tap(find.text('预设'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('全景环绕'));
+    await tester.pumpAndSettle();
+    expect(player.appliedProfiles.map((p) => p.name), ['全景环绕']);
+    expect(player.appliedPresets, isEmpty);
     // 选择后 bottom sheet 关闭，回到均衡器页。
     expect(find.text('启用均衡器'), findsOneWidget);
   });
