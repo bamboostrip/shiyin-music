@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
-import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/lyric_converter.dart';
 import '../form_factor.dart';
@@ -287,11 +286,6 @@ class LandscapeHeader extends StatelessWidget {
   }
 
   void _showMoreSheet(BuildContext context) {
-    // 车机横屏判定（与 search_page._openIdentify 同款）：横屏 + 车机模式
-    // 开时二级页推入内容区 Navigator，左侧常驻播放面板不被盖住。
-    final size = MediaQuery.sizeOf(context);
-    final isCarLandscape =
-        size.width > size.height && ThemeController.instance.carModeEnabled;
     showSongActionSheet(
       context: context,
       song: song,
@@ -327,7 +321,6 @@ class LandscapeHeader extends StatelessWidget {
             onTap: () => showAudioEffectsSheet(
               context: context,
               player: player,
-              inContentArea: isCarLandscape,
             ),
           ),
         if (song.source == SongSource.kugou)

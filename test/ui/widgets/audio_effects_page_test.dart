@@ -320,6 +320,8 @@ void main() {
   testWidgets('showAudioEffectsSheet 内容区推入：音效页落在内层 Navigator', (tester) async {
     final player = _FakePlayer();
     // 复刻车机 AppShell 结构：左侧常驻面板 + 内层内容区 Navigator。
+    // 推入走最近 Navigator（无显式开关）：入口挂在内容区 Navigator 下即
+    // 自然落内容区，常驻面板存活。
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -334,7 +336,6 @@ void main() {
                         onPressed: () => showAudioEffectsSheet(
                           context: navContext,
                           player: player,
-                          inContentArea: true,
                         ),
                         child: const Text('打开音效'),
                       ),

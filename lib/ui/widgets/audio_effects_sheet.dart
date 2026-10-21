@@ -6,15 +6,14 @@ import 'app_dialog.dart';
 
 /// 打开「自定义音效」页。
 ///
-/// [inContentArea] 为 true 时推入调用点最近的内容区 Navigator
-/// （车机横屏：左侧常驻播放面板不被盖住，与 search_page._openIdentify
-/// 的推入模式同款），否则推根 Navigator 整屏（手机竖屏/桌面既有行为）。
+/// 一律推入调用点最近的 Navigator：手机竖屏入口（挂在根 Navigator 的
+/// 播放页）整屏展示；车机横屏/桌面的入口本身就挂在内容区 Navigator 上
+/// （播放页/设置页），音效页自然只占内容区，常驻面板不被盖住。
 Future<void> showAudioEffectsSheet({
   required BuildContext context,
   required PlayerController player,
-  bool inContentArea = false,
 }) {
-  return Navigator.of(context, rootNavigator: !inContentArea).push<void>(
+  return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(builder: (_) => AudioEffectsPage(player: player)),
   );
 }
