@@ -119,7 +119,7 @@ class AudioEffectProfile {
   final double bassStrength;
   final bool surround;
 
-  /// 环绕强度（0..1，映射到 Android Virtualizer strength / 桌面 extrastereo）。
+  /// 环绕强度（0..1，映射到 Android Virtualizer strength / 桌面 stereotools）。
   final double surroundStrength;
 }
 

@@ -17,7 +17,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
     if (bassBoostEnabled) {
       return 'Bass ${(bassBoostStrength * 100).round()}%';
     }
-    if (surroundEnabled) {
+    if (surroundEnabled && isSurroundSupported) {
       return '环绕 ${(surroundStrength * 100).round()}%';
     }
     return '关闭';
@@ -126,7 +126,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
 
   @override
   Future<void> _refreshEqualizerConfig() async {
-    // 桌面保持 fallback 10 段配置（mpv firequalizer 任意频点可用），
+    // 桌面保持 fallback 10 段配置（mpv biquad 链按标准倍频程中心生效），
     // 只有 Android 需要向原生通道查询设备真实段数。
     if (!_audioEffects.isAndroidEffectsChannel) {
       return;
@@ -242,10 +242,11 @@ mixin _PlayerEffects on _PlayerControllerBase {
   }
 
   /// 与低音增强同范式：sessionId 变化/启动恢复/开关时把环绕状态挂到当前
-  /// 音频会话。桌面走 mpv extrastereo（Task 5 放开的桌面门）。
+  /// 音频会话。桌面映射为 mpv stereotools（仅 Linux；Windows 的
+  /// audio-only libmpv 无环绕滤镜，isSurroundSupported 关闭）。
   @override
   Future<void> _applySurround() async {
-    // Android 走原生 Virtualizer；桌面映射为 mpv extrastereo。
+    // Android 走原生 Virtualizer；桌面折进 mpv 滤镜链整体重算。
     if (_audioEffects.isAndroidEffectsChannel) {
       await _audioEffects.configureVirtualizer(
         audioSessionId:
@@ -281,6 +282,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
         bassStrength: bassBoostStrength,
         surroundEnabled: surroundEnabled,
         surroundStrength: surroundStrength,
+        // Windows audio-only libmpv 无环绕滤镜，整段不写（见
+        // DesktopAudioFilters 注释的滤镜白名单约束）。
+        surroundAvailable: isSurroundSupported,
       );
       for (final player in players) {
         await player.setAudioEffectFilters(filters);

@@ -484,51 +484,55 @@ class _EnhancePanel extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 26),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          secondary: Icon(
-            Icons.surround_sound_rounded,
-            color: colorScheme.primary,
-          ),
-          title: const Text('全景环绕'),
-          subtitle: Text(
-            surroundEnabled ? '环绕 $surroundPercent%' : '关闭',
-          ),
-          value: surroundEnabled,
-          onChanged: player.setSurroundEnabled,
-        ),
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            const Text('环绕'),
-            Expanded(
-              child: Slider(
-                value: player.surroundStrength,
-                onChanged: surroundEnabled
-                    ? (value) => player.setSurroundStrength(
-                          value,
-                          persist: false,
-                        )
-                    : null,
-                onChangeEnd: surroundEnabled
-                    ? player.setSurroundStrength
-                    : null,
-              ),
+        // 环绕依赖平台滤镜支持（Windows 的 audio-only libmpv 无可用
+        // 展宽滤镜），不可用时整块隐藏而非留死控件。
+        if (player.isSurroundSupported) ...[
+          const SizedBox(height: 26),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: Icon(
+              Icons.surround_sound_rounded,
+              color: colorScheme.primary,
             ),
-            SizedBox(
-              width: 44,
-              child: Text(
-                '$surroundPercent%',
-                textAlign: TextAlign.end,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
+            title: const Text('全景环绕'),
+            subtitle: Text(
+              surroundEnabled ? '环绕 $surroundPercent%' : '关闭',
             ),
-          ],
-        ),
+            value: surroundEnabled,
+            onChanged: player.setSurroundEnabled,
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              const Text('环绕'),
+              Expanded(
+                child: Slider(
+                  value: player.surroundStrength,
+                  onChanged: surroundEnabled
+                      ? (value) => player.setSurroundStrength(
+                            value,
+                            persist: false,
+                          )
+                      : null,
+                  onChangeEnd: surroundEnabled
+                      ? player.setSurroundStrength
+                      : null,
+                ),
+              ),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  '$surroundPercent%',
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }

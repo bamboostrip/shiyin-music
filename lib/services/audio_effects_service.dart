@@ -79,7 +79,13 @@ class AudioEffectsService {
 
   bool get isBassBoostSupported => isAudioEffectsSupported;
 
-  bool get isSurroundSupported => isAudioEffectsSupported;
+  /// 环绕：Android 走原生 Virtualizer，Linux 走 mpv stereotools。Windows
+  /// 捆绑的 audio-only libmpv 其 ffmpeg 滤镜白名单里没有任何可做立体声
+  /// 展宽的滤镜（stereotools/pan 均未编译），暂不可用。
+  bool get isSurroundSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.linux);
 
   Future<EqualizerConfig?> equalizerConfig({
     required int? audioSessionId,
@@ -111,7 +117,7 @@ class AudioEffectsService {
     required bool enabled,
     required List<int> levels,
   }) async {
-    // 桌面 EQ 由 mpv firequalizer 滤镜链实现，不打 Android 通道。
+    // 桌面 EQ 由 mpv biquad 滤镜链实现，不打 Android 通道。
     if (!isAndroidEffectsChannel) {
       return false;
     }
@@ -162,7 +168,7 @@ class AudioEffectsService {
     required bool enabled,
     required double strength,
   }) async {
-    // 桌面环绕由 mpv extrastereo 实现，不打 Android 通道。
+    // 桌面环绕由 mpv stereotools 实现（仅 Linux），不打 Android 通道。
     if (!isAndroidEffectsChannel) {
       return false;
     }

@@ -45,6 +45,10 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   double surroundStrength = 0.6;
 
+  /// 环绕滑条按支持性条件渲染；fake 默认放行以维持既有断言。
+  @override
+  bool isSurroundSupported = true;
+
   int setEqualizerEnabledCalls = 0;
   final List<AudioEffectPreset> appliedPresets = [];
   final List<AudioEffectProfile> appliedProfiles = [];

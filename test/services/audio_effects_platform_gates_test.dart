@@ -35,17 +35,24 @@ void main() {
     }
   });
 
-  test('isAudioEffectsSupported 为两门之或（含低音/环绕跟随聚合门）', () {
+  test('isAudioEffectsSupported 为两门之或，低音跟随聚合门，环绕缺 Windows', () {
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
-      final expected = platform == TargetPlatform.android ||
+      final aggregate = platform == TargetPlatform.android ||
           platform == TargetPlatform.windows ||
           platform == TargetPlatform.linux;
       final service = AudioEffectsService();
-      expect(service.isAudioEffectsSupported, expected, reason: '$platform');
-      // 低音/环绕沿用聚合门：桌面经 mpv 滤镜链同样可用。
-      expect(service.isBassBoostSupported, expected, reason: '$platform');
-      expect(service.isSurroundSupported, expected, reason: '$platform');
+      expect(service.isAudioEffectsSupported, aggregate, reason: '$platform');
+      // 低音沿用聚合门：桌面经 mpv 滤镜链同样可用。
+      expect(service.isBassBoostSupported, aggregate, reason: '$platform');
+      // 环绕：Android=Virtualizer、Linux=mpv stereotools；Windows 捆绑的
+      // audio-only libmpv 滤镜白名单无任何展宽滤镜，暂不可用。
+      expect(
+        service.isSurroundSupported,
+        platform == TargetPlatform.android ||
+            platform == TargetPlatform.linux,
+        reason: '$platform',
+      );
     }
   });
 }
