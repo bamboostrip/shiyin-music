@@ -18,7 +18,7 @@
 
 ---
 
-### Task A: 预设/档案扩容与曲线调优（数据层）
+### Task 1: 预设/档案扩容与曲线调优（数据层）
 
 **Files:**
 - Create: `lib/models/audio_effect_presets.dart`（模型类 + const 数据表）
@@ -66,7 +66,7 @@ kAudioEffectProfiles = [
 
 - [ ] 建模型文件（含类与两张表、调法注释）→ player_controller.dart 改为 `export '../models/audio_effect_presets.dart' show AudioEffectPreset, AudioEffectProfile;` 并删除原类定义，静态常量改引用 → 测试更新数量断言（16/6）→ analyze/test 全绿 → 提交 `feat(effects): 扩容音效预设与档案并按曲风指引重调曲线`。
 
-### Task B: 预设选择改卡片网格
+### Task 2: 预设选择改卡片网格
 
 **Files:**
 - Modify: `lib/ui/widgets/audio_effects_sheet.dart`（`_showPresetPicker` 重做为卡片网格弹层）
@@ -76,7 +76,7 @@ kAudioEffectProfiles = [
 
 - [ ] 实现 → 对齐/补 UI 测试（档案卡点选、预设卡点选、选中态角标）→ analyze/test 全绿 → 提交 `feat(effects): 预设选择改为卡片网格并附曲线预览`。
 
-### Task C: 车机横屏适配
+### Task 3: 车机横屏适配
 
 **Files:**
 - Modify: `lib/ui/widgets/audio_effects_sheet.dart`（页面横屏双栏布局；入口函数支持内容区推入）
@@ -87,6 +87,6 @@ kAudioEffectProfiles = [
 
 - [ ] 实现 → 横屏/竖屏两个 UI 测试 → analyze/test 全绿 → 提交 `feat(effects): 音效页适配车机横屏双栏与内容区推入`。
 
-### Task D: 收尾
+### Task 4: 收尾
 
 - [ ] `flutter analyze` + `flutter test` + `:app:compileImpellerDebugKotlin` 三门全绿 → 终审（一支子代理审 A..C 全部 diff）→ 修复 → clean 构建 impeller release arm64 测试 APK（`flutter build apk --release --target-platform android-arm64 --flavor impeller --dart-define=APP_RENDERER=impeller --dart-define=APP_ABI=arm64`，E 盘路径的 build_apk.bat 本机不可用）→ 汇报 APK 路径与听感测试点。
