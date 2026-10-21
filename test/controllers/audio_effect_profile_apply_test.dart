@@ -185,7 +185,8 @@ void main() {
     expect(controller.bassBoostEnabled, isTrue);
     expect(controller.bassBoostStrength, closeTo(0.3, 0.001));
     expect(controller.surroundEnabled, isTrue);
-    expect(controller.surroundStrength, closeTo(0.8, 0.001));
+    // 曲线调优后全景环绕环绕强度 0.8→0.85。
+    expect(controller.surroundStrength, closeTo(0.85, 0.001));
 
     // 清理持久化，避免污染其它用例。
     final prefs = await SharedPreferences.getInstance();
@@ -214,10 +215,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
     }
 
-    // 清澈人声档案不启用低音/环绕且强度为 0：此后直接打开开关若不回退
+    // 纯净人声档案不启用低音/环绕且强度为 0：此后直接打开开关若不回退
     // 默认强度，会是开着却 0% 的死控件（须拖滑条才生效）。
     final profile = PlayerController.audioEffectProfiles
-        .firstWhere((p) => p.name == '清澈人声');
+        .firstWhere((p) => p.name == '纯净人声');
     await controller.applyAudioEffectProfile(profile);
     expect(controller.bassBoostEnabled, isFalse);
     expect(controller.bassBoostStrength, closeTo(0, 0.001));
@@ -229,13 +230,13 @@ void main() {
     expect(controller.surroundStrength, closeTo(0.6, 0.001));
     expect(controller.bassBoostStrength, closeTo(0.45, 0.001));
 
-    // 非零强度时开关往返不动用户强度：全景环绕的 0.8 关再开仍在。
+    // 非零强度时开关往返不动用户强度：全景环绕的 0.85 关再开仍在。
     final surroundProfile = PlayerController.audioEffectProfiles
         .firstWhere((p) => p.name == '全景环绕');
     await controller.applyAudioEffectProfile(surroundProfile);
     await controller.setSurroundEnabled(false);
     await controller.setSurroundEnabled(true);
-    expect(controller.surroundStrength, closeTo(0.8, 0.001));
+    expect(controller.surroundStrength, closeTo(0.85, 0.001));
 
     // 清理持久化，避免污染其它用例。
     final prefs = await SharedPreferences.getInstance();

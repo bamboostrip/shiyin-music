@@ -3,6 +3,10 @@ import 'package:shiyin_music/controllers/player_controller.dart';
 
 void main() {
   group('equalizerPresets 数据完整性', () {
+    test('预设数量为 16 且与扩容清单一致', () {
+      expect(PlayerController.equalizerPresets, hasLength(16));
+    });
+
     test('每个预设有 10 段且值在 ±1200 毫贝尔内', () {
       for (final preset in PlayerController.equalizerPresets) {
         expect(preset.name, isNotEmpty);
@@ -21,6 +25,10 @@ void main() {
   });
 
   group('audioEffectProfiles 数据完整性', () {
+    test('档案数量为 6（含改名后的纯净人声/现场演唱会）', () {
+      expect(PlayerController.audioEffectProfiles, hasLength(6));
+    });
+
     test('档案 EQ 为 10 段且值在 ±1200 毫贝尔内，强度在 0..1', () {
       for (final profile in PlayerController.audioEffectProfiles) {
         expect(profile.eqLevels, hasLength(10));
