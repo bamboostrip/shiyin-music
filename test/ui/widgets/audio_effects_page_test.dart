@@ -110,9 +110,7 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
 }
 
 Future<void> _pumpPage(WidgetTester tester, PlayerController player) async {
-  await tester.pumpWidget(
-    MaterialApp(home: AudioEffectsPage(player: player)),
-  );
+  await tester.pumpWidget(MaterialApp(home: AudioEffectsPage(player: player)));
   await tester.pumpAndSettle();
 }
 
@@ -170,10 +168,10 @@ void main() {
 
     await tester.tap(find.text('预设'));
     await tester.pumpAndSettle();
-    // 弹层两段式：顶部音效档案，下方均衡器预设。
+    // 弹层两段卡片网格：顶部音效档案卡，下方带曲线预览的预设卡。
     expect(find.text('音效'), findsOneWidget);
     expect(find.text('全景环绕'), findsOneWidget);
-    // 两段内容超过弹层高度，滚动到均衡器预设段。
+    // 两段网格常超弹层高度，滚动到均衡器预设段（可见时零滚动直接命中）。
     await tester.scrollUntilVisible(
       find.text('流行'),
       120,
@@ -188,7 +186,7 @@ void main() {
     expect(find.text('启用均衡器'), findsOneWidget);
   });
 
-  testWidgets('预设弹层点音效档案透出 applyAudioEffectProfile', (tester) async {
+  testWidgets('预设弹层点音效档案卡透出 applyAudioEffectProfile', (tester) async {
     final player = _FakePlayer();
     await _pumpPage(tester, player);
 
@@ -201,6 +199,43 @@ void main() {
     expect(player.appliedPresets, isEmpty);
     // 选择后 bottom sheet 关闭，回到均衡器页。
     expect(find.text('启用均衡器'), findsOneWidget);
+  });
+
+  testWidgets('预设弹层选中卡带对勾角标且 16 张卡各带曲线预览', (tester) async {
+    final player = _FakePlayer();
+    await _pumpPage(tester, player);
+
+    await tester.tap(find.text('预设'));
+    await tester.pumpAndSettle();
+    // 默认「平直」选中：仅它一张卡带角标，档案段全未选。
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    expect(find.byKey(const ValueKey('effect-selected-badge')), findsOneWidget);
+    // 16 张预设卡各带一枚迷你折线画板。
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is CustomPaint &&
+            widget.painter?.runtimeType.toString() == '_PresetCurvePainter',
+      ),
+      findsNWidgets(16),
+    );
+  });
+
+  testWidgets('选中档案卡时角标落在音效段', (tester) async {
+    final player = _FakePlayer()..equalizerPresetName = '超重低音';
+    await _pumpPage(tester, player);
+
+    await tester.tap(find.text('预设'));
+    await tester.pumpAndSettle();
+    // 角标唯一且档案名在弹层网格内可见（档案卡选中而非预设卡）。
+    expect(find.byKey(const ValueKey('effect-selected-badge')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(GridView).first,
+        matching: find.text('超重低音'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('重置按钮透出控制器', (tester) async {

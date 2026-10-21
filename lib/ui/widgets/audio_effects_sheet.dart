@@ -274,11 +274,22 @@ class _EqualizerPanel extends StatelessWidget {
   }
 
   Future<void> _showPresetPicker(BuildContext context) async {
+    // 卡片网格弹层（酷狗式）：上段音效档案卡、下段带迷你曲线的预设卡。
+    // 两段网格总高常超一屏，isScrollControlled 放开默认 9/16 屏高上限，
+    // 再以 0.9 屏高封顶保留弹层感，整层 ListView 滚动（网格自身不滚）。
     final result = await showModalBottomSheet<Object>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+      ),
       builder: (sheetContext) {
         final sheetTheme = Theme.of(sheetContext);
+        // 窄屏 2 列；宽屏（平板/横屏）预设给 3 列，一屏多看几条曲线。
+        final presetColumns = MediaQuery.sizeOf(sheetContext).width >= 600
+            ? 3
+            : 2;
         return Material(
           color: sheetTheme.colorScheme.surface,
           child: SafeArea(
@@ -287,51 +298,48 @@ class _EqualizerPanel extends StatelessWidget {
               shrinkWrap: true,
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text(
-                    '音效',
-                    style: sheetTheme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                _sheetSectionTitle(sheetTheme, '音效'),
+                GridView(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    mainAxisExtent: 104,
                   ),
+                  children: [
+                    for (final profile in PlayerController.audioEffectProfiles)
+                      _ProfileCard(
+                        profile: profile,
+                        selected: player.equalizerPresetName == profile.name,
+                        onTap: () => Navigator.of(sheetContext).pop(profile),
+                      ),
+                  ],
                 ),
-                for (final profile in PlayerController.audioEffectProfiles)
-                  ListTile(
-                    leading: const Icon(Icons.auto_awesome_rounded),
-                    title: Text(profile.name),
-                    subtitle: Text(profile.description),
-                    trailing: player.equalizerPresetName == profile.name
-                        ? Icon(
-                            Icons.check_rounded,
-                            color: sheetTheme.colorScheme.primary,
-                          )
-                        : null,
-                    onTap: () => Navigator.of(sheetContext).pop(profile),
+                const SizedBox(height: 20),
+                _sheetSectionTitle(sheetTheme, '均衡器预设'),
+                GridView(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: presetColumns,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    // 名称行实际高约 20，92 给非默认字号留防溢出余量。
+                    mainAxisExtent: 92,
                   ),
-                const Divider(height: 24),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text(
-                    '均衡器预设',
-                    style: sheetTheme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                  children: [
+                    for (final preset in PlayerController.equalizerPresets)
+                      _PresetCard(
+                        preset: preset,
+                        selected: player.equalizerPresetName == preset.name,
+                        onTap: () => Navigator.of(sheetContext).pop(preset),
+                      ),
+                  ],
                 ),
-                for (final preset in PlayerController.equalizerPresets)
-                  ListTile(
-                    leading: const Icon(Icons.tune_rounded),
-                    title: Text(preset.name),
-                    dense: true,
-                    trailing: player.equalizerPresetName == preset.name
-                        ? Icon(
-                            Icons.check_rounded,
-                            color: sheetTheme.colorScheme.primary,
-                          )
-                        : null,
-                    onTap: () => Navigator.of(sheetContext).pop(preset),
-                  ),
               ],
             ),
           ),
@@ -343,6 +351,188 @@ class _EqualizerPanel extends StatelessWidget {
     } else if (result is AudioEffectPreset) {
       await player.applyEqualizerPreset(result);
     }
+  }
+}
+
+Widget _sheetSectionTitle(ThemeData theme, String text) {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+    child: Text(
+      text,
+      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+    ),
+  );
+}
+
+/// 档案卡图标按名字映射（档案表在 models 层，不掺 UI 字段）；改名或
+/// 新增档案时回退通用图形，避免空图标。
+const _profileIcons = <String, IconData>{
+  '全景环绕': Icons.surround_sound_rounded,
+  '3D丽音': Icons.auto_awesome_rounded,
+  '超重低音': Icons.speaker_rounded,
+  '纯净人声': Icons.record_voice_over_rounded,
+  '现场演唱会': Icons.stadium_rounded,
+  '深夜舒缓': Icons.bedtime_rounded,
+};
+
+/// 选中态卡片外壳：与 _EffectTabs 同语言的浅底 + 14 圆角，选中时主题色
+/// 描边并在右上角叠一枚对勾角标。
+class _SelectableCard extends StatelessWidget {
+  const _SelectableCard({
+    required this.selected,
+    required this.onTap,
+    required this.child,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: isDark
+          ? colorScheme.surfaceContainerHighest
+          : const Color(0xFFF1F2F5),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          width: 1.6,
+          color: selected ? colorScheme.primary : Colors.transparent,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: child,
+            ),
+            if (selected)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Container(
+                  key: const ValueKey('effect-selected-badge'),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary,
+                    // 只圆内侧左下角；靠卡片外的一角由 Material 圆角裁掉。
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(13),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.check_rounded,
+                    size: 14,
+                    color: colorScheme.onPrimary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.profile,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AudioEffectProfile profile;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _profileIcons[profile.name] ?? Icons.graphic_eq_rounded,
+            size: 26,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            profile.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            profile.description,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresetCard extends StatelessWidget {
+  const _PresetCard({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AudioEffectPreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            preset.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 40,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PresetCurvePainter(
+                colorScheme: colorScheme,
+                levels: preset.levels,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -495,9 +685,7 @@ class _EnhancePanel extends StatelessWidget {
               color: colorScheme.primary,
             ),
             title: const Text('全景环绕'),
-            subtitle: Text(
-              surroundEnabled ? '环绕 $surroundPercent%' : '关闭',
-            ),
+            subtitle: Text(surroundEnabled ? '环绕 $surroundPercent%' : '关闭'),
             value: surroundEnabled,
             onChanged: player.setSurroundEnabled,
           ),
@@ -509,10 +697,8 @@ class _EnhancePanel extends StatelessWidget {
                 child: Slider(
                   value: player.surroundStrength,
                   onChanged: surroundEnabled
-                      ? (value) => player.setSurroundStrength(
-                            value,
-                            persist: false,
-                          )
+                      ? (value) =>
+                            player.setSurroundStrength(value, persist: false)
                       : null,
                   onChangeEnd: surroundEnabled
                       ? player.setSurroundStrength
@@ -524,10 +710,9 @@ class _EnhancePanel extends StatelessWidget {
                 child: Text(
                   '$surroundPercent%',
                   textAlign: TextAlign.end,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -604,6 +789,60 @@ class _EqualizerCurvePainter extends CustomPainter {
     return oldDelegate.levels != levels ||
         oldDelegate.min != min ||
         oldDelegate.max != max ||
+        oldDelegate.colorScheme != colorScheme;
+  }
+}
+
+/// 预设卡迷你曲线：10 点折线，中线为 0dB 基准、正增益向上负增益向下。
+/// 40 高内若按全局 dB 标定，摆幅只剩几个像素，故按卡内峰值归一化放大
+/// 形状差异（全 0 的「平直」即贴中线）；配色沿用主曲线的主题色折线。
+class _PresetCurvePainter extends CustomPainter {
+  const _PresetCurvePainter({required this.colorScheme, required this.levels});
+
+  final ColorScheme colorScheme;
+  final List<int> levels;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final midY = size.height / 2;
+    final basePaint = Paint()
+      ..color = colorScheme.outlineVariant.withValues(alpha: .56)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(0, midY), Offset(size.width, midY), basePaint);
+
+    var peak = 0;
+    for (final level in levels) {
+      if (level.abs() > peak) {
+        peak = level.abs();
+      }
+    }
+    // 峰值下限 1 防除零，全 0 曲线回落到中线。
+    final scale = peak < 1 ? 1 : peak;
+
+    final linePaint = Paint()
+      ..color = colorScheme.primary
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    final path = Path();
+    for (var index = 0; index < levels.length; index++) {
+      final x = levels.length == 1
+          ? size.width / 2
+          : size.width * index / (levels.length - 1);
+      final y = midY - (levels[index] / scale) * (midY - 2);
+      if (index == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PresetCurvePainter oldDelegate) {
+    return oldDelegate.levels != levels ||
         oldDelegate.colorScheme != colorScheme;
   }
 }
