@@ -635,7 +635,8 @@ class _UnsupportedView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Android、Windows 与 Linux 播放时可使用均衡器、音效与低音增强。',
+              'Android 与 Linux（系统 libmpv）播放时可使用均衡器、音效与'
+              '低音增强。Windows 将随后续播放内核升级开放。',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,

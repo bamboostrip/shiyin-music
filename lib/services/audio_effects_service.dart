@@ -67,11 +67,14 @@ class AudioEffectsService {
     return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   }
 
-  /// 桌面端 mpv 滤镜链可用性（Windows/Linux）。
+  /// 桌面端 mpv 滤镜链可用性。仅 Linux：发行版系统 libmpv 链全量 ffmpeg，
+  /// aresample/equalizer/stereotools 齐备。Windows 捆绑的 media-kit
+  /// audio-only 构建 ffmpeg 是 `--disable-filters` 白名单编译（仅
+  /// overlay/equalizer），lavfi 图配置必需的 aresample 也不在其中——
+  /// 任何音效图起播即失败被静默禁用（播放级探针实证，见
+  /// scripts/mpv_af_playback_probe.dart），在换用全功能 DLL 前整体关闭。
   bool get isDesktopEffectsPlatform {
-    return !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.linux);
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
   }
 
   bool get isAudioEffectsSupported =>
@@ -80,8 +83,7 @@ class AudioEffectsService {
   bool get isBassBoostSupported => isAudioEffectsSupported;
 
   /// 环绕：Android 走原生 Virtualizer，Linux 走 mpv stereotools。Windows
-  /// 捆绑的 audio-only libmpv 其 ffmpeg 滤镜白名单里没有任何可做立体声
-  /// 展宽的滤镜（stereotools/pan 均未编译），暂不可用。
+  /// 桌面音效整体未开放（见 [isDesktopEffectsPlatform]），自然不含环绕。
   bool get isSurroundSupported =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||

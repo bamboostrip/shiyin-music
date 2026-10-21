@@ -17,9 +17,9 @@ import 'dart:math' as math;
 /// - 低音增强：Android 有独立 BassBoost 效果器，mpv 无对应滤镜，折算成
 ///   31/62/125Hz 三点抬升（满强度 +12dB 梯形）叠进 EQ 各段。
 /// - 环绕：lavfi `stereotools` 的 slev（边声道增益，>1 声场展宽），强度
-///   线性映射 1 + 0.55×strength。仅 Linux 系统 libmpv（发行版全量
-///   ffmpeg）可用；Windows audio-only 构建没有任何展宽类滤镜，由
-///   [surroundAvailable] 置 false 整段不写。
+///   线性映射 1 + 0.55×strength。Windows 桌面音效整体未开放（缺少
+///   aresample，任何 lavfi 图都无法配置），本组装器只服务 Linux；
+///   [surroundAvailable] 是调用侧能力门控的防御参数。
 ///
 /// lavfi 图一律用方括号 `lavfi=[...]` 包裹：mpv 属性接口的 af 字符串
 /// 解析器对 `[...]` 内的分隔符（逗号/冒号）原样放行，而对单引号包裹
