@@ -26,8 +26,8 @@ void main() {
     expect(filters, hasLength(1));
     expect(
       filters.single,
-      "lavfi='equalizer=f=31:t=q:w=1.2:g=5.0,"
-      "equalizer=f=16000:t=q:w=1.2:g=2.5'",
+      "lavfi=[equalizer=f=31:t=q:w=1.2:g=5.0,"
+      "equalizer=f=16000:t=q:w=1.2:g=2.5]",
     );
   });
 
@@ -42,9 +42,9 @@ void main() {
     // 满强度 +12dB：0.5 → 31Hz +6.0 / 62Hz +4.2 / 125Hz +2.1，其余跳过。
     expect(
       filters.single,
-      "lavfi='equalizer=f=31:t=q:w=1.2:g=6.0,"
+      "lavfi=[equalizer=f=31:t=q:w=1.2:g=6.0,"
       "equalizer=f=62:t=q:w=1.2:g=4.2,"
-      "equalizer=f=125:t=q:w=1.2:g=2.1'",
+      "equalizer=f=125:t=q:w=1.2:g=2.1]",
     );
   });
 
@@ -69,7 +69,7 @@ void main() {
       surroundStrength: 0.8,
     );
     // slev = 1 + 0.55×0.8 = 1.440。
-    expect(filters.single, "lavfi='stereotools=slev=1.440'");
+    expect(filters.single, "lavfi=[stereotools=slev=1.440]");
   });
 
   test('surroundAvailable=false 时不产环绕段（Windows 滤镜白名单）', () {
@@ -93,8 +93,8 @@ void main() {
       surroundStrength: 0.5,
     );
     expect(filters, hasLength(2));
-    expect(filters.first, startsWith("lavfi='equalizer=f=31"));
-    expect(filters.last, "lavfi='stereotools=slev=1.275'");
+    expect(filters.first, startsWith("lavfi=[equalizer=f=31"));
+    expect(filters.last, "lavfi=[stereotools=slev=1.275]");
   });
 
   test('频点与电平数不一致时按短侧截断不抛', () {
@@ -105,8 +105,8 @@ void main() {
     );
     expect(
       filters.single,
-      "lavfi='equalizer=f=31:t=q:w=1.2:g=1.0,"
-      "equalizer=f=62:t=q:w=1.2:g=2.0'",
+      "lavfi=[equalizer=f=31:t=q:w=1.2:g=1.0,"
+      "equalizer=f=62:t=q:w=1.2:g=2.0]",
     );
   });
 }

@@ -21,9 +21,10 @@ import 'dart:math' as math;
 ///   ffmpeg）可用；Windows audio-only 构建没有任何展宽类滤镜，由
 ///   [surroundAvailable] 置 false 整段不写。
 ///
-/// 每段 lavfi 图用单引号整体包裹：mpv 的 af 列表解析器按逗号切条目、
-/// 按冒号切参数，引号内内容原样传给 libavfilter，图内的分隔符才不会
-/// 被误切。
+/// lavfi 图一律用方括号 `lavfi=[...]` 包裹：mpv 属性接口的 af 字符串
+/// 解析器对 `[...]` 内的分隔符（逗号/冒号）原样放行，而对单引号包裹
+/// 直接报 unsupported format（scripts/mpv_af_probe.dart 对真实 DLL 的
+/// 实测结论，曾因引号格式导致音效链整体写入失败）。
 abstract final class DesktopAudioFilters {
   /// 单段增益钳制（±24dB），防 EQ 与低音叠加后的极端值。
   static const _maxDb = 24.0;
@@ -57,7 +58,7 @@ abstract final class DesktopAudioFilters {
     if (surroundAvailable && surroundEnabled && surroundStrength > 0) {
       final slev =
           (1 + 0.55 * surroundStrength.clamp(0.0, 1.0)).toStringAsFixed(3);
-      filters.add("lavfi='stereotools=slev=$slev'");
+      filters.add('lavfi=[stereotools=slev=$slev]');
     }
     return filters;
   }
@@ -88,7 +89,7 @@ abstract final class DesktopAudioFilters {
     if (segments.isEmpty) {
       return null;
     }
-    return "lavfi='${segments.join(',')}'";
+    return 'lavfi=[${segments.join(',')}]';
   }
 
   static double _bandDb(int hz, double eqDb, double bassDb) {
