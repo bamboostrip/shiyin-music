@@ -4,12 +4,18 @@ import 'package:flutter/services.dart';
 import '../../controllers/player_controller.dart';
 import 'app_dialog.dart';
 
+/// 打开「自定义音效」页。
+///
+/// [inContentArea] 为 true 时推入调用点最近的内容区 Navigator
+/// （车机横屏：左侧常驻播放面板不被盖住，与 search_page._openIdentify
+/// 的推入模式同款），否则推根 Navigator 整屏（手机竖屏/桌面既有行为）。
 Future<void> showAudioEffectsSheet({
   required BuildContext context,
   required PlayerController player,
+  bool inContentArea = false,
 }) {
-  return Navigator.of(context).push<void>(
-    MaterialPageRoute(builder: (_) => AudioEffectsPage(player: player)),
+  return Navigator.of(context, rootNavigator: !inContentArea).push<void>(
+    MaterialPageRoute<void>(builder: (_) => AudioEffectsPage(player: player)),
   );
 }
 
@@ -63,7 +69,7 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
               return _UnsupportedView(colorScheme: colorScheme);
             }
 
-            return Column(
+            final panel = Column(
               children: [
                 _EffectTabs(index: _tabIndex, onChanged: _setTab),
                 Expanded(
@@ -72,6 +78,27 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
                       : _EnhancePanel(player: player),
                 ),
               ],
+            );
+
+            // 横屏（车机为主）双栏：左栏保持 tabs + 当前面板，右栏固定宽
+            // 档案快捷卡纵列——车机主屏触达最常用的音效一击即达；
+            // 竖屏维持现有单栏。
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth <= constraints.maxHeight) {
+                  return panel;
+                }
+                return Row(
+                  children: [
+                    Expanded(child: panel),
+                    const VerticalDivider(width: 1, thickness: 1),
+                    SizedBox(
+                      width: 340,
+                      child: _ProfileQuickPane(player: player),
+                    ),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -482,6 +509,92 @@ class _ProfileCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 横屏右栏：音效档案快捷卡纵列（车机主屏一击即达，点选即应用不关页）。
+/// 卡片数量多或高度吃紧时可滚动（ListView），标题沿用弹层分段标题语言。
+class _ProfileQuickPane extends StatelessWidget {
+  const _ProfileQuickPane({required this.player});
+
+  final PlayerController player;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
+      children: [
+        _sheetSectionTitle(Theme.of(context), '音效档案'),
+        for (final profile in PlayerController.audioEffectProfiles)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _ProfileQuickCard(
+              profile: profile,
+              selected: player.equalizerPresetName == profile.name,
+              onTap: () => player.applyAudioEffectProfile(profile),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 横屏右栏的紧凑档案行卡：图标在左、名称+描述在右；选中语言与弹层
+/// 网格卡同源（[_SelectableCard] 主题色描边 + 对勾角标），仅排版换成
+/// 行式以适配固定宽侧栏。
+class _ProfileQuickCard extends StatelessWidget {
+  const _ProfileQuickCard({
+    required this.profile,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AudioEffectProfile profile;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(
+            _profileIcons[profile.name] ?? Icons.graphic_eq_rounded,
+            size: 24,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  profile.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  profile.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
