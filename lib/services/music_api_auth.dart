@@ -131,6 +131,21 @@ mixin _MusicApiAuth on _MusicApiBase {
     await _client.post('/listen/timeadd');
   }
 
+  /// 拉取酷狗账号云端播放历史（「听歌时光机」数据源，只读）。
+  ///
+  /// 引擎对成功响应会把 data 提升为根并注入 status:1；失败时原样返回
+  /// 带非 1/200 status 的原始信封，这里转成 ApiException 交给调用方展示。
+  /// 响应的具体承载形状由 [CloudPlayHistory.fromJson] 容错处理。
+  Future<CloudPlayHistory> cloudPlayHistory() async {
+    final raw = await _client.get('/user/playhistory');
+    final json = asMap(raw);
+    final status = asInt(json['status']);
+    if (json.isNotEmpty && status != null && status != 1 && status != 200) {
+      throw ApiException('拉取云端播放历史失败${_failureSuffix(json)}');
+    }
+    return CloudPlayHistory.fromJson(raw);
+  }
+
   bool _isSuccess(Map<String, dynamic> json) {
     return asInt(json['status']) == 1;
   }
