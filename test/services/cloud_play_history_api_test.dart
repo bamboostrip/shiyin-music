@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/core/api_client.dart';
 import 'package:shiyin_music/core/api_client_interface.dart';
 import 'package:shiyin_music/services/music_api.dart';
 
@@ -72,7 +73,13 @@ void main() {
 
       await expectLater(
         api.cloudPlayHistory(),
-        throwsA(isA<Exception>()),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('拉取云端播放历史失败'),
+          ),
+        ),
       );
     });
 

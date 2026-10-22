@@ -46,12 +46,18 @@ class _TimeMachinePageState extends State<TimeMachinePage> {
     });
   }
 
-  void _goLogin() {
-    Navigator.of(context).push(
+  Future<void> _goLogin() async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => LoginPage(auth: widget.auth, api: widget.api),
       ),
     );
+    if (!mounted) return;
+    // 登录成功返回后立即拉取云端历史；LoginPage 成功时 pop(account)，
+    // 返回值无需判内容，只看登录态（失败/取消返回则停留在引导页）。
+    if (widget.auth.isLoggedIn) {
+      _reload();
+    }
   }
 
   void _play(CloudPlayRecord record, List<Song> queue) {
