@@ -53,13 +53,6 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
             icon: const Icon(Icons.close_rounded),
           ),
           title: const Text('自定义音效'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('保存'),
-            ),
-            const SizedBox(width: 8),
-          ],
         ),
         body: AnimatedBuilder(
           animation: player,
@@ -68,36 +61,17 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
               return _UnsupportedView(colorScheme: colorScheme);
             }
 
-            final panel = Column(
+            // 主界面即卡片选择（音效档案 + 均衡器预设 + 自定义入口），
+            // 手动调线在「自定义」卡推入的深层页；增强保持第二 tab。
+            return Column(
               children: [
                 _EffectTabs(index: _tabIndex, onChanged: _setTab),
                 Expanded(
                   child: _tabIndex == 0
-                      ? _EqualizerPanel(player: player)
+                      ? _EffectsCardPanel(player: player)
                       : _EnhancePanel(player: player),
                 ),
               ],
-            );
-
-            // 横屏（车机为主）双栏：左栏保持 tabs + 当前面板，右栏固定宽
-            // 档案快捷卡纵列——车机主屏触达最常用的音效一击即达；
-            // 竖屏维持现有单栏。
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                if (constraints.maxWidth <= constraints.maxHeight) {
-                  return panel;
-                }
-                return Row(
-                  children: [
-                    Expanded(child: panel),
-                    const VerticalDivider(width: 1, thickness: 1),
-                    SizedBox(
-                      width: 340,
-                      child: _ProfileQuickPane(player: player),
-                    ),
-                  ],
-                );
-              },
             );
           },
         ),
@@ -110,9 +84,8 @@ class _AudioEffectsPageState extends State<AudioEffectsPage> {
   }
 }
 
-/// 顶部胶囊分段切换（均衡器/增强）：44 高整圆角胶囊，选中项为悬浮白丸 +
-/// 主题色字，与搜索胶囊/药丸按钮同语言。此前 86 高大字标题 + 圆点指示
-/// 在移动端显大显旧。
+/// 顶部胶囊分段切换（音效/增强）：44 高整圆角胶囊，选中项为悬浮白丸 +
+/// 主题色字，与搜索胶囊/药丸按钮同语言。
 class _EffectTabs extends StatelessWidget {
   const _EffectTabs({required this.index, required this.onChanged});
 
@@ -123,7 +96,7 @@ class _EffectTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final labels = ['均衡器', '增强'];
+    final labels = ['音效', '增强'];
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
       child: Container(
@@ -182,6 +155,403 @@ class _EffectTabs extends StatelessWidget {
   }
 }
 
+/// 音效 tab 主面板：卡片网格直选（酷狗式）。上段「关闭」+ 音效档案
+/// 组合卡，下段带迷你曲线的均衡器预设卡 + 末尾「自定义」入口卡；点选
+/// 即应用不关页。窄屏 2 列，宽屏（平板/车机横屏/桌面）3 列。
+class _EffectsCardPanel extends StatelessWidget {
+  const _EffectsCardPanel({required this.player});
+
+  final PlayerController player;
+
+  @override
+  Widget build(BuildContext context) {
+    final crossAxisCount = MediaQuery.sizeOf(context).width >= 600 ? 3 : 2;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      children: [
+        _sectionTitle(Theme.of(context), '音效'),
+        GridView(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            mainAxisExtent: 104,
+          ),
+          children: [
+            _OffCard(
+              selected: _isAllEffectsOff(player),
+              onTap: player.disableAllAudioEffects,
+            ),
+            for (final profile in PlayerController.audioEffectProfiles)
+              _ProfileCard(
+                profile: profile,
+                selected: player.equalizerEnabled &&
+                    player.equalizerPresetName == profile.name,
+                onTap: () => player.applyAudioEffectProfile(profile),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        _sectionTitle(Theme.of(context), '均衡器预设'),
+        GridView(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            // 名称行实际高约 20，92 给非默认字号留防溢出余量。
+            mainAxisExtent: 92,
+          ),
+          children: [
+            for (final preset in PlayerController.equalizerPresets)
+              _PresetCard(
+                preset: preset,
+                selected: player.equalizerEnabled &&
+                    player.equalizerPresetName == preset.name,
+                onTap: () => player.applyEqualizerPreset(preset),
+              ),
+            _CustomEqCard(
+              selected: player.equalizerEnabled &&
+                  player.equalizerPresetName == '自定义',
+              levels: player.equalizerLevels,
+              onTap: () => _openEqualizerEditor(context),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 三件全关才让「关闭」卡选中：环绕不支持的平台（Windows）开关不
+  /// 渲染，残留持久化 true 不参与判定。
+  bool _isAllEffectsOff(PlayerController player) {
+    final surroundOff =
+        !(player.surroundEnabled && player.isSurroundSupported);
+    return !player.equalizerEnabled &&
+        !player.bassBoostEnabled &&
+        surroundOff;
+  }
+
+  /// 推入最近 Navigator：与音效页自身同语义（车机上编辑页仍只占内容
+  /// 区，常驻面板不被盖住）。
+  void _openEqualizerEditor(BuildContext context) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _EqualizerEditorPage(player: player),
+      ),
+    );
+  }
+}
+
+/// 深层「自定义均衡器」页：主界面卡片化后手动调线下沉至此。预设选择
+/// 在主界面卡片网格，这里只留启用开关（快速 A/B）、曲线预览、频段推子
+/// 与重置。
+class _EqualizerEditorPage extends StatelessWidget {
+  const _EqualizerEditorPage({required this.player});
+
+  final PlayerController player;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('自定义均衡器')),
+      body: AnimatedBuilder(
+        animation: player,
+        builder: (context, _) => _EqualizerPanel(player: player),
+      ),
+    );
+  }
+}
+
+Widget _sectionTitle(ThemeData theme, String text) {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+    child: Text(
+      text,
+      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+    ),
+  );
+}
+
+/// 档案卡图标按名字映射（档案表在 models 层，不掺 UI 字段）；改名或
+/// 新增档案时回退通用图形，避免空图标。
+const _profileIcons = <String, IconData>{
+  '全景环绕': Icons.surround_sound_rounded,
+  '3D丽音': Icons.auto_awesome_rounded,
+  '超重低音': Icons.speaker_rounded,
+  '纯净人声': Icons.record_voice_over_rounded,
+  '现场演唱会': Icons.stadium_rounded,
+  '深夜舒缓': Icons.bedtime_rounded,
+};
+
+/// 选中态卡片外壳：与 _EffectTabs 同语言的浅底 + 14 圆角，选中时主题色
+/// 描边并在右上角叠一枚对勾角标。
+class _SelectableCard extends StatelessWidget {
+  const _SelectableCard({
+    required this.selected,
+    required this.onTap,
+    required this.child,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: isDark
+          ? colorScheme.surfaceContainerHighest
+          : const Color(0xFFF1F2F5),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          width: 1.6,
+          color: selected ? colorScheme.primary : Colors.transparent,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: child,
+            ),
+            if (selected)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Container(
+                  key: const ValueKey('effect-selected-badge'),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary,
+                    // 只圆内侧左下角；靠卡片外的一角由 Material 圆角裁掉。
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(13),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.check_rounded,
+                    size: 14,
+                    color: colorScheme.onPrimary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 「关闭」卡：一键停用 EQ/低音/环绕三件套（全关时选中）。停用只关
+/// 开关不抹记忆，重新点效果卡即恢复——与档案卡同排版（图标+名+描述）。
+class _OffCard extends StatelessWidget {
+  const _OffCard({required this.selected, required this.onTap});
+
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.power_settings_new_rounded,
+            size: 26,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '关闭',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            '停用全部音效',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.profile,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AudioEffectProfile profile;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _profileIcons[profile.name] ?? Icons.graphic_eq_rounded,
+            size: 26,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            profile.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            profile.description,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「自定义均衡器」入口卡：预设卡同排版（名 + 当前曲线实时预览），点入
+/// 推入手动调线页。手动改过频段（presetName=「自定义」）后回主界面带
+/// 对勾选中。
+class _CustomEqCard extends StatelessWidget {
+  const _CustomEqCard({
+    required this.selected,
+    required this.levels,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final List<int> levels;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.tune_rounded, size: 16, color: colorScheme.primary),
+              const SizedBox(width: 5),
+              Text(
+                '自定义',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 40,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PresetCurvePainter(
+                colorScheme: colorScheme,
+                levels: levels,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresetCard extends StatelessWidget {
+  const _PresetCard({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AudioEffectPreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return _SelectableCard(
+      selected: selected,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            preset.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 40,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PresetCurvePainter(
+                colorScheme: colorScheme,
+                levels: preset.levels,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EqualizerPanel extends StatelessWidget {
   const _EqualizerPanel({required this.player});
 
@@ -190,6 +560,7 @@ class _EqualizerPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final config = player.equalizerConfig;
     final minDb = config.minMillibels / 100;
     final maxDb = config.maxMillibels / 100;
@@ -287,363 +658,19 @@ class _EqualizerPanel extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-          // 与确认弹窗同语言：左浅底重置 + 右渐变预设（46 高整圆角药丸）。
-          child: AppDialogPillActions(
-            cancelText: '重置',
-            confirmText: '预设',
-            onCancel: player.resetEqualizer,
-            onConfirm: () => _showPresetPicker(context),
+          // 与确认弹窗同语言的浅底药丸（46 高整圆角）：重置=回到平直。
+          child: AppPillButton(
+            label: '重置',
+            foreground: isDark
+                ? colorScheme.onSurface
+                : const Color(0xFF1A1D24),
+            background: isDark
+                ? colorScheme.surfaceContainerHighest
+                : const Color(0xFFF4F5F7),
+            onTap: player.resetEqualizer,
           ),
         ),
       ],
-    );
-  }
-
-  Future<void> _showPresetPicker(BuildContext context) async {
-    // 卡片网格弹层（酷狗式）：上段音效档案卡、下段带迷你曲线的预设卡。
-    // 两段网格总高常超一屏，isScrollControlled 放开默认 9/16 屏高上限，
-    // 再以 0.9 屏高封顶保留弹层感，整层 ListView 滚动（网格自身不滚）。
-    final result = await showModalBottomSheet<Object>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
-      ),
-      builder: (sheetContext) {
-        final sheetTheme = Theme.of(sheetContext);
-        // 窄屏 2 列；宽屏（平板/横屏）预设给 3 列，一屏多看几条曲线。
-        final presetColumns = MediaQuery.sizeOf(sheetContext).width >= 600
-            ? 3
-            : 2;
-        return Material(
-          color: sheetTheme.colorScheme.surface,
-          child: SafeArea(
-            top: false,
-            child: ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              children: [
-                _sheetSectionTitle(sheetTheme, '音效'),
-                GridView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: EdgeInsets.zero,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    mainAxisExtent: 104,
-                  ),
-                  children: [
-                    for (final profile in PlayerController.audioEffectProfiles)
-                      _ProfileCard(
-                        profile: profile,
-                        selected: player.equalizerPresetName == profile.name,
-                        onTap: () => Navigator.of(sheetContext).pop(profile),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                _sheetSectionTitle(sheetTheme, '均衡器预设'),
-                GridView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: EdgeInsets.zero,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: presetColumns,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    // 名称行实际高约 20，92 给非默认字号留防溢出余量。
-                    mainAxisExtent: 92,
-                  ),
-                  children: [
-                    for (final preset in PlayerController.equalizerPresets)
-                      _PresetCard(
-                        preset: preset,
-                        selected: player.equalizerPresetName == preset.name,
-                        onTap: () => Navigator.of(sheetContext).pop(preset),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    if (result is AudioEffectProfile) {
-      await player.applyAudioEffectProfile(result);
-    } else if (result is AudioEffectPreset) {
-      await player.applyEqualizerPreset(result);
-    }
-  }
-}
-
-Widget _sheetSectionTitle(ThemeData theme, String text) {
-  return Padding(
-    padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-    child: Text(
-      text,
-      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-    ),
-  );
-}
-
-/// 档案卡图标按名字映射（档案表在 models 层，不掺 UI 字段）；改名或
-/// 新增档案时回退通用图形，避免空图标。
-const _profileIcons = <String, IconData>{
-  '全景环绕': Icons.surround_sound_rounded,
-  '3D丽音': Icons.auto_awesome_rounded,
-  '超重低音': Icons.speaker_rounded,
-  '纯净人声': Icons.record_voice_over_rounded,
-  '现场演唱会': Icons.stadium_rounded,
-  '深夜舒缓': Icons.bedtime_rounded,
-};
-
-/// 选中态卡片外壳：与 _EffectTabs 同语言的浅底 + 14 圆角，选中时主题色
-/// 描边并在右上角叠一枚对勾角标。
-class _SelectableCard extends StatelessWidget {
-  const _SelectableCard({
-    required this.selected,
-    required this.onTap,
-    required this.child,
-  });
-
-  final bool selected;
-  final VoidCallback onTap;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: isDark
-          ? colorScheme.surfaceContainerHighest
-          : const Color(0xFFF1F2F5),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          width: 1.6,
-          color: selected ? colorScheme.primary : Colors.transparent,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: child,
-            ),
-            if (selected)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  key: const ValueKey('effect-selected-badge'),
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary,
-                    // 只圆内侧左下角；靠卡片外的一角由 Material 圆角裁掉。
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(13),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.check_rounded,
-                    size: 14,
-                    color: colorScheme.onPrimary,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProfileCard extends StatelessWidget {
-  const _ProfileCard({
-    required this.profile,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final AudioEffectProfile profile;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return _SelectableCard(
-      selected: selected,
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            _profileIcons[profile.name] ?? Icons.graphic_eq_rounded,
-            size: 26,
-            color: colorScheme.primary,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            profile.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            profile.description,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 横屏右栏：音效档案快捷卡纵列（车机主屏一击即达，点选即应用不关页）。
-/// 卡片数量多或高度吃紧时可滚动（ListView），标题沿用弹层分段标题语言。
-class _ProfileQuickPane extends StatelessWidget {
-  const _ProfileQuickPane({required this.player});
-
-  final PlayerController player;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 18),
-      children: [
-        _sheetSectionTitle(Theme.of(context), '音效档案'),
-        for (final profile in PlayerController.audioEffectProfiles)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _ProfileQuickCard(
-              profile: profile,
-              selected: player.equalizerPresetName == profile.name,
-              onTap: () => player.applyAudioEffectProfile(profile),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// 横屏右栏的紧凑档案行卡：图标在左、名称+描述在右；选中语言与弹层
-/// 网格卡同源（[_SelectableCard] 主题色描边 + 对勾角标），仅排版换成
-/// 行式以适配固定宽侧栏。
-class _ProfileQuickCard extends StatelessWidget {
-  const _ProfileQuickCard({
-    required this.profile,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final AudioEffectProfile profile;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return _SelectableCard(
-      selected: selected,
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(
-            _profileIcons[profile.name] ?? Icons.graphic_eq_rounded,
-            size: 24,
-            color: colorScheme.primary,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  profile.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  profile.description,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PresetCard extends StatelessWidget {
-  const _PresetCard({
-    required this.preset,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final AudioEffectPreset preset;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return _SelectableCard(
-      selected: selected,
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            preset.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            height: 40,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _PresetCurvePainter(
-                colorScheme: colorScheme,
-                levels: preset.levels,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
