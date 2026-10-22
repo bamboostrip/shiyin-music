@@ -146,6 +146,21 @@ mixin _MusicApiAuth on _MusicApiBase {
     return CloudPlayHistory.fromJson(raw);
   }
 
+  /// 上报一条播放记录到酷狗云端（「听歌时光机」二期，写操作）。
+  ///
+  /// 由设置开关「同步播放记录」控制，PlayerController 在起播成功后调用；
+  /// 失败向上抛、由调用方吞错，不影响播放主链路。与 addListeningTime
+  /// 同款最简 POST，不做信封校验（无 UI 反馈，静默语义）。
+  Future<void> uploadPlayHistory({
+    required String mixSongId,
+    int playCount = 1,
+  }) async {
+    await _client.post(
+      '/playhistory/upload',
+      query: {'mixsongid': mixSongId, 'play_count': playCount},
+    );
+  }
+
   bool _isSuccess(Map<String, dynamic> json) {
     return asInt(json['status']) == 1;
   }
