@@ -170,6 +170,14 @@ class PlaybackSettingsSection extends StatelessWidget {
               ),
             ),
             SettingsDivider(),
+            SettingsSwitchTile(
+              icon: Icons.cloud_upload_outlined,
+              iconColor: const Color(0xFF5C6BC0),
+              title: '同步播放记录',
+              subtitle: '开启后，在时音的播放上报到酷狗账号（默认关闭）',
+              value: player.cloudHistoryUploadEnabled,
+              onChanged: player.setCloudHistoryUploadEnabled,
+            ),
             // 移动端/车机专属：桌面隐藏（含前导分隔线）。
             if (!isDesktopFormFactor) ...[
               SettingsTile(

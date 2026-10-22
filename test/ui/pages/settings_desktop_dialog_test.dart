@@ -217,6 +217,8 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool get addListeningTimeEnabled => false;
   @override
+  bool get cloudHistoryUploadEnabled => false;
+  @override
   bool get allowCellularPrecache => false;
   @override
   bool get isDesktopLyricsSupported => true;
