@@ -139,20 +139,39 @@ latest 必须永远是全家桶，**不能**把 Android/Windows/Linux 拆成多�
 git add -A
 git commit -m "release: v2.4.2"
 git push origin main
+
+# 推 v* tag：触发 Android / Windows / Linux 三条构建流水线
+git tag v2.4.2
+git push origin v2.4.2
 ```
 
-## 六、创建 GitHub Release（带详细 changelog）
+## 六、创建 GitHub Release（草稿先行，全绿自动转正）
 
-用 `gh` CLI 创建 Release，**先写 Release 再打 tag**，这样两个 CI 工作流只附加
-附件、不覆盖笔记：
+tag 推送后立刻用 `gh` CLI 创建**草稿** Release（注意 `--draft`）。草稿对公众
+不可见、`/releases/latest` 也不返回——构建期间（约 10 分钟）Release 列表与
+应用内检查更新看到的仍是上一版，**Release 一旦可见就必然附件齐全**：
 
 ```bash
 # 1. 写 Release 笔记到临时文件（避免 shell 转义问题）
 #    内容从 update.md 对应版本摘取，可加分类标题（Bug 修复 / 新功能 / 技术改进）
 
-# 2. 创建 Release（自动在远程创建 tag，同时触发 Android 与 Windows 两条流水线）
-gh release create v2.4.2 --target main --title "时音 v2.4.2" --notes-file <notes-file>
+# 2. 创建草稿 Release（tag 推送后尽快执行：构建任务的上传步骤要求
+#    Release 已存在）
+gh release create v2.4.2 --draft --target main \
+  --title "时音 v2.4.2" --notes-file <notes-file>
 ```
+
+三平台构建**全部成功后**，`publish-release.yml`（监听三条流水线的
+workflow_run 事件）自动 `gh release edit <tag> --draft=false` 把草稿转正——
+转正即对公众可见、成为 latest，且此刻附件已全部就位。任一平台构建失败则
+Release 停留草稿，按文末「需要撤回已发布的版本」清理 tag 与草稿后重走流程；
+如需手动转正（例如补跑某条流水线后自动转正漏掉）：
+`gh release edit v2.4.2 -R bamboostrip/shiyin-music --draft=false`。
+
+> 为什么构建工作流用 `gh release upload` 而不是 softprops/action-gh-release：
+> softprops 对已存在的草稿会在传完附件后自动 finalize（转正），最快的那条
+> 流水线会把半成品 Release 提前放出去；`gh release upload` 只传附件、永不
+> 改 Release 状态，转正时机完全交给 publish-release.yml。
 
 Release 笔记模板：
 
@@ -212,10 +231,14 @@ Release 笔记模板：
 ## 七、确认 CI 构建
 
 ```bash
-gh run list --limit 3          # 查看构建状态（Android 与 Windows 两条）
-gh run watch                   # 实时跟踪（可选）
-gh release view v2.4.2         # 确认附件已附加
+gh run list -R bamboostrip/shiyin-music --limit 4   # 三平台构建 + Publish Release
+gh run watch                                        # 实时跟踪（可选）
+gh release view v2.4.2 -R bamboostrip/shiyin-music  # 确认附件已附加、非草稿
 ```
+
+三平台全绿后 `publish-release.yml` 会自动把草稿转正；确认 Release 页面
+`isDraft=false` 且附件齐全即发版完成。若三线全绿但草稿未转正（自动转正
+未触发），用第六节的手动转正命令兜底。
 
 CI 完成后 Release 页面应包含：
 

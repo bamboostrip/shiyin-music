@@ -196,14 +196,22 @@ jobs:
             build/dist/shiyin-*-linux-x64.deb.sha256
           if-no-files-found: error
 
-      # 仅附加附件，不创建/覆盖 Release 笔记（笔记由 gh release create 手写）。
-      - name: Attach to GitHub Release
+      # 仅把附件传到已存在的（草稿）Release：gh release upload 只传附件、
+      # 不改 Release 状态——转正由 publish-release.yml 在三平台构建全绿后
+      # 统一执行（softprops 会自动 finalize 草稿，弃用）。
+      - name: Upload to draft Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            build/dist/shiyin-*-linux-x64-portable.tar.gz
-            build/dist/shiyin-*-linux-x64-portable.tar.gz.sha256
-            build/dist/shiyin-*-linux-x64.deb
-            build/dist/shiyin-*-linux-x64.deb.sha256
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=(
+            "build/dist/shiyin-${{ github.ref_name }}-linux-x64-portable.tar.gz"
+            "build/dist/shiyin-${{ github.ref_name }}-linux-x64-portable.tar.gz.sha256"
+            "build/dist/shiyin-${{ github.ref_name }}-linux-x64.deb"
+            "build/dist/shiyin-${{ github.ref_name }}-linux-x64.deb.sha256"
+          )
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber

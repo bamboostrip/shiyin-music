@@ -180,15 +180,24 @@ jobs:
           done
           ls -la *.sha256
 
-      # Release 笔记由 gh CLI 手动创建，此处仅按顺序附加 APK，不覆盖 body。
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk
-            dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk.sha256
-            dist/shiyin-${{ github.ref_name }}-skia-arm64.apk
-            dist/shiyin-${{ github.ref_name }}-skia-arm64.apk.sha256
-            dist/shiyin-${{ github.ref_name }}-skia-arm32.apk
-            dist/shiyin-${{ github.ref_name }}-skia-arm32.apk.sha256
-          name: 时音 ${{ github.ref_name }}
+      # 仅把 APK 按固定顺序传到已存在的（草稿）Release：gh release upload
+      # 只传附件、不改 Release 状态——转正由 publish-release.yml 在三平台
+      # 构建全绿后统一执行，避免 Release 先于附件出现在列表里（softprops
+      # 会自动 finalize 草稿，弃用）。
+      - name: Upload APKs to draft Release (impeller-arm64 first)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=(
+            "dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk"
+            "dist/shiyin-${{ github.ref_name }}-impeller-arm64.apk.sha256"
+            "dist/shiyin-${{ github.ref_name }}-skia-arm64.apk"
+            "dist/shiyin-${{ github.ref_name }}-skia-arm64.apk.sha256"
+            "dist/shiyin-${{ github.ref_name }}-skia-arm32.apk"
+            "dist/shiyin-${{ github.ref_name }}-skia-arm32.apk.sha256"
+          )
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber

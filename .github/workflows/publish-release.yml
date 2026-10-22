@@ -1,0 +1,62 @@
+name: Publish Release
+
+# 发版可见性编排（见 docs/release-process.md 第六节）：
+# 发版流程先推 v* tag 触发三平台构建，再用 `gh release create --draft`
+# 建草稿 Release——草稿对公众不可见、/releases/latest 也不返回，客户端
+# 检查更新在构建期间看到的仍是上一版。三条构建流水线（Android/Windows/
+# Linux）全部对同一 tag 成功后，本工作流把草稿转正发布；任一失败则
+# Release 停留草稿，按发版文档「撤回」小节处理后重走。
+#
+# 触发方式：workflow_run 监听三条构建流水线的 completed 事件，每次触发
+# 都重新核对三线状态——最后完成的那条会看到 3/3 全绿并执行转正；先完成
+# 的看到不足 3 条直接跳过。isDraft 检查保证幂等（重复触发/手动已转正时
+# 不再动作）。
+on:
+  workflow_run:
+    workflows: ["Build Android APK", "Build Windows Desktop", "Build Linux Desktop"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    # 仅 tag 推送触发的构建才参与发版判定（三条构建流水线另有
+    # workflow_dispatch 手动入口，手动跑不应碰 Release）。
+    if: >
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish draft release when all three builds are green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.workflow_run.head_branch }}"
+          sha="${{ github.event.workflow_run.head_sha }}"
+          echo "release tag=$tag sha=$sha"
+
+          green=$(gh run list -R "$GITHUB_REPOSITORY" \
+            --branch "$tag" --event push --limit 50 \
+            --json workflowName,headSha,status,conclusion \
+            | jq --arg sha "$sha" \
+              '[.[] | select(.headSha == $sha)
+                 | select(.workflowName == "Build Android APK"
+                       or .workflowName == "Build Windows Desktop"
+                       or .workflowName == "Build Linux Desktop")
+                 | select(.status == "completed" and .conclusion == "success")]
+                | length')
+          echo "green builds: ${green}/3"
+          if [ "$green" -lt 3 ]; then
+            echo "not all builds finished yet, do nothing"
+            exit 0
+          fi
+
+          if [ "$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "$tag is not a draft (already published), do nothing"
+            exit 0
+          fi
+
+          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false
+          echo "published $tag"
