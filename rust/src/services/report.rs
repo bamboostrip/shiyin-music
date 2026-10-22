@@ -8,7 +8,6 @@ use crate::kugou::{
     signer, transport,
 };
 
-#[allow(dead_code)]
 pub async fn upload_play_history(
     client: &reqwest::Client,
     session: &KgSession,
