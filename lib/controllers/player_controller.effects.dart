@@ -98,20 +98,37 @@ mixin _PlayerEffects on _PlayerControllerBase {
   }
 
   Future<void> applyEqualizerPreset(AudioEffectPreset preset) async {
+    // 卡片化音效页：点预设卡即点即响——统一自动开启 EQ（启动恢复不走
+    // 这里，不受影响；resetEqualizer 的「重置=平直」同语义即时生效）。
+    equalizerEnabled = true;
     equalizerPresetName = preset.name;
     equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
       preset.levels,
       equalizerLevels.length,
     );
     await _persistEqualizer();
-    if (equalizerEnabled) {
-      await _applyEqualizer();
-    }
+    await _applyEqualizer();
     notifyListeners();
   }
 
   Future<void> resetEqualizer() async {
     await applyEqualizerPreset(PlayerController.equalizerPresets.first);
+  }
+
+  /// 「关闭」卡：EQ/低音/环绕一次性全关。曲线与强度保留记忆，重新点任一
+  /// 效果卡即恢复（applyAudioEffectProfile/applyEqualizerPreset 均自动开）。
+  Future<void> disableAllAudioEffects() async {
+    equalizerEnabled = false;
+    bassBoostEnabled = false;
+    surroundEnabled = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_equalizerEnabledSettingKey, false);
+    await prefs.setBool(_bassBoostEnabledSettingKey, false);
+    await prefs.setBool(_surroundEnabledSettingKey, false);
+    await _applyEqualizer();
+    await _applyBassBoost();
+    await _applySurround();
+    notifyListeners();
   }
 
   Future<void> _persistEqualizer() async {
