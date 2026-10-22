@@ -290,7 +290,8 @@ const _profileIcons = <String, IconData>{
 };
 
 /// 选中态卡片外壳：与 _EffectTabs 同语言的浅底 + 14 圆角，选中时主题色
-/// 描边并在右上角叠一枚对勾角标。
+/// 描边并在右上角叠一枚对勾角标。Semantics(selected/button) 让读屏把
+/// 整张卡播报为可选中按钮并带出选中态。
 class _SelectableCard extends StatelessWidget {
   const _SelectableCard({
     required this.selected,
@@ -306,48 +307,55 @@ class _SelectableCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: isDark
-          ? colorScheme.surfaceContainerHighest
-          : const Color(0xFFF1F2F5),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          width: 1.6,
-          color: selected ? colorScheme.primary : Colors.transparent,
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: isDark
+            ? colorScheme.surfaceContainerHighest
+            : const Color(0xFFF1F2F5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            width: 1.6,
+            color: selected ? colorScheme.primary : Colors.transparent,
+          ),
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: child,
-            ),
-            if (selected)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  key: const ValueKey('effect-selected-badge'),
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary,
-                    // 只圆内侧左下角；靠卡片外的一角由 Material 圆角裁掉。
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(13),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: child,
+              ),
+              if (selected)
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    key: const ValueKey('effect-selected-badge'),
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary,
+                      // 只圆内侧左下角；靠卡片外的一角由 Material 圆角裁掉。
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(13),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: colorScheme.onPrimary,
                     ),
                   ),
-                  child: Icon(
-                    Icons.check_rounded,
-                    size: 14,
-                    color: colorScheme.onPrimary,
-                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

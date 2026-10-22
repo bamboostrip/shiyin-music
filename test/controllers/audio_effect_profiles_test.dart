@@ -52,4 +52,34 @@ void main() {
       }
     });
   });
+
+  group('卡片网格名称互斥守卫', () {
+    // 音效页卡片网格按 player.equalizerPresetName == name 在档案表、预设
+    // 表与字面量「自定义」三处独立选中：任何重名都会让两张卡同时带对勾
+    // 角标（共享 ValueKey 静默重复，不会报错）。今天互斥只是数据的巧合，
+    // 此处守卫数据层，防未来增改名字时踩雷。
+    test('档案名/预设名/自定义 两两互斥且各自无重名', () {
+      final profileNames =
+          PlayerController.audioEffectProfiles.map((e) => e.name);
+      final presetNames =
+          PlayerController.equalizerPresets.map((e) => e.name);
+
+      // 各自无重名。
+      expect(profileNames.toSet().length, profileNames.length,
+          reason: '档案表内重名');
+      expect(presetNames.toSet().length, presetNames.length,
+          reason: '预设表内重名');
+
+      // 档案名与预设名交集为空。
+      expect(
+        profileNames.toSet().intersection(presetNames.toSet()),
+        isEmpty,
+        reason: '档案名与预设名重名会让两张卡同时带对勾角标',
+      );
+
+      // 「自定义」是手动调线入口的字面量名，被任一表占用同样双对勾。
+      expect(profileNames, isNot(contains('自定义')));
+      expect(presetNames, isNot(contains('自定义')));
+    });
+  });
 }
