@@ -62,16 +62,38 @@ class EqualizerConfig {
 class AudioEffectsService {
   static const _channel = MethodChannel('shiyin_music/audio_effects');
 
-  bool get isAudioEffectsSupported {
+  /// Android 原生通道（audiofx 系效果器）可用性。
+  bool get isAndroidEffectsChannel {
     return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   }
 
+  /// 桌面端 mpv 滤镜链可用性。仅 Linux：发行版系统 libmpv 链全量 ffmpeg，
+  /// aresample/equalizer/stereotools 齐备。Windows 捆绑的 media-kit
+  /// audio-only 构建 ffmpeg 是 `--disable-filters` 白名单编译（仅
+  /// overlay/equalizer），lavfi 图配置必需的 aresample 也不在其中——
+  /// 任何音效图起播即失败被静默禁用（播放级探针实证，见
+  /// scripts/mpv_af_playback_probe.dart），在换用全功能 DLL 前整体关闭。
+  bool get isDesktopEffectsPlatform {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  bool get isAudioEffectsSupported =>
+      isAndroidEffectsChannel || isDesktopEffectsPlatform;
+
   bool get isBassBoostSupported => isAudioEffectsSupported;
+
+  /// 环绕：Android 走原生 Virtualizer，Linux 走 mpv stereotools。Windows
+  /// 桌面音效整体未开放（见 [isDesktopEffectsPlatform]），自然不含环绕。
+  bool get isSurroundSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.linux);
 
   Future<EqualizerConfig?> equalizerConfig({
     required int? audioSessionId,
   }) async {
-    if (!isAudioEffectsSupported) {
+    // 桌面走 mpv 滤镜链（fallback 10 段配置），不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return null;
     }
 
@@ -97,7 +119,8 @@ class AudioEffectsService {
     required bool enabled,
     required List<int> levels,
   }) async {
-    if (!isAudioEffectsSupported) {
+    // 桌面 EQ 由 mpv biquad 滤镜链实现，不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return false;
     }
 
@@ -121,7 +144,8 @@ class AudioEffectsService {
     required bool enabled,
     required double strength,
   }) async {
-    if (!isBassBoostSupported) {
+    // 桌面低音由 EQ 曲线低频搁架折算实现，不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
       return false;
     }
 
@@ -135,6 +159,32 @@ class AudioEffectsService {
       return result ?? false;
     } on PlatformException catch (error) {
       debugPrint('[时音][audio-effects] BassBoost failed: $error');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  Future<bool> configureVirtualizer({
+    required int? audioSessionId,
+    required bool enabled,
+    required double strength,
+  }) async {
+    // 桌面环绕由 mpv stereotools 实现（仅 Linux），不打 Android 通道。
+    if (!isAndroidEffectsChannel) {
+      return false;
+    }
+
+    final normalizedStrength = strength.clamp(0.0, 1.0);
+    try {
+      final result = await _channel.invokeMethod<bool>('configureVirtualizer', {
+        'audioSessionId': audioSessionId,
+        'enabled': enabled,
+        'strength': (normalizedStrength * 1000).round(),
+      });
+      return result ?? false;
+    } on PlatformException catch (error) {
+      debugPrint('[时音][audio-effects] Virtualizer failed: $error');
       return false;
     } on MissingPluginException {
       return false;

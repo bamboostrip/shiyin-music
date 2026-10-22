@@ -318,8 +318,10 @@ class LandscapeHeader extends StatelessWidget {
             icon: Icons.graphic_eq_rounded,
             title: '音效',
             subtitle: player.audioEffectsLabel,
-            onTap: () =>
-                showAudioEffectsSheet(context: context, player: player),
+            onTap: () => showAudioEffectsSheet(
+              context: context,
+              player: player,
+            ),
           ),
         if (song.source == SongSource.kugou)
           SongSheetAction(

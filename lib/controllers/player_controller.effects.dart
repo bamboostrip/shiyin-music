@@ -4,6 +4,7 @@ part of 'player_controller.dart';
 mixin _PlayerEffects on _PlayerControllerBase {
   bool get isAudioEffectsSupported => _audioEffects.isAudioEffectsSupported;
   bool get isBassBoostSupported => _audioEffects.isBassBoostSupported;
+  bool get isSurroundSupported => _audioEffects.isSurroundSupported;
   bool get loudnessEnabled => _loudness.isEnabled;
   bool get isLoudnessAnalysisSupported => _loudness.isAnalysisSupported;
   String get audioEffectsLabel {
@@ -16,6 +17,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
     if (bassBoostEnabled) {
       return 'Bass ${(bassBoostStrength * 100).round()}%';
     }
+    if (surroundEnabled && isSurroundSupported) {
+      return '环绕 ${(surroundStrength * 100).round()}%';
+    }
     return '关闭';
   }
 
@@ -24,8 +28,13 @@ mixin _PlayerEffects on _PlayerControllerBase {
       return;
     }
     bassBoostEnabled = enabled;
+    // 档案可将强度清零，开启即生效需要非零默认（否则开关开着却是 0%）。
+    if (enabled && bassBoostStrength < 0.05) {
+      bassBoostStrength = 0.45;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_bassBoostEnabledSettingKey, enabled);
+    await prefs.setDouble(_bassBoostStrengthSettingKey, bassBoostStrength);
     await _applyBassBoost();
     notifyListeners();
   }
@@ -89,20 +98,37 @@ mixin _PlayerEffects on _PlayerControllerBase {
   }
 
   Future<void> applyEqualizerPreset(AudioEffectPreset preset) async {
+    // 卡片化音效页：点预设卡即点即响——统一自动开启 EQ（启动恢复不走
+    // 这里，不受影响；resetEqualizer 的「重置=平直」同语义即时生效）。
+    equalizerEnabled = true;
     equalizerPresetName = preset.name;
     equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
       preset.levels,
       equalizerLevels.length,
     );
     await _persistEqualizer();
-    if (equalizerEnabled) {
-      await _applyEqualizer();
-    }
+    await _applyEqualizer();
     notifyListeners();
   }
 
   Future<void> resetEqualizer() async {
     await applyEqualizerPreset(PlayerController.equalizerPresets.first);
+  }
+
+  /// 「关闭」卡：EQ/低音/环绕一次性全关。曲线与强度保留记忆，重新点任一
+  /// 效果卡即恢复（applyAudioEffectProfile/applyEqualizerPreset 均自动开）。
+  Future<void> disableAllAudioEffects() async {
+    equalizerEnabled = false;
+    bassBoostEnabled = false;
+    surroundEnabled = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_equalizerEnabledSettingKey, false);
+    await prefs.setBool(_bassBoostEnabledSettingKey, false);
+    await prefs.setBool(_surroundEnabledSettingKey, false);
+    await _applyEqualizer();
+    await _applyBassBoost();
+    await _applySurround();
+    notifyListeners();
   }
 
   Future<void> _persistEqualizer() async {
@@ -117,7 +143,9 @@ mixin _PlayerEffects on _PlayerControllerBase {
 
   @override
   Future<void> _refreshEqualizerConfig() async {
-    if (!isAudioEffectsSupported) {
+    // 桌面保持 fallback 10 段配置（mpv biquad 链按标准倍频程中心生效），
+    // 只有 Android 需要向原生通道查询设备真实段数。
+    if (!_audioEffects.isAndroidEffectsChannel) {
       return;
     }
     final config = await _audioEffects.equalizerConfig(
@@ -140,29 +168,147 @@ mixin _PlayerEffects on _PlayerControllerBase {
 
   @override
   Future<void> _applyEqualizer() async {
-    if (!isAudioEffectsSupported) {
+    // Android 走原生均衡器；桌面（Windows/Linux）把 EQ 编进 mpv 滤镜链。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureEqualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: equalizerEnabled,
+        levels: equalizerLevels,
+      );
       return;
     }
-    await _audioEffects.configureEqualizer(
-      audioSessionId:
-          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
-      enabled: equalizerEnabled,
-      levels: equalizerLevels,
-    );
+    await _applyDesktopAudioFilters();
   }
 
   @override
   Future<void> _applyBassBoost() async {
-    if (!isBassBoostSupported) {
+    // Android 走原生 BassBoost；桌面折算成 EQ 低频搁架（见
+    // DesktopAudioFilters 注释），随整条 mpv 滤镜链一起重算。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureBassBoost(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: bassBoostEnabled,
+        strength: bassBoostStrength,
+      );
       return;
     }
+    await _applyDesktopAudioFilters();
+  }
 
-    await _audioEffects.configureBassBoost(
-      audioSessionId:
-          _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
-      enabled: bassBoostEnabled,
-      strength: bassBoostStrength,
+  Future<void> setSurroundEnabled(bool enabled) async {
+    if (surroundEnabled == enabled) {
+      return;
+    }
+    surroundEnabled = enabled;
+    // 档案可将强度清零，开启即生效需要非零默认（否则开关开着却是 0%）。
+    if (enabled && surroundStrength < 0.05) {
+      surroundStrength = 0.6;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_surroundEnabledSettingKey, enabled);
+    await prefs.setDouble(_surroundStrengthSettingKey, surroundStrength);
+    await _applySurround();
+    notifyListeners();
+  }
+
+  Future<void> setSurroundStrength(
+    double strength, {
+    bool persist = true,
+  }) async {
+    final nextStrength = strength.clamp(0.0, 1.0);
+    if ((surroundStrength - nextStrength).abs() < 0.001) {
+      return;
+    }
+    surroundStrength = nextStrength;
+    if (surroundEnabled) {
+      unawaited(_applySurround());
+    }
+    notifyListeners();
+
+    if (persist) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_surroundStrengthSettingKey, nextStrength);
+    }
+  }
+
+  /// 应用命名音效档案：EQ/低音/环绕一次性落到位（issue #1 酷狗式音效的
+  /// 本仓实现）。应用后各子项仍可单独微调，微调 EQ 会走既有「自定义」路径。
+  Future<void> applyAudioEffectProfile(AudioEffectProfile profile) async {
+    equalizerEnabled = true;
+    equalizerPresetName = profile.name;
+    equalizerLevels = PlayerEqualizerLogic.levelsForBandCount(
+      profile.eqLevels,
+      equalizerLevels.length,
     );
+    bassBoostEnabled = profile.bassBoost;
+    bassBoostStrength = profile.bassStrength;
+    surroundEnabled = profile.surround;
+    surroundStrength = profile.surroundStrength;
+    await _persistEqualizer();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_bassBoostEnabledSettingKey, bassBoostEnabled);
+    await prefs.setDouble(_bassBoostStrengthSettingKey, bassBoostStrength);
+    await prefs.setBool(_surroundEnabledSettingKey, surroundEnabled);
+    await prefs.setDouble(_surroundStrengthSettingKey, surroundStrength);
+    await _applyEqualizer();
+    await _applyBassBoost();
+    await _applySurround();
+    notifyListeners();
+  }
+
+  /// 与低音增强同范式：sessionId 变化/启动恢复/开关时把环绕状态挂到当前
+  /// 音频会话。桌面映射为 mpv stereotools（仅 Linux；Windows 的
+  /// audio-only libmpv 无环绕滤镜，isSurroundSupported 关闭）。
+  @override
+  Future<void> _applySurround() async {
+    // Android 走原生 Virtualizer；桌面折进 mpv 滤镜链整体重算。
+    if (_audioEffects.isAndroidEffectsChannel) {
+      await _audioEffects.configureVirtualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: surroundEnabled,
+        strength: surroundStrength,
+      );
+      return;
+    }
+    await _applyDesktopAudioFilters();
+  }
+
+  /// 桌面端：把 EQ/低音/环绕统一编译成 mpv af 滤镜链（just_audio_media_kit
+  /// → media_kit → mpv）。任一音效状态变化后重算整链，与变速合并写入。
+  Future<void> _applyDesktopAudioFilters() async {
+    if (!_audioEffects.isDesktopEffectsPlatform) {
+      return;
+    }
+    // just_audio 不公开平台实例，经 MediaKitPlayer 在册登记表触达
+    //（无桌面播放器（平台尚未激活）时为空，自然 no-op）。
+    final players = MediaKitPlayer.activeInstances;
+    if (players.isEmpty) {
+      return;
+    }
+    try {
+      final filters = DesktopAudioFilters.build(
+        equalizerEnabled: equalizerEnabled,
+        centerHz: [
+          for (final band in equalizerConfig.bands) band.centerHz,
+        ],
+        levelsMillibels: equalizerLevels,
+        bassEnabled: bassBoostEnabled,
+        bassStrength: bassBoostStrength,
+        surroundEnabled: surroundEnabled,
+        surroundStrength: surroundStrength,
+        // Windows audio-only libmpv 无环绕滤镜，整段不写（见
+        // DesktopAudioFilters 注释的滤镜白名单约束）。
+        surroundAvailable: isSurroundSupported,
+      );
+      for (final player in players) {
+        await player.setAudioEffectFilters(filters);
+      }
+    } catch (error) {
+      debugPrint('[时音][audio-effects] Desktop filters failed: $error');
+    }
   }
 
   /// 切歌时并行分析响度,完成后应用增益(不阻塞 loadSong/播放)。

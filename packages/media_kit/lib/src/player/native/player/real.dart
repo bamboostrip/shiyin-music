@@ -830,9 +830,10 @@ class NativePlayer extends PlatformPlayer {
         // speed on the other hand, changes the pitch when audio-pitch-correction is set to FALSE.
         // Since, it also alters the actual [speed], the scaletempo:scale is divided by the same value of [pitch] to compensate the speed change.
         await _setPropertyFlag('audio-pitch-correction', false);
+        // LOCAL PATCH (shiyin): 变速与音效滤镜链统一经 _updateAudioFilters
+        // 合并写入同一个 af（见下方方法），不再直接覆写冲掉音效链。
         // Divide by [state.pitch] to compensate the speed change caused by pitch shift.
-        await _setPropertyString('af',
-            'scaletempo:scale=${(state.rate / state.pitch).toStringAsFixed(8)}');
+        await _updateAudioFilters();
       } else {
         // Pitch shift control is disabled.
 
@@ -881,9 +882,10 @@ class NativePlayer extends PlatformPlayer {
         // Since, it also alters the actual [speed], the scaletempo:scale is divided by the same value of [pitch] to compensate the speed change.
         await _setPropertyFlag('audio-pitch-correction', false);
         await _setPropertyDouble('speed', pitch);
+        // LOCAL PATCH (shiyin): 同 setRate——变速与音效链统一经
+        // _updateAudioFilters 合并写 af，scaletempo 表达式在彼处原样保留。
         // Divide by [state.pitch] to compensate the speed change caused by pitch shift.
-        await _setPropertyString('af',
-            'scaletempo:scale=${(state.rate / state.pitch).toStringAsFixed(8)}');
+        await _updateAudioFilters();
       } else {
         // Pitch shift control is disabled.
         throw ArgumentError('[PlayerConfiguration.pitch] is false');
@@ -895,6 +897,28 @@ class NativePlayer extends PlatformPlayer {
     } else {
       return function();
     }
+  }
+
+  /// LOCAL PATCH (shiyin): 设置桌面音效滤镜链（EQ/环绕），与变速的
+  /// scaletempo 在同一个 af 属性内合并，互不覆盖。
+  Future<void> setExtraAudioFilters(List<String> filters) async {
+    if (disposed) {
+      return;
+    }
+    await waitForPlayerInitialization;
+    _extraAudioFilters = List<String>.of(filters);
+    await _updateAudioFilters();
+  }
+
+  /// LOCAL PATCH (shiyin): af 滤镜链统一组装。变速（pitch 模式下用
+  /// scaletempo 补偿速度）在前、音效链在后；链为空时写空串清空滤镜。
+  Future<void> _updateAudioFilters() async {
+    final chain = <String>[
+      if (configuration.pitch)
+        'scaletempo:scale=${(state.rate / state.pitch).toStringAsFixed(8)}',
+      ..._extraAudioFilters,
+    ];
+    await _setPropertyString('af', chain.join(','));
   }
 
   /// Enables or disables shuffle for [Player]. Default is `false`.
@@ -2536,6 +2560,10 @@ class NativePlayer extends PlatformPlayer {
       );
     }
   }
+
+  // LOCAL PATCH (shiyin): 桌面音效滤镜链（EQ/环绕），与变速的 scaletempo
+  // 合并写入同一个 af 属性——此前变速直接整体覆写 af，会把音效链冲掉。
+  List<String> _extraAudioFilters = <String>[];
 
   int _asyncRequestNumber = 0;
   final Map<int, Completer<int>> _setPropertyRequests = {};

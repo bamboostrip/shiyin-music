@@ -7,12 +7,24 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:just_audio/just_audio.dart';
+// 桌面（Windows/Linux）播放器是 just_audio_media_kit 的平台实现，音效
+// 滤镜链经 MediaKitPlayer.setAudioEffectFilters 透传给 mpv（Task 5）。
+// 注意：顶层 just_audio_media_kit.dart 不导出 MediaKitPlayer，须引
+// mediakit_player.dart；just_audio 0.10.x 也不公开 AudioPlayer.platform，
+// 桌面实例经 MediaKitPlayer.activeInstances 在册登记表触达。
+import 'package:just_audio_media_kit/mediakit_player.dart'
+    show MediaKitPlayer;
 import 'package:shared_preferences/shared_preferences.dart';
 
+// 音效预设/档案的类与数据表拆到 models 层（issue #2）：import 供本库与
+// part 分片引用类型，export 维持既有消费方「经 player_controller.dart
+// 引用 AudioEffectPreset/AudioEffectProfile」的写法零改动。
+import '../models/audio_effect_presets.dart';
 import '../models/music_models.dart';
 import '../services/audio_effects_service.dart';
 import '../services/cache_service.dart';
 import '../services/bluetooth_lyrics_service.dart';
+import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/music_api.dart';
@@ -28,6 +40,9 @@ import 'download_controller.dart';
 import 'local_music_controller.dart';
 import 'player_logic.dart';
 import 'shuffle_queue.dart';
+
+export '../models/audio_effect_presets.dart'
+    show AudioEffectPreset, AudioEffectProfile;
 
 part 'player_controller.playback.dart';
 part 'player_controller.queue.dart';
@@ -81,13 +96,6 @@ enum PlayConfirm {
   timeoutSilent,
 }
 
-class AudioEffectPreset {
-  const AudioEffectPreset({required this.name, required this.levels});
-
-  final String name;
-  final List<int> levels;
-}
-
 // PlayerController 的私有设置键/常量（原类内 static const，拆分后提升为库级常量，
 // 仅同库可见，引用方式不变）。
 const _listenTimeSettingKey = 'settings.add_listening_time_enabled';
@@ -97,6 +105,9 @@ const _equalizerLevelsSettingKey = 'settings.equalizer_levels';
 const _equalizerPresetSettingKey = 'settings.equalizer_preset';
 const _bassBoostEnabledSettingKey = 'settings.bass_boost_enabled';
 const _bassBoostStrengthSettingKey = 'settings.bass_boost_strength';
+// 环绕开关/强度与低音增强同范式落盘（见 _applySurround 与 _restoreSettings）。
+const _surroundEnabledSettingKey = 'settings.surround_enabled';
+const _surroundStrengthSettingKey = 'settings.surround_strength';
 const _audioInterruptionEnabledSettingKey =
     'settings.audio_interruption_enabled';
 const _autoResumeAfterInterruptionSettingKey =
@@ -155,33 +166,11 @@ class PlayerController extends _PlayerControllerBase
         _PlayerEffects,
         _PlayerDesktop,
         _PlayerSettings {
-  static const equalizerPresets = [
-    AudioEffectPreset(name: '平直', levels: _defaultEqualizerLevels),
-    AudioEffectPreset(
-      name: '流行',
-      levels: [0, 250, 450, 350, 100, -100, 50, 300, 450, 500],
-    ),
-    AudioEffectPreset(
-      name: '摇滚',
-      levels: [500, 350, 150, -100, -250, -150, 150, 350, 550, 650],
-    ),
-    AudioEffectPreset(
-      name: '人声',
-      levels: [-250, -150, 0, 250, 500, 550, 350, 100, -100, -200],
-    ),
-    AudioEffectPreset(
-      name: '低音',
-      levels: [750, 650, 500, 250, 0, -100, -150, -200, -250, -300],
-    ),
-    AudioEffectPreset(
-      name: '古典',
-      levels: [350, 250, 100, 0, 150, 250, 300, 350, 250, 100],
-    ),
-    AudioEffectPreset(
-      name: '电子',
-      levels: [650, 450, 120, -120, -180, 100, 350, 550, 650, 700],
-    ),
-  ];
+  /// EQ 预设表（16 项）与音效档案表（6 项）已拆到 models 层集中维护
+  /// （曲线与调法注释见 audio_effect_presets.dart），此处保留原静态入口
+  /// 签名，既有消费方零改动。
+  static const equalizerPresets = kEqualizerPresets;
+  static const audioEffectProfiles = kAudioEffectProfiles;
 
   PlayerController(super.api, super.audioHandler) {
     unawaited(_restoreSettings());
@@ -244,6 +233,16 @@ class PlayerController extends _PlayerControllerBase
       isPlaying =
           value.playing &&
           value.processingState != ProcessingState.completed;
+      // 桌面滤镜链重放：系统停止（audio_service stop）/播放错误转 idle
+      // 会让 just_audio 销毁并重建平台实例（setPlatform → 全新
+      // MediaKitPlayer），新实例的 mpv af 从零开始，音效链静默丢失；Android
+      // 有 sessionId 重挂钩子，桌面没有。趁每次真实起播（false→true 跃迁）
+      // 幂等补写整链——_applyDesktopAudioFilters 内部按桌面门+在册实例自
+      // 守卫，重复写同一条 af 无副作用。
+      if (isPlaying && !_isPlayingForDesktopFilters) {
+        unawaited(_applyDesktopAudioFilters());
+      }
+      _isPlayingForDesktopFilters = isPlaying;
       // 「重新出声作废完成去重」：系统播放键（通知栏/锁屏/耳机媒体键）曲末
       // 重播不经 togglePlay/_resetCompletionLatchForReplay（应用内入口会自
       // 己清），若不随这轮真实起播作废上一轮的完成标记，这首第二次播完的
@@ -344,6 +343,7 @@ class PlayerController extends _PlayerControllerBase
       unawaited(_refreshEqualizerConfig());
       unawaited(_applyEqualizer());
       unawaited(_applyBassBoost());
+      unawaited(_applySurround());
       unawaited(_applyLoudnessGain());
     });
     unawaited(_setupAudioSessionListeners());
@@ -407,6 +407,21 @@ class PlayerController extends _PlayerControllerBase
         strength: bassBoostStrength,
       ),
     );
+    // 环绕同理：dispose 必须显式释放，否则释放sessionId 后效果器仍挂着
+    // 已销毁会话，下次创建会话时系统可能复用旧强度（与低音增强同范式）。
+    unawaited(
+      _audioEffects.configureVirtualizer(
+        audioSessionId:
+            _androidAudioSessionId ?? audioPlayer.androidAudioSessionId,
+        enabled: false,
+        strength: surroundStrength,
+      ),
+    );
+    // 桌面端清空 mpv 滤镜链（Android 走上面的通道 disable）。just_audio
+    // 不公开平台实例，经在册登记表触达（见 mediakit_player.dart 补丁）。
+    for (final player in MediaKitPlayer.activeInstances) {
+      unawaited(player.setAudioEffectFilters(const []));
+    }
     unawaited(_loudness.cancelAnalysis());
     unawaited(_loudness.releaseNative());
     unawaited(_superLyric.unregisterPublisher());
@@ -559,6 +574,11 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool isBuffering = false;
   bool isPreparing = false;
 
+  /// 上一事件周期的播放态副本，专供桌面滤镜链重放判跃迁（见 _stateSub
+  /// 监听里的 false→true 钩子）：isPlaying 在监听入口已被本事件覆盖，
+  /// 不能拿它当历史态。
+  bool _isPlayingForDesktopFilters = false;
+
   /// 换源深度计数（并发 playSong 各自持有 +1/-1）。
   ///
   /// 曾经是共享 bool：快速连点切歌时，先启动的 playSong 在 await 中被
@@ -627,6 +647,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   );
   bool bassBoostEnabled = false;
   double bassBoostStrength = 0.45;
+  bool surroundEnabled = false;
+  double surroundStrength = 0.6;
   bool audioInterruptionEnabled = true;
   bool autoResumeAfterInterruption = false;
   bool autoPlayOnDeviceConnected = false;
@@ -920,6 +942,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Future<void> _applyEqualizer();
 
   Future<void> _applyBassBoost();
+
+  Future<void> _applySurround();
 
   Future<void> _analyzeAndApplyLoudness({
     required Song song,

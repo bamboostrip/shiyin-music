@@ -14,6 +14,17 @@ import 'src/volume_scale.dart';
 class MediaKitPlayer extends AudioPlayerPlatform {
   static const kErrorCode = 1;
 
+  // LOCAL PATCH (shiyin): just_audio 0.10.x 的 AudioPlayer 不公开其平台
+  // 实例（_platform/_platformValue 均私有，也没有 id getter），app 侧无法
+  // 经 just_audio 拿到本类实例。构造时登记入册、release 时摘除，桌面音效
+  // （setAudioEffectFilters）等 app 侧能力经在册实例触达 mpv。本仓 app
+  // 全程只有一个播放 AudioPlayer，单实例语义成立。
+  static final List<MediaKitPlayer> _activeInstances = <MediaKitPlayer>[];
+
+  /// 当前在册的 [MediaKitPlayer] 实例（无桌面播放器时为空列表）。
+  static List<MediaKitPlayer> get activeInstances =>
+      List<MediaKitPlayer>.unmodifiable(_activeInstances);
+
   /// `package:media_kit`'s [Player]
   late final Player _player;
 
@@ -53,6 +64,8 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   }
 
   MediaKitPlayer(super.id) {
+    // LOCAL PATCH (shiyin): 登记入册（见 _activeInstances 注释）。
+    _activeInstances.add(this);
     _player = Player(
         configuration: PlayerConfiguration(
       pitch: JustAudioMediaKit.pitch,
@@ -369,6 +382,16 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   Future<SetPitchResponse> setPitch(SetPitchRequest request) =>
       _player.setPitch(request.pitch).then((_) => SetPitchResponse());
 
+  /// LOCAL PATCH (shiyin): 桌面音效 —— 把 EQ/环绕滤镜链透传给 media_kit
+  /// NativePlayer（与变速的 scaletempo 在 af 属性里合并，见 real.dart 的
+  /// _updateAudioFilters）。非 NativePlayer 平台静默 no-op。
+  Future<void> setAudioEffectFilters(List<String> filters) async {
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setExtraAudioFilters(filters);
+    }
+  }
+
   @override
   Future<SetLoopModeResponse> setLoopMode(SetLoopModeRequest request) async {
     await _player.setPlaylistMode(_loopModeToPlaylistMode(request.loopMode));
@@ -467,6 +490,8 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   /// Release the resources used by this player.
   Future<void> release() async {
     _logger.info('releasing player resources');
+    // LOCAL PATCH (shiyin): 摘除在册登记（见 _activeInstances 注释）。
+    _activeInstances.remove(this);
     _mediaOpened = false;
     await _player.dispose();
     // cancel all stream subscriptions
