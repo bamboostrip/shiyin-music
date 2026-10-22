@@ -10,6 +10,7 @@ import '../pages/audio_interruption_settings_page.dart';
 import '../pages/desktop_lyrics_settings_page.dart';
 import '../pages/playback_history_page.dart';
 import '../pages/playback_stats_page.dart';
+import '../pages/time_machine_page.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/toast.dart';
 import 'settings_widgets.dart';
@@ -153,6 +154,18 @@ class PlaybackSettingsSection extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (_) =>
                       PlaybackHistoryPage(api: api, auth: auth, player: player),
+                ),
+              ),
+            ),
+            SettingsTile(
+              icon: Icons.hourglass_top_rounded,
+              iconColor: const Color(0xFF00897B),
+              title: '听歌时光机',
+              subtitle: '云端听歌记录按日期回顾',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      TimeMachinePage(api: api, auth: auth, player: player),
                 ),
               ),
             ),
