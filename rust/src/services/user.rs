@@ -66,7 +66,6 @@ pub async fn user_playlist(
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
 pub async fn user_history(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
     require_login(session)?;
     let body = json!({
