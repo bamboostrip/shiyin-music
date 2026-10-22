@@ -234,6 +234,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 记录播放历史与本地播放统计（后台执行，不阻塞播放）
       unawaited(_historyService.record(song));
       unawaited(_statsService.recordPlay(song));
+      // 云端播放记录上报（默认关；仅酷狗在线源；失败静默）
+      if (cloudHistoryUploadEnabled) {
+        unawaited(_reportCloudPlayHistory(song));
+      }
       // 首播后后台缓存（仅当本次用的是网络 URL，且当前网络允许）。
       // 蜂窝网络默认跳过音频下载（只播不存），避免移动流量翻倍；
       // 用户在设置中放行后才缓存。

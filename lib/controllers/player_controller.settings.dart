@@ -17,6 +17,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  Future<void> setCloudHistoryUploadEnabled(bool enabled) async {
+    if (cloudHistoryUploadEnabled == enabled) {
+      return;
+    }
+    cloudHistoryUploadEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_cloudHistoryUploadSettingKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setKeepScreenOnEnabled(bool enabled) async {
     if (keepScreenOnEnabled == enabled) {
       return;
@@ -337,6 +347,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     addListeningTimeEnabled =
         prefs.getBool(_listenTimeSettingKey) ?? addListeningTimeEnabled;
+    cloudHistoryUploadEnabled =
+        prefs.getBool(_cloudHistoryUploadSettingKey) ?? cloudHistoryUploadEnabled;
     keepScreenOnEnabled =
         prefs.getBool(_keepScreenOnSettingKey) ?? keepScreenOnEnabled;
     audioQuality = AudioQuality.fromApiValue(
@@ -593,6 +605,29 @@ mixin _PlayerSettings on _PlayerControllerBase {
       debugPrint('[时音][listen-time] report failed: $error');
     } finally {
       _isReportingListenTime = false;
+    }
+  }
+
+  /// 云端上报用的 mixsongid（与评论按钮同口径）：仅酷狗在线源，
+  /// 且 id 须可解析为数字；本地/网易源、hash 兜底的非数字 id 一律不上报。
+  @visibleForTesting
+  static int? cloudUploadMixSongIdOf(Song song) {
+    if (song.source != SongSource.kugou) return null;
+    final id = song.albumAudioId ?? song.id;
+    if (id.isEmpty) return null;
+    return int.tryParse(id);
+  }
+
+  /// 起播成功后上报一条播放记录。失败静默（debugPrint）：
+  /// 云端记录是锦上添花，绝不打扰播放主链路，也不做重试。
+  @override
+  Future<void> _reportCloudPlayHistory(Song song) async {
+    final mixSongId = cloudUploadMixSongIdOf(song);
+    if (mixSongId == null) return;
+    try {
+      await _api.uploadPlayHistory(mixSongId: '$mixSongId');
+    } catch (error) {
+      debugPrint('[时音][cloud-history] upload failed: $error');
     }
   }
 }

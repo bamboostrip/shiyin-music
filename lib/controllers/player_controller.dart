@@ -99,6 +99,7 @@ enum PlayConfirm {
 // PlayerController 的私有设置键/常量（原类内 static const，拆分后提升为库级常量，
 // 仅同库可见，引用方式不变）。
 const _listenTimeSettingKey = 'settings.add_listening_time_enabled';
+const _cloudHistoryUploadSettingKey = 'settings.cloud_history_upload_enabled';
 const _audioQualitySettingKey = 'settings.audio_quality';
 const _equalizerEnabledSettingKey = 'settings.equalizer_enabled';
 const _equalizerLevelsSettingKey = 'settings.equalizer_levels';
@@ -171,6 +172,13 @@ class PlayerController extends _PlayerControllerBase
   /// 签名，既有消费方零改动。
   static const equalizerPresets = kEqualizerPresets;
   static const audioEffectProfiles = kAudioEffectProfiles;
+
+  /// 云端上报用的 mixsongid 资格判定入口（实现见 _PlayerSettings。
+  /// Dart 的 mixin 静态成员不能经应用它的类名访问，故在此转发，
+  /// 供测试以 PlayerController.cloudUploadMixSongIdOf 的形式调用）。
+  @visibleForTesting
+  static int? cloudUploadMixSongIdOf(Song song) =>
+      _PlayerSettings.cloudUploadMixSongIdOf(song);
 
   PlayerController(super.api, super.audioHandler) {
     unawaited(_restoreSettings());
@@ -613,6 +621,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   DateTime? _autoSkipStreakSince;
   bool addListeningTimeEnabled = true;
 
+  /// 云端播放记录上报开关（「听歌时光机」二期）。默认关闭：
+  /// 上报是把听歌行为写进酷狗账号画像的写操作，必须用户显式开启。
+  bool cloudHistoryUploadEnabled = false;
+
   /// 播放页是否保持屏幕常亮（仅 Android 生效，其余平台无原生实现）。
   ///
   /// 真实生效条件是 [keepScreenOnEnabled] **且** [isPlaying]：暂停/停播时
@@ -954,4 +966,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 切歌缓存未命中时中性化残留的旧响度增益（effects 分片实现）。
   void _resetStaleLoudnessGain();
+
+  /// 云端播放记录上报（settings 分片实现，playback 起播成功钩子调用）。
+  Future<void> _reportCloudPlayHistory(Song song);
 }
