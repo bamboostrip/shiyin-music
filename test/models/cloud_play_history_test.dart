@@ -76,6 +76,23 @@ void main() {
       expect(history.records.every((r) => r.playedAt != null), isTrue);
     });
 
+    test('时间键承载歌曲时长（秒/毫秒）或微秒脏值 → 判为非时间戳', () {
+      // 候选键若其实是时长字段，不能折算成 1970 年附近的「播放时间」。
+      final history = CloudPlayHistory.fromJson({
+        'list': [
+          {'hash': 'a', 'songname': 'A', 'time': 245},
+          {'hash': 'b', 'songname': 'B', 'time': 245000},
+          {'hash': 'c', 'songname': 'C', 'time': 1729500000123456},
+        ],
+      });
+
+      expect(history.totalRecords, 3);
+      expect(history.records.every((r) => r.playedAt == null), isTrue);
+      // 无一落入 1970/远未来日期分组，全部归「未知时间」。
+      final groups = history.groupByDay(now: DateTime(2026, 10, 22));
+      expect(groups.map((g) => g.label), ['未知时间']);
+    });
+
     test('无 hash 的脏记录被过滤，不影响其余记录', () {
       final history = CloudPlayHistory.fromJson({
         'list': [

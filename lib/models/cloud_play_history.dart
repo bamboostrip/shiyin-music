@@ -140,9 +140,12 @@ class CloudPlayHistory {
         final value = asInt(source[key]);
         if (value == null || value <= 0) continue;
         // 秒级（约 1e9）与毫秒级（约 1e12）统一折算成毫秒。
-        return DateTime.fromMillisecondsSinceEpoch(
-          value > 9999999999 ? value : value * 1000,
-        );
+        final ms = value > 9999999999 ? value : value * 1000;
+        // 合理性区间约 2000–2100 年：候选键若实际承载歌曲时长
+        // （如 245 秒 / 245000 毫秒）或微秒级脏值（约 1e15），折算后
+        // 都落不进该区间，跳过该键，避免记录被归进 1970 或远未来分组。
+        if (ms < 946684800000 || ms > 4102444800000) continue;
+        return DateTime.fromMillisecondsSinceEpoch(ms);
       }
     }
     return null;

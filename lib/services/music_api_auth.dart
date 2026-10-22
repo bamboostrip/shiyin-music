@@ -133,15 +133,16 @@ mixin _MusicApiAuth on _MusicApiBase {
 
   /// 拉取酷狗账号云端播放历史（「听歌时光机」数据源，只读）。
   ///
-  /// 引擎对成功响应会把 data 提升为根并注入 status:1；失败时原样返回
-  /// 带非 1/200 status 的原始信封，这里转成 ApiException 交给调用方展示。
+  /// 引擎对成功响应会把 data 提升为根并注入 status:1/error_code:0；失败时
+  /// 原样返回原始信封——其 status 仍可能是 1/200 而 error_code 非零（引擎
+  /// is_success_pair 的失败分支不改动 root）。所以这里与引擎同口径地同时
+  /// 校验 status 与 error_code，失败转成 ApiException 交给调用方展示，
+  /// 而不是被容错解析误读成「云端无记录」。
   /// 响应的具体承载形状由 [CloudPlayHistory.fromJson] 容错处理。
   Future<CloudPlayHistory> cloudPlayHistory() async {
     final raw = await _client.get('/user/playhistory');
-    final json = asMap(raw);
-    final status = asInt(json['status']);
-    if (json.isNotEmpty && status != null && status != 1 && status != 200) {
-      throw ApiException('拉取云端播放历史失败${_failureSuffix(json)}');
+    if (_isFailureEnvelope(asMap(raw))) {
+      throw ApiException('拉取云端播放历史失败${_failureSuffix(asMap(raw))}');
     }
     return CloudPlayHistory.fromJson(raw);
   }
@@ -150,15 +151,37 @@ mixin _MusicApiAuth on _MusicApiBase {
   ///
   /// 由设置开关「同步播放记录」控制，PlayerController 在起播成功后调用；
   /// 失败向上抛、由调用方吞错，不影响播放主链路。与 addListeningTime
-  /// 同款最简 POST，不做信封校验（无 UI 反馈，静默语义）。
+  /// 同款最简 POST；不做信封校验（无 UI 反馈，静默语义），但上游回执
+  /// 非成功时 debugPrint 一行错误码，供灰度验收排查（静默吞掉会无从定位）。
   Future<void> uploadPlayHistory({
     required String mixSongId,
     int playCount = 1,
   }) async {
-    await _client.post(
+    final raw = await _client.post(
       '/playhistory/upload',
       query: {'mixsongid': mixSongId, 'play_count': playCount},
     );
+    final json = asMap(raw);
+    if (_isFailureEnvelope(json)) {
+      debugPrint(
+        '[时音][cloud-history] upload rejected: '
+        'status=${json['status']} '
+        'error_code=${json['error_code'] ?? json['errcode']}'
+        '${_failureSuffix(json)}',
+      );
+    }
+  }
+
+  /// 引擎失败信封判定，与 rust `is_success_pair` 同口径：status 非 1/200，
+  /// 或 error_code/errcode 存在且非零，都算失败。失败信封由引擎原样透传，
+  /// 其 status 仍可能保持 1/200，所以不能只看 status（成功路径引擎必注入
+  /// error_code:0，不会误伤）。
+  bool _isFailureEnvelope(Map<String, dynamic> json) {
+    final status = asInt(json['status']);
+    final errorCode = asInt(json['error_code'] ?? json['errcode']);
+    return json.isNotEmpty &&
+        status != null &&
+        (status != 1 && status != 200 || (errorCode != null && errorCode != 0));
   }
 
   bool _isSuccess(Map<String, dynamic> json) {

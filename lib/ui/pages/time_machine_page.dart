@@ -53,8 +53,9 @@ class _TimeMachinePageState extends State<TimeMachinePage> {
       ),
     );
     if (!mounted) return;
-    // 登录成功返回后立即拉取云端历史；LoginPage 成功时 pop(account)，
-    // 返回值无需判内容，只看登录态（失败/取消返回则停留在引导页）。
+    // 登录成功返回后立即拉取云端历史：LoginPage 自身不在成功时 pop，
+    // 用户经返回导航回到本页（push 的 future 随之结算），这里只看
+    // 登录态即可（失败/取消返回则停留在引导页）。
     if (widget.auth.isLoggedIn) {
       _reload();
     }

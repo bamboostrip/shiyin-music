@@ -204,6 +204,20 @@ class _SpyMusicApi extends _MockMusicApi {
   }
 }
 
+/// 上报挂起：返回永不完成的 Future，模拟上游长阻塞（弱网/服务器不回执）。
+class _HangingUploadMusicApi extends _MockMusicApi {
+  final List<String> uploadedMixSongIds = [];
+
+  @override
+  Future<void> uploadPlayHistory({
+    required String mixSongId,
+    int playCount = 1,
+  }) {
+    uploadedMixSongIds.add(mixSongId);
+    return Completer<void>().future;
+  }
+}
+
 /// 让控制器内部异步链与 `unawaited` 的历史写入跑完。
 Future<void> settle([int rounds = 30]) async {
   for (var i = 0; i < rounds; i++) {
@@ -308,10 +322,25 @@ void main() {
       final history = await PlaybackHistoryService().getHistory();
       expect(history.map((s) => s.hash), contains(kugouSong.hash));
     });
+
+    test('上报挂起（上游长阻塞）不阻塞 playSong 主链路', () async {
+      final api = _HangingUploadMusicApi();
+      final controller = PlayerController(api, handler);
+      addTearDown(controller.dispose);
+      await controller.setCloudHistoryUploadEnabled(true);
+
+      // 若实现把 unawaited 误改成 await，这里会超时失败。
+      await controller
+          .playSong(kugouSong, queue: [kugouSong])
+          .timeout(const Duration(seconds: 2));
+
+      expect(api.uploadedMixSongIds, ['123456']);
+      expect(controller.errorMessage, isNull);
+    });
   });
 
-  group('开关持久化', () {
-    test('setCloudHistoryUploadEnabled 写入 prefs 且恢复读回', () async {
+  group('开关持久化与恢复', () {
+    test('setCloudHistoryUploadEnabled 写入 prefs', () async {
       final controller = PlayerController(_SpyMusicApi(), handler);
       addTearDown(controller.dispose);
 
@@ -320,6 +349,28 @@ void main() {
       await controller.setCloudHistoryUploadEnabled(true);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('settings.cloud_history_upload_enabled'), isTrue);
+    });
+
+    test('prefs 预置 true → 新建控制器恢复为开（升级路径）', () async {
+      SharedPreferences.setMockInitialValues(
+        {'settings.cloud_history_upload_enabled': true},
+      );
+      final controller = PlayerController(_SpyMusicApi(), handler);
+      addTearDown(controller.dispose);
+      await settle();
+
+      expect(controller.cloudHistoryUploadEnabled, isTrue);
+    });
+
+    test('仅相邻的听歌时长开关为 true → 同步开关仍默认关（键不串扰）', () async {
+      SharedPreferences.setMockInitialValues(
+        {'settings.add_listening_time_enabled': true},
+      );
+      final controller = PlayerController(_SpyMusicApi(), handler);
+      addTearDown(controller.dispose);
+      await settle();
+
+      expect(controller.cloudHistoryUploadEnabled, isFalse);
     });
   });
 }

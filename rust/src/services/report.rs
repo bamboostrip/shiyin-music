@@ -1,12 +1,19 @@
 use serde_json::{json, Value};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::kugou::{
     config, crypto,
     request::{KgRequest, SignatureType},
     session::KgSession,
     signer, transport,
 };
+
+fn require_login(session: &KgSession) -> AppResult<()> {
+    if !session.is_logged_in() {
+        return Err(AppError::Unauthorized("此接口需要登录".into()));
+    }
+    Ok(())
+}
 
 pub async fn upload_play_history(
     client: &reqwest::Client,
@@ -15,6 +22,9 @@ pub async fn upload_play_history(
     timestamp: Option<i64>,
     play_count: i64,
 ) -> AppResult<Value> {
+    // 写操作：未登录时上游必然拒绝，空发请求只会白白触发 token 刷新，
+    // 与 playlist/user 服务层同款前置校验。
+    require_login(session)?;
     let body = json!({
         "songs": [{ "mxid": mix_song_id, "op": 1, "ot": timestamp.unwrap_or_else(|| chrono::Utc::now().timestamp()), "pc": play_count }],
         "token": session.token, "userid": session.userid

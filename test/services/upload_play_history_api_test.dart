@@ -69,5 +69,18 @@ void main() {
         throwsA(isA<Exception>()),
       );
     });
+
+    test('上游回执非成功信封不抛异常（静默语义，仅 debugPrint 留痕）', () async {
+      final client = _FakeUploadClient(response: {
+        'status': 0,
+        'error_code': 30195,
+        'error': '请先登录',
+      });
+      final api = MusicApi(client);
+
+      await api.uploadPlayHistory(mixSongId: '123456');
+
+      expect(client.posts.single['path'], '/playhistory/upload');
+    });
   });
 }

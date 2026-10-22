@@ -93,5 +93,39 @@ void main() {
 
       expect((await api.cloudPlayHistory()).totalRecords, 1);
     });
+
+    test('status==1 但 error_code 非零的失败信封也抛 ApiException', () async {
+      // 引擎失败分支原样透传 root，status 可能仍是 1/200（rust
+      // is_success_pair 要求 error_code 缺失或为 0 才算成功），只看
+      // status 会把这类失败误读成「云端无记录」的空成功。
+      final api = MusicApi(_FakeHistoryClient({
+        'status': 1,
+        'error_code': 30195,
+        'error': '请先登录',
+      }));
+
+      await expectLater(
+        api.cloudPlayHistory(),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('拉取云端播放历史失败'),
+          ),
+        ),
+      );
+    });
+
+    test('成功信封显式带 error_code:0 不被误判', () async {
+      final api = MusicApi(_FakeHistoryClient({
+        'status': 1,
+        'error_code': 0,
+        'list': [
+          {'hash': 'h4', 'songname': '夜曲', 'singername': '周杰伦'},
+        ],
+      }));
+
+      expect((await api.cloudPlayHistory()).totalRecords, 1);
+    });
   });
 }
