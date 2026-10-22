@@ -1,6 +1,7 @@
 // 数据模型 barrel 文件：按领域拆分后在此统一导出，
 // 既有 `import '../models/music_models.dart'` 调用点零改动。
 export 'cloud_drive.dart';
+export 'cloud_play_history.dart';
 export 'comment.dart';
 export 'fm.dart';
 export 'model_parsing.dart';
