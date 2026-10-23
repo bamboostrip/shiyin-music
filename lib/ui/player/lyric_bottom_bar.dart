@@ -168,9 +168,52 @@ class _LyricRoundPlayPauseButton extends StatelessWidget {
   }
 }
 
+/// 歌词页底部上一首/下一首切歌键（issue #3：看歌词时免滑回封面页即可切歌）。
+/// 与封面页 Controls 同一 player API，仅样式更收敛以塞进药丸行。
+class _LyricSkipButton extends StatelessWidget {
+  const _LyricSkipButton.previous({
+    required this.onPressed,
+    this.buttonSize = 40,
+    this.iconSize = 26,
+  }) : tooltip = '上一首',
+       icon = Icons.skip_previous_rounded,
+       super(key: const ValueKey('lyric_previous_button'));
+
+  const _LyricSkipButton.next({
+    required this.onPressed,
+    this.buttonSize = 40,
+    this.iconSize = 26,
+  }) : tooltip = '下一首',
+       icon = Icons.skip_next_rounded,
+       super(key: const ValueKey('lyric_next_button'));
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final double buttonSize;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: buttonSize,
+      child: Tooltip(
+        message: tooltip,
+        child: IconButton(
+          padding: EdgeInsets.zero,
+          iconSize: iconSize,
+          color: Colors.white.withValues(alpha: 0.85),
+          onPressed: onPressed,
+          icon: Icon(icon),
+        ),
+      ),
+    );
+  }
+}
+
 /// 歌词页底部 QQ 音乐风格控制栏：
 /// - 左侧：评论按钮（自绘气泡 + 实时评论数角标）
-/// - 右侧：`[词]` 字号入口、`[译 on/off]`、`[音 on/off]` 及圆形播放/暂停键
+/// - 右侧：`[词]` 字号入口、`[译 on/off]`、`[音 on/off]` 及上一首/播放暂停/下一首
 class LyricBottomBar extends StatelessWidget {
   const LyricBottomBar({
     super.key,
@@ -212,52 +255,78 @@ class LyricBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // 左侧：评论入口
-          PlayerCommentButton(
-            player: player,
-            song: song,
-            iconSize: 22.0,
-            iconColor: Colors.white.withValues(alpha: 0.85),
-            onOpenComment: onOpenComment,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 并入切歌键后右侧变挤，按可用宽度分档收紧间距与按钮：
+        // <380（360dp 主流安卓）pill 间距 10、切歌 36px；
+        // <340（320dp 小屏/部分车机）pill 间距 8、切歌 32px、水平边距 12。
+        final width = constraints.maxWidth;
+        final pillGap = width < 340 ? 8.0 : (width < 380 ? 10.0 : 14.0);
+        final skipGap = width < 340 ? 6.0 : (width < 380 ? 8.0 : 12.0);
+        final skipSize = width < 340 ? 32.0 : (width < 380 ? 36.0 : 40.0);
+        final skipIcon = width < 340 ? 20.0 : (width < 380 ? 22.0 : 26.0);
+        final hPadding = width < 340 ? 12.0 : 16.0;
+
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 左侧：评论入口
+              PlayerCommentButton(
+                player: player,
+                song: song,
+                iconSize: 22.0,
+                iconColor: Colors.white.withValues(alpha: 0.85),
+                onOpenComment: onOpenComment,
+              ),
+
+              const Spacer(),
+
+              // 右侧：[词] 字号调节
+              _LyricSettingsPill(onTap: () => _showFontSizeSheet(context)),
+              SizedBox(width: pillGap),
+
+              // [译 on/off]
+              if (hasTranslation) ...[
+                LyricTogglePill(
+                  label: '译',
+                  isOn: showTranslation,
+                  tooltip: '翻译 (${showTranslation ? '已开启' : '已关闭'})',
+                  onToggle: () => onToggleTranslation(!showTranslation),
+                ),
+                SizedBox(width: pillGap),
+              ],
+
+              // [音 on/off]
+              if (hasRomanization) ...[
+                LyricTogglePill(
+                  label: '音',
+                  isOn: showRomanization,
+                  tooltip: '拼音/音译 (${showRomanization ? '已开启' : '已关闭'})',
+                  onToggle: () => onToggleRomanization(!showRomanization),
+                ),
+                SizedBox(width: pillGap),
+              ],
+
+              // 上一首 / 播放暂停 / 下一首
+              _LyricSkipButton.previous(
+                onPressed: player.previous,
+                buttonSize: skipSize,
+                iconSize: skipIcon,
+              ),
+              SizedBox(width: skipGap),
+              _LyricRoundPlayPauseButton(player: player),
+              SizedBox(width: skipGap),
+              _LyricSkipButton.next(
+                onPressed: player.next,
+                buttonSize: skipSize,
+                iconSize: skipIcon,
+              ),
+            ],
           ),
-
-          const Spacer(),
-
-          // 右侧：[词] 字号调节
-          _LyricSettingsPill(onTap: () => _showFontSizeSheet(context)),
-          const SizedBox(width: 14),
-
-          // [译 on/off]
-          if (hasTranslation) ...[
-            LyricTogglePill(
-              label: '译',
-              isOn: showTranslation,
-              tooltip: '翻译 (${showTranslation ? '已开启' : '已关闭'})',
-              onToggle: () => onToggleTranslation(!showTranslation),
-            ),
-            const SizedBox(width: 14),
-          ],
-
-          // [音 on/off]
-          if (hasRomanization) ...[
-            LyricTogglePill(
-              label: '音',
-              isOn: showRomanization,
-              tooltip: '拼音/音译 (${showRomanization ? '已开启' : '已关闭'})',
-              onToggle: () => onToggleRomanization(!showRomanization),
-            ),
-            const SizedBox(width: 14),
-          ],
-
-          // 圆形播放/暂停
-          _LyricRoundPlayPauseButton(player: player),
-        ],
-      ),
+        );
+      },
     );
   }
 }

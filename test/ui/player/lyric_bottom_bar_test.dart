@@ -17,6 +17,15 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
     notifyListeners();
   }
 
+  int previousCalls = 0;
+  int nextCalls = 0;
+
+  @override
+  Future<void> previous() async => previousCalls++;
+
+  @override
+  Future<void> next() async => nextCalls++;
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -132,6 +141,79 @@ void main() {
       expect(find.text('词'), findsOneWidget);
       expect(find.text('译'), findsNothing);
       expect(find.text('音'), findsNothing);
+    });
+
+    testWidgets('renders skip buttons and triggers previous/next', (
+      tester,
+    ) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
+      final player = _FakePlayerController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricBottomBar(
+              player: player,
+              song: song,
+              showTranslation: false,
+              showRomanization: false,
+              hasTranslation: false,
+              hasRomanization: false,
+              lyricScale: 1.0,
+              onToggleTranslation: (_) {},
+              onToggleRomanization: (_) {},
+              onLyricScaleChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      final prevBtn = find.byKey(const ValueKey('lyric_previous_button'));
+      final nextBtn = find.byKey(const ValueKey('lyric_next_button'));
+      expect(prevBtn, findsOneWidget);
+      expect(nextBtn, findsOneWidget);
+
+      await tester.tap(prevBtn);
+      await tester.tap(nextBtn);
+      expect(player.previousCalls, 1);
+      expect(player.nextCalls, 1);
+    });
+
+    testWidgets('does not overflow on 320dp width with both pills shown', (
+      tester,
+    ) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
+      final player = _FakePlayerController();
+
+      tester.view.physicalSize = const Size(320, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricBottomBar(
+              player: player,
+              song: song,
+              showTranslation: true,
+              showRomanization: true,
+              hasTranslation: true,
+              hasRomanization: true,
+              lyricScale: 1.0,
+              onToggleTranslation: (_) {},
+              onToggleRomanization: (_) {},
+              onLyricScaleChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      // 渲染期若 Row 溢出，Flutter 会抛 RenderFlex overflow，用例直接失败。
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('lyric_previous_button')),
+        findsOneWidget,
+      );
     });
   });
 }
