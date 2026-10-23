@@ -160,8 +160,8 @@ class PlaybackSettingsSection extends StatelessWidget {
             SettingsTile(
               icon: Icons.hourglass_top_rounded,
               iconColor: const Color(0xFF00897B),
-              title: '听歌时光机',
-              subtitle: '云端听歌记录按日期回顾',
+              title: '云端播放记录',
+              subtitle: '账号云端听歌记录按日期回顾',
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>

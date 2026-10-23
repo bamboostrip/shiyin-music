@@ -63,7 +63,7 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    expect(find.text('登录后查看你的听歌时光机'), findsOneWidget);
+    expect(find.text('登录后查看你的云端播放记录'), findsOneWidget);
     expect(client.requestedPath, isNull);
   });
 

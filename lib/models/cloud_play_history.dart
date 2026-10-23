@@ -1,7 +1,10 @@
 import 'model_parsing.dart';
 import 'song.dart';
 
-/// 云端播放记录：酷狗账号级听歌历史（概念版「时光机/听歌排行」数据源）中的一条。
+/// 云端播放记录：酷狗账号级播放历史服务中的一条。
+///
+/// 注意：/playhistory 是「最近播放」服务，并非概念版「听歌时光机」
+/// （听歌排行）的数据源——排行接口未公开（2026-10 查证）。
 class CloudPlayRecord {
   const CloudPlayRecord({required this.song, this.playedAt, this.playCount = 1});
 
@@ -23,13 +26,12 @@ class CloudPlayDayGroup {
   final List<CloudPlayRecord> records;
 }
 
-/// 云端播放历史：酷狗服务端返回的账号听歌记录集合。
+/// 云端播放历史：酷狗服务端返回的账号播放记录集合。
 ///
-/// `/playhistory/v1/get_songs` 即概念版「听歌时光机/听歌排行」的数据源
-/// （同行项目 concept-music 的同名模块注释证实；bp 游标翻页，记录级
-/// ot=播放时间、pc=播放次数，歌曲信息嵌在 info 键下——真机实抓
-/// 2026-10-23）。[fromJson] 对承载结构做容错探测（根数组 / list /
-/// songs / data.list），任何无法识别的形状都返回空集合而不是抛异常。
+/// `/playhistory/v1/get_songs` 带 bp 游标翻页（记录级 ot=播放时间、
+/// pc=播放次数，歌曲信息嵌在 info 键下——真机实抓 2026-10-23）。
+/// [fromJson] 对承载结构做容错探测（根数组 / list / songs / data.list），
+/// 任何无法识别的形状都返回空集合而不是抛异常。
 class CloudPlayHistory {
   const CloudPlayHistory({this.records = const []});
 

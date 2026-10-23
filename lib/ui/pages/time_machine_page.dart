@@ -9,10 +9,11 @@ import '../widgets/app_song_row.dart';
 import '../player/song_tap_handler.dart';
 import 'login_page.dart';
 
-/// 听歌时光机：酷狗账号云端播放历史的按日期回顾（只读拉取）。
+/// 云端播放记录：酷狗账号云端播放历史的按日期回顾（只读拉取）。
 ///
-/// 数据来自官方 App 同源的账号级听歌记录（issue #2 一期）；
-/// 上报（把时音的播放写回云端）是二期，本页不含任何写操作。
+/// 注意：这不是概念版「听歌时光机」（听歌排行）——排行的数据源接口
+/// 未公开（2026-10 查证），本页展示的是 /playhistory 播放记录服务
+/// （issue #2 的折中实现）；上报（把时音的播放写回云端）由设置开关控制。
 class TimeMachinePage extends StatefulWidget {
   const TimeMachinePage({
     super.key,
@@ -80,7 +81,7 @@ class _TimeMachinePageState extends State<TimeMachinePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('听歌时光机'),
+        title: const Text('云端播放记录'),
         actions: [
           if (_future != null)
             IconButton(
@@ -143,7 +144,7 @@ class _LoginGuideView extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              '登录后查看你的听歌时光机',
+              '登录后查看你的云端播放记录',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
               ),

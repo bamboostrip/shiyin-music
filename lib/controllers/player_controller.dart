@@ -621,7 +621,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   DateTime? _autoSkipStreakSince;
   bool addListeningTimeEnabled = true;
 
-  /// 云端播放记录上报开关（「听歌时光机」二期）。默认关闭：
+  /// 云端播放记录上报开关（「云端播放记录」特性）。默认关闭：
   /// 上报是把听歌行为写进酷狗账号画像的写操作，必须用户显式开启。
   bool cloudHistoryUploadEnabled = false;
 

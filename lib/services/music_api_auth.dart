@@ -131,7 +131,11 @@ mixin _MusicApiAuth on _MusicApiBase {
     await _client.post('/listen/timeadd');
   }
 
-  /// 拉取酷狗账号云端播放历史（「听歌时光机」数据源，只读）。
+  /// 拉取酷狗账号云端播放历史（「云端播放记录」数据源，只读）。
+  ///
+  /// 注意：/playhistory 只是「最近播放」服务（官方 App 的播放不入库，
+  /// 2026-10 真机翻页验证），并非概念版「听歌时光机」排行的数据源——
+  /// 排行接口未公开。
   ///
   /// 引擎对成功响应会把 data 提升为根并注入 status:1/error_code:0；失败时
   /// 原样返回原始信封——其 status 仍可能是 1/200 而 error_code 非零（引擎
@@ -140,9 +144,8 @@ mixin _MusicApiAuth on _MusicApiBase {
   /// 而不是被容错解析误读成「云端无记录」。
   /// 响应的具体承载形状由 [CloudPlayHistory.fromJson] 容错处理。
   Future<CloudPlayHistory> cloudPlayHistory() async {
-    // 概念版「听歌时光机/听歌排行」即本接口（concept-music 同名模块
-    // 注释证实），has_more=1 时把响应的 bp 游标回传拉下一页，直到
-    // has_more 消失 / 游标不再前进 / 触及页数上限。
+    // 「云端播放记录」即本接口（bp 游标翻页，has_more=1 时把响应的
+    // bp 回传拉下一页，直到游标耗尽/终止防护触发）。
     final records = <CloudPlayRecord>[];
     final seenRecordKeys = <String>{};
     final seenBps = <String?>{};
@@ -253,7 +256,7 @@ mixin _MusicApiAuth on _MusicApiBase {
     return buffer.toString();
   }
 
-  /// 上报一条播放记录到酷狗云端（「听歌时光机」二期，写操作）。
+  /// 上报一条播放记录到酷狗云端（「云端播放记录」二期，写操作）。
   ///
   /// 由设置开关「同步播放记录」控制，PlayerController 在起播成功后调用；
   /// 失败向上抛、由调用方吞错，不影响播放主链路。与 addListeningTime
