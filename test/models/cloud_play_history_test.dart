@@ -8,6 +8,35 @@ import 'package:shiyin_music/models/music_models.dart';
 /// 常见承载方式，且任何未知形状都不抛异常、返回空。
 void main() {
   group('CloudPlayHistory.fromJson 容错解析', () {
+    test('真机实抓形状（2026-10-23）：歌曲数据嵌在 info 键下', () {
+      // /user/playhistory 实测响应骨架（截取自 PC 端日志）：记录层级把
+      // 歌曲信息整体嵌在 info 下（hash/audio_id/cover 等）；歌名/歌手
+      // 字段名在日志截断处之后，暂以 songname/singername 占位，待完整
+      // 原文回填后修正。
+      final history = CloudPlayHistory.fromJson({
+        'status': 1,
+        'error_code': 0,
+        'has_more': 1,
+        'songs': [
+          {
+            'info': {
+              'album_id': 964178,
+              'audio_id': 249315,
+              'hash': '32856ED5E34CFE975149EAD254A38528',
+              'cover': 'http://imge.kugou.com/stdmusic/400/x.jpg',
+              'songname': '晴天',
+              'singername': '周杰伦',
+            },
+          },
+        ],
+      });
+
+      expect(history.totalRecords, 1);
+      expect(history.records.first.song.hash, '32856ED5E34CFE975149EAD254A38528');
+      expect(history.records.first.song.id, '249315');
+      expect(history.records.first.song.title, '晴天');
+    });
+
     test('根即记录数组：平铺歌曲字段 + 秒级时间戳', () {
       final history = CloudPlayHistory.fromJson([
         {

@@ -115,15 +115,21 @@ class CloudPlayHistory {
   }
 
   static CloudPlayRecord? _parseRecord(Map<String, dynamic> map) {
-    // 歌曲字段可能平铺在记录上，也可能嵌在 song / audio_info 下。
-    final songMap = asMap(map['song']).isNotEmpty
-        ? asMap(map['song'])
-        : asMap(map['audio_info']).isNotEmpty
-            ? asMap(map['audio_info'])
-            : map;
+    // 歌曲字段可能平铺在记录上，也可能嵌在 song / audio_info / info 下。
+    // info 为真机实抓形状（2026-10-23：/playhistory/v1/get_songs 的记录
+    // 把歌曲信息整体嵌在 info 键下，记录层级另带播放元数据）。
+    final songMap = _nestedSongMap(map);
     final song = Song.fromSearch(songMap);
     if (song.hash.isEmpty) return null;
     return CloudPlayRecord(song: song, playedAt: _parseTime(map, songMap));
+  }
+
+  static Map<String, dynamic> _nestedSongMap(Map<String, dynamic> map) {
+    for (final key in const ['song', 'audio_info', 'info']) {
+      final nested = asMap(map[key]);
+      if (nested.isNotEmpty) return nested;
+    }
+    return map;
   }
 
   static const _timeKeys = [

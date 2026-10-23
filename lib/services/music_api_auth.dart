@@ -147,6 +147,13 @@ mixin _MusicApiAuth on _MusicApiBase {
     final history = CloudPlayHistory.fromJson(raw);
     if (history.totalRecords > 0) {
       debugPrint('[时音][cloud-history] 拉到 ${history.totalRecords} 条云端记录');
+      // 验收期临时：成功路径也落盘较大篇幅原文，用于补全记录级字段
+      // （歌名/歌手/播放时间键、has_more 分页游标），形状确认后移除。
+      final encoded = jsonEncode(raw);
+      debugPrint(
+        '[时音][cloud-history][probe] 原文[0:3000]='
+        '${encoded.substring(0, encoded.length < 3000 ? encoded.length : 3000)}',
+      );
     } else {
       // 真机验收诊断：解析为空时自动探测候选数据源并落盘日志，确认
       // 概念版「时光机」的真实数据源与响应形状后移除（见 _diagnoseEmptyPull）。
