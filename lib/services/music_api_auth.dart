@@ -145,6 +145,7 @@ mixin _MusicApiAuth on _MusicApiBase {
     // has_more 消失 / 游标不再前进 / 触及页数上限。
     final records = <CloudPlayRecord>[];
     final seenRecordKeys = <String>{};
+    final seenBps = <String?>{};
     String? bp;
     Object? firstRaw;
     for (var page = 0; page < _kMaxCloudHistoryPages; page++) {
@@ -165,16 +166,21 @@ mixin _MusicApiAuth on _MusicApiBase {
         '${encoded.substring(0, encoded.length < 1500 ? encoded.length : 1500)}',
       );
       // 游标异常（回环/原地重复）时后页可能重复返回同一批记录，按键去重。
+      var pageRecordCount = 0;
       for (final record in CloudPlayHistory.fromJson(raw).records) {
         if (seenRecordKeys.add(
           '${record.song.hash}|${record.playedAt?.millisecondsSinceEpoch}',
         )) {
           records.add(record);
+          pageRecordCount++;
         }
       }
+      // 终止三防护（与 Mineradio 生产实现同款）：无更多页 / 游标缺失或
+      // 已见过（全集防环）/ 本页零记录仍称 has_more（服务端异常）。
       if (asInt(json['has_more']) != 1) break;
       final nextBp = asString(json['bp']);
-      if (nextBp == null || nextBp.isEmpty || nextBp == bp) break;
+      if (nextBp == null || nextBp.isEmpty || !seenBps.add(nextBp)) break;
+      if (pageRecordCount == 0) break;
       bp = nextBp;
     }
     if (records.isNotEmpty) {
