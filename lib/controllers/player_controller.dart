@@ -623,8 +623,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 歌词页底部是否显示上一首/下一首切歌键（issue #3）。
   ///
-  /// 默认 false = QQ 音乐原版底栏观感；仅移动端竖屏歌词页消费
-  /// （桌面/车机分栏布局自带完整控制区），设置入口在 设置-播放。
+  /// 默认 false = QQ 音乐原版底栏观感；仅移动端歌词页消费（竖屏及非车机
+  /// 横屏；桌面/车机分栏布局自带完整控制区），设置入口在 设置-播放。
   bool lyricPageSkipButtonsEnabled = false;
   AudioQuality audioQuality = AudioQuality.standard;
 
