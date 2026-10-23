@@ -103,4 +103,18 @@
 - **补测试**：设置瓦片桌面/移动/FORCE_MOBILE 门控与点击写回、PlayerPage
   级开关即时显隐与切歌调用、prefs 默认值/启动恢复/落盘幂等 round-trip。
 - **已知限制**：车机/PC 横屏分栏布局没有 `LyricBottomBar`，该设置在这些
-  形态下可见但不生效（手机横屏非车机模式仍走 PageView，生效）。
+  形态下不生效（修订 3 起直接隐藏瓦片；手机横屏非车机模式仍走 PageView，
+  生效）。
+
+## 修订 3（2026-10-23，产品口径收窄）
+
+- 该设置只服务手机/平板形态：**PC（`isDesktopFormFactor`）与车机（车机
+  模式 `carModeEnabled` 或车机设备 `isAutomotiveDevice`）隐藏「歌词页
+  切歌键」瓦片**，从入口层面消除「看得到但无效」——车机横屏走分栏布局、
+  没有移动端歌词页底栏，PC 更是没有移动端歌词页。
+- 可见性由 `SettingsPage` 计算后传入 `PlaybackSettingsSection`
+  （`showLyricPageSkipButtons`），并随 `ThemeController` 通知即时显隐：
+  开启车机模式瓦片消失，关闭后（或换回手机形态）瓦片恢复；已持久化的
+  开关值保留，不受可见性影响。
+- 手机/平板（移动端形态）仍展示；`FORCE_MOBILE` 调试预览按移动端口径
+  展示，属调试通道预期行为。
