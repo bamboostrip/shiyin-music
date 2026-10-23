@@ -138,6 +138,8 @@ const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
 // 歌词进度偏移：按歌曲 hash 保存毫秒值（正 = 歌词提前），见 lyricOffset。
 const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
+// 歌词页切歌键（issue #3）：默认关 = QQ 音乐原版底栏，用户可在 设置-播放 打开。
+const _lyricPageSkipButtonsSettingKey = 'settings.lyric_page_skip_buttons';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
 const _listenTimeReportInterval = Duration(minutes: 30);
@@ -618,6 +620,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 真实生效条件是 [keepScreenOnEnabled] **且** [isPlaying]：暂停/停播时
   /// 交回系统休眠。历史上是无条件常亮，导致暂停后停在播放页仍在烧屏。
   bool keepScreenOnEnabled = true;
+
+  /// 歌词页底部是否显示上一首/下一首切歌键（issue #3）。
+  ///
+  /// 默认 false = QQ 音乐原版底栏观感；仅移动端竖屏歌词页消费
+  /// （桌面/车机分栏布局自带完整控制区），设置入口在 设置-播放。
+  bool lyricPageSkipButtonsEnabled = false;
   AudioQuality audioQuality = AudioQuality.standard;
 
   /// 是否开启音质智能切换（播放失败时自动降级重试）。

@@ -160,6 +160,7 @@ void main() {
               hasTranslation: false,
               hasRomanization: false,
               lyricScale: 1.0,
+              showSkipButtons: true,
               onToggleTranslation: (_) {},
               onToggleRomanization: (_) {},
               onLyricScaleChanged: (_) {},
@@ -177,6 +178,40 @@ void main() {
       await tester.tap(nextBtn);
       expect(player.previousCalls, 1);
       expect(player.nextCalls, 1);
+    });
+
+    testWidgets('hides skip buttons by default (QQ 原版底栏)', (tester) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
+      final player = _FakePlayerController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricBottomBar(
+              player: player,
+              song: song,
+              showTranslation: true,
+              showRomanization: true,
+              hasTranslation: true,
+              hasRomanization: true,
+              lyricScale: 1.0,
+              onToggleTranslation: (_) {},
+              onToggleRomanization: (_) {},
+              onLyricScaleChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('lyric_previous_button')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('lyric_next_button')), findsNothing);
+      // 原版药丸/播放键仍在
+      expect(find.byKey(const ValueKey('lyric_round_play_pause_button')),
+          findsOneWidget);
+      expect(find.text('词'), findsOneWidget);
     });
 
     testWidgets('does not overflow on 320dp width with both pills shown', (
@@ -200,6 +235,7 @@ void main() {
               hasTranslation: true,
               hasRomanization: true,
               lyricScale: 1.0,
+              showSkipButtons: true,
               onToggleTranslation: (_) {},
               onToggleRomanization: (_) {},
               onLyricScaleChanged: (_) {},

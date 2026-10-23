@@ -213,7 +213,9 @@ class _LyricSkipButton extends StatelessWidget {
 
 /// 歌词页底部 QQ 音乐风格控制栏：
 /// - 左侧：评论按钮（自绘气泡 + 实时评论数角标）
-/// - 右侧：`[词]` 字号入口、`[译 on/off]`、`[音 on/off]` 及上一首/播放暂停/下一首
+/// - 右侧：`[词]` 字号入口、`[译 on/off]`、`[音 on/off]` 及圆形播放/暂停键
+/// - [showSkipButtons] 为 true 时播放键两侧并入上一首/下一首
+///   （issue #3，设置-播放-歌词页切歌键，默认关保持原版观感）
 class LyricBottomBar extends StatelessWidget {
   const LyricBottomBar({
     super.key,
@@ -227,6 +229,7 @@ class LyricBottomBar extends StatelessWidget {
     required this.onToggleTranslation,
     required this.onToggleRomanization,
     required this.onLyricScaleChanged,
+    this.showSkipButtons = false,
     this.onOpenComment,
   });
 
@@ -237,6 +240,7 @@ class LyricBottomBar extends StatelessWidget {
   final bool hasTranslation;
   final bool hasRomanization;
   final double lyricScale;
+  final bool showSkipButtons;
   final ValueChanged<bool> onToggleTranslation;
   final ValueChanged<bool> onToggleRomanization;
   final ValueChanged<double> onLyricScaleChanged;
@@ -257,15 +261,20 @@ class LyricBottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 并入切歌键后右侧变挤，按可用宽度分档收紧间距与按钮：
+        // 关闭切歌键时维持原版常量间距（QQ 音乐底栏观感不变）。
+        // 开启后右侧变挤，按可用宽度分档收紧间距与按钮：
         // <380（360dp 主流安卓）pill 间距 10、切歌 36px；
         // <340（320dp 小屏/部分车机）pill 间距 8、切歌 32px、水平边距 12。
         final width = constraints.maxWidth;
-        final pillGap = width < 340 ? 8.0 : (width < 380 ? 10.0 : 14.0);
+        final pillGap = !showSkipButtons
+            ? 14.0
+            : (width < 340 ? 8.0 : (width < 380 ? 10.0 : 14.0));
         final skipGap = width < 340 ? 6.0 : (width < 380 ? 8.0 : 12.0);
         final skipSize = width < 340 ? 32.0 : (width < 380 ? 36.0 : 40.0);
         final skipIcon = width < 340 ? 20.0 : (width < 380 ? 22.0 : 26.0);
-        final hPadding = width < 340 ? 12.0 : 16.0;
+        final hPadding = !showSkipButtons
+            ? 16.0
+            : (width < 340 ? 12.0 : 16.0);
 
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
@@ -309,20 +318,24 @@ class LyricBottomBar extends StatelessWidget {
                 SizedBox(width: pillGap),
               ],
 
-              // 上一首 / 播放暂停 / 下一首
-              _LyricSkipButton.previous(
-                onPressed: player.previous,
-                buttonSize: skipSize,
-                iconSize: skipIcon,
-              ),
-              SizedBox(width: skipGap),
+              // 上一首 / 播放暂停 / 下一首（可选，见 showSkipButtons）
+              if (showSkipButtons) ...[
+                _LyricSkipButton.previous(
+                  onPressed: player.previous,
+                  buttonSize: skipSize,
+                  iconSize: skipIcon,
+                ),
+                SizedBox(width: skipGap),
+              ],
               _LyricRoundPlayPauseButton(player: player),
-              SizedBox(width: skipGap),
-              _LyricSkipButton.next(
-                onPressed: player.next,
-                buttonSize: skipSize,
-                iconSize: skipIcon,
-              ),
+              if (showSkipButtons) ...[
+                SizedBox(width: skipGap),
+                _LyricSkipButton.next(
+                  onPressed: player.next,
+                  buttonSize: skipSize,
+                  iconSize: skipIcon,
+                ),
+              ],
             ],
           ),
         );

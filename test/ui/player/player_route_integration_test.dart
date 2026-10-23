@@ -69,6 +69,10 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool isPlaying = false;
 
+  // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
+  @override
+  bool lyricPageSkipButtonsEnabled = false;
+
   @override
   bool isPreparing = false;
 

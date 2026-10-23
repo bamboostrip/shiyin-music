@@ -298,6 +298,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
           hasTranslation: hasTranslation,
           hasRomanization: hasRomanization,
           lyricScale: _lyricScale,
+          showSkipButtons: widget.player.lyricPageSkipButtonsEnabled,
           onToggleTranslation: _setShowTranslation,
           onToggleRomanization: _setShowRomanization,
           onLyricScaleChanged: _setLyricScale,

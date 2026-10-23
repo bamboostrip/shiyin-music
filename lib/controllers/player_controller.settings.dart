@@ -27,6 +27,15 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 开关歌词页切歌键（issue #3：默认关，保持 QQ 音乐原版底栏观感）。
+  Future<void> setLyricPageSkipButtonsEnabled(bool enabled) async {
+    if (lyricPageSkipButtonsEnabled == enabled) return;
+    lyricPageSkipButtonsEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_lyricPageSkipButtonsSettingKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setAudioQuality(
     AudioQuality quality, {
     bool reloadCurrent = false,
@@ -339,6 +348,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
         prefs.getBool(_listenTimeSettingKey) ?? addListeningTimeEnabled;
     keepScreenOnEnabled =
         prefs.getBool(_keepScreenOnSettingKey) ?? keepScreenOnEnabled;
+    lyricPageSkipButtonsEnabled =
+        prefs.getBool(_lyricPageSkipButtonsSettingKey) ??
+        lyricPageSkipButtonsEnabled;
     audioQuality = AudioQuality.fromApiValue(
       prefs.getString(_audioQualitySettingKey),
     );

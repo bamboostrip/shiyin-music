@@ -45,6 +45,10 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   Future<void> ensureLyricsLoaded() async {}
 
+  // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
+  @override
+  bool lyricPageSkipButtonsEnabled = false;
+
   @override
   Future<void> togglePlay() async {
     _isPlaying = !_isPlaying;

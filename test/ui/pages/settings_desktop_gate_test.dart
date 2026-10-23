@@ -345,6 +345,10 @@ class _FakeAuth extends ChangeNotifier implements AuthController {
 }
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
+  @override
+  bool lyricPageSkipButtonsEnabled = false;
+
   /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
   @override
   bool keepScreenOnEnabled = true;

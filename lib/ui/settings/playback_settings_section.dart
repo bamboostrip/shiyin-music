@@ -197,6 +197,15 @@ class PlaybackSettingsSection extends StatelessWidget {
                 value: player.keepScreenOnEnabled,
                 onChanged: player.setKeepScreenOnEnabled,
               ),
+              SettingsDivider(),
+              SettingsSwitchTile(
+                icon: Icons.skip_next_rounded,
+                iconColor: const Color(0xFF5C6BC0),
+                title: '歌词页切歌键',
+                subtitle: '在歌词页底部显示上一首/下一首按钮，无需滑回封面页',
+                value: player.lyricPageSkipButtonsEnabled,
+                onChanged: player.setLyricPageSkipButtonsEnabled,
+              ),
             ],
             if (player.isDesktopLyricsSupported) ...[
               SettingsDivider(),
