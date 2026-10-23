@@ -58,3 +58,16 @@
 
 - 底部栏变拥挤：已用紧凑档兜底；极端字体缩放场景由 IconButton 弹性约束吸收。
 - TopBar 收紧影响封面页：封面页内容自适应（Spacer/弹性封面），4px 级别变化安全。
+
+## 修订（2026-10-23，用户真机预览后反馈）
+
+用户预览后反馈切歌键常驻「不好看」：改为**设置门控、默认关闭**。
+
+- 新增 `PlayerController.lyricPageSkipButtonsEnabled`（默认 false，键
+  `settings.lyric_page_skip_buttons`，`setLyricPageSkipButtonsEnabled` 落盘），
+  设置入口在 设置-播放-「歌词页切歌键」（移动端瓦片，桌面分栏不显示）。
+- `LyricBottomBar` 增 `showSkipButtons` 参数（默认 false）：关闭时完整还原
+  原版常量间距；开启时才走三档防溢出布局。
+- `LyricPlayerPage` 从 `player.lyricPageSkipButtonsEnabled` 接线；
+  controller notifyListeners 使设置返回后底栏即时显隐。
+- 顶部间距收紧不受影响，保持生效。提交 c056c53。
