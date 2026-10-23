@@ -73,6 +73,15 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool lyricPageSkipButtonsEnabled = false;
 
+  int previousCalls = 0;
+  int nextCalls = 0;
+
+  @override
+  Future<void> previous() async => previousCalls++;
+
+  @override
+  Future<void> next() async => nextCalls++;
+
   @override
   bool isPreparing = false;
 
@@ -453,6 +462,58 @@ void main() {
 
         await pumpUntilSettled(tester);
         expect(find.byType(PlayerPage), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '歌词页切歌键随 PlayerController 开关即时显隐，且点击触发切歌',
+      (tester) async {
+        // 显式 390x844 视口：与 buildTestApp 的 MediaQuery 尺寸一致，
+        // 保证 PageView 的翻页手势位移（-390）足以跨过半屏阈值。
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final player = _FakePlayerController();
+        final auth = _FakeAuthController();
+        final observer = _TestNavigatorObserver();
+
+        await tester.pumpWidget(
+          buildTestApp(player: player, auth: auth, observer: observer),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byType(MiniPlayer));
+        await pumpUntilSettled(tester);
+        expect(find.byType(PlayerPage), findsOneWidget);
+
+        // 左滑切到歌词页（第 1 页），底部栏此时应保持 QQ 原版（无切歌键）。
+        await tester.drag(find.byType(PageView), const Offset(-390, 0));
+        await pumpUntilSettled(tester);
+
+        const prevKey = ValueKey('lyric_previous_button');
+        const nextKey = ValueKey('lyric_next_button');
+        expect(find.byKey(prevKey), findsNothing);
+
+        // 设置项从关到开：依赖 PlayerPage 的 AnimatedBuilder(player) 重建，
+        // 底栏切歌键应即时出现（不需要重开播放页）。
+        player.lyricPageSkipButtonsEnabled = true;
+        player.notifyListeners();
+        await tester.pump();
+        expect(find.byKey(prevKey), findsOneWidget);
+        expect(find.byKey(nextKey), findsOneWidget);
+
+        await tester.tap(find.byKey(prevKey));
+        await tester.tap(find.byKey(nextKey));
+        expect(player.previousCalls, 1);
+        expect(player.nextCalls, 1);
+
+        // 设置项从开到关：底栏即时还原。
+        player.lyricPageSkipButtonsEnabled = false;
+        player.notifyListeners();
+        await tester.pump();
+        expect(find.byKey(prevKey), findsNothing);
+        expect(find.byKey(nextKey), findsNothing);
       },
     );
   });

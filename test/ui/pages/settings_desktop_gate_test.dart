@@ -50,6 +50,8 @@ void main() {
       expect(find.text('后台打断机制'), findsNothing);
       expect(find.text('增加听歌时长'), findsNothing);
       expect(find.text('播放页保持屏幕常亮'), findsNothing);
+      // 歌词页切歌键同属移动端专属（桌面无移动端歌词页，开关在此无意义）。
+      expect(find.text('歌词页切歌键'), findsNothing);
 
       expect(find.text('桌面'), findsOneWidget);
       expect(find.text('关闭时最小化到托盘'), findsOneWidget);
@@ -130,6 +132,7 @@ void main() {
       expect(find.text('连接新音频设备自动播放'), findsOneWidget);
       expect(find.text('后台打断机制'), findsOneWidget);
       expect(find.text('增加听歌时长'), findsOneWidget);
+      expect(find.text('歌词页切歌键'), findsOneWidget);
 
       expect(find.text('桌面'), findsNothing);
       expect(find.text('开机自启'), findsNothing);
@@ -137,6 +140,23 @@ void main() {
       // 下载位置仅 PC 桌面形态提供（移动端下载走 App 专属目录，无此概念）。
       expect(find.text('下载位置'), findsNothing);
       expect(find.text('重置窗口'), findsNothing);
+    });
+
+    testWidgets('歌词页切歌键瓦片：默认关，点击后写回 controller 并即时刷新', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      final player = _FakePlayer();
+      await _pump(tester, player: player);
+
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+      final switchFinder = _switchFinderForText(tester, '歌词页切歌键');
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+
+      await tester.tap(find.text('歌词页切歌键'));
+      await tester.pump();
+
+      expect(player.lyricPageSkipWrites, [true]);
+      expect(player.lyricPageSkipButtonsEnabled, isTrue);
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
     });
 
     testWidgets('手机视口也显示横屏/车机开关（残留值可改）', (tester) async {
@@ -203,6 +223,7 @@ void main() {
         // 与同组「后台打断机制」「增加听歌时长」同进同出。
         expect(find.text('后台打断机制'), findsOneWidget);
         expect(find.text('增加听歌时长'), findsOneWidget);
+        expect(find.text('歌词页切歌键'), findsOneWidget);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
@@ -234,8 +255,13 @@ void main() {
 Switch _autoStartSwitch(WidgetTester tester) =>
     tester.widget<Switch>(_autoStartSwitchFinder(tester));
 
-Finder _autoStartSwitchFinder(WidgetTester tester) {
-  final textElement = tester.element(find.text('开机自启'));
+Finder _autoStartSwitchFinder(WidgetTester tester) =>
+    _switchFinderForText(tester, '开机自启');
+
+/// 从指定文案向上找到所在瓦片行的 [Switch]（确定性定位，
+/// 避免页面内多个 Switch 的歧义）。
+Finder _switchFinderForText(WidgetTester tester, String text) {
+  final textElement = tester.element(find.text(text));
   Element? switchElement;
   // 沿祖先链由近及远查找第一个含 Switch 子节点的多子节点（瓦片行 Row）。
   textElement.visitAncestorElements((ancestor) {
@@ -251,10 +277,10 @@ Finder _autoStartSwitchFinder(WidgetTester tester) {
       (element) => identical(element, switchElement),
     );
   }
-  fail('未找到「开机自启」开关');
+  fail('未找到「$text」所在瓦片的开关');
 }
 
-Future<void> _pump(WidgetTester tester) async {
+Future<void> _pump(WidgetTester tester, {_FakePlayer? player}) async {
   // 超高视口让懒加载 ListView 一次性构建全部条目（免滚动断言）。
   tester.view.physicalSize = const Size(1080, 20000);
   tester.view.devicePixelRatio = 1.0;
@@ -267,7 +293,7 @@ Future<void> _pump(WidgetTester tester) async {
         body: SettingsPage(
           api: _FakeApi(),
           auth: _FakeAuth(vipClaim),
-          player: _FakePlayer(),
+          player: player ?? _FakePlayer(),
           theme: _FakeTheme(),
         ),
       ),
@@ -348,6 +374,16 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
   @override
   bool lyricPageSkipButtonsEnabled = false;
+
+  /// 切歌键瓦片点击写回的入参记录（断言 UI → controller 接线）。
+  final List<bool> lyricPageSkipWrites = [];
+
+  @override
+  Future<void> setLyricPageSkipButtonsEnabled(bool enabled) async {
+    lyricPageSkipWrites.add(enabled);
+    lyricPageSkipButtonsEnabled = enabled;
+    notifyListeners();
+  }
 
   /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
   @override
