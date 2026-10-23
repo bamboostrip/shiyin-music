@@ -93,7 +93,7 @@ class TopBar extends StatelessWidget {
     Widget content;
     if (currentPage != null) {
       content = Padding(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
         child: Row(
           children: [
             IconButton(

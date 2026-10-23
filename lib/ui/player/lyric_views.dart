@@ -104,7 +104,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 6, 16, 8),
+      padding: const EdgeInsets.fromLTRB(20, 2, 16, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
