@@ -88,7 +88,9 @@ class Song {
     final imageUrl =
         asString(json['Image']) ??
         asString(json['sizable_cover']) ??
-        asString(json['img']);
+        asString(json['img']) ??
+        // 云端播放历史 info 对象的封面键（真机实抓 2026-10-23）。
+        asString(json['cover']);
     final artists = parseArtists(
       json,
       fallbackName:
@@ -141,7 +143,11 @@ class Song {
       hash: hash,
       albumId: asString(json['AlbumID']) ?? asString(json['album_id']),
       albumAudioId: songId,
-      albumName: asString(json['AlbumName']) ?? asString(json['album_name']),
+      albumName:
+          asString(json['AlbumName']) ??
+          asString(json['album_name']) ??
+          // 云端播放历史 info 的专辑名嵌在 albuminfo.name。
+          asString(asMap(json['albuminfo'])['name']),
       coverUrl: normalizeImageUrl(imageUrl),
       artists: artists,
       duration:

@@ -66,12 +66,21 @@ pub async fn user_playlist(
     transport::send(client, session, &req).await
 }
 
-pub async fn user_history(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
+/// 概念版「听歌时光机/听歌排行」数据源（/playhistory/v1/get_songs）。
+/// [bp] 为翻页游标（上页响应的 bp 字段原样回传），None 拉第一页。
+pub async fn user_history(
+    client: &reqwest::Client,
+    session: &KgSession,
+    bp: Option<&str>,
+) -> AppResult<Value> {
     require_login(session)?;
-    let body = json!({
+    let mut body = json!({
         "token": session.token, "userid": session.userid,
         "source_classify": "app", "to_subdivide_sr": 1
     });
+    if let Some(bp) = bp {
+        body["bp"] = json!(bp);
+    }
     let req = KgRequest::get("/playhistory/v1/get_songs")
         .method(reqwest::Method::POST)
         .json_body(body)

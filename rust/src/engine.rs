@@ -701,7 +701,11 @@ impl KugouEngine {
             }
 
             ("GET", "/user/vip/detail") => user::user_vip_detail(client, session).await,
-            ("GET", "/user/playhistory") => user::user_history(client, session).await,
+            ("GET", "/user/playhistory") => {
+                // bp 为翻页游标（上页响应的 bp 原样回传），空则拉第一页。
+                let bp = first_str(&[], params, &["bp"]).filter(|s| !s.is_empty());
+                user::user_history(client, session, bp.as_deref()).await
+            }
             // 真机验收诊断：listenservice 听歌排行（概念版「时光机」的候选
             // 数据源，list_type 语义未证实），供 Dart 端空结果探针比对。
             ("GET", "/user/listenrank") => {

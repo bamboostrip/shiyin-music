@@ -1,14 +1,17 @@
 import 'model_parsing.dart';
 import 'song.dart';
 
-/// 云端播放记录：酷狗账号级听歌历史中的一条。
+/// 云端播放记录：酷狗账号级听歌历史（概念版「时光机/听歌排行」数据源）中的一条。
 class CloudPlayRecord {
-  const CloudPlayRecord({required this.song, this.playedAt});
+  const CloudPlayRecord({required this.song, this.playedAt, this.playCount = 1});
 
   final Song song;
 
-  /// 服务端记录的播放时间；缺失时为 null（归入「未知时间」分组）。
+  /// 服务端记录的播放时间（记录级 ot 字段）；缺失时为 null（归入「未知时间」分组）。
   final DateTime? playedAt;
+
+  /// 服务端累计的播放次数（记录级 pc 字段，概念版听歌排行的计数口径）。
+  final int playCount;
 }
 
 /// 按自然日聚合的一组云端播放记录。
@@ -22,9 +25,11 @@ class CloudPlayDayGroup {
 
 /// 云端播放历史：酷狗服务端返回的账号听歌记录集合。
 ///
-/// `/playhistory/v1/get_songs` 的真实响应形状未经真机验证，
-/// [fromJson] 对承载结构做容错探测（根数组 / list / songs / data.list），
-/// 任何无法识别的形状都返回空集合而不是抛异常。
+/// `/playhistory/v1/get_songs` 即概念版「听歌时光机/听歌排行」的数据源
+/// （同行项目 concept-music 的同名模块注释证实；bp 游标翻页，记录级
+/// ot=播放时间、pc=播放次数，歌曲信息嵌在 info 键下——真机实抓
+/// 2026-10-23）。[fromJson] 对承载结构做容错探测（根数组 / list /
+/// songs / data.list），任何无法识别的形状都返回空集合而不是抛异常。
 class CloudPlayHistory {
   const CloudPlayHistory({this.records = const []});
 
@@ -117,11 +122,15 @@ class CloudPlayHistory {
   static CloudPlayRecord? _parseRecord(Map<String, dynamic> map) {
     // 歌曲字段可能平铺在记录上，也可能嵌在 song / audio_info / info 下。
     // info 为真机实抓形状（2026-10-23：/playhistory/v1/get_songs 的记录
-    // 把歌曲信息整体嵌在 info 键下，记录层级另带播放元数据）。
+    // 把歌曲信息整体嵌在 info 键下，记录层级带 ot/pc/sr 播放元数据）。
     final songMap = _nestedSongMap(map);
     final song = Song.fromSearch(songMap);
     if (song.hash.isEmpty) return null;
-    return CloudPlayRecord(song: song, playedAt: _parseTime(map, songMap));
+    return CloudPlayRecord(
+      song: song,
+      playedAt: _parseTime(map, songMap),
+      playCount: asInt(map['pc']) ?? 1,
+    );
   }
 
   static Map<String, dynamic> _nestedSongMap(Map<String, dynamic> map) {

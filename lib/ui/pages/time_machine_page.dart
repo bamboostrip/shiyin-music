@@ -298,7 +298,7 @@ class _TimeMachineContent extends StatelessWidget {
             AppSongRow(
               song: record.song,
               player: player,
-              subtitle: _formatTime(record.playedAt),
+              subtitle: _formatSubtitle(record.playedAt, record.playCount),
               onTap: () => onPlay(record, allSongs),
             ),
         ],
@@ -306,12 +306,16 @@ class _TimeMachineContent extends StatelessWidget {
     );
   }
 
-  /// 24 小时制的 HH:mm（如 14:05）；无时间时不传副标题、保持默认歌手名。
-  String? _formatTime(DateTime? time) {
-    if (time == null) return null;
+  /// 24 小时制 HH:mm（如 14:05）；服务端累计多次播放的记录追加播放次数
+  /// （pc 是概念版听歌排行的计数口径）。无时间时不传副标题、保持默认歌手名。
+  String? _formatSubtitle(DateTime? time, int playCount) {
+    final suffix = playCount > 1 ? ' · 播放$playCount次' : '';
+    if (time == null) {
+      return playCount > 1 ? '播放$playCount次' : null;
+    }
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    return '$hour:$minute$suffix';
   }
 }
 

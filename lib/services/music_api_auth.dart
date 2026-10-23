@@ -140,27 +140,55 @@ mixin _MusicApiAuth on _MusicApiBase {
   /// 而不是被容错解析误读成「云端无记录」。
   /// 响应的具体承载形状由 [CloudPlayHistory.fromJson] 容错处理。
   Future<CloudPlayHistory> cloudPlayHistory() async {
-    final raw = await _client.get('/user/playhistory');
-    if (_isFailureEnvelope(asMap(raw))) {
-      throw ApiException('拉取云端播放历史失败${_failureSuffix(asMap(raw))}');
-    }
-    final history = CloudPlayHistory.fromJson(raw);
-    if (history.totalRecords > 0) {
-      debugPrint('[时音][cloud-history] 拉到 ${history.totalRecords} 条云端记录');
-      // 验收期临时：成功路径也落盘较大篇幅原文，用于补全记录级字段
-      // （歌名/歌手/播放时间键、has_more 分页游标），形状确认后移除。
+    // 概念版「听歌时光机/听歌排行」即本接口（concept-music 同名模块
+    // 注释证实），has_more=1 时把响应的 bp 游标回传拉下一页，直到
+    // has_more 消失 / 游标不再前进 / 触及页数上限。
+    final records = <CloudPlayRecord>[];
+    final seenRecordKeys = <String>{};
+    String? bp;
+    Object? firstRaw;
+    for (var page = 0; page < _kMaxCloudHistoryPages; page++) {
+      final raw = await _client.get(
+        '/user/playhistory',
+        bp == null ? const {} : {'bp': bp},
+      );
+      final json = asMap(raw);
+      if (_isFailureEnvelope(json)) {
+        throw ApiException('拉取云端播放历史失败${_failureSuffix(json)}');
+      }
+      firstRaw ??= raw;
+      // 验收期临时：落盘每页原文（截断），确认跨页形状/排序后移除。
       final encoded = jsonEncode(raw);
       debugPrint(
-        '[时音][cloud-history][probe] 原文[0:3000]='
-        '${encoded.substring(0, encoded.length < 3000 ? encoded.length : 3000)}',
+        '[时音][cloud-history][probe] 第${page + 1}页 '
+        'has_more=${json['has_more']} bp=${json['bp']} 原文[0:1500]='
+        '${encoded.substring(0, encoded.length < 1500 ? encoded.length : 1500)}',
       );
+      // 游标异常（回环/原地重复）时后页可能重复返回同一批记录，按键去重。
+      for (final record in CloudPlayHistory.fromJson(raw).records) {
+        if (seenRecordKeys.add(
+          '${record.song.hash}|${record.playedAt?.millisecondsSinceEpoch}',
+        )) {
+          records.add(record);
+        }
+      }
+      if (asInt(json['has_more']) != 1) break;
+      final nextBp = asString(json['bp']);
+      if (nextBp == null || nextBp.isEmpty || nextBp == bp) break;
+      bp = nextBp;
+    }
+    if (records.isNotEmpty) {
+      debugPrint('[时音][cloud-history] 拉到 ${records.length} 条云端记录');
     } else {
       // 真机验收诊断：解析为空时自动探测候选数据源并落盘日志，确认
       // 概念版「时光机」的真实数据源与响应形状后移除（见 _diagnoseEmptyPull）。
-      unawaited(_diagnoseEmptyPull(raw));
+      unawaited(_diagnoseEmptyPull(firstRaw));
     }
-    return history;
+    return CloudPlayHistory(records: records);
   }
+
+  /// 翻页上限：防止游标异常时的无限请求；10 页足够覆盖当前验收体量。
+  static const _kMaxCloudHistoryPages = 10;
 
   /// 空结果自动诊断（验收期临时代码，形状确认后移除）：
   ///

@@ -3,13 +3,19 @@ import 'package:shiyin_music/core/api_client.dart';
 import 'package:shiyin_music/core/api_client_interface.dart';
 import 'package:shiyin_music/services/music_api.dart';
 
-/// 假客户端：对 /user/playhistory 返回预置响应。
+/// 假客户端：对 /user/playhistory 返回预置响应（单响应或按序翻页队列）。
 class _FakeHistoryClient implements ApiClientInterface {
-  _FakeHistoryClient(this.response);
+  _FakeHistoryClient(this.response) : pages = null;
+  _FakeHistoryClient.paged(List<Object?> queue)
+    : response = null,
+      pages = queue;
 
   final Object? response;
+  final List<Object?>? pages;
+  int _call = 0;
   Object? requestedPath;
   final List<String> requestedPaths = [];
+  final List<Map<String, Object?>> requests = [];
 
   @override
   String? token;
@@ -23,6 +29,11 @@ class _FakeHistoryClient implements ApiClientInterface {
       [Map<String, Object?> query = const {}]) async {
     requestedPath = path;
     requestedPaths.add(path);
+    requests.add({'path': path, ...query});
+    final pages = this.pages;
+    if (pages != null) {
+      return _call < pages.length ? pages[_call++] : const {'status': 1};
+    }
     return response;
   }
 
@@ -162,6 +173,70 @@ void main() {
       }
 
       expect(client.requestedPaths, ['/user/playhistory']);
+    });
+
+    test('bp 游标翻页：has_more=1 时回传游标拉下一页，直到 has_more 消失', () async {
+      final client = _FakeHistoryClient.paged([
+        {
+          'status': 1,
+          'error_code': 0,
+          'has_more': 1,
+          'bp': 'CURSOR_A',
+          'songs': [
+            {
+              'info': {'hash': 'h1', 'name': 'A', 'singername': 'S'},
+              'ot': 1729500000,
+              'pc': 2,
+            },
+          ],
+        },
+        {
+          'status': 1,
+          'error_code': 0,
+          'has_more': 0,
+          'bp': 'CURSOR_B',
+          'songs': [
+            {
+              'info': {'hash': 'h2', 'name': 'B', 'singername': 'S'},
+            },
+          ],
+        },
+      ]);
+      final api = MusicApi(client);
+
+      final history = await api.cloudPlayHistory();
+
+      expect(history.totalRecords, 2);
+      expect(history.records.first.playCount, 2);
+      expect(client.requests.length, 2);
+      expect(client.requests[1]['bp'], 'CURSOR_A');
+    });
+
+    test('游标不再前进时停止翻页（防服务端异常导致死循环）', () async {
+      final client = _FakeHistoryClient.paged([
+        {
+          'status': 1,
+          'has_more': 1,
+          'bp': 'SAME_CURSOR',
+          'songs': [
+            {'hash': 'h1', 'songname': 'A', 'singername': 'S'},
+          ],
+        },
+        {
+          'status': 1,
+          'has_more': 1,
+          'bp': 'SAME_CURSOR',
+          'songs': [
+            {'hash': 'h1', 'songname': 'A', 'singername': 'S'},
+          ],
+        },
+      ]);
+      final api = MusicApi(client);
+
+      final history = await api.cloudPlayHistory();
+
+      expect(history.totalRecords, 1);
+      expect(client.requests.length, 2); // 第二页游标相同即止
     });
   });
 }

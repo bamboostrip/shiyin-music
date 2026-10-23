@@ -8,11 +8,10 @@ import 'package:shiyin_music/models/music_models.dart';
 /// 常见承载方式，且任何未知形状都不抛异常、返回空。
 void main() {
   group('CloudPlayHistory.fromJson 容错解析', () {
-    test('真机实抓形状（2026-10-23）：歌曲数据嵌在 info 键下', () {
-      // /user/playhistory 实测响应骨架（截取自 PC 端日志）：记录层级把
-      // 歌曲信息整体嵌在 info 下（hash/audio_id/cover 等）；歌名/歌手
-      // 字段名在日志截断处之后，暂以 songname/singername 占位，待完整
-      // 原文回填后修正。
+    test('真机实抓形状（2026-10-23）：info 嵌套 + 记录级 ot/pc/mxid', () {
+      // /user/playhistory 实测响应骨架（PC 端日志，孙楠《留什么给你》）：
+      // 歌曲信息整体嵌在 info 下（name/singername/mixsongid/timelen/
+      // cover/albuminfo/singerinfo），记录级 ot=播放时间、pc=播放次数。
       final history = CloudPlayHistory.fromJson({
         'status': 1,
         'error_code': 0,
@@ -21,20 +20,39 @@ void main() {
           {
             'info': {
               'album_id': 964178,
+              'albuminfo': {'id': 964178, 'name': '我们都是伤心人'},
               'audio_id': 249315,
-              'hash': '32856ED5E34CFE975149EAD254A38528',
               'cover': 'http://imge.kugou.com/stdmusic/400/x.jpg',
-              'songname': '晴天',
-              'singername': '周杰伦',
+              'hash': '32856ED5E34CFE975149EAD254A38528',
+              'mixsongid': 32077008,
+              'name': '留什么给你',
+              'singerinfo': [
+                {'id': 2441, 'name': '孙楠'},
+              ],
+              'singername': '孙楠',
+              'timelen': 237374,
             },
+            'mxid': 32077008,
+            'op': 1,
+            'ot': 1792734484,
+            'pc': 1,
+            'sr': 0,
           },
         ],
       });
 
-      expect(history.totalRecords, 1);
-      expect(history.records.first.song.hash, '32856ED5E34CFE975149EAD254A38528');
-      expect(history.records.first.song.id, '249315');
-      expect(history.records.first.song.title, '晴天');
+      final record = history.records.single;
+      expect(record.song.hash, '32856ED5E34CFE975149EAD254A38528');
+      expect(record.song.id, '32077008');
+      expect(record.song.title, '留什么给你');
+      expect(record.song.artist, '孙楠');
+      expect(record.song.albumName, '我们都是伤心人');
+      expect(record.song.coverUrl, isNotNull);
+      expect(record.playCount, 1);
+      expect(
+        record.playedAt!.millisecondsSinceEpoch,
+        1792734484 * 1000,
+      );
     });
 
     test('根即记录数组：平铺歌曲字段 + 秒级时间戳', () {
