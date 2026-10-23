@@ -702,6 +702,14 @@ impl KugouEngine {
 
             ("GET", "/user/vip/detail") => user::user_vip_detail(client, session).await,
             ("GET", "/user/playhistory") => user::user_history(client, session).await,
+            // 真机验收诊断：listenservice 听歌排行（概念版「时光机」的候选
+            // 数据源，list_type 语义未证实），供 Dart 端空结果探针比对。
+            ("GET", "/user/listenrank") => {
+                let list_type = first_str(&[], params, &["list_type"])
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(0i64);
+                user::user_listen(client, session, list_type).await
+            }
             ("POST", "/playhistory/upload") => {
                 // Dart 走 query: mixsongid / play_count
                 let mixsongid = first_str(&[], params, &["mixsongid", "mixSongId"])
@@ -716,8 +724,7 @@ impl KugouEngine {
                         .get("play_count")
                         .and_then(|s| s.parse::<i64>().ok())
                         .unwrap_or(1i64);
-                    report::upload_play_history(client, session, mixsongid, None, play_count)
-                        .await
+                    report::upload_play_history(client, session, mixsongid, None, play_count).await
                 }
             }
             ("GET", "/youth/month/vip/record") => youth::month_vip_record(client, session).await,

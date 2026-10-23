@@ -9,6 +9,7 @@ class _FakeHistoryClient implements ApiClientInterface {
 
   final Object? response;
   Object? requestedPath;
+  final List<String> requestedPaths = [];
 
   @override
   String? token;
@@ -21,6 +22,7 @@ class _FakeHistoryClient implements ApiClientInterface {
   Future<dynamic> get(String path,
       [Map<String, Object?> query = const {}]) async {
     requestedPath = path;
+    requestedPaths.add(path);
     return response;
   }
 
@@ -126,6 +128,40 @@ void main() {
       }));
 
       expect((await api.cloudPlayHistory()).totalRecords, 1);
+    });
+
+    test('解析为空时自动探测 listenservice（验收诊断）', () async {
+      final client = _FakeHistoryClient({'status': 1, 'list': <Object>[]});
+      final api = MusicApi(client);
+
+      expect((await api.cloudPlayHistory()).totalRecords, 0);
+      // 探针为 unawaited 后台链，让事件循环跑完。
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(client.requestedPaths, contains('/user/listenrank'));
+      expect(
+        client.requestedPaths.where((p) => p == '/user/listenrank').length,
+        2, // list_type 0/1 两档
+      );
+    });
+
+    test('有数据时不触发探针', () async {
+      final client = _FakeHistoryClient({
+        'status': 1,
+        'list': [
+          {'hash': 'h5', 'songname': '晴天', 'singername': '周杰伦'},
+        ],
+      });
+      final api = MusicApi(client);
+
+      await api.cloudPlayHistory();
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(client.requestedPaths, ['/user/playhistory']);
     });
   });
 }

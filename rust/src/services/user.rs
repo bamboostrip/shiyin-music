@@ -79,7 +79,6 @@ pub async fn user_history(client: &reqwest::Client, session: &KgSession) -> AppR
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
 pub async fn user_listen(
     client: &reqwest::Client,
     session: &KgSession,

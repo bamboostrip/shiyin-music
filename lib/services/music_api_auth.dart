@@ -144,7 +144,72 @@ mixin _MusicApiAuth on _MusicApiBase {
     if (_isFailureEnvelope(asMap(raw))) {
       throw ApiException('拉取云端播放历史失败${_failureSuffix(asMap(raw))}');
     }
-    return CloudPlayHistory.fromJson(raw);
+    final history = CloudPlayHistory.fromJson(raw);
+    if (history.totalRecords > 0) {
+      debugPrint('[时音][cloud-history] 拉到 ${history.totalRecords} 条云端记录');
+    } else {
+      // 真机验收诊断：解析为空时自动探测候选数据源并落盘日志，确认
+      // 概念版「时光机」的真实数据源与响应形状后移除（见 _diagnoseEmptyPull）。
+      unawaited(_diagnoseEmptyPull(raw));
+    }
+    return history;
+  }
+
+  /// 空结果自动诊断（验收期临时代码，形状确认后移除）：
+  ///
+  /// 概念版「时光机」展示的是听歌排形态的聚合数据，与 /playhistory 的
+  /// 逐条播放记录可能是两个数据服务。主源解析为空时，把主源原始形状与
+  /// listenservice（/v2/get_list，听歌排行最可疑的候选源，list_type 语义
+  /// 未知，探测 0/1 两档）的原始响应一并写入 AppLog 落盘日志，一次真机
+  /// 打开即可定位真实数据源。仅诊断日志，不影响返回值与 UI。
+  Future<void> _diagnoseEmptyPull(Object? mainRaw) async {
+    debugPrint(
+      '[时音][cloud-history][probe] 主源 /user/playhistory 解析为空，'
+      '响应形状: ${_diagnosticDump(mainRaw)}',
+    );
+    for (final listType in const [0, 1]) {
+      try {
+        final rank = asMap(
+          await _client.get('/user/listenrank', {'list_type': listType}),
+        );
+        debugPrint(
+          '[时音][cloud-history][probe] listenservice list_type=$listType '
+          '响应形状: ${_diagnosticDump(rank)}',
+        );
+      } catch (error) {
+        debugPrint(
+          '[时音][cloud-history][probe] listenservice list_type=$listType '
+          '拉取失败: $error',
+        );
+      }
+    }
+  }
+
+  /// 诊断用原始响应概要：根类型 + 顶层键与各键形状 + 截断的 JSON 原文。
+  static String _diagnosticDump(Object? raw) {
+    final buffer = StringBuffer();
+    if (raw is List) {
+      buffer.write('根为数组(${raw.length} 项)');
+    } else if (raw is Map) {
+      buffer.write('根为对象，键: ${raw.keys.toList()}');
+      for (final entry in raw.entries) {
+        final value = entry.value;
+        if (value is List) {
+          buffer.write(' | ${entry.key}: 数组(${value.length})');
+        } else if (value is Map) {
+          buffer.write(
+            ' | ${entry.key}: 对象(键: ${value.keys.take(20).toList()})',
+          );
+        }
+      }
+    } else {
+      buffer.write('根为 ${raw.runtimeType}');
+    }
+    final encoded = jsonEncode(raw);
+    buffer.write(
+      encoded.length > 500 ? ' | 原文[0:500]=${encoded.substring(0, 500)}' : ' | 原文=$encoded',
+    );
+    return buffer.toString();
   }
 
   /// 上报一条播放记录到酷狗云端（「听歌时光机」二期，写操作）。
