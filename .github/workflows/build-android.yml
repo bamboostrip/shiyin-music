@@ -184,6 +184,8 @@ jobs:
       # 只传附件、不改 Release 状态——转正由 publish-release.yml 在三平台
       # 构建全绿后统一执行，避免 Release 先于附件出现在列表里（softprops
       # 会自动 finalize 草稿，弃用）。
+      # 注意：本 job 没有 actions/checkout（只下载 artifact），工作目录不是
+      # git 仓库，gh 无法从 remote 推断仓库，必须显式带 -R。
       - name: Upload APKs to draft Release (impeller-arm64 first)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -200,4 +202,5 @@ jobs:
           for f in "${files[@]}"; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
           done
-          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber
+          gh release upload "${{ github.ref_name }}" "${files[@]}" \
+            -R "$GITHUB_REPOSITORY" --clobber
