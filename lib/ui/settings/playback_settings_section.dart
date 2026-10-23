@@ -25,12 +25,17 @@ class PlaybackSettingsSection extends StatelessWidget {
     required this.auth,
     required this.player,
     required this.onSelectDefaultAudioQuality,
+    required this.showLyricPageSkipButtons,
   });
 
   final MusicApi api;
   final AuthController auth;
   final PlayerController player;
   final VoidCallback onSelectDefaultAudioQuality;
+
+  /// 是否展示「歌词页切歌键」开关：仅手机/平板形态需要（移动端歌词页
+  /// 底栏才有切歌键）；PC 与车机隐藏，避免「看得到但无效」。
+  final bool showLyricPageSkipButtons;
 
   String _audioInterruptionSummary(PlayerController player) {
     final parts = <String>[];
@@ -197,15 +202,19 @@ class PlaybackSettingsSection extends StatelessWidget {
                 value: player.keepScreenOnEnabled,
                 onChanged: player.setKeepScreenOnEnabled,
               ),
-              SettingsDivider(),
-              SettingsSwitchTile(
-                icon: Icons.skip_next_rounded,
-                iconColor: const Color(0xFF5C6BC0),
-                title: '歌词页切歌键',
-                subtitle: '在歌词页底部显示上一首/下一首按钮，无需滑回封面页',
-                value: player.lyricPageSkipButtonsEnabled,
-                onChanged: player.setLyricPageSkipButtonsEnabled,
-              ),
+              // 歌词页切歌键：仅手机/平板形态提供；PC 与车机没有移动端
+              // 歌词页底栏（车机横屏走分栏布局），隐藏以免无效开关。
+              if (showLyricPageSkipButtons) ...[
+                SettingsDivider(),
+                SettingsSwitchTile(
+                  icon: Icons.skip_next_rounded,
+                  iconColor: const Color(0xFF5C6BC0),
+                  title: '歌词页切歌键',
+                  subtitle: '在歌词页底部显示上一首/下一首按钮，无需滑回封面页',
+                  value: player.lyricPageSkipButtonsEnabled,
+                  onChanged: player.setLyricPageSkipButtonsEnabled,
+                ),
+              ],
             ],
             if (player.isDesktopLyricsSupported) ...[
               SettingsDivider(),

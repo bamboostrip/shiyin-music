@@ -241,6 +241,12 @@ class SettingsPage extends StatelessWidget {
             // 横屏/车机开关：移动端（手机+平板）全量展示，桌面恒横屏无此概念。
             // 手机残留值曾因平板门控无 UI 可改，现还回开关即恢复可编辑。
             final showOrientationTiles = !isDesktopFormFactor;
+            // 歌词页切歌键只服务手机/平板形态：PC 与车机（车机模式或车机
+            // 设备）均无移动端歌词页底栏，隐藏开关避免「看得到但无效」。
+            final showLyricPageSkipButtons =
+                !isDesktopFormFactor &&
+                !theme.carModeEnabled &&
+                !theme.isAutomotiveDevice;
             return AdaptiveContentPadding(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
@@ -256,6 +262,7 @@ class SettingsPage extends StatelessWidget {
                     api: api,
                     auth: auth,
                     player: player,
+                    showLyricPageSkipButtons: showLyricPageSkipButtons,
                     onSelectDefaultAudioQuality: () =>
                         _selectDefaultAudioQuality(context),
                   ),

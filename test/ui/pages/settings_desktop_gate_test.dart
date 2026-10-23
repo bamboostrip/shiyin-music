@@ -159,6 +159,41 @@ void main() {
       expect(tester.widget<Switch>(switchFinder).value, isTrue);
     });
 
+    testWidgets('车机模式下车机、PC 专属场景隐藏歌词页切歌键', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      await _pump(tester, theme: _FakeTheme(carModeEnabled: true));
+
+      // 只有手机/平板形态需要该开关；车机横屏走分栏布局、没有歌词页底栏。
+      expect(find.text('歌词页切歌键'), findsNothing);
+      // 同组其他手机开关仍在，证明页面正常构建而非整体缺失。
+      expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+    });
+
+    testWidgets('车机设备（即使手动关闭车机模式）同样隐藏歌词页切歌键', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      await _pump(tester, theme: _FakeTheme(isAutomotiveDevice: true));
+
+      expect(find.text('歌词页切歌键'), findsNothing);
+      expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+    });
+
+    testWidgets('切换车机模式后歌词页切歌键瓦片即时显隐', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      final theme = _FakeTheme();
+      await _pump(tester, theme: theme);
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+
+      theme.carModeEnabled = true;
+      theme.notifyListeners();
+      await tester.pump();
+      expect(find.text('歌词页切歌键'), findsNothing);
+
+      theme.carModeEnabled = false;
+      theme.notifyListeners();
+      await tester.pump();
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+    });
+
     testWidgets('手机视口也显示横屏/车机开关（残留值可改）', (tester) async {
       debugDesktopFormFactorOverride = false;
       // 手机视口：最短边 <600（此前提下旧逻辑会藏起开关）；
@@ -280,7 +315,11 @@ Finder _switchFinderForText(WidgetTester tester, String text) {
   fail('未找到「$text」所在瓦片的开关');
 }
 
-Future<void> _pump(WidgetTester tester, {_FakePlayer? player}) async {
+Future<void> _pump(
+  WidgetTester tester, {
+  _FakePlayer? player,
+  _FakeTheme? theme,
+}) async {
   // 超高视口让懒加载 ListView 一次性构建全部条目（免滚动断言）。
   tester.view.physicalSize = const Size(1080, 20000);
   tester.view.devicePixelRatio = 1.0;
@@ -294,7 +333,7 @@ Future<void> _pump(WidgetTester tester, {_FakePlayer? player}) async {
           api: _FakeApi(),
           auth: _FakeAuth(vipClaim),
           player: player ?? _FakePlayer(),
-          theme: _FakeTheme(),
+          theme: theme ?? _FakeTheme(),
         ),
       ),
     ),
@@ -439,6 +478,14 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
 }
 
 class _FakeTheme extends ChangeNotifier implements ThemeController {
+  _FakeTheme({this.carModeEnabled = false, this.isAutomotiveDevice = false});
+
+  @override
+  bool carModeEnabled;
+
+  @override
+  bool isAutomotiveDevice;
+
   @override
   double get fontScale => 1.0;
 
@@ -450,12 +497,6 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
 
   @override
   bool get landscapeEnabled => false;
-
-  @override
-  bool get carModeEnabled => false;
-
-  @override
-  bool get isAutomotiveDevice => false;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
