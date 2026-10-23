@@ -216,6 +216,7 @@ class _LyricSkipButton extends StatelessWidget {
 /// - 右侧：`[词]` 字号入口、`[译 on/off]`、`[音 on/off]` 及圆形播放/暂停键
 /// - [showSkipButtons] 为 true 时播放键两侧并入上一首/下一首
 ///   （issue #3，设置-播放-歌词页切歌键，默认关保持原版观感）
+/// - 右侧控件组在极窄宽度下由 FittedBox 整体等比缩小，避免切歌键被裁出屏幕
 class LyricBottomBar extends StatelessWidget {
   const LyricBottomBar({
     super.key,
@@ -272,9 +273,60 @@ class LyricBottomBar extends StatelessWidget {
         final skipGap = width < 340 ? 6.0 : (width < 380 ? 8.0 : 12.0);
         final skipSize = width < 340 ? 32.0 : (width < 380 ? 36.0 : 40.0);
         final skipIcon = width < 340 ? 20.0 : (width < 380 ? 22.0 : 26.0);
-        final hPadding = !showSkipButtons
-            ? 16.0
-            : (width < 340 ? 12.0 : 16.0);
+        final hPadding = !showSkipButtons ? 16.0 : (width < 340 ? 12.0 : 16.0);
+
+        // 右侧控件组按内在宽度排布，剩余空间由 Expanded 吃掉并右对齐；
+        // 空间不足时 FittedBox 等比缩小兜底（见下方 Row 注释）。
+        final rightCluster = Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // [词] 字号调节
+            _LyricSettingsPill(onTap: () => _showFontSizeSheet(context)),
+            SizedBox(width: pillGap),
+
+            // [译 on/off]
+            if (hasTranslation) ...[
+              LyricTogglePill(
+                label: '译',
+                isOn: showTranslation,
+                tooltip: '翻译 (${showTranslation ? '已开启' : '已关闭'})',
+                onToggle: () => onToggleTranslation(!showTranslation),
+              ),
+              SizedBox(width: pillGap),
+            ],
+
+            // [音 on/off]
+            if (hasRomanization) ...[
+              LyricTogglePill(
+                label: '音',
+                isOn: showRomanization,
+                tooltip: '拼音/音译 (${showRomanization ? '已开启' : '已关闭'})',
+                onToggle: () => onToggleRomanization(!showRomanization),
+              ),
+              SizedBox(width: pillGap),
+            ],
+
+            // 上一首 / 播放暂停 / 下一首（可选，见 showSkipButtons）
+            if (showSkipButtons) ...[
+              _LyricSkipButton.previous(
+                onPressed: player.previous,
+                buttonSize: skipSize,
+                iconSize: skipIcon,
+              ),
+              SizedBox(width: skipGap),
+            ],
+            _LyricRoundPlayPauseButton(player: player),
+            if (showSkipButtons) ...[
+              SizedBox(width: skipGap),
+              _LyricSkipButton.next(
+                onPressed: player.next,
+                buttonSize: skipSize,
+                iconSize: skipIcon,
+              ),
+            ],
+          ],
+        );
 
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 8),
@@ -289,53 +341,21 @@ class LyricBottomBar extends StatelessWidget {
                 iconColor: Colors.white.withValues(alpha: 0.85),
                 onOpenComment: onOpenComment,
               ),
-
-              const Spacer(),
-
-              // 右侧：[词] 字号调节
-              _LyricSettingsPill(onTap: () => _showFontSizeSheet(context)),
-              SizedBox(width: pillGap),
-
-              // [译 on/off]
-              if (hasTranslation) ...[
-                LyricTogglePill(
-                  label: '译',
-                  isOn: showTranslation,
-                  tooltip: '翻译 (${showTranslation ? '已开启' : '已关闭'})',
-                  onToggle: () => onToggleTranslation(!showTranslation),
+              // 右侧：Expanded 把剩余空间全部给右对齐的控件组。
+              // 极窄宽度（分屏/小窗/折叠屏/超大系统显示尺寸）下，即使三档
+              // 紧凑参数也放不下时，FittedBox 会等比缩小整组而不是让 Row
+              // 溢出把「下一首」裁出屏幕；正常宽度下 scaleDown 不缩放，
+              // 与原布局像素级一致。
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: rightCluster,
+                  ),
                 ),
-                SizedBox(width: pillGap),
-              ],
-
-              // [音 on/off]
-              if (hasRomanization) ...[
-                LyricTogglePill(
-                  label: '音',
-                  isOn: showRomanization,
-                  tooltip: '拼音/音译 (${showRomanization ? '已开启' : '已关闭'})',
-                  onToggle: () => onToggleRomanization(!showRomanization),
-                ),
-                SizedBox(width: pillGap),
-              ],
-
-              // 上一首 / 播放暂停 / 下一首（可选，见 showSkipButtons）
-              if (showSkipButtons) ...[
-                _LyricSkipButton.previous(
-                  onPressed: player.previous,
-                  buttonSize: skipSize,
-                  iconSize: skipIcon,
-                ),
-                SizedBox(width: skipGap),
-              ],
-              _LyricRoundPlayPauseButton(player: player),
-              if (showSkipButtons) ...[
-                SizedBox(width: skipGap),
-                _LyricSkipButton.next(
-                  onPressed: player.next,
-                  buttonSize: skipSize,
-                  iconSize: skipIcon,
-                ),
-              ],
+              ),
             ],
           ),
         );

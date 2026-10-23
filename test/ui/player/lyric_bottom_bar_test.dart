@@ -203,20 +203,100 @@ void main() {
         ),
       );
 
-      expect(
-        find.byKey(const ValueKey('lyric_previous_button')),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('lyric_previous_button')), findsNothing);
       expect(find.byKey(const ValueKey('lyric_next_button')), findsNothing);
       // 原版药丸/播放键仍在
-      expect(find.byKey(const ValueKey('lyric_round_play_pause_button')),
-          findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('lyric_round_play_pause_button')),
+        findsOneWidget,
+      );
       expect(find.text('词'), findsOneWidget);
     });
 
-    testWidgets('does not overflow on 320dp width with both pills shown', (
-      tester,
-    ) async {
+    // 最坏情况（开启切歌键 + 译/音双 pill）逐宽度扫描：从 320dp 主流窄屏
+    // 一直覆盖到分屏/折叠屏/超大显示尺寸级别的极窄宽度，都不允许出现
+    // RenderFlex overflow（修复前 <314dp 开始溢出、313dp 溢出 1px）。
+    // 正常宽度还必须保持设计档位尺寸，不能被兜底缩放误伤。
+    for (final width in <double>[
+      280,
+      300,
+      313,
+      314,
+      320,
+      340,
+      360,
+      379,
+      380,
+      412,
+    ]) {
+      testWidgets('no overflow at width=$width with both pills and skip on', (
+        tester,
+      ) async {
+        const song = Song(
+          id: 's1',
+          hash: 'h1',
+          title: 'Song',
+          artist: 'Artist',
+        );
+        final player = _FakePlayerController();
+
+        tester.view.physicalSize = Size(width, 600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LyricBottomBar(
+                player: player,
+                song: song,
+                showTranslation: true,
+                showRomanization: true,
+                hasTranslation: true,
+                hasRomanization: true,
+                lyricScale: 1.0,
+                showSkipButtons: true,
+                onToggleTranslation: (_) {},
+                onToggleRomanization: (_) {},
+                onLyricScaleChanged: (_) {},
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 渲染期若 Row 溢出，Flutter 会抛 RenderFlex overflow，用例直接失败。
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'width=$width 开启切歌键后底栏不允许溢出',
+        );
+
+        final prevFinder = find.byKey(const ValueKey('lyric_previous_button'));
+        final nextFinder = find.byKey(const ValueKey('lyric_next_button'));
+        expect(prevFinder, findsOneWidget);
+        expect(nextFinder, findsOneWidget);
+
+        // 正常宽度（≥314dp）走设计档位，不触发兜底缩放：
+        //   ≥380 → 40，340~379 → 36，<340 → 32。
+        final expectedSize = width >= 380 ? 40.0 : (width >= 340 ? 36.0 : 32.0);
+        final prevSize = tester.getSize(prevFinder);
+        if (width >= 314) {
+          expect(prevSize.width, expectedSize, reason: 'width=$width 档位尺寸');
+          expect(prevSize.height, expectedSize);
+        } else {
+          // 极窄宽度：整组等比缩小而不是裁切。
+          expect(prevSize.width, greaterThan(0));
+          expect(prevSize.width, lessThanOrEqualTo(expectedSize));
+        }
+
+        // 「下一首」必须完整落在屏幕内（溢出时会被裁出右边缘）。
+        expect(tester.getRect(nextFinder).right, lessThanOrEqualTo(width));
+        expect(tester.getRect(prevFinder).left, greaterThanOrEqualTo(0));
+      });
+    }
+
+    testWidgets('showSkipButtons=false 完整保留原版底栏间距契约', (tester) async {
       const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
       final player = _FakePlayerController();
 
@@ -235,7 +315,6 @@ void main() {
               hasTranslation: true,
               hasRomanization: true,
               lyricScale: 1.0,
-              showSkipButtons: true,
               onToggleTranslation: (_) {},
               onToggleRomanization: (_) {},
               onLyricScaleChanged: (_) {},
@@ -243,13 +322,36 @@ void main() {
           ),
         ),
       );
-
-      // 渲染期若 Row 溢出，Flutter 会抛 RenderFlex overflow，用例直接失败。
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('lyric_previous_button')),
-        findsOneWidget,
+      expect(tester.takeException(), isNull);
+
+      // 关闭切歌键时必须与原版一致：水平 padding 16、药丸间距 14。
+      final paddingFinder = find.descendant(
+        of: find.byType(LyricBottomBar),
+        matching: find.byWidgetPredicate((w) => w is Padding && w.child is Row),
       );
+      expect(paddingFinder, findsOneWidget);
+      expect(
+        tester.widget<Padding>(paddingFinder).padding,
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      );
+
+      Rect pillRect(String label) => tester.getRect(
+        find
+            .ancestor(of: find.text(label), matching: find.byType(Container))
+            .first,
+      );
+      final word = pillRect('词');
+      final trans = pillRect('译');
+      final roman = pillRect('音');
+      final play = tester.getRect(
+        find.byKey(const ValueKey('lyric_round_play_pause_button')),
+      );
+      expect(trans.left - word.right, 14.0);
+      expect(roman.left - trans.right, 14.0);
+      expect(play.left - roman.right, 14.0);
+      expect(find.byKey(const ValueKey('lyric_previous_button')), findsNothing);
+      expect(find.byKey(const ValueKey('lyric_next_button')), findsNothing);
     });
   });
 }
