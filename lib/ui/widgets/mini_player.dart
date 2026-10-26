@@ -4,6 +4,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
+import '../design_tokens.dart';
 import '../form_factor.dart';
 import '../player/player_route.dart';
 import 'artwork.dart';
@@ -75,11 +76,11 @@ class _MiniPlayerContent extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
       child: Container(
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E2433) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
           border: Border.all(
             color: isDark
                 ? Colors.white.withValues(alpha: .12)
@@ -89,17 +90,18 @@ class _MiniPlayerContent extends StatelessWidget {
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: isDark ? .28 : .12),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+              // 与首页悬浮底栏同一套投影（blur 18 / offset (0,8)）。
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
           child: InkWell(
             onTap: onTap,
             child: SizedBox(
-              height: 64,
+              height: 58,
               child: Stack(
                 children: [
                   Positioned.fill(
@@ -107,15 +109,18 @@ class _MiniPlayerContent extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+                            // 胶囊圆角在 58 高下被钳到 29：y=5 处端部内切到
+                            // x≈13dp，内部横向留 16 让封面/操作按钮完全躲开
+                            // 圆弧，避免大圆角把内容斜切掉一角。
+                            padding: const EdgeInsets.fromLTRB(16, 5, 16, 5),
                             child: Row(
                               children: [
                                 Artwork(
                                   url: song.coverUrl,
-                                  size: 48,
-                                  borderRadius: 6,
+                                  size: 40,
+                                  borderRadius: 8,
                                 ),
-                                const SizedBox(width: 12),
+                                const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
                                     mainAxisAlignment:
@@ -125,28 +130,37 @@ class _MiniPlayerContent extends StatelessWidget {
                                     children: [
                                       // 长歌名不再被 ellipsis 截断；放得下时
                                       // MarqueeText 内部零开销地退化为静态文本。
+                                      // 精致化：标题 14/w700、副标题 12/w500，
+                                      // 比原 16/w900 + 14/w600 更轻、更接近主流
+                                      // 音乐 App 迷你条的字阶（用户反馈太大）。
                                       MarqueeText.text(
                                         song.title,
                                         style: Theme.of(context)
                                             .textTheme
                                             .titleSmall
                                             ?.copyWith(
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14,
                                             ),
                                       ),
+                                      // 播放错误占用副标题槽位（红色），不再在
+                                      // 进度条下方追加一行：58 高的胶囊放不下
+                                      // 第三行，追加会把 Row 挤溢出（历史隐患）。
                                       Text(
-                                        song.artist,
+                                        player.errorMessage ?? song.artist,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: Theme.of(context)
                                             .textTheme
                                             .bodySmall
                                             ?.copyWith(
-                                              color: colorScheme
-                                                  .onSurfaceVariant,
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14,
+                                              color:
+                                                  player.errorMessage != null
+                                                  ? colorScheme.error
+                                                  : colorScheme
+                                                        .onSurfaceVariant,
+                                              fontWeight: FontWeight.w500,
+                                              fontSize: 12,
                                             ),
                                       ),
                                     ],
@@ -159,6 +173,7 @@ class _MiniPlayerContent extends StatelessWidget {
                                       tooltip: player.isPlaying
                                           ? '暂停'
                                           : '播放',
+                                      visualDensity: VisualDensity.compact,
                                       onPressed: player.isPreparing
                                           ? null
                                           : player.togglePlay,
@@ -167,18 +182,19 @@ class _MiniPlayerContent extends StatelessWidget {
                                             ? Icons.pause_rounded
                                             : Icons.play_arrow_rounded,
                                         color: colorScheme.onSurface,
-                                        size: 30,
+                                        size: 26,
                                       ),
                                     );
                                   },
                                 ),
                                 IconButton(
                                   tooltip: '播放队列',
+                                  visualDensity: VisualDensity.compact,
                                   onPressed: onShowQueue,
                                   icon: Icon(
                                     Icons.queue_music_rounded,
                                     color: colorScheme.onSurface,
-                                    size: 29,
+                                    size: 24,
                                   ),
                                 ),
                               ],
@@ -194,32 +210,20 @@ class _MiniPlayerContent extends StatelessWidget {
                                     : (pos.inMilliseconds /
                                             player.duration.inMilliseconds)
                                         .clamp(0.0, 1.0);
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 2,
-                                  color: colorScheme.primary,
-                                  backgroundColor:
-                                      colorScheme.primary.withValues(
-                                    alpha: .12,
-                                  ),
+                            return Padding(
+                              // 底边胶囊圆弧会裁掉通栏 2px 进度条两端，横向
+                              // 内缩 24（与底栏左右边距同值）避开斜切。
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.xl,
+                              ),
+                              child: LinearProgressIndicator(
+                                value: progress,
+                                minHeight: 2,
+                                color: colorScheme.primary,
+                                backgroundColor: colorScheme.primary.withValues(
+                                  alpha: .12,
                                 ),
-                                if (player.errorMessage case final message?)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Text(
-                                      message,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: colorScheme.error,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                              ),
                             );
                           },
                         ),

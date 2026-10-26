@@ -35,6 +35,11 @@ class _FakeMusicApi implements MusicApi {
   }
 
   @override
+  Future<SongPage> playlistSongsPageAll(String id) async {
+    return SongPage(songs: allSongs, rawItemCount: allSongs.length);
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -221,9 +226,9 @@ void main() {
       expect(find.byType(MiniPlayer), findsOneWidget);
       expect(find.byType(LocateCurrentSongButton), findsOneWidget);
 
-      // 移动端预留：66（迷你条）+ 10（底部间距）+ 8（间隙）
+      // 移动端预留：60（迷你条）+ 10（底部间距）+ 8（间隙）
       final rect = tester.getRect(find.byType(LocateCurrentSongButton));
-      expect(rect.bottom, closeTo(850 - (66 + 10 + 8), 1));
+      expect(rect.bottom, closeTo(850 - (60 + 10 + 8), 1));
     });
   });
 }

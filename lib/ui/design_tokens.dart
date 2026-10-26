@@ -11,6 +11,12 @@ abstract final class AppRadius {
   static const double lg = 16;
   static const double xl = 20;
   static const double xxl = 24;
+
+  /// 悬浮胶囊统一圆角（底部导航栏与迷你播放条共用）。
+  ///
+  /// 取 32 配合 62~64 的胶囊高度即为全圆端；两处必须同源，避免再次
+  /// 出现「底栏大圆角、迷你条小圆角」的视觉割裂（issue #6-2）。
+  static const double pill = 32;
 }
 
 abstract final class AppSpacing {

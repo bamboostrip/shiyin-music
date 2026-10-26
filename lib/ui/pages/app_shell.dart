@@ -17,6 +17,7 @@ import '../widgets/touch_sidebar.dart';
 import '../widgets/car_left_player_panel.dart';
 import '../adaptive_layout.dart';
 import '../desktop/desktop_shell.dart';
+import '../design_tokens.dart';
 import '../keyboard_focus_guard.dart';
 import '../keyboard_shortcuts.dart';
 import '../form_factor.dart';
@@ -600,7 +601,7 @@ class _FloatingBottomBarState extends State<_FloatingBottomBar> {
           constraints: const BoxConstraints(maxWidth: 380),
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF1E2433) : Colors.white,
-            borderRadius: BorderRadius.circular(32),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
             border: Border.all(
               color: isDark
                   ? Colors.white.withValues(alpha: .12)
