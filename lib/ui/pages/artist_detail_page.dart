@@ -482,9 +482,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
-    // MiniPlayer 高度约 60（见 mini_player.dart 的胶囊主体），距底部 16，
+    // MiniPlayer 悬浮唱片直径 58（见 mini_player.dart 的 podSize），距底部 16，
     // 合计预留空间防止遮挡最后一首歌。
-    final miniPlayerSpace = bottomInset + 60 + 16;
+    final miniPlayerSpace = bottomInset + 58 + 16;
     final theme = Theme.of(context);
     return Scaffold(
       body: AdaptiveContentPadding(

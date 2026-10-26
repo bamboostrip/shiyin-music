@@ -10,8 +10,8 @@ import '../../controllers/theme_controller.dart';
 import '../../controllers/local_music_controller.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
-import '../widgets/artwork.dart';
 import '../widgets/lazy_indexed_stack.dart';
+import '../widgets/now_playing_disc.dart';
 import '../widgets/toast.dart';
 import '../widgets/touch_sidebar.dart';
 import '../widgets/car_left_player_panel.dart';
@@ -708,6 +708,8 @@ class CenterDisc extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 旋转唱片/环形进度/播放暂停叠加统一收敛在 NowPlayingDisc：
+    // 与详情页悬浮唱片同一套实现，避免两处各写一份动画逻辑。
     return GestureDetector(
       onTap: () => _openPlayer(context),
       onLongPress: () {
@@ -716,87 +718,18 @@ class CenterDisc extends StatelessWidget {
           player.togglePlay();
         }
       },
-      child: AnimatedBuilder(
-        animation: player,
-        builder: (context, _) {
-          final song = player.currentSong;
-          final hasSong = song != null;
-          // 进度环单独听 positionListenable：position 字段只在大 notify 才变，
-          // 直接读它圆环播放中会 frozen，这里用 tick 值驱动
-          final progressRing = ValueListenableBuilder<Duration>(
-            valueListenable: player.positionListenable,
-            builder: (context, pos, _) {
-              final durationMs = player.duration.inMilliseconds;
-              final progress = (durationMs > 0 && hasSong
-                      ? pos.inMilliseconds / durationMs
-                      : 0.0)
-                  .clamp(0.0, 1.0);
-              return SizedBox(
-                width: 52,
-                height: 52,
-                child: CircularProgressIndicator(
-                  value: hasSong ? progress : 0,
-                  strokeWidth: 2.5,
-                  backgroundColor:
-                      colorScheme.outlineVariant.withValues(alpha: .35),
-                  valueColor:
-                      AlwaysStoppedAnimation<Color>(colorScheme.primary),
-                ),
-              );
-            },
-          );
-          return SizedBox(
-            width: 52,
-            height: 52,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 进度环
-                progressRing,
-                // 封面
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withValues(alpha: .9), width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: .15),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: hasSong
-                        ? Artwork(url: song.coverUrl, size: 42, borderRadius: 21)
-                        : Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.music_note_rounded,
-                                size: 22, color: colorScheme.onSurfaceVariant),
-                          ),
-                  ),
-                ),
-                // 播放/暂停小图标叠加（无歌时隐藏）
-                if (hasSong)
-                  Container(
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: .45),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      size: 12,
-                      color: Colors.white,
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
+      child: NowPlayingDisc(
+        player: player,
+        ringSize: 52,
+        coverSize: 42,
+        strokeWidth: 2.5,
+        ringBackgroundColor: colorScheme.outlineVariant.withValues(alpha: .35),
+        showTransportIcon: true,
+        showVinylDetail: false,
+        coverBorder: BorderSide(
+          color: Colors.white.withValues(alpha: .9),
+          width: 1.5,
+        ),
       ),
     );
   }

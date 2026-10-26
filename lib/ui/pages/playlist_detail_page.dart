@@ -67,9 +67,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   static const _heroExpandedHeightDesktop = 236.0;
   static const _stickyHeaderHeight = 68.0;
 
-  /// MiniPlayer 悬浮条总高（58 内容 + 上下各 1px 描边，见 mini_player.dart
-  /// 的 Container 边框），定位按钮悬浮其上方。
-  static const _miniPlayerExtent = 60.0;
+  /// MiniPlayer 悬浮唱片直径（mini_player.dart 的 podSize），定位按钮悬浮其上方。
+  static const _miniPlayerExtent = 58.0;
 
   double get _heroExpandedHeight =>
       isDesktopFormFactor ? _heroExpandedHeightDesktop : _heroExpandedHeightMobile;

@@ -11,6 +11,7 @@ import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/pages/playlist_detail_page.dart';
 import 'package:shiyin_music/ui/widgets/locate_current_song_button.dart';
 import 'package:shiyin_music/ui/widgets/mini_player.dart';
+import 'package:shiyin_music/ui/widgets/now_playing_disc.dart';
 
 /// 分页 fake：按 page/pageSize 切片返回。
 class _FakeMusicApi implements MusicApi {
@@ -167,7 +168,7 @@ void main() {
       await tester.pump();
 
       expect(find.byType(MiniPlayer), findsNothing);
-      expect(find.text('歌曲00'), findsNothing);
+      expect(find.byType(NowPlayingDisc), findsNothing);
     });
 
     testWidgets('移动端形态挂载迷你播放条（行为与改造前一致）', (tester) async {
@@ -177,7 +178,8 @@ void main() {
       await tester.pump();
 
       expect(find.byType(MiniPlayer), findsOneWidget);
-      expect(find.text('歌曲00'), findsOneWidget);
+      // 悬浮唱片形态：不再有文字，只有圆盘 + 旋转封面。
+      expect(find.byType(NowPlayingDisc), findsOneWidget);
     });
   });
 
@@ -226,9 +228,9 @@ void main() {
       expect(find.byType(MiniPlayer), findsOneWidget);
       expect(find.byType(LocateCurrentSongButton), findsOneWidget);
 
-      // 移动端预留：60（迷你条）+ 10（底部间距）+ 8（间隙）
+      // 移动端预留：58（悬浮唱片直径）+ 10（底部间距）+ 8（间隙）
       final rect = tester.getRect(find.byType(LocateCurrentSongButton));
-      expect(rect.bottom, closeTo(850 - (60 + 10 + 8), 1));
+      expect(rect.bottom, closeTo(850 - (58 + 10 + 8), 1));
     });
   });
 }
