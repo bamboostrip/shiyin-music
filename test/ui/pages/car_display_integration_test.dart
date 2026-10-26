@@ -57,6 +57,8 @@ Song _song(int i) =>
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  _FakePlayerController({this.currentSong});
+
   @override
   Song? currentSong;
   @override
@@ -76,8 +78,26 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool hasRestoredPlaybackState = false;
   @override
+  PlaybackMode playbackMode = PlaybackMode.playlistLoop;
+  @override
+  Duration get smoothPosition => position;
+  @override
   final ValueNotifier<Duration> positionListenable =
       ValueNotifier(Duration.zero);
+
+  @override
+  Future<void> togglePlay() async {}
+  @override
+  PlaybackMode cyclePlaybackMode() => playbackMode;
+  @override
+  void previewSeek(Duration position) {}
+  @override
+  Future<void> seek(Duration position) async {}
+  @override
+  Future<void> previous() async {}
+  @override
+  Future<void> next() async {}
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -138,11 +158,11 @@ class _FakeLocalMusicController extends ChangeNotifier
 }
 
 /// 真实 AppShell（车机壳层测试共用的假依赖集合）。
-Widget _shell(ThemeController theme) {
+Widget _shell(ThemeController theme, {PlayerController? player}) {
   return AppShell(
     api: _FakeMusicApi(),
     auth: _FakeAuthController(),
-    player: _FakePlayerController(),
+    player: player ?? _FakePlayerController(),
     cache: _FakeCache(),
     theme: theme,
     downloads: _FakeDownloadController(),
@@ -280,5 +300,79 @@ void main() {
       ).top,
       24,
     );
+  });
+
+  testWidgets('播放中的车机横屏 + 130% 缩放 + 留白：左面板不溢出', (tester) async {
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setCarModeEnabled(true);
+    final player = _FakePlayerController(currentSong: _song(0))
+      ..duration = const Duration(minutes: 3, seconds: 57);
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => CarDisplayViewport.maybe(
+          enabled: theme.carModeEnabled,
+          scale: 1.3,
+          marginTop: 20,
+          marginBottom: 10,
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: _shell(theme, player: player),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(CarLeftPlayerPanel), findsOneWidget);
+  });
+
+  testWidgets('常见车机分辨率 × 缩放档位：播放中壳层无布局异常', (tester) async {
+    final cases = <(Size, double)>[
+      (const Size(1280, 720), 1.3),
+      (const Size(1024, 600), 1.3),
+      (const Size(1280, 480), 1.3),
+      (const Size(1280, 720), 0.8),
+      // 用户实车日志复现：虚拟高度 564（非车机缩放，矮窗口/分屏同类形态）。
+      (const Size(1280, 564), 1.0),
+      (const Size(1280, 600), 1.0),
+    ];
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setCarModeEnabled(true);
+
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    for (final (size, scale) in cases) {
+      tester.view.physicalSize = size;
+      final player = _FakePlayerController(currentSong: _song(0))
+        ..duration = const Duration(minutes: 3, seconds: 57);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => CarDisplayViewport.maybe(
+            enabled: theme.carModeEnabled,
+            scale: scale,
+            marginTop: 20,
+            marginBottom: 10,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: _shell(theme, player: player),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason:
+            '${size.width.toInt()}x${size.height.toInt()} @ $scale 出现布局异常',
+      );
+    }
   });
 }

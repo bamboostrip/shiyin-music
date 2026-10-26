@@ -1,4 +1,5 @@
 import 'dart:async' show unawaited;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
@@ -29,27 +30,40 @@ class CarLeftPlayerPanel extends StatelessWidget {
     final panelWidth = isSmallScreen ? 320.0 : 380.0;
     final panelPadding = isSmallScreen ? 14.0 : 20.0;
 
-    if (size.height < 150) {
+    final sysPadding = MediaQuery.paddingOf(context);
+    final availableHeight = size.height - sysPadding.top - sysPadding.bottom;
+    // 可用高度连固定块都放不下（分屏/极小窗口）时直接留空面板，避免溢出。
+    if (availableHeight < 280) {
       return SizedBox(width: panelWidth);
     }
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final height = MediaQuery.sizeOf(context).height;
-    final sysPadding = MediaQuery.paddingOf(context);
-    final availableHeight = height - sysPadding.top - sysPadding.bottom;
-
-    final isShortScreen = height < 500;
+    final isShortScreen = size.height < 500;
     final verticalPadding = isShortScreen ? 8.0 : 20.0;
     final bottomGap = isShortScreen ? 10.0 : 32.0;
     final controlsHeight = isShortScreen ? 68.0 : 80.0;
-
-    final artworkSizeSubtractor = isShortScreen ? 250.0 : 340.0;
-    final artworkSize = (availableHeight - artworkSizeSubtractor).clamp(80.0, 280.0);
-
     final gapSize = isShortScreen ? 10.0 : 20.0;
     final titleGap = isShortScreen ? 14.0 : 24.0;
     final progressGap = isShortScreen ? 16.0 : 28.0;
+
+    // 除封面外的固定块高度合计（header 28 + 歌名行 60 + 进度条 38 +
+    // 控制条 + 各间距）。封面高度必须扣掉它们，否则矮屏、车机界面缩放或
+    // 系统字号放大把虚拟高度压小时，Column 会溢出（历史 720p 车机在
+    // 130% 缩放下正好触发 12px 溢出）。
+    final fixedContentHeight = isShortScreen ? 244.0 : 310.0;
+    // 28 = 封面边框 2.2 + 文字放大余量（歌名行高随系统/字体档位增长）。
+    final artworkFitHeight =
+        availableHeight - verticalPadding * 2 - fixedContentHeight - 28.0;
+    final artworkSize = math
+        .min(
+          (availableHeight - (isShortScreen ? 250.0 : 340.0)).clamp(
+            80.0,
+            280.0,
+          ),
+          math.max(24.0, artworkFitHeight),
+        )
+        .clamp(24.0, 280.0);
 
     final buttonMinWidth = isSmallScreen ? 42.0 : 52.0;
     final playBtnSize = isSmallScreen ? 56.0 : 64.0;
