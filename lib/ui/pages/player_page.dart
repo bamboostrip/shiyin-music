@@ -314,8 +314,10 @@ class _PlayerBodyState extends State<_PlayerBody>
         autofocus: true,
         child: AnnotatedRegion<SystemUiOverlayStyle>(
           value: const SystemUiOverlayStyle(
+            // 播放页固定深色底：Android 用浅色前景图标，iOS 背景为深色
+            // （statusBarBrightness: dark）→ 系统自动用白色状态栏文字。
             statusBarIconBrightness: Brightness.light,
-            statusBarBrightness: Brightness.light,
+            statusBarBrightness: Brightness.dark,
           ),
           child: Transform.translate(
             key: const Key('player_body_dismiss_transform'),

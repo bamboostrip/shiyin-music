@@ -20,6 +20,15 @@ import 'package:shiyin_music/ui/player/player_top_bar.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Duration lyricOffset = Duration.zero;
 
   int adjustCalls = 0;

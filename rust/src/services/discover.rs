@@ -161,7 +161,6 @@ pub async fn top_album(
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
 pub async fn top_card(
     client: &reqwest::Client,
     session: &KgSession,

@@ -2,6 +2,26 @@
 part of 'player_controller.dart';
 
 mixin _PlayerLyrics on _PlayerControllerBase {
+  /// 本地歌词匹配/缓存服务：首次加载本地歌曲时懒建。
+  ///
+  /// 懒建的原因：`cacheService` / `localMusic` 由 `main.dart` 在 controller
+  /// 创建后注入，构造期可能还是 null；首次真正加载本地歌词时注入值已就绪。
+  /// 内嵌歌词由 [LocalMusicController.getEmbeddedLyrics] 读取（Rust
+  /// `readLocalLyrics` / Android MethodChannel），避免引入上游的
+  /// `audio_metadata_reader` 依赖。
+  LocalLyricsService? _localLyricsService;
+
+  LocalLyricsService _ensureLocalLyricsService() => _localLyricsService ??=
+      LocalLyricsService(
+        api: _api,
+        cache: cacheService,
+        embeddedLyricsReader: (path) async {
+          final reader = localMusic;
+          if (reader == null) return null;
+          return reader.getEmbeddedLyrics(path);
+        },
+      );
+
   /// 开关车载蓝牙歌词广播（默认关闭，避免无车机时多余广播）。
   Future<void> setBluetoothLyricsEnabled(bool enabled) async {
     if (bluetoothLyricsEnabled == enabled) return;
@@ -34,51 +54,12 @@ mixin _PlayerLyrics on _PlayerControllerBase {
     final cacheKey = 'cache_lyric_${song.hash}';
 
     if (song.source == SongSource.local) {
-      // 1. 优先尝试同名 .lrc 文件
-      try {
-        final songFile = File(song.id);
-        final dotIndex = songFile.path.lastIndexOf('.');
-        final lrcPath =
-            '${dotIndex != -1 ? songFile.path.substring(0, dotIndex) : songFile.path}.lrc';
-        final file = File(lrcPath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          String content;
-          try {
-            content = utf8.decode(bytes);
-          } catch (_) {
-            content = utf8.decode(bytes, allowMalformed: true);
-          }
-          final lines = parseLyrics(content);
-          if (currentSong?.hash == song.hash) {
-            lyrics = lines;
-            notifyListeners();
-            _syncDesktopLyrics();
-          }
-          return;
-        }
-      } catch (e) {
-        debugPrint('Failed to load local .lrc lyrics: $e');
-      }
-
-      // 2. 尝试从音频文件内嵌元数据读取歌词
-      try {
-        final embedded = await localMusic?.getEmbeddedLyrics(song.id);
-        if (embedded != null && embedded.isNotEmpty) {
-          final lines = parseLyrics(embedded);
-          if (currentSong?.hash == song.hash) {
-            lyrics = lines;
-            notifyListeners();
-            _syncDesktopLyrics();
-          }
-          return;
-        }
-      } catch (e) {
-        debugPrint('Failed to load embedded lyrics: $e');
-      }
-
+      // 本地歌：同名 .lrc → 音频内嵌歌词 → 本地缓存 → 元数据在线匹配缓存。
+      // 空/无效 .lrc 不得抑制内嵌或在线歌词、失败静默返回空、同歌并发加载
+      // in-flight 去重等细节都在 LocalLyricsService 内（含单测）。
+      final lines = await _ensureLocalLyricsService().load(song);
       if (currentSong?.hash == song.hash) {
-        lyrics = const [];
+        lyrics = lines;
         notifyListeners();
         _syncDesktopLyrics();
       }

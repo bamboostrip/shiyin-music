@@ -410,6 +410,7 @@ class _FakeApi implements MusicApi {
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
+    bool hashOnly = false,
   }) async {
     // hangTransfers 场景由 service 层挂起；此处立即返回即可
     return PlayUrl(url: 'http://fake/${song.hash}.mp3', hash: song.hash);

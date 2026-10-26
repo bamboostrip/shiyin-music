@@ -5,6 +5,7 @@
 > - `.github/workflows/build-android.yml`（打 `v*` tag 自动构建 Android 三变体 APK：impeller-arm64 / skia-arm64 / skia-arm32（老车机），按固定顺序附加到 Release）
 > - `.github/workflows/build-windows.yml`（打 `v*` tag 自动构建 Windows 便携包 + 安装包并附加到 Release）
 > - `.github/workflows/build-linux.yml`（打 `v*` tag 自动构建 Linux 便携包 + deb 包并附加到 Release）
+> - `.github/workflows/flutter-ci.yml`（PR / push `main` / 手动触发：`flutter analyze` + `flutter test` 校验；不参与打包，同分支新提交自动取消上一次运行）
 
 ---
 

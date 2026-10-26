@@ -130,10 +130,24 @@ mixin _MusicApiPlaylist on _MusicApiBase {
     );
   }
 
-  /// 解析网易云 / QQ 音乐歌单分享链接，返回歌单名和歌曲名称列表。
+  /// 解析网易云 / QQ 音乐歌单分享链接，返回歌单名、曲目列表（QQ 含歌手/时长）。
+  ///
+  /// QQ 音乐公开歌单接口无需登录、且不是酷狗接口，按任务书约定允许 Dart 直连
+  /// （见 docs/upstream-sync/2026-10-26-next-batch-tasks.md 0.4 第 2 条例外）；
+  /// 酷狗相关请求仍必须走 Rust engine。其余平台（如网易云）继续走旧的
+  /// Rust `/playlist/external/parse`，保持双路径兼容。
   Future<ExternalPlaylistParseResult> parseExternalPlaylist(
     String sourceText,
   ) async {
+    final qqUri = QqPlaylistService.shareUri(sourceText);
+    if (qqUri != null) {
+      final client = http.Client();
+      try {
+        return await QqPlaylistService(client).load(qqUri);
+      } finally {
+        client.close();
+      }
+    }
     final json = asMap(
       await _client.post(
         '/playlist/external/parse',

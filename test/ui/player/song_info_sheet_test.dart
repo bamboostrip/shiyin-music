@@ -66,6 +66,15 @@ class _FakeInfoClient implements ApiClientInterface {
 }
 
 class _FakeInfoPlayer extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   _FakeInfoPlayer(this.api);
 
   @override

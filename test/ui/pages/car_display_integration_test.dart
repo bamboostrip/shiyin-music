@@ -38,6 +38,8 @@ class _FakeMusicApi implements MusicApi {
   Future<List<Song>> topSongs({int type = 21608, int page = 1}) async =>
       List.generate(8, (i) => _song(100 + i));
   @override
+  Future<List<RecommendedSongCard>> recommendedSongCards() async => const [];
+  @override
   Future<List<RankCategory>> rankList({int withSong = 0}) async =>
       List.generate(5, (i) => RankCategory(rankId: 100 + i, rankName: '榜单$i'));
   @override
@@ -57,6 +59,15 @@ Song _song(int i) =>
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   _FakePlayerController({this.currentSong});
 
   @override

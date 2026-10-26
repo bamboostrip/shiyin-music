@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/models/music_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/services/audio_effects_service.dart';
 import 'package:shiyin_music/ui/widgets/audio_effects_sheet.dart';
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   _FakePlayer({this.isAudioEffectsSupported = true});
 
   @override

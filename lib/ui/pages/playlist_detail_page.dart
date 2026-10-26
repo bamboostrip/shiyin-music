@@ -38,13 +38,20 @@ class PlaylistDetailPage extends StatefulWidget {
     required this.player,
     required this.playlist,
     this.initialSongs,
+    this.readOnly = false,
   });
 
   final MusicApi api;
   final AuthController auth;
   final PlayerController player;
   final PlaylistSummary playlist;
+
+  /// 入口一次性传入的歌曲（推荐歌曲卡/每日推荐预览）。非空时视为静态
+  /// 集合：直接展示，不请求分页/缓存/相似歌单，也没有收藏/编辑入口。
   final List<Song>? initialSongs;
+
+  /// 只读集合（服务端推荐卡等一次性歌单）：隐藏收藏/编辑/更多入口。
+  final bool readOnly;
 
   @override
   State<PlaylistDetailPage> createState() => _PlaylistDetailPageState();
@@ -208,7 +215,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  bool get _isAlbum => widget.playlist.isCollectedAlbum;
+  /// 静态集合：歌曲由入口一次性传入（推荐歌曲卡/每日推荐预览），不走
+  /// 歌单分页/缓存/相似歌单等网络流程。
+  bool get _isStaticCollection => widget.initialSongs?.isNotEmpty == true;
+
+  bool get _isAlbum =>
+      !_isStaticCollection && widget.playlist.isCollectedAlbum;
   bool get _isDailyRecommend => widget.playlist.id == 'daily_recommend';
 
   @override
@@ -331,7 +343,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   /// 不碰 guard flag（flag 已由新代际接管，见 [_releaseAllSongsFlags]）。
   /// 不改变触发时机与队列扩展逻辑（上滑仍分页，计数口径不变）。
   Future<void> _loadAllSongs({bool silent = false}) async {
-    if (_isLoadingAllSongs || _isExpandingQueue || _allSongsLoaded) return;
+    if (_isStaticCollection ||
+        _isLoadingAllSongs ||
+        _isExpandingQueue ||
+        _allSongsLoaded) {
+      return;
+    }
     if (_disposed) return;
     final gen = _loadGeneration;
     if (silent) {
@@ -488,20 +505,23 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _songs.clear();
     });
 
+    // 静态集合（推荐歌曲卡/携带预览的每日推荐）：直接用入口传入的歌曲
+    // 填充，不请求全量歌曲/相似歌单/收藏状态，也不进入分页/缓存流程。
+    if (_isStaticCollection) {
+      final songs = List<Song>.of(widget.initialSongs!);
+      setState(() {
+        _info = widget.playlist;
+        _songs
+          ..clear()
+          ..addAll(songs);
+        _isInitialLoading = false;
+        _allSongsLoaded = true;
+        _hasMore = false;
+      });
+      return;
+    }
+
     if (_isDailyRecommend) {
-      if (widget.initialSongs != null && widget.initialSongs!.isNotEmpty && _songs.isEmpty) {
-        final songs = List<Song>.of(widget.initialSongs!);
-        setState(() {
-          _info = widget.playlist;
-          _songs
-            ..clear()
-            ..addAll(songs);
-          _isInitialLoading = false;
-          _allSongsLoaded = true;
-          _hasMore = false;
-        });
-        return;
-      }
       try {
         final daily = await widget.api.dailyRecommend();
         if (!mounted) return;
@@ -520,22 +540,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         });
       } catch (e) {
         if (!mounted) return;
-        if (widget.initialSongs != null && widget.initialSongs!.isNotEmpty) {
-          setState(() {
-            _info = widget.playlist;
-            _songs
-              ..clear()
-              ..addAll(widget.initialSongs!);
-            _isInitialLoading = false;
-            _allSongsLoaded = true;
-            _hasMore = false;
-          });
-        } else {
-          setState(() {
-            _errorMessage = '加载失败: $e';
-            _isInitialLoading = false;
-          });
-        }
+        setState(() {
+          _errorMessage = '加载失败: $e';
+          _isInitialLoading = false;
+        });
       }
       return;
     }
@@ -673,6 +681,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   /// 加载相似歌单（增强展示，失败静默忽略）。
   Future<void> _loadSimilarPlaylists() async {
+    // 静态集合是一次性推荐内容，没有服务端歌单 id，不请求相似歌单。
+    if (_isStaticCollection) return;
     try {
       final similar = await widget.api.similarPlaylists(widget.playlist.id);
       if (!mounted || similar.isEmpty) return;
@@ -943,10 +953,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return widget.auth.findUserPlaylist(_currentPlaylist) ?? _currentPlaylist;
   }
 
-  bool get _isInLibrary => widget.auth.isPlaylistInLibrary(_currentPlaylist);
+  bool get _isInLibrary =>
+      !widget.readOnly && widget.auth.isPlaylistInLibrary(_currentPlaylist);
 
   /// 优先用库列表里的歌单元数据判断，避免详情接口字段不全导致无法删歌。
-  bool get _canEdit => widget.auth.canEditPlaylist(_libraryPlaylist);
+  bool get _canEdit =>
+      !widget.readOnly && widget.auth.canEditPlaylist(_libraryPlaylist);
 
   String _songKey(Song song) => song.hash.isNotEmpty ? song.hash : song.id;
 
@@ -1628,7 +1640,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                 ),
                               ),
                             )
-                          else
+                          // 只读集合（推荐歌曲卡等）不提供歌单操作入口。
+                          else if (!widget.readOnly)
                             IconButton(
                               tooltip: '更多',
                               onPressed: _showPlaylistActionSheet,
@@ -1648,8 +1661,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               background: _HeroHeader(
                                 info: _info ?? widget.playlist,
                                 isInLibrary: _isInLibrary,
-                                showCollect:
-                                    !_isAlbum && !_isDailyRecommend,
+                                showCollect: !widget.readOnly &&
+                                    !_isAlbum &&
+                                    !_isDailyRecommend,
                                 mutating: _isMutating,
                                 downloading: _isBatchDownloading,
                                 downloadAvailable: widget
@@ -1711,6 +1725,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                         selectEnabled:
                                             _songs.isNotEmpty || _hasMore,
                                         onSelect: _enterSelectMode,
+                                        showSelect: !widget.readOnly,
                                       ),
                                     ),
                                     if (_showDesktopTableHeader)
@@ -1752,6 +1767,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               onSort: () => _showSortSheet(context),
                               selectEnabled: _songs.isNotEmpty || _hasMore,
                               onSelect: _enterSelectMode,
+                              showSelect: !widget.readOnly,
                             );
                           },
                         ),
@@ -2927,6 +2943,7 @@ class ListStickyBar extends StatelessWidget {
     required this.onSelect,
     this.flatTop = false,
     this.topRadiusOverride,
+    this.showSelect = true,
   });
 
   final bool selecting;
@@ -2944,6 +2961,9 @@ class ListStickyBar extends StatelessWidget {
   final VoidCallback onSelect;
   final bool flatTop;
   final double? topRadiusOverride;
+
+  /// 是否展示「多选」（编辑）入口；只读集合（推荐卡）隐藏。
+  final bool showSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -3101,12 +3121,14 @@ class ListStickyBar extends StatelessWidget {
                   tooltip: '排序',
                   onTap: onSort,
                 ),
-                const SizedBox(width: 8),
-                _StickyHeaderIconButton(
-                  icon: Icons.checklist_rounded,
-                  tooltip: '多选',
-                  onTap: selectEnabled ? onSelect : null,
-                ),
+                if (showSelect) ...[
+                  const SizedBox(width: 8),
+                  _StickyHeaderIconButton(
+                    icon: Icons.checklist_rounded,
+                    tooltip: '多选',
+                    onTap: selectEnabled ? onSelect : null,
+                  ),
+                ],
               ],
             ),
     );

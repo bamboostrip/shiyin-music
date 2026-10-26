@@ -183,6 +183,7 @@ class _FakeApi implements MusicApi {
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
+    bool hashOnly = false,
   }) async {
     if (failSongUrl || failHashes.contains(song.hash)) {
       throw Exception('no url');

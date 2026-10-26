@@ -2,6 +2,7 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'design_tokens.dart';
 import 'form_factor.dart';
@@ -111,6 +112,20 @@ class AppTheme {
             : Colors.transparent,
         surfaceTintColor: Colors.transparent,
         foregroundColor: scheme.onSurface,
+        // AppBar 背景是 transparent，若不显式指定 systemOverlayStyle，iOS 会按
+        // 「未知背景」推断，浅色页面会出现白字白底不可见（状态栏内容两行的
+        // 根因之一）。注意 Android 的 statusBarIconBrightness 描述**前景**
+        // （图标/文字）明暗，iOS 的 statusBarBrightness 描述**背景**明暗，
+        // 两者语义相反，必须取镜像值。
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+          statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+          systemNavigationBarColor: scheme.surface,
+          systemNavigationBarIconBrightness: isDark
+              ? Brightness.light
+              : Brightness.dark,
+        ),
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(

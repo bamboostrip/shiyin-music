@@ -7,6 +7,15 @@ import 'package:shiyin_music/ui/player/lyric_display_mode.dart';
 import 'package:shiyin_music/ui/player/lyric_karaoke_text.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   _FakePlayerController({
     Duration initialPosition = Duration.zero,
     bool initialIsPlaying = false,

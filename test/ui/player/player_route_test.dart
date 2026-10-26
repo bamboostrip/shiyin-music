@@ -13,6 +13,15 @@ import 'package:shiyin_music/ui/player/player_route.dart';
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   /// PlayerPage 的 KEEP_SCREEN_ON 门控会读写这两个成员。
   @override
   bool keepScreenOnEnabled = true;

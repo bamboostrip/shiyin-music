@@ -7,6 +7,110 @@ mixin _MusicApiRank on _MusicApiBase {
     return DailyRecommend.fromJson(json);
   }
 
+  /// 获取酷狗官方「猜你喜欢」（红心 Radio + 根据口味的私人 FM）。
+  ///
+  /// 不传播放反馈时是刷新推荐；传 [hash]/[songId]/[playtime] 时向服务端上报
+  /// 当前歌曲的播放行为，服务端据此返回下一批推荐（见
+  /// [PlayerController.startPersonalFm] 与私人 FM 会话的续批逻辑）。
+  ///
+  /// 注意参数名：本 fork 的 Rust 引擎 `/personal/fm` 路由按 snake_case 解析
+  /// （song_pool_id / is_overplay / remain_song_cnt），与上游 .NET 后端的
+  /// camelCase 查询参数不同。
+  Future<List<Song>> personalFm({
+    String? hash,
+    String? songId,
+    int? playtime,
+    bool isOverplay = false,
+  }) async {
+    final hasPlaybackFeedback =
+        hash != null || songId != null || playtime != null;
+    final raw = await _client.get('/personal/fm', {
+      'mode': 'normal',
+      'song_pool_id': 0,
+      // 上游后端 action 缺省是 play，Rust 引擎缺省是 refresh；显式传 play
+      // 保持与上游行为一致（无反馈字段时即纯刷新）。
+      'action': 'play',
+      if (hasPlaybackFeedback) ...{
+        'hash': hash,
+        'songid': songId,
+        'playtime': playtime,
+        'is_overplay': isOverplay,
+        'remain_song_cnt': 0,
+      },
+    });
+    final json = asMap(raw);
+    // transport 已把 data 提升为根；失败信封（status/error_code 非成功）会
+    // 原样透传且没有 song_list。两种情况都兜住，避免把服务故障伪装成
+    // 「暂时没有推荐」。
+    final songList = asList(
+      json['song_list'] ?? asMap(json['data'])['song_list'],
+    );
+    final songs = <Song>[];
+    final identities = <String>{};
+    for (final item in songList.whereType<Map>()) {
+      final song = Song.fromPersonalFm(asMap(item));
+      final identity = song.hash.isNotEmpty ? song.hash : song.id;
+      if (identity.isEmpty || !identities.add(identity)) {
+        continue;
+      }
+      songs.add(song);
+      if (songs.length == 5) {
+        break;
+      }
+    }
+    if (songs.isEmpty) {
+      final status = asInt(json['status']);
+      final errorCode = asInt(json['error_code'] ?? json['errcode']);
+      final ok =
+          (status == null || status == 1 || status == 200) &&
+          (errorCode == null || errorCode == 0);
+      if (!ok) {
+        throw ApiException(
+          '猜你喜欢推荐服务暂不可用（${json['error'] ?? json['msg'] ?? errorCode ?? status}）',
+          statusCode: errorCode ?? status,
+        );
+      }
+    }
+    return songs;
+  }
+
+  /// 首页「推荐歌曲」6 组横滑卡（上游 3.2.0 /top/card）。
+  ///
+  /// 每组定义各自的 card_id 与展示标题，6 组并发请求；单组失败只丢该组
+  /// （debugPrint 留痕）不影响其它组与首页首屏，空 `song_list` 组同样过滤。
+  Future<List<RecommendedSongCard>> recommendedSongCards() async {
+    const definitions = <(int, String)>[
+      (1, '私人专属好歌'),
+      (2, '经典怀旧金曲'),
+      (3, '热门好歌精选'),
+      (4, '小众宝藏佳作'),
+      (5, '潮流尝鲜'),
+      (6, 'VIP 专属推荐'),
+    ];
+    final cards = await Future.wait(
+      definitions.map((definition) async {
+        try {
+          final json = asMap(
+            await _client.get('/top/card', {'card_id': definition.$1}),
+          );
+          final card = RecommendedSongCard.fromJson(
+            cardId: definition.$1,
+            title: definition.$2,
+            json: json,
+          );
+          return card.songs.isEmpty ? null : card;
+        } catch (error, stackTrace) {
+          debugPrint(
+            'Failed to load recommended song card ${definition.$1}: $error\n'
+            '$stackTrace',
+          );
+          return null;
+        }
+      }),
+    );
+    return cards.whereType<RecommendedSongCard>().toList();
+  }
+
   /// 新歌速递。
   Future<List<Song>> topSongs({int type = 21608, int page = 1}) async {
     final raw = await _client.get('/top/song', {'type': type, 'page': page});

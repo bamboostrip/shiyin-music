@@ -135,6 +135,7 @@ class _MockMusicApi extends Fake implements MusicApi {
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
+    bool hashOnly = false,
   }) {
     return Future<PlayUrl>.value(PlayUrl(url: song.id, hash: song.hash));
   }

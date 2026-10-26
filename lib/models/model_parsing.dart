@@ -52,6 +52,19 @@ Duration? durationFromSeconds(Object? value) {
   return seconds == null ? null : Duration(seconds: seconds);
 }
 
+/// `/top/card` 的 `time_length` 是带小数的秒数（如 259.16，上游 62ae541 修复）。
+Duration? durationFromTopCardSeconds(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  final seconds = value is num
+      ? value.toDouble()
+      : double.tryParse(value.toString());
+  return seconds == null
+      ? null
+      : Duration(milliseconds: (seconds * 1000).round());
+}
+
 Duration? durationFromMilliseconds(Object? value) {
   final milliseconds = asInt(value);
   return milliseconds == null ? null : Duration(milliseconds: milliseconds);

@@ -16,7 +16,9 @@ class CommentPage extends StatelessWidget {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-        statusBarBrightness: isDark ? Brightness.light : Brightness.dark,
+        // iOS 语义是「背景明暗」，与 Android 前景图标亮度取镜像值，
+        // 否则浅色页面会出现白字白底不可见。
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
       ),
       child: Scaffold(
         appBar: AppBar(title: const Text('评论'), centerTitle: false),

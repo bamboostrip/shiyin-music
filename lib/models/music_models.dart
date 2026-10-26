@@ -6,6 +6,7 @@ export 'fm.dart';
 export 'model_parsing.dart';
 export 'netease_external.dart';
 export 'playlist.dart';
+export 'recommend_card.dart';
 export 'search_rank.dart';
 export 'song.dart';
 export 'user_vip.dart';

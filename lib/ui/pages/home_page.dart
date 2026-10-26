@@ -144,6 +144,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
   // 车机切回竖屏时用 _sectionIndex 重建控制器，保证回到对应 tab。
   bool? _lastIsCarMode;
 
+  // 猜你喜欢（酷狗官方「红心 Radio」私人 FM）预览与启动态：登录后预取一批
+  // 推荐作为卡片预览，点按即播不再等一次网络；未登录不请求。
+  var _isStartingPersonalFm = false;
+  var _isLoadingPersonalFmPreview = false;
+  var _hasRequestedPersonalFmPreview = false;
+  List<Song> _personalFmPreviewSongs = const [];
+
   @override
   void initState() {
     super.initState();
@@ -155,6 +162,10 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
     _updateService = AppUpdateService();
     widget.auth.addListener(_handleAuthChanged);
+    // 首页「猜你喜欢」= 私人 FM 预览：登录态就绪后拉一批做卡片展示。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadPersonalFmPreview();
+    });
     if (AppUpdateService.isSupportedPlatform) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
     }
@@ -760,6 +771,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
   }
 
   void _handleAuthChanged() {
+    // 登录/登出即时同步「猜你喜欢」预览：登录后拉一批，登出清空并允许
+    // 下次登录重新请求。
+    if (!widget.auth.isRestoring) {
+      if (widget.auth.isLoggedIn) {
+        _loadPersonalFmPreview();
+      } else {
+        _hasRequestedPersonalFmPreview = false;
+        if (_personalFmPreviewSongs.isNotEmpty && mounted) {
+          setState(() => _personalFmPreviewSongs = const []);
+        }
+      }
+    }
     if (widget.auth.isRestoring || !widget.auth.isLoggedIn) {
       return;
     }
@@ -809,6 +832,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
   }
 
+  /// 推荐歌曲 6 组失败/未登录返回空列表，不阻塞首页其他板块。
+  ///
+  /// 6 组请求在 [MusicApi.recommendedSongCards] 内并发且每组独立降级；
+  /// 这里再兜一层，保证旧缓存/整体异常时首页照常。
+  Future<List<RecommendedSongCard>> _loadRecommendedSongCardsSafe() async {
+    try {
+      return await widget.api.recommendedSongCards();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   // ---------------- SWR 数据钩子（骨架见 SwrSectionState） ----------------
 
   @override
@@ -839,6 +874,12 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
           .map(Song.fromCache)
           .where((song) => song.hash.isNotEmpty)
           .toList(),
+      recommendedSongCards:
+          (json['recommendedSongCards'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(RecommendedSongCard.fromCache)
+              .where((card) => card.cardId > 0 && card.songs.isNotEmpty)
+              .toList(),
     );
   }
 
@@ -847,15 +888,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
         'daily': data.daily.toCache(),
         'playlists': data.playlists.map((p) => p.toCache()).toList(),
         'topSongs': data.topSongs.map((song) => song.toCache()).toList(),
+        'recommendedSongCards':
+            data.recommendedSongCards.map((card) => card.toCache()).toList(),
       };
 
-  /// 三个板块是否至少有一个非空：全空说明多半是接口异常的静默空数据，
+  /// 四个板块是否至少有一个非空：全空说明多半是接口异常的静默空数据，
   /// 不应写入/覆盖内存与磁盘缓存。
   @override
   bool hasContent(HomeData data) =>
       data.daily.songs.isNotEmpty ||
       data.playlists.isNotEmpty ||
-      data.topSongs.isNotEmpty;
+      data.topSongs.isNotEmpty ||
+      data.recommendedSongCards.isNotEmpty;
 
   @override
   Future<HomeData> fetchData() async {
@@ -863,11 +907,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
       widget.api.dailyRecommend(),
       widget.api.recommendedPlaylists(),
       _loadTopSongsSafe(),
+      _loadRecommendedSongCardsSafe(),
     ]);
     return HomeData(
       daily: results[0] as DailyRecommend,
       playlists: results[1] as List<PlaylistSummary>,
       topSongs: results[2] as List<Song>,
+      recommendedSongCards: results[3] as List<RecommendedSongCard>,
     );
   }
 
@@ -967,12 +1013,83 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
   }
 
+  /// 手动刷新（下拉/双击/桌面按钮）时联动刷新「猜你喜欢」预览：
+  /// 正在播私人 FM 时不动会话（用户在看当前推荐），否则重新预取一批。
+  @override
+  void onManualRefreshStart() {
+    if (!widget.player.isPersonalFmActive) {
+      unawaited(_loadPersonalFmPreview(force: true));
+    }
+  }
+
+  Future<void> _loadPersonalFmPreview({bool force = false}) async {
+    if (force) {
+      _hasRequestedPersonalFmPreview = false;
+    }
+    if (!mounted ||
+        widget.auth.isRestoring ||
+        !widget.auth.isLoggedIn ||
+        _isLoadingPersonalFmPreview ||
+        _hasRequestedPersonalFmPreview) {
+      return;
+    }
+
+    _hasRequestedPersonalFmPreview = true;
+    setState(() => _isLoadingPersonalFmPreview = true);
+    try {
+      final songs = await widget.api.personalFm();
+      if (!mounted || !widget.auth.isLoggedIn) {
+        return;
+      }
+      setState(() => _personalFmPreviewSongs = songs);
+    } catch (_) {
+      // 预览失败静默：卡片保留「红心 Radio · 根据口味」文案，点按时再拉。
+      _hasRequestedPersonalFmPreview = false;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingPersonalFmPreview = false);
+      }
+    }
+  }
+
+  Future<void> _startPersonalFm() async {
+    if (widget.player.isPersonalFmActive) {
+      await widget.player.togglePlay();
+      return;
+    }
+    if (_isStartingPersonalFm) {
+      return;
+    }
+    if (!widget.auth.isLoggedIn) {
+      Toast.info('登录后才能使用红心猜你喜欢');
+      return;
+    }
+
+    setState(() => _isStartingPersonalFm = true);
+    try {
+      final success = await widget.player.startPersonalFm(
+        initialSongs: _personalFmPreviewSongs,
+      );
+      if (!success) {
+        Toast.error(widget.player.errorMessage ?? '私人 FM 加载失败，请稍后再试');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isStartingPersonalFm = false);
+      }
+    }
+  }
+
+  /// 「每日推荐」歌单页入口：主卡片已改为私人 FM，这里作为卡片内的次级
+  /// 入口保留每日推荐歌单（上游同样移除了首页主入口，但本 fork 用户仍有
+  /// 每日推荐的使用习惯，故降级为次级动作而不是直接删除）。
   void _openDailyRecommend(DailyRecommend daily) {
     final playlist = PlaylistSummary(
       id: 'daily_recommend',
-      title: '猜你喜欢',
+      title: '每日推荐',
       subtitle: daily.subtitle ?? '根据你的听歌偏好，每日精心推荐',
-      coverUrl: daily.coverUrl ??
+      coverUrl:
+          daily.coverUrl ??
           (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
       songCount: daily.songs.length,
     );
@@ -984,6 +1101,30 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
           player: widget.player,
           playlist: playlist,
           initialSongs: daily.songs,
+        ),
+      ),
+    );
+  }
+
+  void _openRecommendedSongCard(RecommendedSongCard card) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlaylistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          player: widget.player,
+          playlist: PlaylistSummary(
+            id: 'recommended-card-${card.cardId}',
+            title: card.title,
+            subtitle: card.description?.trim().isNotEmpty == true
+                ? card.description
+                : card.songSummary,
+            coverUrl: card.coverUrl,
+            songCount: card.songs.length,
+          ),
+          initialSongs: card.songs,
+          // 推荐卡片是服务端生成的一次性歌单：只读，不提供收藏/编辑入口。
+          readOnly: true,
         ),
       ),
     );
@@ -1353,18 +1494,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                             maxWidth: tabletShell ? 620 : double.infinity,
                           ),
                           child: _FeatureShelf(
-                            daily: data.daily,
-                            onDailyPlay: () {
-                              final songs = data.daily.songs;
-                              if (songs.isNotEmpty) {
-                                widget.player.playSong(
-                                  songs.first,
-                                  queue: songs,
-                                );
-                              }
-                            },
-                            onDailyTap: () =>
-                                _openDailyRecommend(data.daily),
+                            player: widget.player,
+                            onPersonalFmPlay: _startPersonalFm,
+                            isPersonalFmLoading:
+                                _isStartingPersonalFm ||
+                                _isLoadingPersonalFmPreview,
+                            personalFmPreviewSong:
+                                _personalFmPreviewSongs.isEmpty
+                                ? null
+                                : _personalFmPreviewSongs.first,
+                            onDailyRecommendTap: data.daily.songs.isEmpty
+                                ? null
+                                : () => _openDailyRecommend(data.daily),
                           ),
                         ),
                       ),
@@ -1385,6 +1526,17 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       player: widget.player,
                       onViewArtist: _openArtist,
                     ),
+                    // 首页「推荐歌曲」6 组：紧邻「大家都在听」下方（上游
+                    // f230444 同位置）。空数据不挂，避免空 sliver 混入。
+                    if (data.recommendedSongCards.isNotEmpty)
+                      _RecommendedSongCardRail(
+                        key: ValueKey(
+                          'recommend_card_rail_$railResetEpoch',
+                        ),
+                        asSlivers: true,
+                        cards: data.recommendedSongCards,
+                        onTap: _openRecommendedSongCard,
+                      ),
                     // 同上：推荐歌单网格桌面端转懒构建 SliverGrid。
                     _PlaylistRail(
                       key: ValueKey('playlist_rail_$railResetEpoch'),
@@ -1527,7 +1679,6 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
               SliverToBoxAdapter(
                 child: _RecommendHeader(
                   auth: widget.auth,
-                  daily: data.daily,
                   sectionIndex: _sectionIndex,
                   showRefreshEqualizer: showRefreshEqualizer,
                   onSectionChanged: (value) {
@@ -1537,13 +1688,15 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       _handleSectionTap(value, animatePage: false);
                     }
                   },
-                  onDailyPlay: () {
-                    final songs = data.daily.songs;
-                    if (songs.isNotEmpty) {
-                      widget.player.playSong(songs.first, queue: songs);
-                    }
-                  },
-                  onDailyTap: () => _openDailyRecommend(data.daily),
+                  onPersonalFmPlay: _startPersonalFm,
+                  isPersonalFmLoading:
+                      _isStartingPersonalFm || _isLoadingPersonalFmPreview,
+                  personalFmPreviewSong: _personalFmPreviewSongs.isEmpty
+                      ? null
+                      : _personalFmPreviewSongs.first,
+                  onDailyRecommendTap: data.daily.songs.isEmpty
+                      ? null
+                      : () => _openDailyRecommend(data.daily),
                   api: widget.api,
                   player: widget.player,
                   updateVersion:
@@ -1574,6 +1727,16 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                             player: widget.player,
                             onViewArtist: _openArtist,
                           ),
+                          // 首页「推荐歌曲」6 组（车机 Column 形态）：
+                          // 与移动端同位置，紧跟「大家都在听」。
+                          if (data.recommendedSongCards.isNotEmpty)
+                            _RecommendedSongCardRail(
+                              key: ValueKey(
+                                'car_recommend_card_rail_$railResetEpoch',
+                              ),
+                              cards: data.recommendedSongCards,
+                              onTap: _openRecommendedSongCard,
+                            ),
                           _PlaylistRail(
                             key: ValueKey('car_playlist_rail_$railResetEpoch'),
                             playlists: data.playlists,
@@ -1664,11 +1827,12 @@ class _HomeTabKeepAliveState extends State<_HomeTabKeepAlive>
 class _RecommendHeader extends StatelessWidget {
   const _RecommendHeader({
     required this.auth,
-    required this.daily,
     required this.sectionIndex,
     required this.onSectionChanged,
-    required this.onDailyPlay,
-    required this.onDailyTap,
+    required this.onPersonalFmPlay,
+    required this.isPersonalFmLoading,
+    required this.personalFmPreviewSong,
+    required this.onDailyRecommendTap,
     required this.api,
     required this.player,
     required this.updateVersion,
@@ -1679,11 +1843,14 @@ class _RecommendHeader extends StatelessWidget {
   });
 
   final AuthController auth;
-  final DailyRecommend daily;
   final int sectionIndex;
   final ValueChanged<int> onSectionChanged;
-  final VoidCallback onDailyPlay;
-  final VoidCallback onDailyTap;
+  final VoidCallback onPersonalFmPlay;
+  final bool isPersonalFmLoading;
+  final Song? personalFmPreviewSong;
+
+  /// 卡片内「每日推荐」次级入口（null = 无每日推荐数据，不展示）。
+  final VoidCallback? onDailyRecommendTap;
   final MusicApi api;
   final PlayerController player;
   final AppVersionInfo? updateVersion;
@@ -1737,9 +1904,11 @@ class _RecommendHeader extends StatelessWidget {
                       Expanded(
                         flex: 6,
                         child: _FeatureShelf(
-                          daily: daily,
-                          onDailyPlay: onDailyPlay,
-                          onDailyTap: onDailyTap,
+                          player: player,
+                          onPersonalFmPlay: onPersonalFmPlay,
+                          isPersonalFmLoading: isPersonalFmLoading,
+                          personalFmPreviewSong: personalFmPreviewSong,
+                          onDailyRecommendTap: onDailyRecommendTap,
                         ),
                       ),
                       // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
@@ -1759,9 +1928,11 @@ class _RecommendHeader extends StatelessWidget {
                   )
                 else ...[
                   _FeatureShelf(
-                    daily: daily,
-                    onDailyPlay: onDailyPlay,
-                    onDailyTap: onDailyTap,
+                    player: player,
+                    onPersonalFmPlay: onPersonalFmPlay,
+                    isPersonalFmLoading: isPersonalFmLoading,
+                    personalFmPreviewSong: personalFmPreviewSong,
+                    onDailyRecommendTap: onDailyRecommendTap,
                   ),
                   if (isCarMode)
                     _CarQuickStatsPills(
@@ -1798,30 +1969,52 @@ class _PersistentTabPane extends StatelessWidget {
 
 /// 推荐区特性卡：新碟上架下线后只剩「猜你喜欢」一张，全宽独占一行。
 /// 手机/车机/宽窄屏统一为单卡，不再需要双卡并排与窄屏竖排逻辑。
+///
+/// 「猜你喜欢」= 酷狗官方猜你喜欢（红心 Radio + 口味私人 FM），不是每日
+/// 推荐歌单：卡片展示当前 FM 歌曲（未开播时展示预取首曲），点按开始/暂停
+/// 私人 FM 会话，会话进行中随播放状态实时更新图标与文案。
 class _FeatureShelf extends StatelessWidget {
   const _FeatureShelf({
-    required this.daily,
-    required this.onDailyPlay,
-    required this.onDailyTap,
+    required this.player,
+    required this.onPersonalFmPlay,
+    required this.isPersonalFmLoading,
+    required this.personalFmPreviewSong,
+    this.onDailyRecommendTap,
   });
 
-  final DailyRecommend daily;
-  final VoidCallback onDailyPlay;
-  final VoidCallback onDailyTap;
+  final PlayerController player;
+  final VoidCallback onPersonalFmPlay;
+  final bool isPersonalFmLoading;
+  final Song? personalFmPreviewSong;
+
+  /// 卡片内「每日推荐」次级入口；null = 无每日推荐数据。
+  final VoidCallback? onDailyRecommendTap;
 
   @override
   Widget build(BuildContext context) {
-    return _FeatureCard(
-      title: '猜你喜欢',
-      subtitle: daily.songs.isEmpty
-          ? '献给此刻迈步的你'
-          : daily.songs.first.title,
-      imageUrl: daily.songs.isEmpty
-          ? daily.coverUrl
-          : daily.songs.first.coverUrl,
-      gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
-      onTap: onDailyTap,
-      onPlay: onDailyPlay,
+    return AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final fmActive = player.isPersonalFmActive;
+        final currentFmSong = fmActive
+            ? player.currentSong
+            : personalFmPreviewSong;
+        final isPlayingFm = fmActive && player.isPlaying;
+        return _FeatureCard(
+          title: '猜你喜欢',
+          subtitle: currentFmSong?.title ?? '红心 Radio · 根据口味',
+          imageUrl: currentFmSong?.coverUrl,
+          gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
+          onTap: onPersonalFmPlay,
+          onPlay: onPersonalFmPlay,
+          loading: isPersonalFmLoading || player.isLoadingPersonalFm,
+          icon: isPlayingFm ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          hint: fmActive
+              ? (isPlayingFm ? '私人 FM 播放中 · 点击暂停' : '私人 FM 已暂停 · 点击继续')
+              : '红心 Radio · 点击播放猜你喜欢',
+          onSecondaryTap: onDailyRecommendTap,
+        );
+      },
     );
   }
 }
@@ -1834,6 +2027,10 @@ class _FeatureCard extends StatelessWidget {
     required this.gradient,
     required this.onTap,
     required this.onPlay,
+    this.loading = false,
+    this.icon = Icons.play_arrow_rounded,
+    this.hint = '',
+    this.onSecondaryTap,
   });
 
   final String title;
@@ -1842,6 +2039,18 @@ class _FeatureCard extends StatelessWidget {
   final List<Color> gradient;
   final VoidCallback onTap;
   final VoidCallback onPlay;
+
+  /// 推荐拉取中：卡片禁用点按，右侧播放键换成转圈。
+  final bool loading;
+
+  /// 右侧播放键图标（播放中显示暂停）。
+  final IconData icon;
+
+  /// 卡片底部提示文案。
+  final String hint;
+
+  /// 卡片内次级入口（如「每日推荐」）；null 时不展示。
+  final VoidCallback? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1887,7 +2096,7 @@ class _FeatureCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
+          onTap: loading ? null : onTap,
           mouseCursor: SystemMouseCursors.click,
           child: Padding(
             padding: cardPadding,
@@ -1981,22 +2190,72 @@ class _FeatureCard extends StatelessWidget {
                             ),
                       ),
                       SizedBox(height: hintGap),
-                      Text(
-                        isCarMode ? '点击查看歌单 · 右侧播放' : '点击查看歌单',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant.withValues(alpha: .70),
-                          fontWeight: FontWeight.w600,
-                          fontSize: hintFontSize,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              hint,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: false,
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: .70,
+                                ),
+                                fontWeight: FontWeight.w600,
+                                fontSize: hintFontSize,
+                              ),
+                            ),
+                          ),
+                          if (onSecondaryTap != null) ...[
+                            const SizedBox(width: 8),
+                            // 「每日推荐」次级入口：主卡片改为私人 FM 后，
+                            // 每日推荐歌单仍可从卡片内进入（不再有首页主入口）。
+                            InkWell(
+                              onTap: onSecondaryTap,
+                              borderRadius: BorderRadius.circular(6),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  '每日推荐',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    color: colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: hintFontSize,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
                 ),
                 SizedBox(width: gap),
-                _CirclePlayButton(size: playSize, iconSize: playIconSize, onTap: onPlay),
+                if (loading)
+                  SizedBox.square(
+                    dimension: playSize,
+                    child: Padding(
+                      padding: EdgeInsets.all(playSize * 0.18),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  )
+                else
+                  _CirclePlayButton(
+                    size: playSize,
+                    iconSize: playIconSize,
+                    icon: icon,
+                    onTap: onPlay,
+                  ),
               ],
             ),
           ),
@@ -2579,6 +2838,93 @@ class _TopSongCard extends StatelessWidget {
   }
 }
 
+/// 首页「推荐歌曲」6 组横滑卡（酷狗 `/top/card`，上游 f230444）。
+///
+/// 空数据不渲染；桌面宽窗（宿主为 tab 级 CustomScrollView）由 [AppHorizontalRail]
+/// 按内容宽度自适配横轨/网格，本体只需外包 SliverToBoxAdapter；车机 Column
+/// 宿主（asSlivers=false）返回普通盒子。
+class _RecommendedSongCardRail extends StatelessWidget {
+  const _RecommendedSongCardRail({
+    super.key,
+    required this.cards,
+    required this.onTap,
+    this.asSlivers = false,
+  });
+
+  final List<RecommendedSongCard> cards;
+  final ValueChanged<RecommendedSongCard> onTap;
+  final bool asSlivers;
+
+  @override
+  Widget build(BuildContext context) {
+    if (cards.isEmpty) {
+      if (asSlivers) {
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
+      }
+      return const SizedBox.shrink();
+    }
+    final rail = AppHorizontalRail<RecommendedSongCard>(
+      title: '推荐歌曲',
+      items: cards,
+      height: 172,
+      itemWidth: 120,
+      itemBuilder: (context, card) => _RecommendedSongCardTile(
+        card: card,
+        onTap: () => onTap(card),
+      ),
+    );
+    if (asSlivers) {
+      return SliverToBoxAdapter(child: rail);
+    }
+    return rail;
+  }
+}
+
+class _RecommendedSongCardTile extends StatelessWidget {
+  const _RecommendedSongCardTile({required this.card, required this.onTap});
+
+  final RecommendedSongCard card;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final radius = isDesktopFormFactor ? 8.0 : 14.0;
+    return InkWell(
+      onTap: onTap,
+      mouseCursor: SystemMouseCursors.click,
+      borderRadius: BorderRadius.circular(radius),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: Artwork(url: card.coverUrl, size: 120),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            card.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          Text(
+            card.description?.trim().isNotEmpty == true
+                ? card.description!
+                : card.songSummary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlaylistRail extends StatelessWidget {
   const _PlaylistRail({
     super.key,
@@ -2862,12 +3208,14 @@ class _CirclePlayButton extends StatelessWidget {
     this.size = 36,
     this.iconSize = 20,
     this.tooltip,
+    this.icon = Icons.play_arrow_rounded,
   });
 
   final VoidCallback onTap;
   final double size;
   final double iconSize;
   final String? tooltip;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -2881,7 +3229,7 @@ class _CirclePlayButton extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Icon(
-        Icons.play_arrow_rounded,
+        icon,
         color: colorScheme.primary,
         size: iconSize,
       ),
@@ -4068,11 +4416,13 @@ class HomeData {
     required this.daily,
     required this.playlists,
     this.topSongs = const [],
+    this.recommendedSongCards = const [],
   });
 
   final DailyRecommend daily;
   final List<PlaylistSummary> playlists;
   final List<Song> topSongs;
+  final List<RecommendedSongCard> recommendedSongCards;
 }
 
 class _RadioData {

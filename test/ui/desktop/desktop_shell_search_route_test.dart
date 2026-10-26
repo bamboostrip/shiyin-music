@@ -19,6 +19,9 @@ import 'package:shiyin_music/ui/pages/search_page.dart';
 
 class _FakeMusicApi implements MusicApi {
   @override
+  Future<List<RecommendedSongCard>> recommendedSongCards() async => const [];
+
+  @override
   Future<List<SearchHotCategory>> searchHotKeywords() async => const [];
 
   @override
@@ -58,6 +61,15 @@ class _FakeMusicApi implements MusicApi {
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   @override
   final ValueNotifier<bool> openLyricsSettingsRequest =
       ValueNotifier<bool>(false);

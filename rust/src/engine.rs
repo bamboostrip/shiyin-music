@@ -305,7 +305,13 @@ impl KugouEngine {
             ("GET", "/search/lyric") => {
                 let hash = params.get("hash").map(|s| s.as_str());
                 let album_audio_id = params.get("album_audio_id").map(|s| s.as_str());
-                let keyword = params.get("keyword").map(|s| s.as_str());
+                // 上游 Dart `_searchLyricCandidate` 关键字兜底传的是复数
+                // `keywords`；酷狗接口参数为单数 `keyword`，这里做别名兼容，
+                // 保持上游 Dart 代码可原样对照。
+                let keyword = params
+                    .get("keyword")
+                    .or_else(|| params.get("keywords"))
+                    .map(|s| s.as_str());
                 let man = params.get("man").map(|s| s.as_str());
                 lyric::search_lyric(client, session, hash, album_audio_id, keyword, man).await
             }
@@ -387,6 +393,15 @@ impl KugouEngine {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(30i64);
                 discover::top_album(client, session, page, pagesize).await
+            }
+            // 首页「推荐歌曲」6 组横滑卡（上游 .NET DiscoveryController 的
+            // /top/card，card_id 缺省 1）。
+            ("GET", "/top/card") => {
+                let card_id = params
+                    .get("card_id")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1i64);
+                discover::top_card(client, session, card_id).await
             }
             ("GET", "/recommend/songs") => discover::recommend_songs(client, session).await,
             ("GET", "/ai/recommend") => {

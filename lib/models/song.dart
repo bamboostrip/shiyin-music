@@ -185,6 +185,38 @@ class Song {
     );
   }
 
+  /// 首页「推荐歌曲」（/top/card）下发的单曲。
+  ///
+  /// 字段形态对齐上游 3.2.0（f230444）：songname / author_name / hash /
+  /// time_length（带小数的秒，62ae541 修复）/ album_id / songid / mixsongid /
+  /// sizable_cover。本 fork 无 releaseDate 字段，故不解析。
+  factory Song.fromTopCard(Map<String, dynamic> json) {
+    final songId = asString(json['songid']);
+    final mixSongId = asString(json['mixsongid']);
+    final authorName = asString(json['author_name']);
+    final artists = parseArtists(json, fallbackName: authorName);
+    final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : authorName ?? '未知艺人';
+    final rawTitle = asString(json['songname']) ?? '未知歌曲';
+    final hash = asString(json['hash']) ?? '';
+    return Song(
+      id: mixSongId ?? songId ?? hash,
+      title: cleanSongTitle(rawTitle, artist: resolvedArtist, artists: artists),
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
+      hash: hash,
+      albumId: asString(json['album_id']),
+      albumAudioId: mixSongId ?? songId,
+      albumName: asString(json['album_name']),
+      coverUrl: normalizeImageUrl(asString(json['sizable_cover'])),
+      artists: artists,
+      // /top/card 的 time_length 是带小数的秒数（如 259.16）。
+      duration: durationFromTopCardSeconds(json['time_length']),
+    );
+  }
+
   factory Song.fromDaily(Map<String, dynamic> json) {
     final songId = asString(json['songid']) ?? asString(json['audio_id']);
     final artists = parseArtists(
@@ -217,6 +249,52 @@ class Song {
       albumAudioId: asString(json['mixsongid']) ?? songId,
       albumName: asString(json['album_name']),
       coverUrl: normalizeImageUrl(asString(json['sizable_cover'])),
+      artists: artists,
+      duration: durationFromSeconds(json['time_length']),
+    );
+  }
+
+  /// 酷狗官方「猜你喜欢」/私人 FM 下发的单曲。
+  ///
+  /// 字段形态来自上游 .NET 后端的 PersonalFmSong（见 api.json）：songname /
+  /// author_name / hash / time_length(秒) / album_id / songid / mixsongid /
+  /// singerinfo / trans_param。该链路播放时只依赖 hash（见
+  /// [MusicApi.songUrl] 的 hashOnly），专辑/音频 id 仅作展示与缓存键兜底。
+  factory Song.fromPersonalFm(Map<String, dynamic> json) {
+    final songId = asString(json['songid']);
+    final mixSongId = asString(json['mixsongid']);
+    final hash = asString(json['hash']) ?? '';
+    final authorName = asString(json['author_name']);
+    final artists = parseArtists(json, fallbackName: authorName);
+    final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : authorName ?? '未知艺人';
+    final rawTitle =
+        asString(json['songname']) ??
+        asString(json['audio_name']) ??
+        asString(json['name']) ??
+        '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
+    final transParam = asMap(json['trans_param']);
+    return Song(
+      id: songId ?? mixSongId ?? hash,
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
+      hash: hash,
+      albumId: asString(json['album_id']),
+      albumAudioId: mixSongId ?? songId,
+      albumName: asString(json['album_name']),
+      coverUrl: normalizeImageUrl(
+        asString(transParam['union_cover']) ??
+            asString(json['sizable_cover']) ??
+            asString(json['cover']),
+      ),
       artists: artists,
       duration: durationFromSeconds(json['time_length']),
     );
@@ -971,7 +1049,9 @@ class LyricWord {
     return LyricWord(
       time: Duration(milliseconds: asInt(json['timeMs']) ?? 0),
       duration: Duration(milliseconds: asInt(json['durationMs']) ?? 0),
-      text: asString(json['text']) ?? '',
+      // KRC 的空格是带时间的独立词，trim 会改掉缓存后的逐字歌词（词间空格
+      // 丢失）。与上游 87c35a1 的修复一致，这里不要走 asString 的 trim。
+      text: json['text']?.toString() ?? '',
     );
   }
 }

@@ -702,7 +702,10 @@ class _SystemUiOverlay extends StatelessWidget {
     final overlayStyle = SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-      statusBarBrightness: isDark ? Brightness.light : Brightness.dark,
+      // iOS：statusBarBrightness 描述「背景」明暗（与 Android 的前景语义相反），
+      // 深色主题背景深 → Brightness.dark，系统自动用白色前景文字；
+      // 浅色主题背景浅 → Brightness.light，系统自动用深色前景文字。
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
       systemNavigationBarColor: colorScheme.surface,
       systemNavigationBarIconBrightness: isDark
           ? Brightness.light

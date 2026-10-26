@@ -58,8 +58,12 @@ dependencies:
   # Windows 平台实现，与 MPRIS 同构，依赖后自动接管 AudioService.init，
   # 无需手动接线（未选 smtc_windows：其 uuid ^4 与 system_tray 的 uuid ^3 冲突）。
   audio_service_win: ^0.0.3
-  # 更新包 sha256 完整性校验（对照 Release 附带的 checksums.txt）。
+  # 更新包 sha256 完整性校验（对照 Release 附带的 checksums.txt）；
+  # 本地歌词缓存的路径稳定哈希也复用 sha1。
   crypto: ^3.0.7
+  # 本地 .lrc 歌词解码（旧中文歌词文件常用 GBK；UTF-16 BOM/UTF-8 由 dart:convert
+  # 处理）。上游 3.2.0 本地歌词匹配实现同款依赖。
+  charset: ^2.0.1
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
   window_manager: ^0.4.3

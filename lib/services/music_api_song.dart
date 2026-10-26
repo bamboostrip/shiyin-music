@@ -43,16 +43,23 @@ mixin _MusicApiSong on _MusicApiBase {
     return null;
   }
 
+  /// [hashOnly] 为 true 时只按 hash 取地址（不传专辑/音频 id）。
+  ///
+  /// 私人 FM（酷狗官方猜你喜欢）下发的歌曲没有稳定可用的专辑/音频 id，
+  /// 带上它们反而会让服务端查不到音源；该场景下的播放链路统一走 hash。
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
+    bool hashOnly = false,
   }) async {
     final json = asMap(
       await _client.get('/song/url', {
         'hash': song.hash,
         'quality': quality.apiValue,
-        'album_id': song.albumId,
-        'album_audio_id': song.albumAudioId,
+        if (!hashOnly) ...{
+          'album_id': song.albumId,
+          'album_audio_id': song.albumAudioId,
+        },
         'free_part': false,
       }),
     );
