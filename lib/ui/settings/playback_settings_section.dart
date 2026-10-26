@@ -71,6 +71,19 @@ class PlaybackSettingsSection extends StatelessWidget {
               onChanged: player.setSmartQualityEnabled,
             ),
             SettingsDivider(),
+            // issue #6-3：默认关 = 搜索点单曲只插入当前队列（不摧毁正在听的
+            // 歌单）；打开 = 旧行为（用搜索结果整体替换播放队列）。
+            SettingsSwitchTile(
+              icon: Icons.queue_music_rounded,
+              iconColor: const Color(0xFF5E35B1),
+              title: '搜索点歌替换播放队列',
+              subtitle: player.searchPlayReplaceQueue
+                  ? '点搜索结果会以整个搜索列表作为播放队列'
+                  : '点搜索结果只把该曲插入当前队列，不打乱正在播放的歌单',
+              value: player.searchPlayReplaceQueue,
+              onChanged: player.setSearchPlayReplaceQueue,
+            ),
+            SettingsDivider(),
             // 移动端/车机专属：桌面无蜂窝网络，显示纯属摆设（含前导分隔线）。
             if (!isDesktopFormFactor) ...[
               SettingsSwitchTile(

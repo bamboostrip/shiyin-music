@@ -36,6 +36,15 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 开关「搜索点歌替换播放队列」（issue #6-3：默认关 = 插入当前队列）。
+  Future<void> setSearchPlayReplaceQueue(bool enabled) async {
+    if (searchPlayReplaceQueue == enabled) return;
+    searchPlayReplaceQueue = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_searchPlayReplaceQueueSettingKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setAudioQuality(
     AudioQuality quality, {
     bool reloadCurrent = false,
@@ -349,6 +358,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     lyricPageSkipButtonsEnabled =
         prefs.getBool(_lyricPageSkipButtonsSettingKey) ??
         lyricPageSkipButtonsEnabled;
+    searchPlayReplaceQueue =
+        prefs.getBool(_searchPlayReplaceQueueSettingKey) ??
+        searchPlayReplaceQueue;
     audioQuality = AudioQuality.fromApiValue(
       prefs.getString(_audioQualitySettingKey),
     );

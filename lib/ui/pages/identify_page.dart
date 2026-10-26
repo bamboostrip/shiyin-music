@@ -312,10 +312,11 @@ class _IdentifyPageState extends State<IdentifyPage>
     if (mounted && _phase == _IdentifyPhase.listening) _beginListening();
   }
 
-  /// 播放结果歌曲：以全部候选为队列直接交由 player 播放，保持留在识曲结果页内试听。
+  /// 播放结果歌曲：把该曲插入当前播放队列并起播（不替换原队列，issue #6-3）；
+  /// 当前没有播放队列时才用识曲候选列表当新队列，保留“连着试听”的体验。
   void _playSong(Song song) {
     final queue = _results.map((m) => m.song).toList();
-    widget.player.playSong(song, queue: queue);
+    unawaited(widget.player.playSongKeepingQueue(song, fallbackQueue: queue));
   }
 
   /// 查看歌手主页。

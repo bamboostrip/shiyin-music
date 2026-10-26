@@ -141,6 +141,9 @@ const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
 // 歌词页切歌键（issue #3）：默认关 = QQ 音乐原版底栏，用户可在 设置-播放 打开。
 const _lyricPageSkipButtonsSettingKey = 'settings.lyric_page_skip_buttons';
+// 搜索点歌替换播放队列（issue #6-3）：默认关 = 只把该曲插入当前队列播放
+// （不摧毁正在听的歌单）；打开 = 用搜索结果整体替换队列（旧行为）。
+const _searchPlayReplaceQueueSettingKey = 'settings.search_play_replace_queue';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
 const _listenTimeReportInterval = Duration(minutes: 30);
@@ -646,6 +649,13 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 横屏；桌面/车机分栏布局自带完整控制区），设置入口在 设置-播放
   /// （仅手机/平板形态展示，PC 与车机隐藏）。
   bool lyricPageSkipButtonsEnabled = false;
+
+  /// 搜索点歌时是否用搜索结果替换整个播放队列（issue #6-3）。
+  ///
+  /// 默认 false = 只把点中的歌插入当前播放队列并立即起播（不打断正在听的
+  /// 歌单）；true = 旧行为，把整页搜索结果当作新播放队列。
+  /// 只影响搜索页单曲点击；听歌识曲恒为插入语义，不受此开关影响。
+  bool searchPlayReplaceQueue = false;
   AudioQuality audioQuality = AudioQuality.standard;
 
   /// 是否开启音质智能切换（播放失败时自动降级重试）。

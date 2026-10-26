@@ -329,7 +329,15 @@ class _SearchPageState extends State<SearchPage> {
     )) {
       return;
     }
-    widget.player.playSong(song, queue: _results);
+    // 默认只把该曲插入当前播放队列并起播，不打断正在听的歌单（issue #6-3）；
+    // 设置里打开「搜索点歌替换播放队列」后才回到旧行为：整页搜索结果当队列。
+    if (widget.player.searchPlayReplaceQueue) {
+      unawaited(widget.player.playSong(song, queue: _results));
+    } else {
+      unawaited(
+        widget.player.playSongKeepingQueue(song, fallbackQueue: _results),
+      );
+    }
   }
 
   /// 打开听歌识曲页：PC 桌面嵌入与车机横屏推入内容区 Navigator（保留

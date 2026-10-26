@@ -189,6 +189,16 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool lyricPageSkipButtonsEnabled = false;
 
+  // 搜索点歌替换播放队列开关（issue #6-3）：默认关 = 插入当前队列。
+  @override
+  bool searchPlayReplaceQueue = false;
+
+  @override
+  Future<void> setSearchPlayReplaceQueue(bool enabled) async {
+    searchPlayReplaceQueue = enabled;
+    notifyListeners();
+  }
+
   /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
   @override
   bool keepScreenOnEnabled = true;

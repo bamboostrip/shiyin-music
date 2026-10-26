@@ -32,6 +32,56 @@ mixin _PlayerQueue on _PlayerControllerBase {
   /// 将歌曲插入到「下一首」位置播放
   Future<bool> insertNext(Song song) => addToQueue(song);
 
+  /// 播放单曲但保留当前播放队列（搜索 / 听歌识曲点单曲的默认语义）。
+  ///
+  /// 与 [playSong] 传 `queue` 的区别：不整体替换播放队列，只把该曲插到
+  /// 当前曲之后并立即起播；与 [insertNext] 的区别：会立刻切歌（后者只是
+  /// 排队，「下一首播放」语义）。
+  ///
+  /// - 当前队列为空（冷启动/从未播放过）时退化为一次普通播放：有
+  ///   [fallbackQueue] 用它当新队列（搜索/识曲结果列表，保留“连着试听”
+  ///   的体验），否则只播这一首。
+  /// - 点的就是当前在播歌曲：不重新载入（不打断进度），暂停中则恢复。
+  /// - 歌曲已在队列中：直接按队列原位置起播，不重排。
+  /// - 否则插到 `currentIndex + 1`（而不是末尾再跳转）：播完后「下一首」
+  ///   回到原队列的下一首，顺序不断裂；末尾跳转会因曲末回绕跑到队列开头。
+  Future<void> playSongKeepingQueue(
+    Song song, {
+    List<Song>? fallbackQueue,
+    Duration? initialPosition,
+  }) async {
+    String keyOf(Song item) => item.hash.isNotEmpty ? item.hash : item.id;
+
+    if (queue.isEmpty) {
+      final nextQueue = fallbackQueue != null && fallbackQueue.isNotEmpty
+          ? List<Song>.of(fallbackQueue)
+          : <Song>[song];
+      await playSong(song, queue: nextQueue, initialPosition: initialPosition);
+      return;
+    }
+
+    final current = currentSong;
+    if (current != null && keyOf(current) == keyOf(song)) {
+      if (!isPlaying) {
+        await togglePlay();
+      }
+      return;
+    }
+
+    final existingIndex = queue.indexWhere((item) => keyOf(item) == keyOf(song));
+    if (existingIndex >= 0) {
+      await playSong(song, queue: queue, initialPosition: initialPosition);
+      return;
+    }
+
+    final insertAt = (currentIndex >= 0 ? currentIndex + 1 : 0).clamp(
+      0,
+      queue.length,
+    );
+    final nextQueue = List<Song>.of(queue)..insert(insertAt, song);
+    await playSong(song, queue: nextQueue, initialPosition: initialPosition);
+  }
+
   /// 批量插入到「下一首」位置，只更新一次队列与系统媒体会话。
   /// 用新列表替换播放队列（不切歌），用于歌单分页后台补全。
   Future<void> replaceQueue(List<Song> songs) async {

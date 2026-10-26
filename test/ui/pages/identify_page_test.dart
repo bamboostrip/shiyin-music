@@ -104,6 +104,20 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
     notifyListeners();
   }
 
+  /// issue #6-3：识曲结果点击改走「插入当前队列并起播」，这里记录调用。
+  List<Song>? lastKeepingQueueFallback;
+
+  @override
+  Future<void> playSongKeepingQueue(
+    Song song, {
+    List<Song>? fallbackQueue,
+    Duration? initialPosition,
+  }) async {
+    lastKeepingQueueFallback = fallbackQueue;
+    played.add(song);
+    notifyListeners();
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
