@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +17,15 @@ class _FakeMusicApi implements MusicApi {
 }
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   @override
   Song? get currentSong => null;
   @override

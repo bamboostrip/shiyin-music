@@ -15,6 +15,15 @@ const _song = Song(id: '1', title: '测试歌曲', artist: '测试歌手', hash:
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Song? currentSong = _song;
 
   @override

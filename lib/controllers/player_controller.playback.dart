@@ -53,7 +53,21 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     bool isRetry = false,
     Duration? initialPosition,
     bool preserveClimax = false,
+    bool preservePersonalFmSession = false,
   }) async {
+    // 私人 FM 会话的保持判定：显式 preserve，或本次点歌没有替换当前队列
+    // （同一队列里的上一首/下一首、播放页点当前队列的其他歌），都视为仍在
+    // FM 会话内；否则说明用户从歌单/搜索等别的入口切歌，退出 FM 会话。
+    final isPlayingWithinCurrentQueue =
+        _isPersonalFmActive &&
+        (queue == null ||
+            identical(queue, this.queue) ||
+            _isSameQueue(queue, this.queue));
+    if (!preservePersonalFmSession && !isPlayingWithinCurrentQueue) {
+      _isPersonalFmActive = false;
+      _isLoadingPersonalFm = false;
+      _personalFmRequestSerial++;
+    }
     final isSameSong = currentSong?.hash == song.hash;
     if (!preserveClimax) {
       _climaxEndTime = null;
@@ -591,21 +605,33 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
 
     try {
-      final playUrl = await _api.songUrl(song, quality: audioQuality);
+      final playUrl = await _api.songUrl(
+        song,
+        quality: audioQuality,
+        hashOnly: _isPersonalFmActive,
+      );
       if (playUrl.url.isNotEmpty || !smartQualityEnabled) {
         return playUrl;
       }
       // 返回空地址：按智能音质策略降级重试
       final fallback = PlayerQualityLogic.nextLowerQuality(audioQuality);
       if (fallback == null) return playUrl;
-      return _api.songUrl(song, quality: fallback);
+      return _api.songUrl(
+        song,
+        quality: fallback,
+        hashOnly: _isPersonalFmActive,
+      );
     } catch (error) {
       if (!smartQualityEnabled) rethrow;
       // 网络请求失败：尝试降级重试
       final fallback = PlayerQualityLogic.nextLowerQuality(audioQuality);
       if (fallback == null) rethrow;
       try {
-        final retryUrl = await _api.songUrl(song, quality: fallback);
+        final retryUrl = await _api.songUrl(
+          song,
+          quality: fallback,
+          hashOnly: _isPersonalFmActive,
+        );
         if (retryUrl.url.isNotEmpty) {
           debugPrint(
             '[时音][smart-quality] ${audioQuality.badge} 失败，'
@@ -634,7 +660,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       if (result.status == VipClaimStatus.success ||
           result.status == VipClaimStatus.alreadyClaimed) {
         debugPrint('[时音][player] VIP 已领取，重试播放: ${song.title}');
-        final playUrl = await _api.songUrl(song, quality: audioQuality);
+        final playUrl = await _api.songUrl(
+          song,
+          quality: audioQuality,
+          hashOnly: _isPersonalFmActive,
+        );
         if (playUrl.url.isNotEmpty) {
           errorMessage = null;
           // 重新走完整播放流程（保留定位与高潮武装）；
@@ -873,7 +903,14 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         return;
       }
 
-      if (playbackMode == PlaybackMode.singleLoop) {
+      // 私人 FM：队列播到末尾时续拉下一批（不循环、不进单曲循环）。
+      if (_isPersonalFmActive && _isAtQueueEnd) {
+        _nextLog('完成处理分支: 私人 FM 队列末尾 → 续拉下一批');
+        await _loadNextPersonalFmBatch(isOverplay: true);
+        return;
+      }
+
+      if (!_isPersonalFmActive && playbackMode == PlaybackMode.singleLoop) {
         // 重启完成后再清去重 hash：重启在途中重复 completed 事件仍去重，
         // 避免 self-loop 打转；下一轮正常播完可再次触发。
         // completed 后 just_audio.playing 仍为 true，play() 会被

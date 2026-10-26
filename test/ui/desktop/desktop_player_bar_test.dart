@@ -52,6 +52,15 @@ class _FakeCommentApi implements MusicApi {
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Song? currentSong;
 
   /// 评论接口 fake（真实签名为 `MusicApi get api`）；
@@ -1135,4 +1144,3 @@ void main() {
     });
   });
 }
-

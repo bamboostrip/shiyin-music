@@ -102,9 +102,18 @@ mixin _PlayerQueue on _PlayerControllerBase {
 
   @override
   Future<void> next() async {
+    // 私人 FM：队列末尾的「下一首」= 续拉下一批推荐（不循环回第一首）。
+    if (_isPersonalFmActive && _isAtQueueEnd) {
+      await _loadNextPersonalFmBatch(isOverplay: false);
+      return;
+    }
     final nextSong = _nextSong();
     if (nextSong == null) return;
-    await playSong(nextSong, queue: queue);
+    await playSong(
+      nextSong,
+      queue: queue,
+      preservePersonalFmSession: _isPersonalFmActive,
+    );
   }
 
   /// 边界回零（空队列/单曲/首曲 previous）：引擎异常时落错误态而非上抛，
@@ -123,6 +132,21 @@ mixin _PlayerQueue on _PlayerControllerBase {
   Future<void> previous() async {
     if (queue.isEmpty) {
       await _seekToStartSafe();
+      return;
+    }
+
+    // 私人 FM：严格线性回退（不受随机播放模式影响）；已在会话第一首就回零。
+    if (_isPersonalFmActive) {
+      final fmIndex = currentIndex;
+      if (fmIndex > 0) {
+        await playSong(
+          queue[fmIndex - 1],
+          queue: queue,
+          preservePersonalFmSession: true,
+        );
+      } else {
+        await _seekToStartSafe();
+      }
       return;
     }
 

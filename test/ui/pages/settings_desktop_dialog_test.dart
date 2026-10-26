@@ -176,6 +176,15 @@ class _FakeAuth extends ChangeNotifier implements AuthController {
 }
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
   @override
   bool lyricPageSkipButtonsEnabled = false;

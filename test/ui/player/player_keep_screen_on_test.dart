@@ -23,6 +23,15 @@ import 'package:shiyin_music/ui/pages/player_page.dart';
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Song? currentSong = const Song(
     id: '1001',
     hash: 'hash1001',

@@ -18,6 +18,15 @@ Finder _panelPositionedFinder() {
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Song? currentSong;
   @override
   List<Song> queue = const [];
@@ -34,6 +43,7 @@ class _FakePlayerController extends ChangeNotifier
     bool isRetry = false,
     Duration? initialPosition,
     bool preserveClimax = false,
+    bool preservePersonalFmSession = false,
   }) async {
     playCalls.add(song);
     playQueueArgs.add(queue);

@@ -19,6 +19,15 @@ class _FakeApi implements MusicApi {
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   Song? currentSong = const Song(
     id: 'test-song-1',
     title: '晴天',

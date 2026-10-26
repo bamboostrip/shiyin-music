@@ -9,6 +9,15 @@ import 'package:shiyin_music/ui/player/landscape_player.dart';
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

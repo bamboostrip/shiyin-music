@@ -222,6 +222,52 @@ class Song {
     );
   }
 
+  /// 酷狗官方「猜你喜欢」/私人 FM 下发的单曲。
+  ///
+  /// 字段形态来自上游 .NET 后端的 PersonalFmSong（见 api.json）：songname /
+  /// author_name / hash / time_length(秒) / album_id / songid / mixsongid /
+  /// singerinfo / trans_param。该链路播放时只依赖 hash（见
+  /// [MusicApi.songUrl] 的 hashOnly），专辑/音频 id 仅作展示与缓存键兜底。
+  factory Song.fromPersonalFm(Map<String, dynamic> json) {
+    final songId = asString(json['songid']);
+    final mixSongId = asString(json['mixsongid']);
+    final hash = asString(json['hash']) ?? '';
+    final authorName = asString(json['author_name']);
+    final artists = parseArtists(json, fallbackName: authorName);
+    final artistName = artists.map((artist) => artist.name).join(' / ');
+    final resolvedArtist = artistName.isNotEmpty
+        ? artistName
+        : authorName ?? '未知艺人';
+    final rawTitle =
+        asString(json['songname']) ??
+        asString(json['audio_name']) ??
+        asString(json['name']) ??
+        '未知歌曲';
+    final cleanedTitle = cleanSongTitle(
+      rawTitle,
+      artist: resolvedArtist,
+      artists: artists,
+    );
+    final transParam = asMap(json['trans_param']);
+    return Song(
+      id: songId ?? mixSongId ?? hash,
+      title: cleanedTitle,
+      rawTitle: rawTitle,
+      artist: resolvedArtist,
+      hash: hash,
+      albumId: asString(json['album_id']),
+      albumAudioId: mixSongId ?? songId,
+      albumName: asString(json['album_name']),
+      coverUrl: normalizeImageUrl(
+        asString(transParam['union_cover']) ??
+            asString(json['sizable_cover']) ??
+            asString(json['cover']),
+      ),
+      artists: artists,
+      duration: durationFromSeconds(json['time_length']),
+    );
+  }
+
   factory Song.fromPlaylist(Map<String, dynamic> json) {
     final artists = parseArtists(json);
     final artist = artists.map((artist) => artist.name).join(' / ');

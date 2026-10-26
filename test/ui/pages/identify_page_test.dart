@@ -70,6 +70,15 @@ class _SlowStartBackend implements IdentifyCaptureBackend {
 }
 
 class _FakePlayer extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   final List<Song> played = [];
 
   @override
@@ -89,7 +98,8 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
       {List<Song>? queue,
       bool isRetry = false,
       Duration? initialPosition,
-      bool preserveClimax = false}) async {
+      bool preserveClimax = false,
+      bool preservePersonalFmSession = false}) async {
     played.add(song);
     notifyListeners();
   }

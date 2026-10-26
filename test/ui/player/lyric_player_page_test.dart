@@ -11,6 +11,15 @@ import 'package:shiyin_music/ui/player/mobile_lyric_list.dart';
 import 'package:shiyin_music/ui/player/player_comment_button.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   _FakePlayerController({bool initialIsPlaying = true})
     : _isPlaying = initialIsPlaying;
 

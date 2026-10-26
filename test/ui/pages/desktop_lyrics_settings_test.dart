@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/services/desktop_lyrics_service.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
@@ -8,6 +9,15 @@ import 'package:shiyin_music/ui/pages/desktop_lyrics_settings_page.dart';
 
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
+  @override
+  bool isPersonalFmActive = false;
+
+  @override
+  bool isLoadingPersonalFm = false;
+
+  @override
+  Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
+
   @override
   DesktopLyricsSettings desktopLyricsSettings = const DesktopLyricsSettings();
 
@@ -503,4 +513,3 @@ void main() {
     );
   });
 }
-

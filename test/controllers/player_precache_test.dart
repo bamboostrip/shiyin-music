@@ -159,6 +159,7 @@ class _TestMusicApi extends Fake implements MusicApi {
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
+    bool hashOnly = false,
   }) async {
     songUrlCallCount++;
     songUrlRequestedSongs.add(song);

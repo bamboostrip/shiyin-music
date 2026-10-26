@@ -144,6 +144,13 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
   // 车机切回竖屏时用 _sectionIndex 重建控制器，保证回到对应 tab。
   bool? _lastIsCarMode;
 
+  // 猜你喜欢（酷狗官方「红心 Radio」私人 FM）预览与启动态：登录后预取一批
+  // 推荐作为卡片预览，点按即播不再等一次网络；未登录不请求。
+  var _isStartingPersonalFm = false;
+  var _isLoadingPersonalFmPreview = false;
+  var _hasRequestedPersonalFmPreview = false;
+  List<Song> _personalFmPreviewSongs = const [];
+
   @override
   void initState() {
     super.initState();
@@ -155,6 +162,10 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
     _updateService = AppUpdateService();
     widget.auth.addListener(_handleAuthChanged);
+    // 首页「猜你喜欢」= 私人 FM 预览：登录态就绪后拉一批做卡片展示。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadPersonalFmPreview();
+    });
     if (AppUpdateService.isSupportedPlatform) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdates());
     }
@@ -760,6 +771,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
   }
 
   void _handleAuthChanged() {
+    // 登录/登出即时同步「猜你喜欢」预览：登录后拉一批，登出清空并允许
+    // 下次登录重新请求。
+    if (!widget.auth.isRestoring) {
+      if (widget.auth.isLoggedIn) {
+        _loadPersonalFmPreview();
+      } else {
+        _hasRequestedPersonalFmPreview = false;
+        if (_personalFmPreviewSongs.isNotEmpty && mounted) {
+          setState(() => _personalFmPreviewSongs = const []);
+        }
+      }
+    }
     if (widget.auth.isRestoring || !widget.auth.isLoggedIn) {
       return;
     }
@@ -967,26 +990,71 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
   }
 
-  void _openDailyRecommend(DailyRecommend daily) {
-    final playlist = PlaylistSummary(
-      id: 'daily_recommend',
-      title: '猜你喜欢',
-      subtitle: daily.subtitle ?? '根据你的听歌偏好，每日精心推荐',
-      coverUrl: daily.coverUrl ??
-          (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
-      songCount: daily.songs.length,
-    );
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlaylistDetailPage(
-          api: widget.api,
-          auth: widget.auth,
-          player: widget.player,
-          playlist: playlist,
-          initialSongs: daily.songs,
-        ),
-      ),
-    );
+  /// 手动刷新（下拉/双击/桌面按钮）时联动刷新「猜你喜欢」预览：
+  /// 正在播私人 FM 时不动会话（用户在看当前推荐），否则重新预取一批。
+  @override
+  void onManualRefreshStart() {
+    if (!widget.player.isPersonalFmActive) {
+      unawaited(_loadPersonalFmPreview(force: true));
+    }
+  }
+
+  Future<void> _loadPersonalFmPreview({bool force = false}) async {
+    if (force) {
+      _hasRequestedPersonalFmPreview = false;
+    }
+    if (!mounted ||
+        widget.auth.isRestoring ||
+        !widget.auth.isLoggedIn ||
+        _isLoadingPersonalFmPreview ||
+        _hasRequestedPersonalFmPreview) {
+      return;
+    }
+
+    _hasRequestedPersonalFmPreview = true;
+    setState(() => _isLoadingPersonalFmPreview = true);
+    try {
+      final songs = await widget.api.personalFm();
+      if (!mounted || !widget.auth.isLoggedIn) {
+        return;
+      }
+      setState(() => _personalFmPreviewSongs = songs);
+    } catch (_) {
+      // 预览失败静默：卡片保留「红心 Radio · 根据口味」文案，点按时再拉。
+      _hasRequestedPersonalFmPreview = false;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingPersonalFmPreview = false);
+      }
+    }
+  }
+
+  Future<void> _startPersonalFm() async {
+    if (widget.player.isPersonalFmActive) {
+      await widget.player.togglePlay();
+      return;
+    }
+    if (_isStartingPersonalFm) {
+      return;
+    }
+    if (!widget.auth.isLoggedIn) {
+      Toast.info('登录后才能使用红心猜你喜欢');
+      return;
+    }
+
+    setState(() => _isStartingPersonalFm = true);
+    try {
+      final success = await widget.player.startPersonalFm(
+        initialSongs: _personalFmPreviewSongs,
+      );
+      if (!success) {
+        Toast.error(widget.player.errorMessage ?? '私人 FM 加载失败，请稍后再试');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isStartingPersonalFm = false);
+      }
+    }
   }
 
   void _openRecommendedPlaylists(List<PlaylistSummary> playlists) {
@@ -1353,18 +1421,14 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                             maxWidth: tabletShell ? 620 : double.infinity,
                           ),
                           child: _FeatureShelf(
-                            daily: data.daily,
-                            onDailyPlay: () {
-                              final songs = data.daily.songs;
-                              if (songs.isNotEmpty) {
-                                widget.player.playSong(
-                                  songs.first,
-                                  queue: songs,
-                                );
-                              }
-                            },
-                            onDailyTap: () =>
-                                _openDailyRecommend(data.daily),
+                            player: widget.player,
+                            onPersonalFmPlay: _startPersonalFm,
+                            isPersonalFmLoading: _isStartingPersonalFm ||
+                                _isLoadingPersonalFmPreview,
+                            personalFmPreviewSong:
+                                _personalFmPreviewSongs.isEmpty
+                                ? null
+                                : _personalFmPreviewSongs.first,
                           ),
                         ),
                       ),
@@ -1527,7 +1591,6 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
               SliverToBoxAdapter(
                 child: _RecommendHeader(
                   auth: widget.auth,
-                  daily: data.daily,
                   sectionIndex: _sectionIndex,
                   showRefreshEqualizer: showRefreshEqualizer,
                   onSectionChanged: (value) {
@@ -1537,13 +1600,12 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                       _handleSectionTap(value, animatePage: false);
                     }
                   },
-                  onDailyPlay: () {
-                    final songs = data.daily.songs;
-                    if (songs.isNotEmpty) {
-                      widget.player.playSong(songs.first, queue: songs);
-                    }
-                  },
-                  onDailyTap: () => _openDailyRecommend(data.daily),
+                  onPersonalFmPlay: _startPersonalFm,
+                  isPersonalFmLoading:
+                      _isStartingPersonalFm || _isLoadingPersonalFmPreview,
+                  personalFmPreviewSong: _personalFmPreviewSongs.isEmpty
+                      ? null
+                      : _personalFmPreviewSongs.first,
                   api: widget.api,
                   player: widget.player,
                   updateVersion:
@@ -1664,11 +1726,11 @@ class _HomeTabKeepAliveState extends State<_HomeTabKeepAlive>
 class _RecommendHeader extends StatelessWidget {
   const _RecommendHeader({
     required this.auth,
-    required this.daily,
     required this.sectionIndex,
     required this.onSectionChanged,
-    required this.onDailyPlay,
-    required this.onDailyTap,
+    required this.onPersonalFmPlay,
+    required this.isPersonalFmLoading,
+    required this.personalFmPreviewSong,
     required this.api,
     required this.player,
     required this.updateVersion,
@@ -1679,11 +1741,11 @@ class _RecommendHeader extends StatelessWidget {
   });
 
   final AuthController auth;
-  final DailyRecommend daily;
   final int sectionIndex;
   final ValueChanged<int> onSectionChanged;
-  final VoidCallback onDailyPlay;
-  final VoidCallback onDailyTap;
+  final VoidCallback onPersonalFmPlay;
+  final bool isPersonalFmLoading;
+  final Song? personalFmPreviewSong;
   final MusicApi api;
   final PlayerController player;
   final AppVersionInfo? updateVersion;
@@ -1737,9 +1799,10 @@ class _RecommendHeader extends StatelessWidget {
                       Expanded(
                         flex: 6,
                         child: _FeatureShelf(
-                          daily: daily,
-                          onDailyPlay: onDailyPlay,
-                          onDailyTap: onDailyTap,
+                          player: player,
+                          onPersonalFmPlay: onPersonalFmPlay,
+                          isPersonalFmLoading: isPersonalFmLoading,
+                          personalFmPreviewSong: personalFmPreviewSong,
                         ),
                       ),
                       // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
@@ -1759,9 +1822,10 @@ class _RecommendHeader extends StatelessWidget {
                   )
                 else ...[
                   _FeatureShelf(
-                    daily: daily,
-                    onDailyPlay: onDailyPlay,
-                    onDailyTap: onDailyTap,
+                    player: player,
+                    onPersonalFmPlay: onPersonalFmPlay,
+                    isPersonalFmLoading: isPersonalFmLoading,
+                    personalFmPreviewSong: personalFmPreviewSong,
                   ),
                   if (isCarMode)
                     _CarQuickStatsPills(
@@ -1798,30 +1862,47 @@ class _PersistentTabPane extends StatelessWidget {
 
 /// 推荐区特性卡：新碟上架下线后只剩「猜你喜欢」一张，全宽独占一行。
 /// 手机/车机/宽窄屏统一为单卡，不再需要双卡并排与窄屏竖排逻辑。
+///
+/// 「猜你喜欢」= 酷狗官方猜你喜欢（红心 Radio + 口味私人 FM），不是每日
+/// 推荐歌单：卡片展示当前 FM 歌曲（未开播时展示预取首曲），点按开始/暂停
+/// 私人 FM 会话，会话进行中随播放状态实时更新图标与文案。
 class _FeatureShelf extends StatelessWidget {
   const _FeatureShelf({
-    required this.daily,
-    required this.onDailyPlay,
-    required this.onDailyTap,
+    required this.player,
+    required this.onPersonalFmPlay,
+    required this.isPersonalFmLoading,
+    required this.personalFmPreviewSong,
   });
 
-  final DailyRecommend daily;
-  final VoidCallback onDailyPlay;
-  final VoidCallback onDailyTap;
+  final PlayerController player;
+  final VoidCallback onPersonalFmPlay;
+  final bool isPersonalFmLoading;
+  final Song? personalFmPreviewSong;
 
   @override
   Widget build(BuildContext context) {
-    return _FeatureCard(
-      title: '猜你喜欢',
-      subtitle: daily.songs.isEmpty
-          ? '献给此刻迈步的你'
-          : daily.songs.first.title,
-      imageUrl: daily.songs.isEmpty
-          ? daily.coverUrl
-          : daily.songs.first.coverUrl,
-      gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
-      onTap: onDailyTap,
-      onPlay: onDailyPlay,
+    return AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final fmActive = player.isPersonalFmActive;
+        final currentFmSong = fmActive
+            ? player.currentSong
+            : personalFmPreviewSong;
+        final isPlayingFm = fmActive && player.isPlaying;
+        return _FeatureCard(
+          title: '猜你喜欢',
+          subtitle: currentFmSong?.title ?? '红心 Radio · 根据口味',
+          imageUrl: currentFmSong?.coverUrl,
+          gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
+          onTap: onPersonalFmPlay,
+          onPlay: onPersonalFmPlay,
+          loading: isPersonalFmLoading || player.isLoadingPersonalFm,
+          icon: isPlayingFm ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          hint: fmActive
+              ? (isPlayingFm ? '私人 FM 播放中 · 点击暂停' : '私人 FM 已暂停 · 点击继续')
+              : '红心 Radio · 点击播放猜你喜欢',
+        );
+      },
     );
   }
 }
@@ -1834,6 +1915,9 @@ class _FeatureCard extends StatelessWidget {
     required this.gradient,
     required this.onTap,
     required this.onPlay,
+    this.loading = false,
+    this.icon = Icons.play_arrow_rounded,
+    this.hint = '',
   });
 
   final String title;
@@ -1842,6 +1926,15 @@ class _FeatureCard extends StatelessWidget {
   final List<Color> gradient;
   final VoidCallback onTap;
   final VoidCallback onPlay;
+
+  /// 推荐拉取中：卡片禁用点按，右侧播放键换成转圈。
+  final bool loading;
+
+  /// 右侧播放键图标（播放中显示暂停）。
+  final IconData icon;
+
+  /// 卡片底部提示文案。
+  final String hint;
 
   @override
   Widget build(BuildContext context) {
@@ -1887,7 +1980,7 @@ class _FeatureCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
+          onTap: loading ? null : onTap,
           mouseCursor: SystemMouseCursors.click,
           child: Padding(
             padding: cardPadding,
@@ -1982,7 +2075,7 @@ class _FeatureCard extends StatelessWidget {
                       ),
                       SizedBox(height: hintGap),
                       Text(
-                        isCarMode ? '点击查看歌单 · 右侧播放' : '点击查看歌单',
+                        hint,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
@@ -1996,7 +2089,24 @@ class _FeatureCard extends StatelessWidget {
                   ),
                 ),
                 SizedBox(width: gap),
-                _CirclePlayButton(size: playSize, iconSize: playIconSize, onTap: onPlay),
+                if (loading)
+                  SizedBox.square(
+                    dimension: playSize,
+                    child: Padding(
+                      padding: EdgeInsets.all(playSize * 0.18),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  )
+                else
+                  _CirclePlayButton(
+                    size: playSize,
+                    iconSize: playIconSize,
+                    icon: icon,
+                    onTap: onPlay,
+                  ),
               ],
             ),
           ),
@@ -2862,12 +2972,14 @@ class _CirclePlayButton extends StatelessWidget {
     this.size = 36,
     this.iconSize = 20,
     this.tooltip,
+    this.icon = Icons.play_arrow_rounded,
   });
 
   final VoidCallback onTap;
   final double size;
   final double iconSize;
   final String? tooltip;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -2881,7 +2993,7 @@ class _CirclePlayButton extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Icon(
-        Icons.play_arrow_rounded,
+        icon,
         color: colorScheme.primary,
         size: iconSize,
       ),

@@ -46,6 +46,7 @@ export '../models/audio_effect_presets.dart'
 
 part 'player_controller.playback.dart';
 part 'player_controller.queue.dart';
+part 'player_controller.personalfm.dart';
 part 'player_controller.lyrics.dart';
 part 'player_controller.effects.dart';
 part 'player_controller.desktop.dart';
@@ -164,6 +165,7 @@ class PlayerController extends _PlayerControllerBase
     with
         _PlayerPlayback,
         _PlayerQueue,
+        _PlayerPersonalFm,
         _PlayerLyrics,
         _PlayerEffects,
         _PlayerDesktop,
@@ -360,6 +362,12 @@ class PlayerController extends _PlayerControllerBase
 
   bool get isScrubbing => _isScrubbing;
 
+  /// 当前是否处于私人 FM（酷狗官方「猜你喜欢」）会话中。
+  bool get isPersonalFmActive => _isPersonalFmActive;
+
+  /// 私人 FM 推荐拉取中（首播/续批都算）。
+  bool get isLoadingPersonalFm => _isLoadingPersonalFm;
+
   @override
   void dispose() {
     _disposed = true;
@@ -519,6 +527,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _isScrubbing = false;
   bool _isHandlingCompletion = false;
   String? _completedSongHash;
+
+  // 私人 FM（酷狗官方「猜你喜欢」）会话状态：active 时队列末尾自动续批，
+  // 且单曲循环/随机模式不改变 FM 的线性推荐语义（见 personalfm 分片）。
+  bool _isPersonalFmActive = false;
+  bool _isLoadingPersonalFm = false;
+  int _personalFmRequestSerial = 0;
   // 完成处理锁绑定的歌曲 hash：不同歌的完成互不吞（旧歌处理中，新歌
   // 又播完时放行新歌，旧流程靠 playSong 的 hash 自弃收敛）
   String? _handlingCompletedHash;
@@ -879,7 +893,24 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     bool isRetry = false,
     Duration? initialPosition,
     bool preserveClimax = false,
+    bool preservePersonalFmSession = false,
   });
+
+  /// 启动私人 FM（酷狗官方「猜你喜欢」= 红心 Radio + 口味推荐）。
+  ///
+  /// [initialSongs] 传入首页已预取的预览批次，避免点按后再等一次网络；
+  /// 为空时现拉一批。成功返回 true 并立即开播第一首。
+  Future<bool> startPersonalFm({List<Song>? initialSongs});
+
+  /// 私人 FM 会话内队列播到末尾时续拉下一批（自然播完/手动下一首共用）。
+  Future<void> _loadNextPersonalFmBatch({required bool isOverplay});
+
+  /// 当前是否停在队列最后一首（私人 FM 续批的触发条件）。
+  bool get _isAtQueueEnd;
+
+  /// 两个队列是否内容等价（按歌曲 hash/音频 id 身份逐项比较；用于识别
+  /// 「在同一队列里切歌」从而保持私人 FM 会话）。
+  bool _isSameQueue(List<Song> a, List<Song> b);
 
   Future<void> togglePlay();
 
@@ -895,6 +926,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     }
 
     final index = currentIndex;
+    if (_isPersonalFmActive) {
+      // 私人 FM 的「下一首」严格线性：不随机、不循环；已到末尾返回 null，
+      // 由 next()/完成处理走 [_loadNextPersonalFmBatch] 续批。
+      if (index >= 0 && index < queue.length - 1) {
+        return queue[index + 1];
+      }
+      return null;
+    }
     if (playbackMode == PlaybackMode.shuffle) {
       if (queue.length == 1) return queue.first;
       final nextIndex = peek
