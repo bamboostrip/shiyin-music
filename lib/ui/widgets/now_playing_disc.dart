@@ -46,7 +46,7 @@ class NowPlayingDisc extends StatefulWidget {
   /// 是否叠加播放/暂停小图标（首页底栏唱片沿用该交互提示）。
   final bool showTransportIcon;
 
-  /// 是否绘制黑胶细节（同心圆描边 + 中心轴孔）。
+  /// 是否绘制黑胶细节（同心圆边缘纹理）。
   final bool showVinylDetail;
 
   /// 封面外描边（首页底栏唱片的白圈）。
@@ -194,7 +194,9 @@ class _NowPlayingDiscState extends State<NowPlayingDisc>
                                     borderRadius: coverSize / 2,
                                   ),
                                   if (widget.showVinylDetail) ...[
-                                    // 唱片同心圆边缘纹理。
+                                    // 唱片同心圆边缘纹理（不再画中心轴孔：
+                                    // 详情页圆盘没有播放暂停叠层，中心点会显得
+                                    // 像脏点，用户反馈后移除）。
                                     DecoratedBox(
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
@@ -206,23 +208,6 @@ class _NowPlayingDiscState extends State<NowPlayingDisc>
                                         ),
                                       ),
                                       child: const SizedBox.expand(),
-                                    ),
-                                    // 中心轴孔微光。
-                                    Center(
-                                      child: Container(
-                                        width: 6,
-                                        height: 6,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF0F131A),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: Colors.white.withValues(
-                                              alpha: .6,
-                                            ),
-                                            width: .8,
-                                          ),
-                                        ),
-                                      ),
                                     ),
                                   ],
                                 ],
