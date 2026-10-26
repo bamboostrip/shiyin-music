@@ -33,6 +33,11 @@ class _FakeMusicApi implements MusicApi {
   }
 
   @override
+  Future<SongPage> playlistSongsPageAll(String id) async {
+    return SongPage(songs: allSongs, rawItemCount: allSongs.length);
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

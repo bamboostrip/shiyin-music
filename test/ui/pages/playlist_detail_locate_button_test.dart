@@ -33,6 +33,11 @@ class _FakeMusicApi implements MusicApi {
     return PlaylistSummary(id: id, title: '测试歌单', songCount: allSongs.length);
   }
 
+  @override
+  Future<SongPage> playlistSongsPageAll(String id) async {
+    return SongPage(songs: allSongs, rawItemCount: allSongs.length);
+  }
+
   // similarPlaylists 等未实现方法：页面内均 try/catch 静默降级。
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

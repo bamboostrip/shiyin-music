@@ -75,8 +75,18 @@ mixin _MusicApiPlaylist on _MusicApiBase {
       );
       return songPage.songs;
     }
+    return (await playlistSongsPageAll(id)).songs;
+  }
 
+  /// 全量拉取歌单曲目，并保留原始条数（[SongPage.rawItemCount]）。
+  ///
+  /// 上游 `/playlist/track/all` 会下发已下架/无版权（无 hash）的曲目，
+  /// [playlistSongPage] 会把它们过滤掉；原始条数累计后与过滤后条数之差
+  /// 即「不可播放且未展示」的数量，供歌单详情页对齐元信息 count 与
+  /// 实际可播放条数（issue #6：收藏 530 首只显示 514 首）。
+  Future<SongPage> playlistSongsPageAll(String id) async {
     final allSongs = <Song>[];
+    var rawItemCount = 0;
     var currentPage = 1;
     const perPage = 200;
     // 与 rankAudioAll 同构：某页 rawItemCount 不足一页即终止；并设防御页数
@@ -91,10 +101,11 @@ mixin _MusicApiPlaylist on _MusicApiBase {
         pageSize: perPage,
       );
       allSongs.addAll(songPage.songs);
+      rawItemCount += songPage.rawItemCount;
       if (songPage.rawItemCount < perPage) break;
       currentPage++;
     }
-    return allSongs;
+    return SongPage(songs: allSongs, rawItemCount: rawItemCount);
   }
 
   Future<SongPage> playlistSongPage(

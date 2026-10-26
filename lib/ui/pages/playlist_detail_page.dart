@@ -67,8 +67,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   static const _heroExpandedHeightDesktop = 236.0;
   static const _stickyHeaderHeight = 68.0;
 
-  /// MiniPlayer 悬浮条总高（64 内容 + 2 进度条），定位按钮悬浮其上方。
-  static const _miniPlayerExtent = 66.0;
+  /// MiniPlayer 悬浮条总高（58 内容 + 上下各 1px 描边，见 mini_player.dart
+  /// 的 Container 边框），定位按钮悬浮其上方。
+  static const _miniPlayerExtent = 60.0;
 
   double get _heroExpandedHeight =>
       isDesktopFormFactor ? _heroExpandedHeightDesktop : _heroExpandedHeightMobile;
@@ -88,6 +89,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   bool _isMutating = false;
   bool _isSearching = false;
   bool _isLoadingAllSongs = false;
+  // 已加载曲目中「有原始数据但被过滤掉（无 hash：下架/无版权）」的条数。
+  // 元信息 songCount（如 530）含这部分，列表却只展示可播放曲目（如 514），
+  // 两处口径不一致会让用户误以为加载不全（issue #6）。这里累计原始条数
+  // 与过滤后条数之差，供列表上方提示「N 首不可播放」。
+  int _unavailableSongCount = 0;
   // 后台静默补全进行中（点歌后扩展队列用，不驱动全屏 loading UI，
   // 避免列表被替换导致滚动位置丢失）。
   bool _isExpandingQueue = false;
@@ -377,6 +383,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       if (_disposed || gen != _loadGeneration) return;
 
       List<Song> allSongs;
+      // 被过滤掉的无 hash（下架/无版权）条数：缓存命中时读缓存值，
+      // 网络拉取时由「原始条数 - 可播放条数」得出。
+      var unavailableCount = 0;
       // 过期视为未命中，走网络重新拉全量，避免全量缓存永不失效。
       if (fullCached != null && !fullCached.isStale) {
         // 分片解析：大单 fromCache 同步循环每片让出一帧，避免卡顿；
@@ -385,6 +394,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             (fullCached.data['songs'] as List? ?? const [])
                 .whereType<Map<String, dynamic>>()
                 .toList();
+        unavailableCount = fullCached.data['unavailableCount'] as int? ?? 0;
         allSongs = [];
         for (var i = 0; i < raw.length; i += _cacheChunkSize) {
           if (_disposed || gen != _loadGeneration) return;
@@ -399,10 +409,14 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           }
         }
       } else {
-        allSongs = _isAlbum
-            ? await widget.api.albumSongs(id, page: 1, pageSize: 5000)
-            : await widget.api.playlistSongs(id, fetchAll: true);
+        final songPage = _isAlbum
+            ? await widget.api.albumSongsPageAll(id)
+            : await widget.api.playlistSongsPageAll(id);
         if (_disposed || gen != _loadGeneration) return;
+        allSongs = songPage.songs;
+        unavailableCount = songPage.rawItemCount > songPage.songs.length
+            ? songPage.rawItemCount - songPage.songs.length
+            : 0;
         // 分片写缓存：toCache 同步映射同样分片让帧；取消后不写，
         // 避免退出后仍做大 JSON 编码浪费电量。
         final cacheList = <Map<String, dynamic>>[];
@@ -416,8 +430,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             await Future<void>.delayed(Duration.zero);
           }
         }
-        // 写入完整歌单缓存，后续播放可直接复用
-        await _cache.write(fullCacheKey, {'songs': cacheList});
+        // 写入完整歌单缓存（含不可播放条数），后续播放可直接复用
+        await _cache.write(fullCacheKey, {
+          'songs': cacheList,
+          'unavailableCount': unavailableCount,
+        });
         if (_disposed || gen != _loadGeneration) return;
       }
 
@@ -445,8 +462,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         _hasMore = false;
         _isLoadingAllSongs = false;
         _isExpandingQueue = false;
+        // 全量结果权威：以本次「原始条数 - 可播放条数」覆盖分页阶段的累计值。
+        _unavailableSongCount = unavailableCount;
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[时音][playlist] 全量歌曲加载失败: $error');
       // 异常复位同样只允许拥有者：新代际在途时旧任务的异常不得清新标记。
       _releaseAllSongsFlags(gen, silent: silent);
     }
@@ -486,6 +506,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }());
   }
 
+  /// 单页中「原始条数 - 可播放条数」= 被过滤的无 hash（下架/无版权）条数。
+  int _unavailableFromPage(SongPage page) =>
+      page.rawItemCount > page.songs.length
+          ? page.rawItemCount - page.songs.length
+          : 0;
+
   Future<void> _loadInitial() async {
     // 新一轮初始加载使在途全量补全失效（代际取消），避免旧单结果
     // 追加到新单列表里。新代际同步接管 guard flag 并复位：在途旧任务
@@ -502,6 +528,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _nextPage = 1;
       _hasMore = true;
       _info = null;
+      _unavailableSongCount = 0;
       _songs.clear();
     });
 
@@ -611,6 +638,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           if (!_hasMore) {
             _allSongsLoaded = true;
           }
+          _unavailableSongCount = _unavailableFromPage(songPage);
           _isInitialLoading = false;
         });
         await _cache.write(cacheKey, {
@@ -652,6 +680,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           if (!_hasMore) {
             _allSongsLoaded = true;
           }
+          _unavailableSongCount = _unavailableFromPage(songPage);
           _isInitialLoading = false;
         });
         await _cache.write(cacheKey, {
@@ -779,6 +808,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         if (!_hasMore) {
           _allSongsLoaded = true;
         }
+        _unavailableSongCount += _unavailableFromPage(songPage);
         _isLoadingMore = false;
       });
     } catch (error) {
@@ -1795,6 +1825,27 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                           !_isLoadingAllSongs)
                         const SliverToBoxAdapter(child: _SearchEmpty())
                       else ...[
+                        // 元信息 count（如 530）含下架/无版权曲，列表只展示
+                        // 可播放曲目（如 514）。把「被隐藏的条数」显式告知，
+                        // 避免用户把两处计数差误判为「歌曲没加载全」(issue #6)。
+                        if (_allSongsLoaded &&
+                            _unavailableSongCount > 0 &&
+                            _searchQuery.isEmpty)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(18, 4, 18, 2),
+                              child: Text(
+                                '$_unavailableSongCount 首歌曲已下架或暂无版权，未在列表中显示',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                              ),
+                            ),
+                          ),
                         if (_isLoadingAllSongs)
                           const SliverToBoxAdapter(
                             child: Padding(

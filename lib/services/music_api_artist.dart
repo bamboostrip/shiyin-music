@@ -95,9 +95,27 @@ mixin _MusicApiArtist on _MusicApiBase {
     int page = 1,
     int pageSize = 30,
   }) async {
+    final songPage = await albumSongsPageAll(
+      id,
+      startPage: page,
+      pageSize: pageSize,
+    );
+    return songPage.songs;
+  }
+
+  /// 全量拉取专辑曲目，并保留原始条数（含被过滤的无 hash 下架曲目）。
+  ///
+  /// 与 [albumSongs] 同一翻页策略，额外累计 [SongPage.rawItemCount]，
+  /// 供歌单/专辑详情页对账元信息 count 与可播放条数（issue #6）。
+  Future<SongPage> albumSongsPageAll(
+    String id, {
+    int startPage = 1,
+    int pageSize = 50,
+  }) async {
     final limit = pageSize.clamp(1, 50);
     final songs = <Song>[];
-    var currentPage = page;
+    var rawItemCount = 0;
+    var currentPage = startPage;
     // 防御页数上限（与 rankAudioAll 的 maxPages 同构）：
     // 防止上游异常数据（永远满页）导致翻页死循环。
     const maxPages = 30;
@@ -108,10 +126,11 @@ mixin _MusicApiArtist on _MusicApiBase {
         pageSize: limit,
       );
       songs.addAll(songPage.songs);
+      rawItemCount += songPage.rawItemCount;
       if (songPage.rawItemCount < limit) break;
       currentPage++;
     }
-    return songs;
+    return SongPage(songs: songs, rawItemCount: rawItemCount);
   }
 
   Future<SongPage> albumSongPage(

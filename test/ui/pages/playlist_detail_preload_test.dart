@@ -37,6 +37,13 @@ class _FakeMusicApi implements MusicApi {
     return allSongs;
   }
 
+  /// 全量加载新入口（issue #6：带上原始条数以便对账不可播放曲目）。
+  @override
+  Future<SongPage> playlistSongsPageAll(String id) async {
+    playlistSongsCallCount++;
+    return SongPage(songs: allSongs, rawItemCount: allSongs.length);
+  }
+
   @override
   Future<PlaylistSummary> playlistInfo(String id) async {
     return PlaylistSummary(

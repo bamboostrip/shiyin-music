@@ -43,6 +43,12 @@ class _RecordingApi implements MusicApi {
   }
 
   @override
+  Future<SongPage> playlistSongsPageAll(String id) async {
+    playlistSongsCalls++;
+    throw StateError('静态集合不应请求全量歌曲');
+  }
+
+  @override
   Future<PlaylistSummary> playlistInfo(String id) async {
     playlistInfoCalls++;
     throw StateError('静态集合不应请求歌单详情');
