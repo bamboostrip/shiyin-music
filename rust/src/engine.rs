@@ -305,7 +305,13 @@ impl KugouEngine {
             ("GET", "/search/lyric") => {
                 let hash = params.get("hash").map(|s| s.as_str());
                 let album_audio_id = params.get("album_audio_id").map(|s| s.as_str());
-                let keyword = params.get("keyword").map(|s| s.as_str());
+                // 上游 Dart `_searchLyricCandidate` 关键字兜底传的是复数
+                // `keywords`；酷狗接口参数为单数 `keyword`，这里做别名兼容，
+                // 保持上游 Dart 代码可原样对照。
+                let keyword = params
+                    .get("keyword")
+                    .or_else(|| params.get("keywords"))
+                    .map(|s| s.as_str());
                 let man = params.get("man").map(|s| s.as_str());
                 lyric::search_lyric(client, session, hash, album_audio_id, keyword, man).await
             }

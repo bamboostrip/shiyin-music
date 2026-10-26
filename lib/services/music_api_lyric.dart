@@ -22,15 +22,43 @@ mixin _MusicApiLyric on _MusicApiBase {
   }
 
   Future<Map<String, dynamic>?> _searchLyricCandidate(Song song) async {
-    final query = {'hash': song.hash};
-    _debugLyricLogObject('search query', query);
-    final searchJson = await _client.get('/search/lyric', query);
-    _debugLyricLogObject('search response', searchJson);
+    // 1. 优先按 hash + album_audio_id 精确定位歌词候选。
+    if (song.hash.isNotEmpty && !song.hash.startsWith('ne_')) {
+      final query = <String, Object?>{
+        'hash': song.hash,
+        if (song.albumAudioId != null && song.albumAudioId!.isNotEmpty)
+          'album_audio_id': song.albumAudioId,
+      };
+      _debugLyricLogObject('search query', query);
+      final searchJson = await _client.get('/search/lyric', query);
+      _debugLyricLogObject('search response', searchJson);
 
-    final candidate = _findLyricCandidate(searchJson);
-    if (candidate != null) {
-      _debugLyricLog('search found candidate by hash');
-      return candidate;
+      final candidate = _findLyricCandidate(searchJson);
+      if (candidate != null) {
+        _debugLyricLog('search found candidate by hash');
+        return candidate;
+      }
+    }
+
+    // 2. hash 查不到（非标/播客/电台/版权变更等）时，用「歌手 + 歌名」关键字
+    //    兜底，避免用户可见的「无歌词」。上游 Dart 传入的参数名是复数
+    //    keywords；本 fork 的 Rust 引擎 /search/lyric 内部同时接受 keyword
+    //    与 keywords（engine.rs 做别名），这里保持与上游一致以方便后续对照。
+    final keywords = '${song.artist} ${song.title}'.trim();
+    if (keywords.isNotEmpty && song.title != '未知歌曲') {
+      try {
+        final searchJson = await _client.get('/search/lyric', {
+          'keywords': keywords,
+        });
+        _debugLyricLogObject('search response (keywords)', searchJson);
+        final candidate = _findLyricCandidate(searchJson);
+        if (candidate != null) {
+          _debugLyricLog('search found candidate by keywords');
+          return candidate;
+        }
+      } catch (_) {
+        // 关键字兜底失败不影响播放：无歌词优于播放崩溃。
+      }
     }
     return null;
   }

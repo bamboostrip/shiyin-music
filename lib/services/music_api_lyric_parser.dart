@@ -12,7 +12,12 @@ List<LyricLine> parseLyrics(String? content) {
       .replaceAll('\r', '\n')
       .replaceAll(r'\r\n', '\n')
       .replaceAll(r'\n', '\n');
-  final krcLines = _parseKrc(normalized);
+  // 变体轨（翻译/音译）必须先解析再解析主歌词：KRC 的 language 变体行序与
+  // 原始 KRC 行严格 1:1（含空文本行），_parseKrc 需要据此按原始行号直接挂
+  // translation/romanization；若等到主歌词解析完再补，空行/被跳过的行会让
+  // 后续翻译整体错位。
+  final variants = _parseLyricVariants(originalContent: normalized);
+  final krcLines = _parseKrc(normalized, variants: variants);
   final parsed = krcLines.isNotEmpty
       ? krcLines
       : _mergeSameTimeTranslation(_parseLrc(normalized));
@@ -20,7 +25,6 @@ List<LyricLine> parseLyrics(String? content) {
     return const [];
   }
 
-  final variants = _parseLyricVariants(originalContent: normalized);
   return _mergeLyricVariants(parsed, variants);
 }
 
@@ -50,35 +54,51 @@ List<LyricLine> _mergeSameTimeTranslation(List<LyricLine> lines) {
   return merged;
 }
 
-List<LyricLine> _parseKrc(String content) {
+List<LyricLine> _parseKrc(
+  String content, {
+  _ParsedLyricVariants variants = const _ParsedLyricVariants(),
+}) {
   final lines = <LyricLine>[];
   final offset = _extractOffset(content);
   final lineExpression = RegExp(r'^\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\](.*)$');
   final wordExpression = RegExp(r'<\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*>');
 
+  // 先按原始行收集所有 KRC 时间标签行：[language:] 变体轨的行序与这些
+  // 原始行严格 1:1（标题/Credits/纯音乐段都以空行占位），因此对齐必须基于
+  // 原始行号；解析后的 lines 会跳过空文本行，用它做下标会整体错位。
+  final rawMatchedLines = <RegExpMatch>[];
   for (final rawLine in content.split('\n')) {
     final match = lineExpression.firstMatch(rawLine.trim());
-    if (match == null) {
-      continue;
+    if (match != null) {
+      rawMatchedLines.add(match);
     }
+  }
 
+  final totalRawLines = rawMatchedLines.length;
+  final transByIndex = variants.translation.byIndex;
+  final romaByIndex = variants.romanization.byIndex;
+  final hasDirectTransIndex = transByIndex.length == totalRawLines;
+  final hasDirectRomaIndex = romaByIndex.length == totalRawLines;
+
+  for (var rawIndex = 0; rawIndex < totalRawLines; rawIndex++) {
+    final match = rawMatchedLines[rawIndex];
     final start = int.tryParse(match.group(1) ?? '');
     final duration = int.tryParse(match.group(2) ?? '');
     if (start == null || duration == null) {
       continue;
     }
 
-    final content = match.group(3) ?? '';
+    final lineBody = match.group(3) ?? '';
     final words = <LyricWord>[];
-    final matches = wordExpression.allMatches(content).toList();
+    final matches = wordExpression.allMatches(lineBody).toList();
     for (var index = 0; index < matches.length; index++) {
       final wordMatch = matches[index];
       final wordStart = int.tryParse(wordMatch.group(1) ?? '') ?? 0;
       final wordDuration = int.tryParse(wordMatch.group(2) ?? '') ?? 0;
       final wordEnd = index + 1 < matches.length
           ? matches[index + 1].start
-          : content.length;
-      final wordText = content.substring(wordMatch.end, wordEnd);
+          : lineBody.length;
+      final wordText = lineBody.substring(wordMatch.end, wordEnd);
       if (wordText.isEmpty) {
         continue;
       }
@@ -99,10 +119,30 @@ List<LyricLine> _parseKrc(String content) {
 
     final displayWords = _trimLyricWords(words);
     final text = displayWords.isEmpty
-        ? content.replaceAll(wordExpression, '').trim()
+        ? lineBody.replaceAll(wordExpression, '').trim()
         : displayWords.map((word) => word.text).join();
     if (text.isEmpty) {
       continue;
+    }
+
+    String? directTranslation;
+    if (hasDirectTransIndex) {
+      final candidate = transByIndex[rawIndex].trim();
+      if (candidate.isNotEmpty &&
+          !_isLyricVariantHeaderRow(candidate) &&
+          !_sameLyricText(text, candidate)) {
+        directTranslation = candidate;
+      }
+    }
+
+    String? directRomanization;
+    if (hasDirectRomaIndex) {
+      final candidate = romaByIndex[rawIndex].trim();
+      if (candidate.isNotEmpty &&
+          !_isLyricVariantHeaderRow(candidate) &&
+          !_sameLyricText(text, candidate)) {
+        directRomanization = candidate;
+      }
     }
 
     lines.add(
@@ -113,6 +153,8 @@ List<LyricLine> _parseKrc(String content) {
         duration: Duration(milliseconds: duration.clamp(0, 1 << 31).toInt()),
         text: text,
         words: displayWords,
+        translation: directTranslation,
+        romanization: directRomanization,
       ),
     );
   }
@@ -357,26 +399,39 @@ void _collectKrcLanguageRows(
   Object? row,
   int? sectionType,
 ) {
-  if (row is! List || row.isEmpty) {
+  if (row is! List) {
     return null;
   }
-
-  final time = row.length > 1 ? asInt(row[0]) : null;
-  final values = row.map(asString).whereType<String>().toList();
-  if (values.isEmpty) {
-    // 空行是酷狗的占位记号（标题/Credits/纯音乐段等未覆盖行用空串占位），
-    // 保留在 byIndex 中维持行序对齐信息；定时行没有位置意义且无内容，
-    // 直接丢弃。
-    return time == null ? (time: null, text: '') : null;
+  if (row.isEmpty) {
+    // 空行是酷狗的占位记号（标题/Credits/纯音乐段等未覆盖行用空数组占位），
+    // 必须保留成 (time: null, text: '') 留在 byIndex 中维持行序；一旦丢弃，
+    // 后面所有翻译/音译都会整体错位。
+    return (time: null, text: '');
   }
 
-  final text = time != null && row.length > 1
-      ? asString(row[1])
-      : (sectionType == 0 ? values.join('') : values.join(' ').trim());
-  if (text == null || text.isEmpty) {
-    return null;
+  // 只有严格的 [数字时间戳, 文本] 双元素行才视为定时行。旧逻辑用
+  // `row.length > 1 ? asInt(row[0])`，会把多列脏行或首元素是数字字符串
+  // 的索引行误判成定时行（进而丢行/错位）。
+  final time = row.length == 2 && row[0] is num
+      ? (row[0] as num).toInt()
+      : null;
+  if (time != null) {
+    return (time: time, text: asString(row[1]) ?? '');
   }
-  return (time: time, text: text);
+
+  final rawParts = row
+      .map((item) => item == null ? '' : item.toString())
+      .toList();
+  // 音译轨（type 0）的逐词数组需要拼成原文空格，翻译轨（type 1）逐词
+  // trim 后再以单空格连接。
+  final text = sectionType == 0
+      ? rawParts.join('').trim()
+      : rawParts
+            .map((part) => part.trim())
+            .where((part) => part.isNotEmpty)
+            .join(' ')
+            .trim();
+  return (time: null, text: text);
 }
 
 List<LyricLine> _mergeLyricVariants(
@@ -404,19 +459,18 @@ List<LyricLine> _mergeLyricVariants(
       variants.translation.byTime,
     );
     final indexed = indexedTranslations[index];
-    final trans = byTime ?? nearest ?? indexed;
-    merged.add(
-      line.copyWith(
-        translation: trans,
-        romanization:
-            variants.romanization.byTime[line.time.inMilliseconds] ??
-            _nearestLyricVariant(
-              line.time.inMilliseconds,
-              variants.romanization.byTime,
-            ) ??
-            indexedRomanizations[index],
-      ),
-    );
+    // _parseKrc 在 language 变体行数与原始 KRC 行数严格一致时已按原始行号
+    // 直接挂好（最可靠），其次才是按时间戳 / 最近时间 / 索引对齐兜底。
+    final trans = line.translation ?? byTime ?? nearest ?? indexed;
+    final roma =
+        line.romanization ??
+        variants.romanization.byTime[line.time.inMilliseconds] ??
+        _nearestLyricVariant(
+          line.time.inMilliseconds,
+          variants.romanization.byTime,
+        ) ??
+        indexedRomanizations[index];
+    merged.add(line.copyWith(translation: trans, romanization: roma));
     if (trans != null && trans.isNotEmpty) {
       _debugLyricLog(
         'merge[$index]: "${line.text}" → "$trans" (byTime=$byTime nearest=$nearest indexed=$indexed)',
@@ -556,9 +610,7 @@ Map<int, int>? _alignVariantRowsToLines(
   // 数与主歌词的汉字行数相当（≤）且主歌词确有纯拉丁行时启用——若轨道
   // 对每行都有内容（如给英文行配了中文翻译的正常翻译轨），惩罚会伤及
   // 正确配对，必须关闭。
-  final linesWithHan = lines
-      .where((line) => _hasHanRune(line.text))
-      .length;
+  final linesWithHan = lines.where((line) => _hasHanRune(line.text)).length;
   final rowsWithHan = rows.where(_hasHanRune).length;
   final penalizeLatinOnlyLines =
       lineCount > linesWithHan && rowsWithHan <= linesWithHan;
