@@ -187,11 +187,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
         // isPreparing 钉死（详见 _kPlayConfirmTimeout）。
         await _requestPlayback();
       }
-      // 切音质后后台缓存（同样受蜂窝门控约束）
+      // 切音质稳定播放后再后台缓存（同样受蜂窝门控约束；快速切歌会取消）
       if (networkUrl != null && isAudioPrecacheAllowed) {
-        unawaited(
-          downloadController?.cacheForPlayback(song, audioQuality, networkUrl),
-        );
+        _schedulePlayCache(song, audioQuality, networkUrl);
       }
     } catch (error) {
       if (_disposed) return;

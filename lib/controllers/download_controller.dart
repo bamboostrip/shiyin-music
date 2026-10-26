@@ -943,17 +943,48 @@ class DownloadController extends ChangeNotifier {
 
   // ===== 播放缓存 =====
 
-  /// 后台缓存当前播放歌曲（首播后调用）。url 来自 songUrl 结果。
+  /// 当前在途的后台播放缓存 key（一次只跑一个，切歌时取消旧传输）。
+  String? _activePlayCacheKey;
+
+  /// 取消当前正在进行的后台播放缓存传输（切歌时调用，避免快速切歌浪费流量）。
+  ///
+  /// 手动下载（DownloadTaskKind.download）与播放缓存写不同目录、共用同一
+  /// song+quality key：若该 key 同时有用户主动下载任务在跑，不取消它。
+  Future<void> cancelActivePlayCache() async {
+    final activeKey = _activePlayCacheKey;
+    if (activeKey == null) return;
+    _activePlayCacheKey = null;
+    final isManualDownload = _downloads.values.any(
+      (entry) =>
+          entry.status == DownloadStatus.downloading &&
+          _service.cacheKeyFor(entry.song, entry.quality) == activeKey,
+    );
+    if (!isManualDownload) {
+      _inFlightCacheKeys.remove(activeKey);
+      await _service.cancel(activeKey, kind: DownloadTaskKind.playCache);
+    }
+  }
+
+  /// 后台缓存当前播放歌曲（稳定播放后调用）。url 来自 songUrl 结果。
   Future<void> cacheForPlayback(
     Song song,
     AudioQuality quality,
     String url,
   ) async {
+    if (_playCacheLimit <= 0) return;
     final key = _service.cacheKeyFor(song, quality);
-    // 已有缓存、已在下载或在途缓存任务则跳过
+    // 已有缓存、已下载/正在下载或在途缓存任务则跳过
     if (_playCache[key] != null) return;
-    if (_downloads[song.hash]?.status == DownloadStatus.downloading) return;
+    final downloadStatus = _downloads[song.hash]?.status;
+    if (downloadStatus == DownloadStatus.downloading ||
+        downloadStatus == DownloadStatus.downloaded) {
+      return;
+    }
     if (_inFlightCacheKeys.contains(key)) return;
+    if (_activePlayCacheKey != null && _activePlayCacheKey != key) {
+      await cancelActivePlayCache();
+    }
+    _activePlayCacheKey = key;
     _inFlightCacheKeys.add(key);
 
     try {
@@ -963,6 +994,8 @@ class DownloadController extends ChangeNotifier {
         url: url,
       );
       final size = await _service.fileSize(path);
+      // 取消传输/异常时可能只有 .part 半成品（size=0），不得写入索引。
+      if (size <= 0) return;
       final entry = PlayCacheEntry(
         cacheKey: key,
         song: song,
@@ -981,6 +1014,9 @@ class DownloadController extends ChangeNotifier {
       // 播放缓存失败静默忽略
     } finally {
       _inFlightCacheKeys.remove(key);
+      if (_activePlayCacheKey == key) {
+        _activePlayCacheKey = null;
+      }
     }
   }
 

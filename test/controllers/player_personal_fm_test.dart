@@ -71,6 +71,11 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
     lastSeek = position ?? Duration.zero;
   }
 
+  /// 触发引擎 processingState 事件（模拟自然播完 → completed）。
+  void emitProcessingState(ProcessingState state) {
+    _processingStateController.add(state);
+  }
+
   void disposeStreams() {
     _positionController.close();
     _durationController.close();
@@ -150,6 +155,13 @@ class _FakeMusicApi extends Fake implements MusicApi {
 
   int _batchIndex = 0;
 
+  /// 每次调用都返回一批全新歌曲（用于验证长会话队列软上限）。
+  bool generateUniqueSongs = false;
+  int _uniqueSeq = 0;
+
+  /// 非 null 时 personalFm 抛出该错误（模拟服务故障）。
+  Object? personalFmError;
+
   @override
   Future<List<Song>> personalFm({
     String? hash,
@@ -165,6 +177,13 @@ class _FakeMusicApi extends Fake implements MusicApi {
         isOverplay: isOverplay,
       ),
     );
+    final error = personalFmError;
+    if (error != null) {
+      throw error;
+    }
+    if (generateUniqueSongs) {
+      return List<Song>.generate(5, (_) => _song(1000 + _uniqueSeq++));
+    }
     if (batches.isEmpty) return const [];
     final batch = batches[_batchIndex.clamp(0, batches.length - 1)];
     if (_batchIndex < batches.length - 1) {
@@ -373,6 +392,84 @@ void main() {
 
       expect(controller.currentSong?.hash, 'hash_1');
       expect(controller.errorMessage, '私人 FM 暂时没有新的推荐歌曲');
+      expect(controller.isPersonalFmActive, isTrue);
+    });
+  });
+
+  group('自然播完与长会话', () {
+    test('自然播完（completed）在队列末尾续批且 isOverplay=true', () async {
+      api.batches
+        ..add([_song(1)])
+        ..add([_song(2)]);
+      await controller.startPersonalFm();
+      await settle();
+      expect(controller.currentSong?.hash, 'hash_1');
+
+      fakeAudioPlayer.emitProcessingState(ProcessingState.completed);
+      await settle();
+
+      expect(api.fmCalls.length, 2);
+      expect(api.fmCalls.last.isOverplay, isTrue);
+      expect(controller.currentSong?.hash, 'hash_2');
+      expect(controller.isPersonalFmActive, isTrue);
+    });
+
+    test('从其它入口播放队列外单曲（queue=null）退出会话', () async {
+      api.batches.add([_song(1), _song(2)]);
+      await controller.startPersonalFm();
+      await settle();
+      expect(controller.isPersonalFmActive, isTrue);
+
+      // 已下载/本地/历史等入口：不传 queue，且歌曲不在当前队列里。
+      await controller.playSong(_song(99));
+      await settle();
+
+      expect(controller.isPersonalFmActive, isFalse);
+    });
+
+    test('长会话队列有软上限，不无限增长', () async {
+      // 预热一个接近上限的队列（197 首），末尾续批 +5 后应被裁回 200。
+      final initial = List<Song>.generate(197, (i) => _song(i));
+      final ok = await controller.startPersonalFm(initialSongs: initial);
+      await settle();
+      expect(ok, isTrue);
+      expect(controller.queue.length, 197);
+
+      // 把当前歌拨到队尾，下一次「下一首」才会触发续批。
+      controller.currentSong = initial.last;
+      api.generateUniqueSongs = true;
+      await controller.next();
+      await settle();
+
+      expect(controller.queue.length, 200);
+      expect(controller.isPersonalFmActive, isTrue);
+      expect(controller.currentSong, isNotNull);
+      // 软上限裁剪后当前歌必须仍在队列里（currentIndex 可定位）。
+      expect(
+        controller.queue.any(
+          (song) => song.hash == controller.currentSong!.hash,
+        ),
+        isTrue,
+      );
+    });
+
+    test('续批失败：进入错误态、会话保留、completed 标记清除可重试', () async {
+      api.batches.add([_song(1)]);
+      await controller.startPersonalFm();
+      await settle();
+
+      api.personalFmError = Exception('network down');
+      await controller.next();
+      await settle();
+      expect(controller.errorMessage, contains('network down'));
+      expect(controller.isPersonalFmActive, isTrue);
+
+      // 网络恢复后重试成功，队列继续增长。
+      api.personalFmError = null;
+      api.generateUniqueSongs = true;
+      await controller.next();
+      await settle();
+      expect(controller.currentSong?.hash, 'hash_1000');
       expect(controller.isPersonalFmActive, isTrue);
     });
   });

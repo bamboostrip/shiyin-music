@@ -55,14 +55,23 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
   }) async {
-    // 私人 FM 会话的保持判定：显式 preserve，或本次点歌没有替换当前队列
-    // （同一队列里的上一首/下一首、播放页点当前队列的其他歌），都视为仍在
-    // FM 会话内；否则说明用户从歌单/搜索等别的入口切歌，退出 FM 会话。
+    // 私人 FM 会话的保持判定：只有「在本次播放使用的队列里点歌」才算仍在
+    // FM 会话内（同队列上一首/下一首、播放页点当前队列的其他歌、同曲重播）。
+    // 从已下载/本地/历史等入口点单曲时 queue 参数为 null 且歌曲不在当前队列，
+    // 必须退出 FM 会话——否则 currentIndex=-1，播完不续批、下一首也没反应。
+    final targetQueue = queue != null && queue.isNotEmpty ? queue : this.queue;
+    final replacesQueue = queue != null &&
+        queue.isNotEmpty &&
+        !identical(queue, this.queue) &&
+        !_isSameQueue(queue, this.queue);
     final isPlayingWithinCurrentQueue =
         _isPersonalFmActive &&
-        (queue == null ||
-            identical(queue, this.queue) ||
-            _isSameQueue(queue, this.queue));
+        !replacesQueue &&
+        targetQueue.any(
+          (item) => song.hash.isNotEmpty
+              ? item.hash == song.hash
+              : identical(item, song) || item.id == song.id,
+        );
     if (!preservePersonalFmSession && !isPlayingWithinCurrentQueue) {
       _isPersonalFmActive = false;
       _isLoadingPersonalFm = false;
@@ -78,6 +87,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     _fallbackTimerBuiltAtPosition = null;
     _nearEndStallChecks = 0;
     _completedSongHash = null;
+    // 切歌/重播：取消未到点的播放缓存调度与在途音频缓存传输。快速切歌时
+    // 旧歌缓存立刻下载会白白消耗流量（移动端尤其明显），稳定播放后由
+    // [_schedulePlayCache] 重新排程本次音频的缓存。
+    _playCacheTimer?.cancel();
+    unawaited(downloadController?.cancelActivePlayCache());
     // 新一轮播放：曲尾诊断日志重新允许记录（同曲重播也要能看到）。
     _endOfSongLoggedForHash = null;
     _precachedForSongHash = null;
@@ -248,13 +262,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 记录播放历史与本地播放统计（后台执行，不阻塞播放）
       unawaited(_historyService.record(song));
       unawaited(_statsService.recordPlay(song));
-      // 首播后后台缓存（仅当本次用的是网络 URL，且当前网络允许）。
+      // 稳定播放 15s 后再后台缓存（仅当本次用的是网络 URL，且当前网络允许）。
       // 蜂窝网络默认跳过音频下载（只播不存），避免移动流量翻倍；
-      // 用户在设置中放行后才缓存。
+      // 用户在设置中放行后才缓存；快速切歌时旧调度会被下一次 playSong 取消。
       if (networkUrl != null && isAudioPrecacheAllowed) {
-        unawaited(
-          downloadController?.cacheForPlayback(song, audioQuality, networkUrl),
-        );
+        _schedulePlayCache(song, audioQuality, networkUrl);
       } else if (networkUrl != null) {
         debugPrint('[时音][player] 蜂窝网络跳过播后缓存: ${song.title}');
       }
@@ -685,6 +697,22 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       debugPrint('[时音][player] VIP 领取/重试失败: $e');
     }
     return false;
+  }
+
+  /// 稳定播放 15s 后再后台缓存本次音频：快速切歌/跳过不会为每首歌都下载
+  /// 一份缓存（移动端流量翻倍的主因）。定时器在 playSong 切歌与 dispose 时
+  /// 取消；到点时若已切歌或已暂停则放弃缓存。
+  @override
+  void _schedulePlayCache(Song song, AudioQuality quality, String networkUrl) {
+    _playCacheTimer?.cancel();
+    _playCacheTimer = Timer(const Duration(seconds: 15), () {
+      if (_disposed || currentSong?.hash != song.hash || !isPlaying) {
+        return;
+      }
+      unawaited(
+        downloadController?.cacheForPlayback(song, quality, networkUrl),
+      );
+    });
   }
 
   Future<void> setPlaybackSpeed(double speed) async {

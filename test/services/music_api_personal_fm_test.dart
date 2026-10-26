@@ -5,6 +5,7 @@
 // - 无反馈参数 = 纯刷新；带反馈参数 = 上报当前播放行为换取下一批；
 // - 响应解析 PersonalFmResponse.song_list，按 hash/id 去重且单批最多 5 首。
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/core/api_client.dart';
 import 'package:shiyin_music/core/api_client_interface.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/music_api.dart';
@@ -76,7 +77,11 @@ void main() {
       final songs = await api.personalFm();
 
       expect(client.lastPath, '/personal/fm');
-      expect(client.lastQuery, {'mode': 'normal', 'song_pool_id': 0});
+      expect(client.lastQuery, {
+        'mode': 'normal',
+        'song_pool_id': 0,
+        'action': 'play',
+      });
       expect(songs.map((song) => song.hash), ['HASH_1', 'HASH_2']);
       expect(songs.first.title, '推荐歌曲1');
       expect(songs.first.duration, const Duration(seconds: 201));
@@ -98,14 +103,25 @@ void main() {
       expect(client.lastQuery, {
         'mode': 'normal',
         'song_pool_id': 0,
+        'action': 'play',
         'hash': 'HASH_CURRENT',
         'songid': '555',
         'playtime': 42,
-        'action': 'play',
         'is_overplay': true,
         'remain_song_cnt': 0,
       });
       expect(songs.single.hash, 'HASH_3');
+    });
+
+    test('失败信封（status/error_code 非成功）抛 ApiException 而不是伪装成空推荐', () async {
+      final client = _FakePersonalFmClient({
+        'status': 0,
+        'error_code': 20028,
+        'error': '本次请求需要验证',
+      });
+      final api = MusicApi(client);
+
+      await expectLater(() => api.personalFm(), throwsA(isA<ApiException>()));
     });
 
     test('按 hash 去重且单批最多 5 首', () async {

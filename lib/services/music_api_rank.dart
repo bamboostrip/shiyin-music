@@ -27,19 +27,27 @@ mixin _MusicApiRank on _MusicApiBase {
     final raw = await _client.get('/personal/fm', {
       'mode': 'normal',
       'song_pool_id': 0,
+      // 上游后端 action 缺省是 play，Rust 引擎缺省是 refresh；显式传 play
+      // 保持与上游行为一致（无反馈字段时即纯刷新）。
+      'action': 'play',
       if (hasPlaybackFeedback) ...{
         'hash': hash,
         'songid': songId,
         'playtime': playtime,
-        'action': 'play',
         'is_overplay': isOverplay,
         'remain_song_cnt': 0,
       },
     });
     final json = asMap(raw);
+    // transport 已把 data 提升为根；失败信封（status/error_code 非成功）会
+    // 原样透传且没有 song_list。两种情况都兜住，避免把服务故障伪装成
+    // 「暂时没有推荐」。
+    final songList = asList(
+      json['song_list'] ?? asMap(json['data'])['song_list'],
+    );
     final songs = <Song>[];
     final identities = <String>{};
-    for (final item in asList(json['song_list']).whereType<Map>()) {
+    for (final item in songList.whereType<Map>()) {
       final song = Song.fromPersonalFm(asMap(item));
       final identity = song.hash.isNotEmpty ? song.hash : song.id;
       if (identity.isEmpty || !identities.add(identity)) {
@@ -48,6 +56,19 @@ mixin _MusicApiRank on _MusicApiBase {
       songs.add(song);
       if (songs.length == 5) {
         break;
+      }
+    }
+    if (songs.isEmpty) {
+      final status = asInt(json['status']);
+      final errorCode = asInt(json['error_code'] ?? json['errcode']);
+      final ok =
+          (status == null || status == 1 || status == 200) &&
+          (errorCode == null || errorCode == 0);
+      if (!ok) {
+        throw ApiException(
+          '猜你喜欢推荐服务暂不可用（${json['error'] ?? json['msg'] ?? errorCode ?? status}）',
+          statusCode: errorCode ?? status,
+        );
       }
     }
     return songs;

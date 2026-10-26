@@ -11,6 +11,11 @@
 // 成员声明与字段见 player_controller.dart。
 part of 'player_controller.dart';
 
+/// 私人 FM 队列软上限：与播放状态持久化只存前 `_playbackStateMaxQueueSize`
+/// 条对齐。否则长会话（每批 +5）队列无限增长，冷启动恢复时 currentIndex
+/// 超出持久化窗口会恢复成错歌；超过上限时丢弃最老的推荐（只影响回退深度）。
+const _kPersonalFmMaxQueueLength = _playbackStateMaxQueueSize;
+
 mixin _PlayerPersonalFm on _PlayerControllerBase {
   @override
   bool get _isAtQueueEnd {
@@ -130,10 +135,16 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
       }
       if (additions.isEmpty) {
         errorMessage = '私人 FM 暂时没有新的推荐歌曲';
+        if (!_disposed) {
+          Toast.info('私人 FM 暂时没有新的推荐歌曲，稍后再试');
+        }
         return;
       }
 
       queue = [...queue, ...additions];
+      if (queue.length > _kPersonalFmMaxQueueLength) {
+        queue = queue.sublist(queue.length - _kPersonalFmMaxQueueLength);
+      }
       await playSong(
         additions.first,
         queue: queue,
@@ -142,6 +153,12 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
     } catch (error) {
       if (requestSerial == _personalFmRequestSerial) {
         errorMessage = error.toString();
+        // 完成处理已消费掉本次 completed 事件（_completedSongHash 标记），
+        // 续批失败后清掉标记：用户重试下一首/重播后还能再次触发自然续批。
+        _completedSongHash = null;
+        if (!_disposed) {
+          Toast.error('私人 FM 加载失败，请稍后再试');
+        }
       }
     } finally {
       if (requestSerial == _personalFmRequestSerial) {

@@ -381,6 +381,7 @@ class PlayerController extends _PlayerControllerBase
     _networkRestoredSub?.cancel();
     _autoResumeTimer?.cancel();
     _sleepTimer?.cancel();
+    _playCacheTimer?.cancel();
     _positionSub.cancel();
     _durationSub.cancel();
     _stateSub.cancel();
@@ -519,6 +520,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   int _nearEndStallChecks = 0;
   Timer? _nearEndStallRecheck;
   Timer? _listenTimeTimer;
+
+  /// 播放缓存的延迟调度 timer：稳定播放 15s 后才落盘音频，避免快速切歌
+  /// 反复下载浪费流量（切歌/换源/dispose 时取消，见 [_PlayerPlayback._schedulePlayCache]）。
+  Timer? _playCacheTimer;
   DateTime? _listenTimeStartedAt;
   Duration _pendingListenTime = Duration.zero;
   bool _isReportingListenTime = false;
@@ -976,6 +981,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Future<PlayUrl> _resolvePlayUrl(Song song);
 
   Future<void> _loadClimax(Song song);
+
+  /// 稳定播放 15s 后再后台缓存本次播放的网络音频（playback 分片实现，
+  /// settings 的切音质路径复用）；下次切歌会取消未落盘的调度与在途传输。
+  void _schedulePlayCache(Song song, AudioQuality quality, String networkUrl);
 
   /// VIP 过期领取后重试（playback 分片实现，settings 的切音质路径复用）。
   Future<bool> _tryClaimVipAndRetry(
