@@ -1026,6 +1026,9 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     if (force) {
       _hasRequestedPersonalFmPreview = false;
     }
+    // FM 会话进行中不需要预览批次（卡片展示的是当前 FM 歌曲）；后台预取
+    // 只该服务「点按即播」，不能反过来拖住正在播放的卡片交互。
+    if (widget.player.isPersonalFmActive) return;
     if (!mounted ||
         widget.auth.isRestoring ||
         !widget.auth.isLoggedIn ||
@@ -1496,9 +1499,9 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                           child: _FeatureShelf(
                             player: widget.player,
                             onPersonalFmPlay: _startPersonalFm,
-                            isPersonalFmLoading:
-                                _isStartingPersonalFm ||
-                                _isLoadingPersonalFmPreview,
+                            // 预览预取不参与卡片 loading（见 _FeatureShelf 内注释）：
+                            // 只把用户主动点按后的「启动中」传下去。
+                            isPersonalFmLoading: _isStartingPersonalFm,
                             personalFmPreviewSong:
                                 _personalFmPreviewSongs.isEmpty
                                 ? null
@@ -1689,8 +1692,7 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                     }
                   },
                   onPersonalFmPlay: _startPersonalFm,
-                  isPersonalFmLoading:
-                      _isStartingPersonalFm || _isLoadingPersonalFmPreview,
+                  isPersonalFmLoading: _isStartingPersonalFm,
                   personalFmPreviewSong: _personalFmPreviewSongs.isEmpty
                       ? null
                       : _personalFmPreviewSongs.first,
@@ -2000,6 +2002,13 @@ class _FeatureShelf extends StatelessWidget {
             ? player.currentSong
             : personalFmPreviewSong;
         final isPlayingFm = fmActive && player.isPlaying;
+        // 只有「真正在起播且还没出声」时才把播放键换成转圈：
+        // - 预览批次的后台预取（isPersonalFmLoading 里的 preview 部分）已经
+        //   在父级剥离，不再参与；
+        // - 播放器 FM 拉取（首播/续批）在已经出声后也不再转圈。否则会出现
+        //   「明明已经在播了，右上角还转很久」且按钮被禁用点不动的问题。
+        final loading =
+            (isPersonalFmLoading || player.isLoadingPersonalFm) && !isPlayingFm;
         return _FeatureCard(
           title: '猜你喜欢',
           subtitle: currentFmSong?.title ?? '红心 Radio · 根据口味',
@@ -2007,9 +2016,11 @@ class _FeatureShelf extends StatelessWidget {
           gradient: const [Color(0xFFFFD88E), Color(0xFFFF8DA2)],
           onTap: onPersonalFmPlay,
           onPlay: onPersonalFmPlay,
-          loading: isPersonalFmLoading || player.isLoadingPersonalFm,
+          loading: loading,
           icon: isPlayingFm ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          hint: fmActive
+          hint: loading
+              ? '正在开启私人 FM…'
+              : fmActive
               ? (isPlayingFm ? '私人 FM 播放中 · 点击暂停' : '私人 FM 已暂停 · 点击继续')
               : '红心 Radio · 点击播放猜你喜欢',
           onSecondaryTap: onDailyRecommendTap,
