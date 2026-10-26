@@ -135,27 +135,17 @@ void main() {
       addTearDown(server.stop);
       final partPath = '${tempDir.path}/b.mp3.part';
 
-      // 第一次：收到首段进度后取消，留下 .part。
-      final cancelToken = CancelToken();
-      try {
-        await DownloadService.downloadWithResume(
-          dio: dio,
-          url: url,
-          partPath: partPath,
-          onProgress: (received, total) {
-            cancelToken.cancel();
-          },
-          cancelToken: cancelToken,
-        );
-        fail('取消后应抛出异常');
-      } on DioException {
-        // 预期：取消。
-      }
-      final partLength = File(partPath).lengthSync();
-      expect(partLength, greaterThan(0));
-      expect(partLength, lessThan(data.length));
+      // 模拟"上次下载中断后留下半成品"：直接写入前 60KB。
+      //
+      // 原实现在第一次下载的 onProgress 里取消令牌来制造半成品，但在 CI
+      // （Linux 环回口）上 128KB 常在取消生效前就传输完毕，导致
+      // downloadWithResume 正常返回、用例偶发失败（本地 Windows 因时序不同
+      // 不复现）。半成品正是续传逻辑的输入，直接构造既确定复现又不依赖
+      // 取消时序；续传后字节必须与原始数据完全一致才是本用例要守的回归点。
+      const interruptedLength = 60 * 1024;
+      File(partPath).writeAsBytesSync(data.sublist(0, interruptedLength));
 
-      // 第二次：续传完成后文件必须等于完整原始字节。
+      // 续传完成后文件必须等于完整原始字节。
       // 旧实现（dio.download + FileMode.write 截断 + Range 头）在这里产出
       // "只有后半段"的损坏文件。
       await DownloadService.downloadWithResume(
@@ -164,6 +154,7 @@ void main() {
         partPath: partPath,
       );
 
+      expect(File(partPath).lengthSync(), data.length);
       expect(File(partPath).readAsBytesSync(), data);
     }, timeout: const Timeout(Duration(seconds: 30)));
 
