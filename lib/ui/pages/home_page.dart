@@ -1057,6 +1057,32 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     }
   }
 
+  /// 「每日推荐」歌单页入口：主卡片已改为私人 FM，这里作为卡片内的次级
+  /// 入口保留每日推荐歌单（上游同样移除了首页主入口，但本 fork 用户仍有
+  /// 每日推荐的使用习惯，故降级为次级动作而不是直接删除）。
+  void _openDailyRecommend(DailyRecommend daily) {
+    final playlist = PlaylistSummary(
+      id: 'daily_recommend',
+      title: '每日推荐',
+      subtitle: daily.subtitle ?? '根据你的听歌偏好，每日精心推荐',
+      coverUrl:
+          daily.coverUrl ??
+          (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
+      songCount: daily.songs.length,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlaylistDetailPage(
+          api: widget.api,
+          auth: widget.auth,
+          player: widget.player,
+          playlist: playlist,
+          initialSongs: daily.songs,
+        ),
+      ),
+    );
+  }
+
   void _openRecommendedPlaylists(List<PlaylistSummary> playlists) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -1423,12 +1449,16 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                           child: _FeatureShelf(
                             player: widget.player,
                             onPersonalFmPlay: _startPersonalFm,
-                            isPersonalFmLoading: _isStartingPersonalFm ||
+                            isPersonalFmLoading:
+                                _isStartingPersonalFm ||
                                 _isLoadingPersonalFmPreview,
                             personalFmPreviewSong:
                                 _personalFmPreviewSongs.isEmpty
                                 ? null
                                 : _personalFmPreviewSongs.first,
+                            onDailyRecommendTap: data.daily.songs.isEmpty
+                                ? null
+                                : () => _openDailyRecommend(data.daily),
                           ),
                         ),
                       ),
@@ -1606,6 +1636,9 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
                   personalFmPreviewSong: _personalFmPreviewSongs.isEmpty
                       ? null
                       : _personalFmPreviewSongs.first,
+                  onDailyRecommendTap: data.daily.songs.isEmpty
+                      ? null
+                      : () => _openDailyRecommend(data.daily),
                   api: widget.api,
                   player: widget.player,
                   updateVersion:
@@ -1731,6 +1764,7 @@ class _RecommendHeader extends StatelessWidget {
     required this.onPersonalFmPlay,
     required this.isPersonalFmLoading,
     required this.personalFmPreviewSong,
+    required this.onDailyRecommendTap,
     required this.api,
     required this.player,
     required this.updateVersion,
@@ -1746,6 +1780,9 @@ class _RecommendHeader extends StatelessWidget {
   final VoidCallback onPersonalFmPlay;
   final bool isPersonalFmLoading;
   final Song? personalFmPreviewSong;
+
+  /// 卡片内「每日推荐」次级入口（null = 无每日推荐数据，不展示）。
+  final VoidCallback? onDailyRecommendTap;
   final MusicApi api;
   final PlayerController player;
   final AppVersionInfo? updateVersion;
@@ -1803,6 +1840,7 @@ class _RecommendHeader extends StatelessWidget {
                           onPersonalFmPlay: onPersonalFmPlay,
                           isPersonalFmLoading: isPersonalFmLoading,
                           personalFmPreviewSong: personalFmPreviewSong,
+                          onDailyRecommendTap: onDailyRecommendTap,
                         ),
                       ),
                       // 猜你喜欢与统计 pills 之间留出明确呼吸间距，
@@ -1826,6 +1864,7 @@ class _RecommendHeader extends StatelessWidget {
                     onPersonalFmPlay: onPersonalFmPlay,
                     isPersonalFmLoading: isPersonalFmLoading,
                     personalFmPreviewSong: personalFmPreviewSong,
+                    onDailyRecommendTap: onDailyRecommendTap,
                   ),
                   if (isCarMode)
                     _CarQuickStatsPills(
@@ -1872,12 +1911,16 @@ class _FeatureShelf extends StatelessWidget {
     required this.onPersonalFmPlay,
     required this.isPersonalFmLoading,
     required this.personalFmPreviewSong,
+    this.onDailyRecommendTap,
   });
 
   final PlayerController player;
   final VoidCallback onPersonalFmPlay;
   final bool isPersonalFmLoading;
   final Song? personalFmPreviewSong;
+
+  /// 卡片内「每日推荐」次级入口；null = 无每日推荐数据。
+  final VoidCallback? onDailyRecommendTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1901,6 +1944,7 @@ class _FeatureShelf extends StatelessWidget {
           hint: fmActive
               ? (isPlayingFm ? '私人 FM 播放中 · 点击暂停' : '私人 FM 已暂停 · 点击继续')
               : '红心 Radio · 点击播放猜你喜欢',
+          onSecondaryTap: onDailyRecommendTap,
         );
       },
     );
@@ -1918,6 +1962,7 @@ class _FeatureCard extends StatelessWidget {
     this.loading = false,
     this.icon = Icons.play_arrow_rounded,
     this.hint = '',
+    this.onSecondaryTap,
   });
 
   final String title;
@@ -1935,6 +1980,9 @@ class _FeatureCard extends StatelessWidget {
 
   /// 卡片底部提示文案。
   final String hint;
+
+  /// 卡片内次级入口（如「每日推荐」）；null 时不展示。
+  final VoidCallback? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2074,16 +2122,49 @@ class _FeatureCard extends StatelessWidget {
                             ),
                       ),
                       SizedBox(height: hintGap),
-                      Text(
-                        hint,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant.withValues(alpha: .70),
-                          fontWeight: FontWeight.w600,
-                          fontSize: hintFontSize,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              hint,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              softWrap: false,
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: .70,
+                                ),
+                                fontWeight: FontWeight.w600,
+                                fontSize: hintFontSize,
+                              ),
+                            ),
+                          ),
+                          if (onSecondaryTap != null) ...[
+                            const SizedBox(width: 8),
+                            // 「每日推荐」次级入口：主卡片改为私人 FM 后，
+                            // 每日推荐歌单仍可从卡片内进入（不再有首页主入口）。
+                            InkWell(
+                              onTap: onSecondaryTap,
+                              borderRadius: BorderRadius.circular(6),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  '每日推荐',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    color: colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: hintFontSize,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
