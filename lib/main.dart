@@ -30,6 +30,7 @@ import 'services/music_api.dart';
 import 'services/network_monitor.dart';
 import 'models/music_models.dart';
 import 'ui/adaptive_layout.dart';
+import 'ui/car_display_viewport.dart';
 import 'ui/desktop/desktop_tray.dart';
 import 'ui/desktop/desktop_window.dart';
 import 'ui/desktop/lyrics_overlay_window.dart';
@@ -517,12 +518,21 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
             // 全局字体大小（保留系统无障碍缩放）。
             final baseScale = MediaQuery.textScalerOf(context).scale(1.0);
             final textScaler = TextScaler.linear(baseScale * _theme.fontScale);
+            // 车机显示微调：仅在车机模式且参数非默认值时启用，
+            // 普通用户/桌面完全走原路径（零额外层级、零行为变化）。
+            // 注意：缩放不叠加进 textScaler，文字随布局一起被变换放大。
             Widget result = MediaQuery(
               data: MediaQuery.of(context).copyWith(textScaler: textScaler),
               child: _AppBackground(
                 themeController: _theme,
-                child: _SystemUiOverlay(
-                  child: child ?? const SizedBox.shrink(),
+                child: CarDisplayViewport.maybe(
+                  enabled: _theme.carModeEnabled,
+                  scale: _theme.carDisplayScale,
+                  marginTop: _theme.carMarginTop,
+                  marginBottom: _theme.carMarginBottom,
+                  child: _SystemUiOverlay(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             );

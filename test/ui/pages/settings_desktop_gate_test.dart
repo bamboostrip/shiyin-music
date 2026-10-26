@@ -62,6 +62,8 @@ void main() {
       // 桌面恒横屏、无车机概念：横屏/车机开关不出现
       expect(find.text('横屏模式'), findsNothing);
       expect(find.text('车机模式'), findsNothing);
+      // 「车机显示」分节也只属于移动形态 + 车机模式，桌面不出现。
+      expect(find.text('车机显示'), findsNothing);
 
       // 默认关。
       expect(_autoStartSwitch(tester).value, isFalse);
@@ -140,6 +142,8 @@ void main() {
       // 下载位置仅 PC 桌面形态提供（移动端下载走 App 专属目录，无此概念）。
       expect(find.text('下载位置'), findsNothing);
       expect(find.text('重置窗口'), findsNothing);
+      // 车机模式未开启时「车机显示」分节不出现。
+      expect(find.text('车机显示'), findsNothing);
     });
 
     testWidgets('歌词页切歌键瓦片：默认关，点击后写回 controller 并即时刷新', (tester) async {
@@ -167,6 +171,9 @@ void main() {
       expect(find.text('歌词页切歌键'), findsNothing);
       // 同组其他手机开关仍在，证明页面正常构建而非整体缺失。
       expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+      // 车机模式开启时「车机显示」分节出现（移动端专属）。
+      expect(find.text('车机显示'), findsOneWidget);
+      expect(find.text('恢复默认车机显示'), findsOneWidget);
     });
 
     testWidgets('车机设备（即使手动关闭车机模式）同样隐藏歌词页切歌键', (tester) async {
@@ -187,11 +194,14 @@ void main() {
       theme.notifyListeners();
       await tester.pump();
       expect(find.text('歌词页切歌键'), findsNothing);
+      // 车机显示分节随车机模式即时显隐。
+      expect(find.text('车机显示'), findsOneWidget);
 
       theme.carModeEnabled = false;
       theme.notifyListeners();
       await tester.pump();
       expect(find.text('歌词页切歌键'), findsOneWidget);
+      expect(find.text('车机显示'), findsNothing);
     });
 
     testWidgets('手机视口也显示横屏/车机开关（残留值可改）', (tester) async {
@@ -497,6 +507,31 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
 
   @override
   bool get landscapeEnabled => false;
+
+  // 车机显示微调（分节仅在车机模式开启时构建，此处给中性默认值即可）。
+  @override
+  double get carDisplayScale => 1.0;
+
+  @override
+  double get carMarginTop => 0;
+
+  @override
+  double get carMarginBottom => 0;
+
+  @override
+  bool get hasCustomCarDisplay => false;
+
+  @override
+  Future<void> setCarDisplayScale(double scale) async {}
+
+  @override
+  Future<void> setCarMarginTop(double margin) async {}
+
+  @override
+  Future<void> setCarMarginBottom(double margin) async {}
+
+  @override
+  Future<void> resetCarDisplay() async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

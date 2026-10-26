@@ -32,12 +32,27 @@ class ThemeController extends ChangeNotifier {
   static const _landscapeEnabledKey = 'theme.landscape_enabled';
   static const _carModeEnabledKey = 'theme.car_mode_enabled';
   static const _fontScaleKey = 'theme.font_scale';
+  static const _carDisplayScaleKey = 'theme.car_display_scale';
+  static const _carMarginTopKey = 'theme.car_margin_top';
+  static const _carMarginBottomKey = 'theme.car_margin_bottom';
 
   /// 全局字体大小档位（1.0 = 标准，1.1 = 大，1.2 = 特大）。
   static const fontScaleOptions = [1.0, 1.1, 1.2];
 
   /// 车机模式下文字放大倍数（远距离观看更清晰）。
   static const double carModeFontScaleFactor = 1.12;
+
+  /// 车机显示缩放档位（仅车机模式生效，1.0 = 标准）。
+  ///
+  /// 车机屏幕分辨率与 DPI 差异极大：低分屏 100% 观感偏大、高分屏偏小。
+  /// 用档位而非连续滑杆，保证每一档都能做布局回归（缩放过度会让触控
+  /// 目标过小或撞上网格/侧栏断点）。
+  static const carDisplayScaleOptions = [0.8, 0.9, 1.0, 1.15, 1.3];
+
+  /// 车机安全留白上限（逻辑像素）。
+  ///
+  /// 车机 dpr 常见 1~2，100 逻辑像素足以让出悬浮状态栏/底部悬浮条。
+  static const double carMarginMax = 100;
 
   /// 预设种子色列表（首位即默认配色）。
   static const presetColors = <_PresetColor>[
@@ -62,6 +77,9 @@ class ThemeController extends ChangeNotifier {
   bool _landscapeEnabled = false;
   bool _carModeEnabled = false;
   double _fontScale = 1.0;
+  double _carDisplayScale = 1.0;
+  double _carMarginTop = 0;
+  double _carMarginBottom = 0;
   // 车机检测结果缓存（设备不变，启动时检测一次）。
   bool _isAutomotiveDevice = false;
 
@@ -84,6 +102,19 @@ class ThemeController extends ChangeNotifier {
   bool get carModeEnabled => _carModeEnabled && !isDesktopFormFactor;
   double get fontScale => _fontScale;
   bool get isAutomotiveDevice => _isAutomotiveDevice;
+
+  /// 车机显示缩放（仅移动形态；桌面恒 1.0，避免移动端残留值劫持 PC 布局）。
+  double get carDisplayScale => isDesktopFormFactor ? 1.0 : _carDisplayScale;
+
+  /// 车机顶部安全留白（逻辑像素，0 = 仅依赖系统 inset）。
+  double get carMarginTop => isDesktopFormFactor ? 0 : _carMarginTop;
+
+  /// 车机底部安全留白（逻辑像素，0 = 仅依赖系统 inset）。
+  double get carMarginBottom => isDesktopFormFactor ? 0 : _carMarginBottom;
+
+  /// 车机显示是否偏离默认值（用于设置页「恢复默认」置灰与副标题）。
+  bool get hasCustomCarDisplay =>
+      carDisplayScale != 1.0 || carMarginTop != 0 || carMarginBottom != 0;
 
   /// 是否使用了非默认种子色。
   bool get hasCustomSeedColor => _seedColor != defaultSeedColor;
@@ -115,6 +146,18 @@ class ThemeController extends ChangeNotifier {
     final storedFontScale = prefs.getDouble(_fontScaleKey) ?? 1.0;
     _fontScale =
         fontScaleOptions.contains(storedFontScale) ? storedFontScale : 1.0;
+    // 车机显示微调：默认中性值（缩放 1.0 / 留白 0），老用户升级无感；
+    // 手改 prefs 或旧版本残留的非法值一律回落。
+    final storedCarScale = prefs.getDouble(_carDisplayScaleKey) ?? 1.0;
+    _carDisplayScale = carDisplayScaleOptions.contains(storedCarScale)
+        ? storedCarScale
+        : 1.0;
+    _carMarginTop = (prefs.getDouble(_carMarginTopKey) ?? 0.0)
+        .clamp(0.0, carMarginMax)
+        .toDouble();
+    _carMarginBottom = (prefs.getDouble(_carMarginBottomKey) ?? 0.0)
+        .clamp(0.0, carMarginMax)
+        .toDouble();
     final opacity = prefs.getDouble(_bgOpacityKey);
     if (opacity != null) {
       _backgroundOpacity = opacity.clamp(0.0, 0.8);
@@ -164,6 +207,56 @@ class ThemeController extends ChangeNotifier {
     _fontScale = clamped;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_fontScaleKey, clamped);
+    notifyListeners();
+  }
+
+  /// 设置车机显示缩放档位（仅接受 [carDisplayScaleOptions] 中的值）。
+  ///
+  /// 档位由 [CarDisplayViewport] 消费：缩小布局视口 + 变换放大还原，
+  /// 因此改变的不仅是文字，网格列数、按钮物理尺寸同步变化。
+  Future<void> setCarDisplayScale(double scale) async {
+    final clamped = carDisplayScaleOptions.contains(scale) ? scale : 1.0;
+    if (_carDisplayScale == clamped) return;
+    _carDisplayScale = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_carDisplayScaleKey, clamped);
+    notifyListeners();
+  }
+
+  /// 设置车机顶部安全留白（逻辑像素，0~[carMarginMax]）。
+  Future<void> setCarMarginTop(double margin) async {
+    final clamped = margin.clamp(0.0, carMarginMax).toDouble();
+    if (_carMarginTop == clamped) return;
+    _carMarginTop = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_carMarginTopKey, clamped);
+    notifyListeners();
+  }
+
+  /// 设置车机底部安全留白（逻辑像素，0~[carMarginMax]）。
+  Future<void> setCarMarginBottom(double margin) async {
+    final clamped = margin.clamp(0.0, carMarginMax).toDouble();
+    if (_carMarginBottom == clamped) return;
+    _carMarginBottom = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_carMarginBottomKey, clamped);
+    notifyListeners();
+  }
+
+  /// 恢复车机显示默认值（缩放 1.0、上下留白 0）。
+  Future<void> resetCarDisplay() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_carDisplayScaleKey);
+    await prefs.remove(_carMarginTopKey);
+    await prefs.remove(_carMarginBottomKey);
+    if (_carDisplayScale == 1.0 &&
+        _carMarginTop == 0.0 &&
+        _carMarginBottom == 0.0) {
+      return;
+    }
+    _carDisplayScale = 1.0;
+    _carMarginTop = 0;
+    _carMarginBottom = 0;
     notifyListeners();
   }
 

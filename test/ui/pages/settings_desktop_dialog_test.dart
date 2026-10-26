@@ -262,6 +262,24 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   @override
   bool get isAutomotiveDevice => false;
 
+  // 车机显示微调（桌面形态下分节不会构建，仅补全接口契约）。
+  @override
+  double get carDisplayScale => 1.0;
+  @override
+  double get carMarginTop => 0;
+  @override
+  double get carMarginBottom => 0;
+  @override
+  bool get hasCustomCarDisplay => false;
+  @override
+  Future<void> setCarDisplayScale(double scale) async {}
+  @override
+  Future<void> setCarMarginTop(double margin) async {}
+  @override
+  Future<void> setCarMarginBottom(double margin) async {}
+  @override
+  Future<void> resetCarDisplay() async {}
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

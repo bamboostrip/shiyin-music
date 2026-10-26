@@ -232,9 +232,18 @@ class _AppShellState extends State<AppShell> {
                                 _buildCarTopNavBar(navContext),
                                 const Divider(height: 1),
                                 Expanded(
-                                  child: LazyIndexedStack(
-                                    index: activePageIndex,
-                                    children: pages,
+                                  // 顶栏已手动加上 paddingOf.top 让出状态栏，
+                                  // 内容区位于顶栏之下，必须移除 top padding，
+                                  // 否则内层 SafeArea 会再消费一次（系统 inset
+                                  // 非 0 时顶栏下方多出一整条空白；车机常见
+                                  // inset=0 才一直没暴露）。
+                                  child: MediaQuery.removePadding(
+                                    context: navContext,
+                                    removeTop: true,
+                                    child: LazyIndexedStack(
+                                      index: activePageIndex,
+                                      children: pages,
+                                    ),
                                   ),
                                 ),
                               ],

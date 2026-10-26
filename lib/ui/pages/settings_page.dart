@@ -15,6 +15,7 @@ import '../settings/about_settings_section.dart';
 import '../settings/account_settings_section.dart';
 import '../settings/cache_management_sheet.dart';
 import '../settings/cache_settings_section.dart';
+import '../settings/car_display_settings_section.dart';
 import '../settings/desktop_settings_section.dart';
 import '../settings/personalization_settings_section.dart';
 import '../settings/playback_settings_section.dart';
@@ -278,6 +279,10 @@ class SettingsPage extends StatelessWidget {
                     showOrientationTiles: showOrientationTiles,
                     onSelectFontScale: () => _selectFontScale(context, theme),
                   ),
+                  // 车机显示分节：仅车机模式开启（移动形态）时有意义，
+                  // 桌面形态恒隐藏（车机模式下 PC 布局不生效）。
+                  if (!isDesktopFormFactor && theme.carModeEnabled)
+                    CarDisplaySettingsSection(theme: theme),
                   // App section
                   AboutSettingsSection(api: api),
                 ],
