@@ -30,6 +30,19 @@ import 'artist_detail_page.dart';
 /// 缓存中完整歌单歌曲列表的 key 后缀。
 const _fullSongsCacheSuffix = '_full';
 
+/// 播放失败文案规范化：剥掉异常类前缀，避免 Toast 出现
+/// 「播放失败：Exception: …」「播放失败：Bad state: …」这类噪音。
+///
+/// 行为对齐上游 PR #156（10ac04d）的 `_showPlaybackErrorIfNeeded`：
+/// 只去前缀、不改写正文。抽成顶层纯函数便于单独单测。
+String formatPlaybackError(String message) {
+  final cleaned = message
+      .replaceFirst(RegExp(r'^(Exception|Bad state):\s*'), '')
+      .trim();
+  // 前缀后没有正文（极端情况）时退回原文，避免弹出空的「播放失败：」。
+  return cleaned.isEmpty ? message : cleaned;
+}
+
 class PlaylistDetailPage extends StatefulWidget {
   const PlaylistDetailPage({
     super.key,
@@ -96,6 +109,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   // 后台静默补全进行中（点歌后扩展队列用，不驱动全屏 loading UI，
   // 避免列表被替换导致滚动位置丢失）。
   bool _isExpandingQueue = false;
+  // 「播放全部」起播中（防连点）：从点击到 playSong 返回前忽略重复触发，
+  // 同时让播放按钮呈禁用态给出即时反馈（对齐上游 10ac04d 的 _isStartingPlayback）。
+  bool _isStartingPlayback = false;
   bool _allSongsLoaded = false;
   // 全量加载代际：页面退出/重新加载时 +1，使在途的 _loadAllSongs
   // 在下一个 await 后自行放弃（逻辑 CancelToken，MusicApi 的 Rust
@@ -499,6 +515,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       });
       // 用户已切到其它来源则不改队列
       if (currentKey != startedKey && !queueStillOurs) return;
+      // 判据等价性（对齐上游 10ac04d replaceQueueIfMatches 的保护意图）：
+      // 该检查与 replaceQueue 之间没有 await——expanded 是同步快照，而
+      // replaceQueue 在首个 await 前就已完成 queue 赋值。因此不存在
+      // 「判据通过后用户又切源、补全结果仍覆盖新队列」的窗口，保持现状。
       final expanded = _playbackQueueNow();
       if (expanded.length <= widget.player.queue.length) return;
       await widget.player.replaceQueue(expanded);
@@ -1344,12 +1364,43 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   /// 播放全部/播放结果：与粘性歌曲条共用，避免两处逻辑分叉。
-  void _playAll() {
-    final queue = _playbackQueueNow();
-    if (queue.isEmpty) return;
-    final first = queue.first;
-    widget.player.playSong(first, queue: List<Song>.of(queue));
-    _expandQueueInBackgroundIfNeeded(startedWith: first);
+  ///
+  /// 防连点：起播期间忽略重复触发（播放按钮同时置灰禁用），
+  /// 避免快速连击建两次队列 / 触发两次网络解析。
+  Future<void> _playAll() async {
+    if (_isStartingPlayback) return;
+    setState(() => _isStartingPlayback = true);
+    try {
+      final queue = _playbackQueueNow();
+      if (queue.isEmpty) return;
+      await _playFromVisibleQueue(queue.first, queue);
+    } finally {
+      // 页面已退出时不再 setState（dispose 后 mounted 为 false）。
+      if (mounted) setState(() => _isStartingPlayback = false);
+    }
+  }
+
+  /// 统一播放入口：起播 → 失败提示 → 后台补全队列。
+  ///
+  /// 单曲行点击与「播放全部」都收敛到这里，保证播放失败反馈与补队列
+  /// 行为一致；队列参数一律传入快照拷贝，避免 player 持有调用方的
+  /// 可变列表引用（与旧实现的 `List<Song>.of(queue)` 语义一致）。
+  Future<void> _playFromVisibleQueue(Song song, List<Song> queue) async {
+    await widget.player.playSong(song, queue: List<Song>.of(queue));
+    // 起播期间页面已退出：不弹 Toast、也不再补队列。
+    if (!mounted || _disposed) return;
+    _showPlaybackErrorIfNeeded();
+    _expandQueueInBackgroundIfNeeded(startedWith: song);
+  }
+
+  /// 起播失败时把 player 的最新错误转成用户可读 Toast；成功则静默。
+  ///
+  /// 只读起播结束后的 [PlayerController.errorMessage]：playSong 每轮开始
+  /// 都会先清空该字段，因此不会把上一首的旧错误重复弹给用户。
+  void _showPlaybackErrorIfNeeded() {
+    final error = widget.player.errorMessage;
+    if (error == null || error.isEmpty) return;
+    Toast.error('播放失败：${formatPlaybackError(error)}');
   }
 
   /// Hero 区「下载」：补全全量后整单入队，复用批量下载的并发 guard。
@@ -1746,8 +1797,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                         onDone: _exitSelectMode,
                                         title: stickyTitle,
                                         subtitle: stickySubtitle,
-                                        canPlay:
-                                            _playbackQueueNow().isNotEmpty,
+                                        canPlay: _playbackQueueNow().isNotEmpty &&
+                                            !_isStartingPlayback,
                                         onPlay: _playAll,
                                         onSearch: _toggleSearch,
                                         onSort: () => _showSortSheet(context),
@@ -1790,7 +1841,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               onDone: _exitSelectMode,
                               title: stickyTitle,
                               subtitle: stickySubtitle,
-                              canPlay: _playbackQueueNow().isNotEmpty,
+                              canPlay: _playbackQueueNow().isNotEmpty &&
+                                  !_isStartingPlayback,
                               onPlay: _playAll,
                               onSearch: _toggleSearch,
                               onSort: () => _showSortSheet(context),
@@ -1901,28 +1953,16 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                         () => _focusedSongKey = _songKey(song),
                                       );
                                     },
-                                    onDoubleTap: () {
+                                    onDoubleTap: () async {
                                       if (_isSelecting) return;
                                       final queue = _playbackQueueNow();
                                       if (queue.isEmpty) return;
-                                      widget.player.playSong(
-                                        song,
-                                        queue: List<Song>.of(queue),
-                                      );
-                                      _expandQueueInBackgroundIfNeeded(
-                                        startedWith: song,
-                                      );
+                                      await _playFromVisibleQueue(song, queue);
                                     },
-                                    onPlay: () {
+                                    onPlay: () async {
                                       final queue = _playbackQueueNow();
                                       if (queue.isEmpty) return;
-                                      widget.player.playSong(
-                                        song,
-                                        queue: List<Song>.of(queue),
-                                      );
-                                      _expandQueueInBackgroundIfNeeded(
-                                        startedWith: song,
-                                      );
+                                      await _playFromVisibleQueue(song, queue);
                                     },
                                     onAddToPlaylist: () =>
                                         _addSongToPlaylist(song),
@@ -1961,7 +2001,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                   canDelete: _canEdit,
                                   selecting: _isSelecting,
                                   selected: _isSongSelected(song),
-                                  onTap: () {
+                                  onTap: () async {
                                     if (_isSelecting) {
                                       _toggleSongSelection(song);
                                       return;
@@ -1977,13 +2017,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                     }
                                     final queue = _playbackQueueNow();
                                     if (queue.isEmpty) return;
-                                    widget.player.playSong(
-                                      song,
-                                      queue: List<Song>.of(queue),
-                                    );
-                                    _expandQueueInBackgroundIfNeeded(
-                                      startedWith: song,
-                                    );
+                                    await _playFromVisibleQueue(song, queue);
                                   },
                                   onAddToPlaylist: () =>
                                       _addSongToPlaylist(song),
