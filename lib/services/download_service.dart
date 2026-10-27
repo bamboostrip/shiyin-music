@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
@@ -9,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import '../models/music_models.dart';
+import 'id3_tag_writer.dart';
+import 'image_disk_cache.dart';
 
 /// 下载任务类型。
 enum DownloadTaskKind { download, playCache }
@@ -474,18 +477,29 @@ class DownloadService {
         }
       }
 
-      // 下载完成，重命名 .part 为最终文件。目标已存在且大小与本次产物
-      // 不同视为"同名不同歌"（大小写不敏感文件系统上大小写变体、或
+      // 下载完成，重命名 .part 为最终文件。目标已存在且**音频长度**与本次
+      // 产物不同视为"同名不同歌"（大小写不敏感文件系统上大小写变体、或
       // 非法字符归一后的碰撞），换名保留两份，绝不静默覆盖另一首歌；
-      // 大小相同几乎必为同一内容（同歌重下），覆盖无副作用。
+      // 音频长度相同几乎必为同一内容（同歌重下，目标可能已带 ID3 标签），
+      // 覆盖无副作用。
       final finalPath = resolveNonCollidingPath(targetPath, partPath);
       if (finalPath != targetPath && File(targetPath).existsSync()) {
         debugPrint(
-          '[DownloadService] 目标文件已存在且大小不同，避免覆盖: '
+          '[DownloadService] 目标文件已存在且音频长度不同，避免覆盖: '
           '$targetPath -> ${File(finalPath).uri.pathSegments.last}',
         );
       }
       await File(partPath).rename(finalPath);
+
+      // 下载完成后立即写入 ID3v2.3 标签（仅用户主动下载的 MP3）。这里用
+      // await 而不是上游的 unawaited：下载 future 完成时标签已就位，索引/
+      // 扫描拿到的就是最终文件，不会出现「已入库但播放器读不到标签」窗口。
+      // 注入失败静默降级（见 _injectId3Tag），不影响下载结果；FLAC 需
+      // Vorbis comment，不在本期范围，直接跳过。
+      if (task.kind == DownloadTaskKind.download &&
+          finalPath.toLowerCase().endsWith('.mp3')) {
+        await _injectId3Tag(finalPath, task.song);
+      }
 
       return finalPath;
     } finally {
@@ -494,17 +508,61 @@ class DownloadService {
     }
   }
 
-  /// 目标已存在且与 .part 大小不一致时，返回带序号的备选路径。
+  /// 为刚落盘的下载 MP3 注入 ID3v2.3 标签（歌名 / 歌手 / 专辑 / 封面）。
+  ///
+  /// 两层兜底保证「标签写失败 ≠ 下载失败」：封面读取失败只丢 APIC 帧；
+  /// 写标签任何异常都只记日志——文件本身已完整落盘，缺标签顶多是第三方
+  /// 播放器/车机不显示元数据，回退行为与注入前完全一致。
+  Future<void> _injectId3Tag(String filePath, Song song) async {
+    try {
+      Uint8List? coverBytes;
+      final coverUrl = song.coverUrl;
+      if (coverUrl != null && coverUrl.isNotEmpty) {
+        coverBytes = await _cachedCoverBytes(coverUrl);
+      }
+      await Id3TagWriter.injectMetadata(
+        filePath: filePath,
+        song: song,
+        coverBytes: coverBytes,
+      );
+    } catch (error) {
+      debugPrint('[DownloadService] 写入 ID3 标签失败（已忽略，不影响下载）: $error');
+    }
+  }
+
+  /// 从封面磁盘缓存读取某 URL 的封面原始字节；未命中 / 读取失败返回 null。
+  ///
+  /// 封面禁止 http 二次下载：多一次联网会拖慢下载收尾（弱网下最长 4s），
+  /// 且下载链路本就可能是离线/受限网络。缓存未命中时跳过 APIC 帧即可，
+  /// 文本标签照常写入。命中率取决于该封面在下载前是否被界面加载过。
+  Future<Uint8List?> _cachedCoverBytes(String url) async {
+    try {
+      final file = await ImageDiskCache.instance.lookup(url);
+      if (file == null) return null;
+      final bytes = await file.readAsBytes();
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 目标已存在且与 .part 音频内容长度不一致时，返回带序号的备选路径。
   ///
   /// 下载完成落盘与历史目录搬移（DownloadController.reconcileDownloads）
-  /// 共用的同名冲突决策：目标不存在或大小相同（几乎必为同一内容）→
-  /// 原路径；大小不同（"同名不同歌"）→ "(n)" 备选名，绝不静默覆盖。
+  /// 共用的同名冲突决策：目标不存在或**音频字节数**相同（几乎必为同一
+  /// 内容）→ 原路径；音频字节数不同（"同名不同歌"）→ "(n)" 备选名，绝不
+  /// 静默覆盖。
+  ///
+  /// 注意比较的是剥掉 ID3v2 标签后的长度而不是文件总大小：本 fork 下载
+  /// 完成后会给 mp3 写标签，重下同一首歌时目标文件比新的纯音频 `.part`
+  /// 多出一段标签；按总大小比较会把它误判成"同名不同歌"而多存一份
+  /// `(2).mp3`，用户看到重复文件。
   String resolveNonCollidingPath(String targetPath, String partPath) {
     final partFile = File(partPath);
     if (!partFile.existsSync()) return targetPath;
     final target = File(targetPath);
     if (!target.existsSync() ||
-        target.lengthSync() == partFile.lengthSync()) {
+        _audioContentLength(target) == _audioContentLength(partFile)) {
       return targetPath;
     }
     final dot = targetPath.lastIndexOf('.');
@@ -516,6 +574,13 @@ class DownloadService {
     }
     return '$stem ($index)$ext';
   }
+
+  /// 文件的有效音频字节数：文件总大小减去文件头可能存在的 ID3v2 标签。
+  ///
+  /// 只有本 fork 下载 MP3 后写标签的文件会带这段前缀；`.flac`/`.part`
+  /// 等无标签文件结果与原文件大小一致（见 [resolveNonCollidingPath]）。
+  static int _audioContentLength(File file) =>
+      file.lengthSync() - Id3TagWriter.existingTagLengthSync(file);
 
   /// 断点续传决策（纯函数，供单测）：已有 .part 且服务器确认 Range
   /// （HTTP 206）才续传追加；服务器忽略 Range 返回 200 全量时必须整体
