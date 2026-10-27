@@ -208,6 +208,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     isPreparing = !isSameSong || !hasLocalAudio;
     _changingSourceDepth++;
     errorMessage = null;
+    // 每轮起播重置：上一轮的友好失败提示不得成为本轮页面去重的依据。
+    lastPlaybackFailureToast = null;
     _tailSkipExhausted = false;
     currentSong = song;
     // 装载这首歌自己的歌词进度偏移（歌词列表/桌面歌词都按它定位）。
@@ -619,7 +621,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         'skips=$_consecutiveNearEndSkips/$effectiveLimit overBudget=$overBudget '
         'since=$_nearEndSkipStreakSince',
       );
-      Toast.error('连续多次在曲末播放失败，已停止自动切歌');
+      const toastMessage = '连续多次在曲末播放失败，已停止自动切歌';
+      lastPlaybackFailureToast = toastMessage;
+      Toast.error(toastMessage);
       return false;
     }
     _consecutiveNearEndSkips++;
@@ -649,13 +653,17 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     if (_disposed) return;
     _consecutivePlayFailures++;
     if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) {
-      Toast.error('《${song.title}》暂无可播放音源');
+      final toastMessage = '《${song.title}》暂无可播放音源';
+      lastPlaybackFailureToast = toastMessage;
+      Toast.error(toastMessage);
       return;
     }
 
     final queueLength = queue.length;
     if (queueLength <= 1) {
-      Toast.error('《${song.title}》暂无可播放音源');
+      final toastMessage = '《${song.title}》暂无可播放音源';
+      lastPlaybackFailureToast = toastMessage;
+      Toast.error(toastMessage);
       return;
     }
     final skipLimit = queueLength < _kMaxAutoSkipsPerStreak
@@ -670,14 +678,18 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         '$_autoSkippedInStreak 首（上限 $skipLimit'
         '${overBudget ? '，已超墙钟预算 $_kAutoSkipWallClockBudget' : ''}），停止跳转',
       );
-      Toast.error('连续多首歌曲播放失败，已停止播放');
+      const toastMessage = '连续多首歌曲播放失败，已停止播放';
+      lastPlaybackFailureToast = toastMessage;
+      Toast.error(toastMessage);
       return;
     }
     _autoSkippedInStreak++;
     debugPrint(
       '[时音][player] 连续失败 $_consecutivePlayFailures 次，自动跳过: ${song.title}',
     );
-    Toast.show('《${song.title}》播放失败，已跳过');
+    final toastMessage = '《${song.title}》播放失败，已跳过';
+    lastPlaybackFailureToast = toastMessage;
+    Toast.show(toastMessage);
     // 脱离当前调用栈：本流程的 finally 尚未执行，直接 await next() 会形成
     // 逐曲嵌套的 await 链；延后一拍让本次收尾先完成（finally 的深度计数
     // 随后归零，不会误清新流程的守卫）。

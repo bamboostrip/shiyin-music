@@ -31,16 +31,28 @@ import 'artist_detail_page.dart';
 const _fullSongsCacheSuffix = '_full';
 
 /// 播放失败文案规范化：剥掉异常类前缀，避免 Toast 出现
-/// 「播放失败：Exception: …」「播放失败：Bad state: …」这类噪音。
+/// 「播放失败：Exception: …」「播放失败：ApiException(500): …」这类噪音。
 ///
 /// 行为对齐上游 PR #156（10ac04d）的 `_showPlaybackErrorIfNeeded`：
 /// 只去前缀、不改写正文。抽成顶层纯函数便于单独单测。
 String formatPlaybackError(String message) {
-  final cleaned = message
-      .replaceFirst(RegExp(r'^(Exception|Bad state):\s*'), '')
-      .trim();
-  // 前缀后没有正文（极端情况）时退回原文，避免弹出空的「播放失败：」。
-  return cleaned.isEmpty ? message : cleaned;
+  // 前缀可能叠多层（如 `Exception: ApiException(500): …`），循环剥到稳定；
+  // 上限 3 次只为防异常输入死循环，正常最多两层。
+  // - ApiException 的 toString() 是 `ApiException(状态码): 正文`（状态码可为 null）；
+  // - DioException 的 toString() 是 `DioException [类型]: 正文`，方括号一并剥掉。
+  final prefix = RegExp(
+    r'^(Exception|Bad state|ApiException(?:\([^)]*\))?'
+    r'|DioException(?: \[[^\]]*\])?):\s*',
+  );
+  var cleaned = message.trim();
+  for (var i = 0; i < 3; i++) {
+    final next = cleaned.replaceFirst(prefix, '').trim();
+    if (next == cleaned) break;
+    cleaned = next;
+  }
+  // 只有前缀没有正文（控制器抛了空异常）时给通用文案，避免弹出空的
+  // 「播放失败：」或用原始前缀污染提示。
+  return cleaned.isEmpty ? '播放失败，请稍后重试' : cleaned;
 }
 
 class PlaylistDetailPage extends StatefulWidget {
@@ -1369,10 +1381,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   /// 避免快速连击建两次队列 / 触发两次网络解析。
   Future<void> _playAll() async {
     if (_isStartingPlayback) return;
+    // 空队列无需进入起播态：先判空再置位，避免空列表也短暂显示转圈。
+    final queue = _playbackQueueNow();
+    if (queue.isEmpty) return;
     setState(() => _isStartingPlayback = true);
     try {
-      final queue = _playbackQueueNow();
-      if (queue.isEmpty) return;
       await _playFromVisibleQueue(queue.first, queue);
     } finally {
       // 页面已退出时不再 setState（dispose 后 mounted 为 false）。
@@ -1380,27 +1393,38 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  /// 统一播放入口：起播 → 失败提示 → 后台补全队列。
+  /// 统一播放入口：后台补全队列 → 起播 → 失败提示。
   ///
   /// 单曲行点击与「播放全部」都收敛到这里，保证播放失败反馈与补队列
   /// 行为一致；队列参数一律传入快照拷贝，避免 player 持有调用方的
   /// 可变列表引用（与旧实现的 `List<Song>.of(queue)` 语义一致）。
   Future<void> _playFromVisibleQueue(Song song, List<Song> queue) async {
+    // 补队列在起播前触发（恢复 fork 早于 P2 的立即补全语义）：弱网下
+    // playSong 可能挂起数十秒（地址解析/音质降级/起播确认），等它返回
+    // 再补会让队列在这段时间里一直只有首屏的快照。
+    _expandQueueInBackgroundIfNeeded(startedWith: song);
     await widget.player.playSong(song, queue: List<Song>.of(queue));
-    // 起播期间页面已退出：不弹 Toast、也不再补队列。
+    // 起播期间页面已退出：不再弹失败 Toast。
     if (!mounted || _disposed) return;
     _showPlaybackErrorIfNeeded();
-    _expandQueueInBackgroundIfNeeded(startedWith: song);
   }
 
   /// 起播失败时把 player 的最新错误转成用户可读 Toast；成功则静默。
   ///
-  /// 只读起播结束后的 [PlayerController.errorMessage]：playSong 每轮开始
-  /// 都会先清空该字段，因此不会把上一首的旧错误重复弹给用户。
+  /// 去重依据是 [PlayerController.lastPlaybackFailureToast]：控制器失败收尾
+  /// 已弹过友好 Toast 时该字段非空，页面不得再用原始异常把它盖掉。该字段与
+  /// [PlayerController.errorMessage] 都由 playSong 每轮开始清空，因此不会把
+  /// 上一首的旧提示重复弹给用户。
   void _showPlaybackErrorIfNeeded() {
+    // 控制器 _registerPlaybackFailure 已弹过友好 Toast（《歌名》暂无可播放
+    // 音源 / 连续多首歌曲播放失败…），页面再弹一次会把它盖掉，这里直接跳过。
+    final friendly = widget.player.lastPlaybackFailureToast;
+    if (friendly != null && friendly.isNotEmpty) return;
     final error = widget.player.errorMessage;
     if (error == null || error.isEmpty) return;
-    Toast.error('播放失败：${formatPlaybackError(error)}');
+    final message = formatPlaybackError(error);
+    // 空正文兜底文案自带「播放失败」，避免拼成「播放失败：播放失败…」。
+    Toast.error(message.startsWith('播放失败') ? message : '播放失败：$message');
   }
 
   /// Hero 区「下载」：补全全量后整单入队，复用批量下载的并发 guard。
@@ -1799,6 +1823,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                         subtitle: stickySubtitle,
                                         canPlay: _playbackQueueNow().isNotEmpty &&
                                             !_isStartingPlayback,
+                                        starting: _isStartingPlayback,
                                         onPlay: _playAll,
                                         onSearch: _toggleSearch,
                                         onSort: () => _showSortSheet(context),
@@ -1843,6 +1868,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               subtitle: stickySubtitle,
                               canPlay: _playbackQueueNow().isNotEmpty &&
                                   !_isStartingPlayback,
+                              starting: _isStartingPlayback,
                               onPlay: _playAll,
                               onSearch: _toggleSearch,
                               onSort: () => _showSortSheet(context),
@@ -3025,6 +3051,7 @@ class ListStickyBar extends StatelessWidget {
     required this.onSort,
     required this.selectEnabled,
     required this.onSelect,
+    this.starting = false,
     this.flatTop = false,
     this.topRadiusOverride,
     this.showSelect = true,
@@ -3038,6 +3065,11 @@ class ListStickyBar extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool canPlay;
+
+  /// 起播中（弱网下 playSong 可能挂起 40~80s）。为真时播放键换成白色
+  /// 转圈、置为非激活底色且不可点，让用户明确知道「点了、正在起播」。
+  final bool starting;
+
   final VoidCallback onPlay;
   final VoidCallback onSearch;
   final VoidCallback onSort;
@@ -3138,25 +3170,37 @@ class ListStickyBar extends StatelessWidget {
           : Row(
               children: [
                 Material(
-                  color: canPlay
+                  // 起播中沿用非激活底色（不再用主色实心），与禁用态一致；
+                  // canPlay 由页面保证在起播中为 false，这里再兜一层。
+                  color: canPlay && !starting
                       ? colorScheme.primary
                       : colorScheme.primary.withValues(alpha: .38),
                   shape: const CircleBorder(),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: canPlay ? onPlay : null,
-                    mouseCursor: canPlay
+                    onTap: canPlay && !starting ? onPlay : null,
+                    mouseCursor: canPlay && !starting
                         ? SystemMouseCursors.click
                         : SystemMouseCursors.basic,
                     customBorder: const CircleBorder(),
-                    child: const SizedBox.square(
+                    child: SizedBox.square(
                       dimension: 40,
                       child: Center(
-                        child: Icon(
-                          Icons.play_arrow_rounded,
-                          size: 24,
-                          color: Colors.white,
-                        ),
+                        // 起播中把播放图标换成 24px 转圈：外层仍是 40px 圆形
+                        // 容器且尺寸不变，图标↔转圈切换不会引起布局跳动。
+                        child: starting
+                            ? const SizedBox.square(
+                                dimension: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.play_arrow_rounded,
+                                size: 24,
+                                color: Colors.white,
+                              ),
                       ),
                     ),
                   ),

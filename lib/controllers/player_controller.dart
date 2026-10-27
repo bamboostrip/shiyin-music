@@ -775,6 +775,16 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _sleepFinishCurrentSongOption = false;
   String? errorMessage;
 
+  /// 控制器最近一次播放失败已弹出（或即将弹出）的友好 Toast 文案。
+  ///
+  /// [errorMessage] 保存的是原始异常（`error.toString()`），页面层无法据此
+  /// 判断控制器是否已经给出「《歌名》暂无可播放音源」这类友好提示；若页面
+  /// 再用原始异常弹一次 Toast，单例 Toast 会把友好文案直接盖掉。
+  /// 本字段由 `_registerPlaybackFailure` 等失败收尾写入，页面（如歌单页
+  /// `_showPlaybackErrorIfNeeded`）据此跳过重复提示；每轮 playSong 起播时
+  /// 清空，成功起播后保持为 null。
+  String? lastPlaybackFailureToast;
+
   /// 曲末跳过预算耗尽标记：与 [errorMessage] 同设不同命。
   ///
   /// 耗尽态沿用 errorMessage 做移动端持久提示，但它不是“可重试的网络错误”——

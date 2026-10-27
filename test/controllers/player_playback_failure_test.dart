@@ -376,6 +376,8 @@ void main() {
       await tester.pump();
 
       expect(find.text('《${song.title}》暂无可播放音源'), findsOneWidget);
+      // 友好 Toast 同时记录在公开字段里：页面层据此避免重复弹原始异常。
+      expect(controller.lastPlaybackFailureToast, contains('暂无可播放音源'));
 
       controller.dispose();
       fakeAudioPlayer.disposeStreams();
@@ -405,6 +407,37 @@ void main() {
 
       // 验证提示连续多首播放失败已停止播放
       expect(find.text('连续多首歌曲播放失败，已停止播放'), findsOneWidget);
+      expect(
+        controller.lastPlaybackFailureToast,
+        '连续多首歌曲播放失败，已停止播放',
+      );
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('成功起播后清空上一轮的友好失败提示记录', (tester) async {
+      await pumpToastHost(tester);
+
+      final song = _song(1);
+      controller.queue = [song];
+      handler.loadError = Exception('Single song failed');
+
+      // 先失败一次：控制器应记录刚弹过的友好提示（errorMessage 仍是原始异常）。
+      await controller.playSong(song, isRetry: true);
+      await tester.pump();
+      expect(controller.errorMessage, isNotNull);
+      expect(controller.lastPlaybackFailureToast, contains('暂无可播放音源'));
+
+      // 同一首恢复可播：新一轮 playSong 起播时必须清空上一轮的记录，
+      // 否则页面会把上一轮的友好提示误当成这一轮的失败去重依据。
+      handler.loadError = null;
+      await controller.playSong(song);
+      await tester.pump();
+
+      expect(controller.errorMessage, isNull);
+      expect(controller.lastPlaybackFailureToast, isNull);
 
       controller.dispose();
       fakeAudioPlayer.disposeStreams();

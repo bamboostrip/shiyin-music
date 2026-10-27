@@ -2,9 +2,14 @@
 // _isStartingPlayback / _playFromVisibleQueue / _showPlaybackErrorIfNeeded）：
 // 1. 播放全部防连点：起播未完成时重复触发只调一次 playSong，按钮同时置灰；
 // 2. 播放失败 Toast：起播结束后 player.errorMessage 非空才提示，且剥掉
-//    Exception / Bad state 前缀；成功保持静默；
+//    Exception / Bad state / ApiException(状态码) / DioException 前缀；成功静默；
 // 3. 单曲行点击与播放全部走同一 helper：失败同样有反馈，队列为可见列表快照；
-// 4. 后台补队列判据：起播歌已切走（不在当前歌、也不在队列）时不得 replaceQueue。
+// 4. 后台补队列判据：起播歌已切走（不在当前歌、也不在队列）时不得 replaceQueue；
+// 5. M1 起播态反馈：起播挂起时粘性条播放键换成白色转圈（40px 容器内 24px），
+//    不可点也不会二次起播，完成/失败后恢复播放图标；
+// 6. m4 补队列时机：后台补全在 playSong 之前就触发（弱网起播挂起期间已在补）；
+// 7. m1 失败提示去重：控制器 lastPlaybackFailureToast 非空（已弹友好 Toast）
+//    时页面不再用 errorMessage 里的原始异常盖掉它；该字段为空才由页面兜底。
 //
 // 说明：不引入真实网络/音频——PlayerController 用既有 Fake 模式，
 // MusicApi 用内存假实现。
@@ -60,6 +65,11 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   String? errorMessage;
 
+  /// 控制器最近一次失败已弹出的友好 Toast 文案；语义与真实控制器一致，
+  /// 页面据此跳过重复提示，避免原始异常把友好文案盖掉。
+  @override
+  String? lastPlaybackFailureToast;
+
   @override
   final ValueNotifier<Duration> positionListenable = ValueNotifier(
     Duration.zero,
@@ -79,6 +89,10 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   /// 非 null 时模拟起播失败：playSong 结束前写入 errorMessage。
   String? playFailureMessage;
 
+  /// 非 null 时模拟控制器已弹过友好失败 Toast：playSong 结束前写入
+  /// [lastPlaybackFailureToast]（errorMessage 仍保留原始异常）。
+  String? playFailureToast;
+
   @override
   Future<void> playSong(
     Song song, {
@@ -89,6 +103,9 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
     bool preservePersonalFmSession = false,
   }) async {
     playSongCalls++;
+    // 与真实控制器一致：每轮起播先清空上一轮的错误与友好提示记录。
+    errorMessage = null;
+    lastPlaybackFailureToast = null;
     final pending = pendingPlay;
     if (pending != null) await pending.future;
     lastPlayedSong = song;
@@ -98,6 +115,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
       this.queue = List<Song>.of(queue);
     }
     errorMessage = playFailureMessage;
+    lastPlaybackFailureToast = playFailureToast;
     notifyListeners();
   }
 
@@ -209,6 +227,12 @@ Finder _playAllButton() => find.descendant(
   matching: find.byIcon(Icons.play_arrow_rounded),
 );
 
+/// 起播中的白色转圈（占据播放键位置，图标被替换）。
+Finder _stickyPlaySpinner() => find.descendant(
+  of: find.byType(ListStickyBar),
+  matching: find.byType(CircularProgressIndicator),
+);
+
 /// 清掉错误 Toast 的静态状态与自动关闭计时器，避免跨用例串扰
 /// （flutter_test 在用例结束时有未完成 Timer 会直接判失败）。
 Future<void> _drainToast(WidgetTester tester) async {
@@ -315,9 +339,35 @@ void main() {
       expect(formatPlaybackError('Exception:   多余空格也去掉'), '多余空格也去掉');
     });
 
-    test('无异常前缀时原样返回；前缀后为空时回退原文', () {
+    test('无异常前缀时原样返回；前缀后为空时回退通用文案', () {
       expect(formatPlaybackError('音频地址无效'), '音频地址无效');
-      expect(formatPlaybackError('Exception:'), 'Exception:');
+      // 只有前缀没有正文：给通用提示，不再把原始前缀抛给用户。
+      expect(formatPlaybackError('Exception:'), '播放失败，请稍后重试');
+    });
+
+    test('剥离 ApiException(状态码) 与 DioException 前缀', () {
+      // ApiException.toString() => 'ApiException($statusCode): $message'
+      expect(formatPlaybackError('ApiException(500): 服务异常'), '服务异常');
+      expect(formatPlaybackError('ApiException(401): 登录已过期'), '登录已过期');
+      // 状态码可能为 null（本地校验失败等）。
+      expect(formatPlaybackError('ApiException(null): 参数错误'), '参数错误');
+      // DioException.toString() => 'DioException [type]: message'
+      expect(
+        formatPlaybackError('DioException [connectionError]: 网络连接失败'),
+        '网络连接失败',
+      );
+    });
+
+    test('多层前缀逐层剥离；剥离后无正文时回退通用文案', () {
+      expect(
+        formatPlaybackError('Exception: ApiException(500): 服务异常'),
+        '服务异常',
+      );
+      expect(formatPlaybackError('ApiException(500):'), '播放失败，请稍后重试');
+      expect(
+        formatPlaybackError('DioException [unknown]:'),
+        '播放失败，请稍后重试',
+      );
     });
   });
 
@@ -368,13 +418,98 @@ void main() {
       await tester.pump();
       expect(player.playSongCalls, 1);
 
-      // 按钮此时 onTap 为 null：命中也不会第二次起播。
-      await tester.tap(_playAllButton(), warnIfMissed: false);
+      // 起播中播放图标已换成转圈，onTap 为 null：点同一位置也不再起播。
+      expect(_stickyPlaySpinner(), findsOneWidget);
+      await tester.tap(_stickyPlaySpinner(), warnIfMissed: false);
       await tester.pump();
       expect(player.playSongCalls, 1);
 
       gate.complete();
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('M1 起播态反馈', () {
+    testWidgets('起播挂起时播放键变白色转圈（尺寸不跳动），完成前不会二次起播', (tester) async {
+      final player = _FakePlayerController();
+      final gate = Completer<void>();
+      player.pendingPlay = gate;
+      await pumpStaticCollection(
+        tester,
+        player: player,
+        songs: _makeSongs(3),
+      );
+
+      await tester.tap(_playAllButton());
+      await tester.pump();
+
+      expect(player.playSongCalls, 1);
+      // 播放图标换成转圈：仍在 40px 圆形按钮内、转圈本身 24px，布局不跳动。
+      expect(_playAllButton(), findsNothing);
+      expect(_stickyPlaySpinner(), findsOneWidget);
+      final spinner = tester.widget<CircularProgressIndicator>(
+        _stickyPlaySpinner(),
+      );
+      expect(spinner.strokeWidth, 2.4);
+      expect(spinner.color, Colors.white);
+      expect(tester.getSize(_stickyPlaySpinner()), const Size.square(24));
+      final pill = find
+          .ancestor(
+            of: _stickyPlaySpinner(),
+            matching: find.byType(InkWell),
+          )
+          .first;
+      expect(tester.getSize(pill), const Size.square(40));
+
+      final bar = tester.widget<ListStickyBar>(find.byType(ListStickyBar));
+      expect(bar.starting, isTrue, reason: '起播中应把 starting 传给粘性条');
+      expect(
+        bar.canPlay,
+        isFalse,
+        reason: '起播期间「播放全部」按钮应呈禁用态，给出即时反馈',
+      );
+      // 二次触发（含再次命中禁用按钮）都不得再次起播。
+      bar.onPlay();
+      bar.onPlay();
+      await tester.tap(_stickyPlaySpinner(), warnIfMissed: false);
+      await tester.pump();
+      expect(player.playSongCalls, 1);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(_stickyPlaySpinner(), findsNothing);
+      expect(_playAllButton(), findsOneWidget);
+      expect(
+        tester.widget<ListStickyBar>(find.byType(ListStickyBar)).starting,
+        isFalse,
+        reason: '起播结束后应恢复播放图标',
+      );
+      expect(player.lastPlayedQueue, hasLength(3));
+    });
+
+    testWidgets('起播失败后转圈消失、播放图标恢复，并给出失败 Toast', (tester) async {
+      final player = _FakePlayerController()
+        ..playFailureMessage = 'Exception: 音频地址解析失败';
+      final gate = Completer<void>();
+      player.pendingPlay = gate;
+      await pumpStaticCollection(
+        tester,
+        player: player,
+        songs: _makeSongs(3),
+      );
+
+      await tester.tap(_playAllButton());
+      await tester.pump();
+      expect(_stickyPlaySpinner(), findsOneWidget);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(_stickyPlaySpinner(), findsNothing);
+      expect(_playAllButton(), findsOneWidget);
+      expect(find.text('播放失败：音频地址解析失败'), findsOneWidget);
+      await _drainToast(tester);
     });
   });
 
@@ -432,6 +567,77 @@ void main() {
       expect(find.text('播放失败：没有可播放的音源'), findsOneWidget);
       await _drainToast(tester);
     });
+
+    testWidgets('控制器已弹《歌名》友好提示时页面不再重复弹原始异常', (tester) async {
+      final player = _FakePlayerController()
+        // 控制器 errorMessage 存原始异常，另用 lastPlaybackFailureToast 记录
+        // 已弹过的友好文案——页面必须以后者为准去重，不能把前者盖上去。
+        ..playFailureMessage = 'Exception: 音频地址解析失败'
+        ..playFailureToast = '《歌曲 0》暂无可播放音源';
+      await pumpStaticCollection(
+        tester,
+        player: player,
+        songs: _makeSongs(3),
+      );
+
+      await tester.tap(_playAllButton());
+      await tester.pumpAndSettle();
+
+      expect(player.playSongCalls, 1);
+      expect(
+        find.textContaining('播放失败：'),
+        findsNothing,
+        reason: '控制器已给友好 Toast，页面不得再用原始异常盖掉',
+      );
+      expect(
+        find.textContaining('音频地址解析失败'),
+        findsNothing,
+        reason: '原始异常不得出现在页面 Toast 里',
+      );
+      await _drainToast(tester);
+    });
+
+    testWidgets('控制器连续失败停止提示时页面不再重复弹 Toast', (tester) async {
+      final player = _FakePlayerController()
+        ..playFailureMessage = 'Exception: 网络连接失败'
+        ..playFailureToast = '连续多首歌曲播放失败，已停止播放';
+      await pumpStaticCollection(
+        tester,
+        player: player,
+        songs: _makeSongs(3),
+      );
+
+      await tester.tap(_playAllButton());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('播放失败：'),
+        findsNothing,
+        reason: '连续失败停止的提示由控制器统一给出，页面不叠加',
+      );
+      await _drainToast(tester);
+    });
+
+    testWidgets('lastPlaybackFailureToast 为空时原始异常才弹页面 Toast，并剥掉 ApiException 状态码前缀', (
+      tester,
+    ) async {
+      final player = _FakePlayerController()
+        ..playFailureMessage = 'ApiException(500): 服务异常，请稍后重试';
+      // 未设置 playFailureToast：控制器没弹过友好提示（字段为 null），
+      // 页面需要用格式化后的原始异常兜底。
+      await pumpStaticCollection(
+        tester,
+        player: player,
+        songs: _makeSongs(3),
+      );
+
+      await tester.tap(_playAllButton());
+      await tester.pumpAndSettle();
+
+      expect(player.lastPlaybackFailureToast, isNull);
+      expect(find.text('播放失败：服务异常，请稍后重试'), findsOneWidget);
+      await _drainToast(tester);
+    });
   });
 
   group('后台补队列判据', () {
@@ -461,6 +667,44 @@ void main() {
       final api = await pumpPaginatedPlaylist(tester, player: player);
       api.expandGate = Completer<void>();
       await startPlayAllUntilExpansion(tester, api);
+
+      api.expandGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(player.replacedQueues, hasLength(1));
+      expect(player.replacedQueues.single, hasLength(120));
+    });
+
+    testWidgets('补队列在 playSong 完成前已触发，完成后按全量结果替换队列', (tester) async {
+      final player = _FakePlayerController();
+      final playGate = Completer<void>();
+      player.pendingPlay = playGate;
+      final api = await pumpPaginatedPlaylist(tester, player: player);
+      api.expandGate = Completer<void>();
+
+      await tester.tap(_playAllButton());
+      await tester.pump();
+      // 起播仍挂起（弱网下的 40~80s 窗口）：补队列此时就该已经发出，
+      // 而不是等 playSong 返回后才开始。
+      for (var i = 0; i < 50 && api.songsPageAllCalls < 2; i++) {
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      expect(player.playSongCalls, 1);
+      expect(
+        player.currentSong,
+        isNull,
+        reason: 'playSong 仍挂在 pendingPlay 上，尚未完成起播',
+      );
+      expect(
+        api.songsPageAllCalls,
+        2,
+        reason: '补队列应在 playSong 完成前就触发（恢复 P2 之前的立即语义）',
+      );
+
+      // 起播完成后再放行补全：结果应在起播歌仍是当前歌时替换队列。
+      playGate.complete();
+      await tester.pumpAndSettle();
+      expect(player.currentSong?.id, api.allSongs.first.id);
 
       api.expandGate!.complete();
       await tester.pumpAndSettle();
