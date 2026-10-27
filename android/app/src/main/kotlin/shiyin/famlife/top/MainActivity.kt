@@ -58,6 +58,11 @@ class MainActivity : AudioServiceActivity() {
     // 让解码循环立即结束,避免旧歌曲分析空跑占 CPU。
     @Volatile private var loudnessAnalysisCancelled: Boolean = false
     private var pendingPermissionResult: MethodChannel.Result? = null
+    // AI / 外部 DeepLink（shiyin://）：原生只负责搬运 intent，解析与执行
+    // 全在 Dart 侧（channel: shiyin_music/deep_link）。冷启动链接先暂存在
+    // 这里，等 Dart 主动 getInitialLink 时取走。
+    private var deepLinkChannel: MethodChannel? = null
+    private var initialDeepLink: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
@@ -65,6 +70,8 @@ class MainActivity : AudioServiceActivity() {
         private const val TAG_SUPER_LYRIC = "SuperLyricPublisher"
         private const val TAG_BLUETOOTH_LYRICS = "BluetoothLyrics"
         private const val TAG_LYRICS_OVERLAY = "LyricsOverlay"
+        private const val TAG_DEEP_LINK = "DeepLink"
+        private const val DEEP_LINK_SCHEME = "shiyin://"
     }
 
     // 桌面歌词 intent 的 fire-and-forget 拉起。用户点关闭后服务已 stopSelf，
@@ -110,8 +117,41 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
+    // 冷启动入口：仅"全新启动"（savedInstanceState == null）时把 VIEW intent
+    // 视为初始 DeepLink。Activity 被系统回收后重建会复用原始 intent，若也
+    // 暂存，Dart 侧前台补拉会把同一条链接再执行一次。
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) {
+            intent?.dataString?.let { data ->
+                if (data.startsWith(DEEP_LINK_SCHEME)) {
+                    initialDeepLink = data
+                }
+            }
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // AI / 外部 DeepLink（shiyin://）：VIEW intent 的 data 交给 Dart 解析
+        // 与执行。冷启动链接已在 onCreate 暂存，由 Dart 的 getInitialLink 取走
+        // （取走后置空，Dart 可在 Activity 重建后回前台时补拉一次）；热启动
+        // （singleTop 复用）走 onNewIntent 主动推送。
+        deepLinkChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "shiyin_music/deep_link"
+        ).apply {
+            setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getInitialLink" -> {
+                        result.success(initialDeepLink)
+                        initialDeepLink = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shiyin_music/screen")
             .setMethodCallHandler { call, result ->
@@ -1234,6 +1274,20 @@ class MainActivity : AudioServiceActivity() {
         } catch (e: Exception) {
             null
         }
+    }
+
+    // singleTop 热启动：Activity 复用，新的 VIEW intent 不再触发
+    // configureFlutterEngine，这里把链接转发给 Dart 侧处理。转发失败（引擎
+    // 已销毁/通道未注册）只记日志，不影响 Activity 生命周期。
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val data = intent.dataString ?: return
+        if (!data.startsWith(DEEP_LINK_SCHEME)) return
+        runCatching { deepLinkChannel?.invokeMethod("onDeepLink", data) }
+            .onFailure {
+                Log.w(TAG_DEEP_LINK, "DeepLink 转发失败，本次忽略: ${it.message}")
+            }
     }
 
     override fun onDestroy() {

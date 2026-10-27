@@ -52,6 +52,16 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- AI / 外部唤起 DeepLink（shiyin://）：VIEW + BROWSABLE 允许
+                 adb / 快捷方式 / AI 助手 / 车机通过 URL 唤起播放或播控，
+                 如 shiyin://play?keyword=晴天。解析与执行在 Dart 侧
+                 （lib/services/deep_link_service.dart），原生只搬运 intent。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="shiyin"/>
+            </intent-filter>
         </activity>
         <service
             android:name="com.ryanheise.audioservice.AudioService"

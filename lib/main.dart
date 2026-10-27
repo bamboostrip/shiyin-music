@@ -19,6 +19,7 @@ import 'core/api_client_interface.dart';
 import 'core/rust_api_client.dart';
 import 'services/app_log_service.dart';
 import 'services/cache_service.dart';
+import 'services/deep_link_service.dart';
 import 'services/desktop_system_integration.dart';
 import 'services/desktop_system_media.dart';
 import 'services/device_info_service.dart';
@@ -258,6 +259,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   late final ThemeController _theme;
   late final LocalMusicController _localMusic;
 
+  /// AI/外部 DeepLink（shiyin://）：仅 Android 原生侧注册，其余平台为 null。
+  DeepLinkService? _deepLink;
+
   /// 主窗标题随播放（仅桌面形态创建并绑定）。
   DesktopWindowTitleBinder? _windowTitleBinder;
 
@@ -375,6 +379,14 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     unawaited(NetworkMonitor.instance.start());
     _theme = widget.themeController;
     _auth.restore();
+    // AI/外部 DeepLink（shiyin://）：仅 Android 原生侧有 MethodChannel 实现，
+    // 桌面平台不注册。start() 内部异步读取冷启动链接、对缺原生实现/非法
+    // 链接静默，不阻塞启动；指令落地见 [_handleDeepLinkCommand]。
+    if (!kIsWeb && Platform.isAndroid) {
+      final deepLink = DeepLinkService(onCommand: _handleDeepLinkCommand);
+      _deepLink = deepLink;
+      unawaited(deepLink.start());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _downloads.initialize();
       // 封面磁盘缓存的裁剪放到首帧之后：全量扫目录要读大量 stat，放在启动前
@@ -404,6 +416,40 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     }
   }
 
+  /// DeepLink（shiyin://）指令落地：纯解析在 [DeepLinkService.parse]，这里
+  /// 只调搜索/播控 API；解析失败与执行异常均由 DeepLinkService 兜底静默。
+  ///
+  /// fork 没有 player.play()/pause()：用 isPlaying + togglePlay 表达幂等的
+  /// 播放/暂停（与 UI 播控按钮同一条路径，idle/completed 由 togglePlay 内部
+  /// 走完整播放流程）。
+  Future<void> _handleDeepLinkCommand(DeepLinkCommand command) async {
+    switch (command) {
+      case DeepLinkPlayCommand(:final query):
+        final songs = await _api.searchSongs(query, pageSize: 10);
+        if (songs.isEmpty) {
+          debugPrint('[DeepLink] 搜索无结果，忽略：$query');
+          return;
+        }
+        // 与上游一致：播放第一首并把整页结果作为队列。
+        return _player.playSong(songs.first, queue: songs);
+      case DeepLinkControlCommand(:final action):
+        switch (action) {
+          case DeepLinkControlAction.next:
+            return _player.next();
+          case DeepLinkControlAction.previous:
+            return _player.previous();
+          case DeepLinkControlAction.toggle:
+            return _player.togglePlay();
+          case DeepLinkControlAction.play:
+            if (_player.isPlaying) return;
+            return _player.togglePlay();
+          case DeepLinkControlAction.pause:
+            if (!_player.isPlaying) return;
+            return _player.togglePlay();
+        }
+    }
+  }
+
   /// 桌面下载完成通知：初始化 local_notifier（通知点击把主窗带到前台）
   /// 并注入下载控制器；移动端/车机不进入本路径。
   Future<void> _initDesktopNotifications() async {
@@ -423,6 +469,8 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     _windowTitleBinder?.detach();
     // 摘除通知卡片自定义按钮的桥接与监听，避免悬空调用已销毁控制器。
     widget.audioHandler.detachNotificationActions();
+    // 摘除 DeepLink 原生回调：销毁后到达的链接直接丢弃。
+    _deepLink?.dispose();
     _auth.removeListener(_refreshNotificationButtons);
     _player.removeListener(_onPlayerChangedForNotificationButtons);
     WidgetsBinding.instance.removeObserver(this);
@@ -471,6 +519,14 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         // 且副作用仅在桌面歌词开启时生效；若这里加开关门槛，后台关闭歌词后
         // _isAppForeground 会滞留为 false，重新开启歌词时弹窗遮挡前台应用。
         _player.setAppForeground(true);
+        // DeepLink 补拉：Android 上 Activity 被回收重建而 Dart 引擎仍存活
+        // （后台播放场景）时，新的 MainActivity 会把 VIEW intent 暂存到原生
+        // 侧，但 Dart 初始化已完成、不会再自动拉取；回前台时补一次（原生
+        // 取走后置空，重复调用幂等，不会重复执行同一条链接）。
+        final deepLink = _deepLink;
+        if (deepLink != null) {
+          unawaited(deepLink.requestInitialLink());
+        }
       // inactive/hidden 是瞬时失焦（下拉通知栏、权限弹窗、分屏失焦等，
       // 应用仍可见），不能当"回桌面"处理——否则悬浮窗会弹到应用之上。
       // 真正退后台（Home/切其他应用/锁屏）必经 paused，在这里统一触发。
