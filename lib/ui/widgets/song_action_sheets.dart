@@ -10,6 +10,7 @@ import '../../models/music_models.dart';
 import '../form_factor.dart';
 import 'artwork.dart';
 import 'desktop_anchored_menu.dart';
+import 'song_share.dart';
 import 'toast.dart';
 
 class SongSheetAction {
@@ -206,6 +207,17 @@ Future<void> showSongActionSheet({
                           ),
                         ],
                       ),
+                    ),
+                    // 分享：先关弹窗再写剪贴板/Toast —— 不等关闭动画结束才弹提示，
+                    // 提示挂在根 Overlay 上不会被弹窗退场盖住。
+                    IconButton(
+                      tooltip: '分享歌曲',
+                      icon: const Icon(Icons.share_outlined),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        copySongShareText(song);
+                      },
                     ),
                   ],
                 ),
@@ -796,6 +808,18 @@ Widget _buildCarActionDialogContent(
                   ],
                 ),
               ),
+              // 车机头部同样提供分享入口：先关左侧滑入弹窗再复制，
+              // 与移动端/桌面共用 copySongShareText 的统一文案与提示。
+              IconButton(
+                tooltip: '分享歌曲',
+                icon: const Icon(Icons.share_outlined),
+                visualDensity: VisualDensity.compact,
+                color: colorScheme.onSurfaceVariant,
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  copySongShareText(song);
+                },
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -986,6 +1010,20 @@ class _DesktopSongMenuHeader extends StatelessWidget {
               ],
             ),
           ),
+          // 分享：先关菜单再写剪贴板/Toast（菜单 route 退场期间提示不与之竞争）；
+          // 原「复制歌曲信息」入口已并入此处，桌面菜单只保留这一个分享入口。
+          IconButton(
+            tooltip: '分享歌曲',
+            icon: const Icon(Icons.share_outlined, size: 18),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            color: colorScheme.onSurfaceVariant,
+            onPressed: () {
+              Navigator.of(context).pop();
+              copySongShareText(song);
+            },
+          ),
         ],
       ),
     );
@@ -1070,45 +1108,9 @@ class _DesktopSongActionMenuPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // 顶部紧凑歌曲信息（PC 上下文菜单规范：无关闭按钮，
-            // 点击菜单外任意处/Esc 即关闭，见 showDesktopAnchoredMenu）
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: Row(
-                children: [
-                  Artwork(url: song.coverUrl, size: 32, borderRadius: 6),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            height: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          song.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                            fontSize: 11,
-                            height: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // 点击菜单外任意处/Esc 即关闭，见 showDesktopAnchoredMenu）。
+            // 居中兜底弹窗与锚定级联菜单共用同一头部，分享入口只此一处。
+            _DesktopSongMenuHeader(song: song),
             Divider(
               height: 1,
               thickness: 1,

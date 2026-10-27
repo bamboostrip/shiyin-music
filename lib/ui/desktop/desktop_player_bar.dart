@@ -935,15 +935,9 @@ class _SongMoreButtonState extends State<SongMoreButton> {
             }
           },
         ),
-      SongSheetAction(
-        icon: Icons.copy_rounded,
-        title: '复制歌曲信息',
-        onTap: () async {
-          final text = '${s.title} - ${s.artist}';
-          await Clipboard.setData(ClipboardData(text: text));
-          Toast.success('已复制歌曲信息');
-        },
-      ),
+      // 原「复制歌曲信息」列表项已合并为菜单头部「分享歌曲」入口
+      // （文案/剪贴板/Toast 统一走 song_share.dart 的 copySongShareText），
+      // 这里不再重复提供列表项，避免同一张菜单出现两个语义重复入口。
     ];
 
     await showSongActionSheet(

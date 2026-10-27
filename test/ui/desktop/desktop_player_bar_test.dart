@@ -12,6 +12,7 @@ import 'package:shiyin_music/ui/desktop/player_bar_widgets.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 import 'package:shiyin_music/ui/widgets/artwork.dart';
 import 'package:shiyin_music/ui/widgets/marquee_text.dart';
+import 'package:shiyin_music/ui/widgets/song_share.dart';
 
 class _FakeDownloadController extends ChangeNotifier implements DownloadController {
   bool downloaded = false;
@@ -814,7 +815,10 @@ void main() {
       expect(find.text('定时播放'), findsOneWidget);
       expect(find.text('下载'), findsOneWidget);
       expect(find.text('查看歌手'), findsOneWidget);
-      expect(find.text('复制歌曲信息'), findsOneWidget);
+      // 原「复制歌曲信息」列表项已合并为菜单头部「分享歌曲」单入口。
+      expect(find.text('复制歌曲信息'), findsNothing);
+      expect(find.byTooltip('分享歌曲'), findsOneWidget);
+      expect(find.byIcon(Icons.share_outlined), findsOneWidget);
     });
 
     testWidgets('点击更多菜单中的"试听高潮"调用 player.playClimaxPreview', (tester) async {
@@ -954,7 +958,7 @@ void main() {
       expect(find.text('到点立即暂停'), findsOneWidget);
     });
 
-    testWidgets('点击更多菜单中的"复制歌曲信息"写入剪贴板', (tester) async {
+    testWidgets('点击更多菜单头部的"分享歌曲"写入统一分享文案', (tester) async {
       debugDesktopFormFactorOverride = true;
       addTearDown(() => debugDesktopFormFactorOverride = null);
 
@@ -981,11 +985,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('desktop_song_more_button')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('复制歌曲信息'));
+      await tester.tap(find.byTooltip('分享歌曲'));
       await tester.pump(const Duration(milliseconds: 150));
       await tester.pump();
 
-      expect(copiedText, '测试歌曲 - 测试歌手');
+      // 与移动端/车机共用 song_share.dart 的统一文案（含「来自 时音」品牌行）。
+      expect(copiedText, buildSongShareText(_song));
+      expect(copiedText, contains('来自 时音'));
     });
   });
 
