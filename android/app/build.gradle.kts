@@ -41,8 +41,31 @@ android {
 
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "shiyin.famlife.top"
+        // 渠道定制包名：`-PcustomPackageName=com.xxx.yyy` 可打出独立
+        // applicationId 的渠道包（Flutter 侧等价传
+        // `--android-project-arg=customPackageName=com.xxx.yyy`），缺省仍为
+        // 官方包名 shiyin.famlife.top。namespace 与 Kotlin 包名（源码目录
+        // src/main/kotlin/shiyin/famlife/top）保持不变——它们只决定 R/
+        // BuildConfig 生成与 Manifest 合并的类路径，与安装身份无关。
+        //
+        // 注意：自定义 applicationId 等于「另一个独立应用」：
+        // 1) 数据隔离：SharedPreferences/数据库/应用私有目录均按 applicationId
+        //    分目录，与原版互不可见（用户需重新登录、重新扫描本地音乐）；
+        // 2) 应用内更新隔离：README/Release 里的官方包 applicationId 仍是
+        //    shiyin.famlife.top，自定义包无法被官方 APK 覆盖升级（同签名会
+        //    并存成两个「时音」，不同签名直接安装失败），必须按渠道自行发版，
+        //    并在该渠道包内关闭应用内更新检查；
+        // 3) 其余随包名走的项已自动跟随或与包名无关：FileProvider authority
+        //    是 `${applicationId}.fileprovider`（Manifest 占位符自动跟随），
+        //    MainActivity 里 `"$packageName.fileprovider"` 取运行时包名；
+        //    LyricsOverlayService 的 ACTION_* 是进程内广播 action 名（Intent
+        //    已用 setPackage(packageName) 限定同进程），不按包名解析，保持原样。
+        //    传入值需是合法 Android applicationId（字母/数字/下划线/点），格式
+        //    错误由 AGP 直接报错。
+        val customPkg =
+            (project.findProperty("customPackageName") as? String)?.trim()
+        applicationId =
+            if (!customPkg.isNullOrEmpty()) customPkg else "shiyin.famlife.top"
         // You may update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // 车载歌词依赖 SuperLyricApi 3.4 声明 minSdk 26，原 flutter.minSdkVersion(24) 会在 Manifest 合并失败
