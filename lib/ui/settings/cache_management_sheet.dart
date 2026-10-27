@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
@@ -242,6 +243,12 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
           size: _formatSize(_downloadSize),
           onClear: null, // 下载文件用户主动管理，不提供一键清理
         ),
+        if (widget.downloads != null) ...[
+          const SizedBox(height: 10),
+          // 下载存储目录信息块：只展示路径 + 复制；「更改目录 / 恢复默认」
+          // 不搬上游入口（fork 桌面设置已有等价项，避免双入口）。
+          DownloadDirInfo(downloads: widget.downloads!),
+        ],
         const SizedBox(height: 10),
         CacheItem(
           icon: Icons.cached_rounded,
@@ -405,16 +412,189 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
     );
 
     if (widget.isDialog) {
-      return content;
+      // 桌面居中 Dialog 形态：桌面窗口可缩到 360×520，新增「下载存储目录」
+      // 信息块后内容可能超过可用高度。SingleChildScrollView 高约束下会
+      // 收缩到内容高度、仅在超高时滚动——正常窗口视觉不变，小窗口不再
+      // RenderFlex 溢出（弹层形态同样可滚动，两条路径口径一致）。
+      return SingleChildScrollView(child: content);
     }
 
     // 底部弹窗形态：内容可达 500+ dp（四项缓存 + 上限行），横屏/小屏设备
-    // 可用高度不足会 RenderFlex 溢出，改为可滚动（对话框形态高度不受限，
-    // 维持原布局）。
+    // 可用高度不足会 RenderFlex 溢出，改为可滚动（与 Dialog 形态同款兜底）。
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
         child: SingleChildScrollView(child: content),
+      ),
+    );
+  }
+}
+
+/// 「下载存储目录」信息块。
+///
+/// 展示当前实际生效的下载目录绝对路径；用户自定义目录时加「(自定义)」
+/// 标记；提供一键复制（剪贴板 + Toast）。路径解析失败静默降级为
+/// 「暂不可用」，不影响弹层其余内容。
+///
+/// 抽成独立 StatefulWidget 便于单独单测（缓存管理弹层直接复用）；
+/// [DownloadController.getDownloadDirPath] 会触发目录创建，因此只在
+/// 本块挂载时解析一次，不在弹层主体里重复请求。
+class DownloadDirInfo extends StatefulWidget {
+  const DownloadDirInfo({super.key, required this.downloads});
+
+  final DownloadController downloads;
+
+  @override
+  State<DownloadDirInfo> createState() => _DownloadDirInfoState();
+}
+
+class _DownloadDirInfoState extends State<DownloadDirInfo> {
+  String? _path;
+  String? _customDir;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final path = await widget.downloads.getDownloadDirPath();
+      final custom = await widget.downloads.getCustomDownloadDir();
+      if (!mounted) return;
+      setState(() {
+        _path = path;
+        _customDir = custom;
+        _failed = false;
+      });
+    } catch (_) {
+      // 目录不可用（卷未挂载、权限不足、path_provider 失败等）：静默占位。
+      if (!mounted) return;
+      setState(() {
+        _path = null;
+        _customDir = null;
+        _failed = true;
+      });
+    }
+  }
+
+  /// 是否为用户自定义目录（空串/空白视为跟随默认）。
+  bool get _isCustom => (_customDir ?? '').trim().isNotEmpty;
+
+  Future<void> _copyPath() async {
+    final path = _path;
+    if (path == null || path.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: path));
+    Toast.success('下载目录路径已复制');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final pathText = _failed ? '暂不可用' : (_path ?? '正在获取路径…');
+    final canCopy = _path != null && _path!.isNotEmpty && !_failed;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .10)
+              : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: isDark ? .22 : .10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.folder_outlined,
+              size: 20,
+              color: colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '下载存储目录',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    if (_isCustom) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '(自定义)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                // 路径可长按选中（复制按钮兜底给不熟悉长按的用户）。
+                SelectableText(
+                  pathText,
+                  maxLines: 2,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (canCopy)
+            IconButton(
+              tooltip: '复制路径',
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              color: colorScheme.onSurfaceVariant.withValues(alpha: .7),
+              onPressed: _copyPath,
+              icon: const Icon(Icons.copy_rounded),
+            ),
+        ],
       ),
     );
   }

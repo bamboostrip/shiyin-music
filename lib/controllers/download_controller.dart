@@ -443,6 +443,16 @@ class DownloadController extends ChangeNotifier {
   /// 获取播放缓存目录大小（字节）。
   Future<int> getPlayCacheDirSize() => _service.getPlayCacheDirSize();
 
+  /// 当前实际生效的下载目录绝对路径（缓存管理弹层展示用）。
+  Future<String> getDownloadDirPath() async {
+    final dir = await _service.downloadDir();
+    return dir.path;
+  }
+
+  /// 用户自定义的下载目录；未配置（跟随系统默认）返回 null。
+  Future<String?> getCustomDownloadDir() =>
+      DownloadService.customDownloadDirOverride();
+
   // ===== 下载操作 =====
 
   /// 用户主动下载歌曲。
