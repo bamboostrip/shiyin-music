@@ -108,9 +108,21 @@ class DownloadController extends ChangeNotifier {
   static const _playCacheIndexKey = 'shiyin_play_cache_index';
   static const _playCacheLimitKey = 'settings.play_cache_limit';
 
-  final Map<String, DownloadEntry> _downloads = {}; // key = hash
+  /// 归一化 hash（下载识别键）：`trim + 小写`。
+  ///
+  /// 同一首歌在不同入口（歌单导入、搜索、云盘、历史恢复）返回的 hash
+  /// 大小写/首尾空格可能不一致；旧实现按原始 hash 存/查索引，导致
+  /// 「明明已下载却被判未下载而走网络」（歌单导入链路
+  /// `playlist_import_service` 已用小写 hash 比对）。Song.hash 本身必须
+  /// 保留原始值（播放地址等接口靠它请求），因此只归一索引键，不改 Song。
+  static String _normalizeHash(String hash) => hash.trim().toLowerCase();
+
+  /// 歌曲在下载索引里的 key（见 [_normalizeHash]）。
+  String _downloadKey(Song song) => _normalizeHash(song.hash);
+
+  final Map<String, DownloadEntry> _downloads = {}; // key = 归一 hash
   final Map<String, PlayCacheEntry> _playCache = {}; // key = hash_quality
-  // 同曲索引：hash -> cacheKey 集合，避免 AnyQuality 查询时 O(n) 全表
+  // 同曲索引：归一 hash -> cacheKey 集合，避免 AnyQuality 查询时 O(n) 全表
   // 扫描 + 逐条 existsSync。内存增量仅为 key 字符串引用复用
   // （Song/路径对象本身不复制），千条约几十 KB，车机可忽略。
   final Map<String, Set<String>> _playCacheByHash = {};
@@ -185,6 +197,11 @@ class DownloadController extends ChangeNotifier {
     // 统一交给 [reconcileDownloads]（加载即裁会误删"改名迁移只重写了
     // 索引、文件仍在旧目录"的错位条目）；仅同 hash 重复条目在加载时
     // 择优（见循环内注释），避免丢失条目顶掉好条目。
+    //
+    // 旧索引兼容（加载时迁移）：持久化 JSON 只存 Song 对象、不存 map key，
+    // 索引键始终由 Song.hash 派生。这里插入时统一走 [_downloadKey]，旧版本
+    // 以原始大小写写入的条目会被归一到同一 key（幂等，无需回写 prefs，
+    // 也不改写 Song.hash 原始值——播放地址接口仍按原始 hash 请求）。
     var dropped = 0;
     for (final item in decoded) {
       if (item is! Map<String, dynamic>) {
@@ -198,10 +215,11 @@ class DownloadController extends ChangeNotifier {
         final quality = AudioQuality.fromApiValue(item['quality'] as String?);
         final filePath = item['filePath'] as String?;
         if (filePath == null) throw const FormatException('no path');
+        final key = _downloadKey(song);
         // 同 hash 重复条目（历史索引里同一首歌以不同音质记了两条）：
         // 优先保留文件仍在磁盘上的那条——"后条覆盖前条"会让丢失条目
         // 顶掉好条目，随后被对账清掉，下载凭空消失。
-        final existing = _downloads[song.hash];
+        final existing = _downloads[key];
         if (existing?.filePath != null) {
           final newPathExists = await File(filePath).exists();
           final oldPathExists = await File(existing!.filePath!).exists();
@@ -211,7 +229,7 @@ class DownloadController extends ChangeNotifier {
           }
         }
         final downloadedAtStr = item['downloadedAt'] as String?;
-        _downloads[song.hash] = DownloadEntry(
+        _downloads[key] = DownloadEntry(
           song: song,
           quality: quality,
           status: DownloadStatus.downloaded,
@@ -284,18 +302,21 @@ class DownloadController extends ChangeNotifier {
   }
 
   void _indexPlayCacheEntry(PlayCacheEntry entry) {
+    // 同曲索引按归一 hash 建表：查询侧（localPathForAnyQuality）即使拿到
+    // 大小写不同的 hash 也能命中同一首歌的缓存候选。
     final set = _playCacheByHash.putIfAbsent(
-      entry.song.hash,
+      _normalizeHash(entry.song.hash),
       () => <String>{},
     );
     set.add(entry.cacheKey);
   }
 
   void _unindexPlayCacheEntry(PlayCacheEntry entry) {
-    final set = _playCacheByHash[entry.song.hash];
+    final hashKey = _normalizeHash(entry.song.hash);
+    final set = _playCacheByHash[hashKey];
     if (set == null) return;
     set.remove(entry.cacheKey);
-    if (set.isEmpty) _playCacheByHash.remove(entry.song.hash);
+    if (set.isEmpty) _playCacheByHash.remove(hashKey);
   }
 
   Future<void> _persistDownloads() async {
@@ -334,13 +355,18 @@ class DownloadController extends ChangeNotifier {
   // ===== 查询 =====
 
   /// 返回本地文件路径：优先已下载 > 播放缓存（按当前音质）。无则 null。
+  ///
+  /// 下载识别键归一（[_downloadKey]，大小写/首尾空格不敏感）；文件存在性
+  /// 校验保持同步 `existsSync`（切歌主路径，不能为一次磁盘探测引入异步）。
   String? localPathFor(Song song, AudioQuality quality) {
     final key = _service.cacheKeyFor(song, quality);
-    // 优先已下载（同音质）
-    final download = _downloads[song.hash];
+    // 优先已下载（同音质）：归一 key 命中后按 DownloadEntry 记录的
+    // quality 判定同音质（旧实现用 cacheKey 字符串相等，隐含要求 hash
+    // 原文完全一致，大小写漂移时会漏判）。
+    final download = _downloads[_downloadKey(song)];
     if (download?.status == DownloadStatus.downloaded &&
         download?.filePath != null &&
-        _service.cacheKeyFor(download!.song, download.quality) == key) {
+        download!.quality == quality) {
       if (File(download.filePath!).existsSync()) {
         return download.filePath;
       }
@@ -349,6 +375,20 @@ class DownloadController extends ChangeNotifier {
     final cache = _playCache[key];
     if (cache != null && File(cache.filePath).existsSync()) {
       return cache.filePath;
+    }
+    // 播放缓存 key 由 service 按「原始 hash + 音质」生成（文件命名相关，
+    // 不能改）。hash 大小写漂移时 cacheKey 不同，再经同曲索引找同音质
+    // 候选（同一首歌、同一音质）；不是当前音质的缓存留给 AnyQuality 降级。
+    final cacheKeys = _playCacheByHash[_normalizeHash(song.hash)];
+    if (cacheKeys != null) {
+      for (final cacheKey in cacheKeys) {
+        final entry = _playCache[cacheKey];
+        if (entry != null &&
+            entry.quality == quality &&
+            File(entry.filePath).existsSync()) {
+          return entry.filePath;
+        }
+      }
     }
     return null;
   }
@@ -363,15 +403,15 @@ class DownloadController extends ChangeNotifier {
       final exact = localPathFor(song, preferredQuality);
       if (exact != null) return exact;
     }
-    // 降级1：遍历同 hash 的已下载文件（不限音质）
-    final download = _downloads[song.hash];
+    // 降级1：遍历同 hash 的已下载文件（不限音质），key 归一后大小写不敏感
+    final download = _downloads[_downloadKey(song)];
     if (download?.status == DownloadStatus.downloaded &&
         download?.filePath != null &&
         File(download!.filePath!).existsSync()) {
       return download.filePath;
     }
     // 降级2：同曲索引取候选（通常 1 条），只做常数次 existsSync
-    final keys = _playCacheByHash[song.hash];
+    final keys = _playCacheByHash[_normalizeHash(song.hash)];
     if (keys != null) {
       for (final key in keys) {
         final entry = _playCache[key];
@@ -384,9 +424,9 @@ class DownloadController extends ChangeNotifier {
   }
 
   bool isDownloaded(Song song) =>
-      _downloads[song.hash]?.status == DownloadStatus.downloaded;
+      _downloads[_downloadKey(song)]?.status == DownloadStatus.downloaded;
 
-  DownloadEntry? entryFor(Song song) => _downloads[song.hash];
+  DownloadEntry? entryFor(Song song) => _downloads[_downloadKey(song)];
 
   List<Song> get downloadedSongs => _downloads.values
       .where((e) => e.status == DownloadStatus.downloaded)
@@ -407,9 +447,9 @@ class DownloadController extends ChangeNotifier {
 
   /// 用户主动下载歌曲。
   Future<void> download(Song song, AudioQuality quality) async {
-    final hash = song.hash;
+    final downloadKey = _downloadKey(song);
     final key = _service.cacheKeyFor(song, quality);
-    final existing = _downloads[hash];
+    final existing = _downloads[downloadKey];
     if (existing?.status == DownloadStatus.downloading) return;
     if (existing?.status == DownloadStatus.downloaded) return;
     // 同键下载任务已在途/排队（service 按 kind:cacheKey 去重，此处为
@@ -418,7 +458,7 @@ class DownloadController extends ChangeNotifier {
       return;
     }
 
-    _downloads[hash] = DownloadEntry(
+    _downloads[downloadKey] = DownloadEntry(
       song: song,
       quality: quality,
       status: DownloadStatus.downloading,
@@ -435,8 +475,10 @@ class DownloadController extends ChangeNotifier {
     } catch (error) {
       // 等待地址解析期间已被清空/取消（条目移除）：不再写回失败条目。
       // _transfer 内部自捕获不会抛到此处，能到这里只会是解析本身失败。
-      if (_downloads[hash]?.status != DownloadStatus.downloading) return;
-      _downloads[hash] = DownloadEntry(
+      if (_downloads[downloadKey]?.status != DownloadStatus.downloading) {
+        return;
+      }
+      _downloads[downloadKey] = DownloadEntry(
         song: song,
         quality: quality,
         status: DownloadStatus.failed,
@@ -457,9 +499,10 @@ class DownloadController extends ChangeNotifier {
     List<Song> songs,
     AudioQuality quality,
   ) async {
-    // 批次内按 hash 去重，避免同一首歌被重复下载。
+    // 批次内按归一 hash 去重，避免同一首歌（入口不同导致 hash 大小写
+    // 漂移）被重复下载。
     final seen = <String>{};
-    songs = songs.where((song) => seen.add(song.hash)).toList();
+    songs = songs.where((song) => seen.add(_downloadKey(song))).toList();
     const urlConcurrency = 4;
     var enqueued = 0;
     var skipped = 0;
@@ -482,15 +525,15 @@ class DownloadController extends ChangeNotifier {
     Future<void> worker() async {
       while (cursor < songs.length && gen == _generation && !_disposed) {
         final song = songs[cursor++];
-        final hash = song.hash;
-        final existing = _downloads[hash];
+        final downloadKey = _downloadKey(song);
+        final existing = _downloads[downloadKey];
         if (existing?.status == DownloadStatus.downloading ||
             existing?.status == DownloadStatus.downloaded) {
           skipped++;
           continue;
         }
 
-        _downloads[hash] = DownloadEntry(
+        _downloads[downloadKey] = DownloadEntry(
           song: song,
           quality: quality,
           status: DownloadStatus.downloading,
@@ -507,12 +550,12 @@ class DownloadController extends ChangeNotifier {
           // 静默中止，不写回条目；tracker 仍要结束计数以保守恒。
           if (_disposed ||
               gen != _generation ||
-              _downloads[hash]?.status != DownloadStatus.downloading) {
+              _downloads[downloadKey]?.status != DownloadStatus.downloading) {
             tracker?.trackFinished(succeeded: false);
             continue;
           }
           if (playUrl.url.isEmpty) {
-            _downloads[hash] = DownloadEntry(
+            _downloads[downloadKey] = DownloadEntry(
               song: song,
               quality: quality,
               status: DownloadStatus.failed,
@@ -536,11 +579,11 @@ class DownloadController extends ChangeNotifier {
         } catch (error) {
           if (_disposed ||
               gen != _generation ||
-              _downloads[hash]?.status != DownloadStatus.downloading) {
+              _downloads[downloadKey]?.status != DownloadStatus.downloading) {
             tracker?.trackFinished(succeeded: false);
             continue;
           }
-          _downloads[hash] = DownloadEntry(
+          _downloads[downloadKey] = DownloadEntry(
             song: song,
             quality: quality,
             status: DownloadStatus.failed,
@@ -577,7 +620,7 @@ class DownloadController extends ChangeNotifier {
     bool partOfBatch = false,
     BatchDownloadTracker? batchTracker,
   }) async {
-    final hash = song.hash;
+    final downloadKey = _downloadKey(song);
     // 代际快照：clearAll 后完成的传输直接丢弃，不复活条目
     final gen = _generation;
     var succeeded = false;
@@ -586,7 +629,7 @@ class DownloadController extends ChangeNotifier {
       // 此时不再发起传输，避免已清空的歌"复活"。守卫放 try 内，
       // finally 的桌面通知/tracker 记账仍恰好一次（单曲失败不弹、
       // 批次照常 trackFinished，计数守恒不破坏）。
-      if (_downloads[hash]?.status != DownloadStatus.downloading) {
+      if (_downloads[downloadKey]?.status != DownloadStatus.downloading) {
         return;
       }
       final path = await _service.download(
@@ -596,9 +639,9 @@ class DownloadController extends ChangeNotifier {
         onProgress: (received, total) {
           if (_disposed) return;
           final progress = total > 0 ? received / total : 0.0;
-          final entry = _downloads[hash];
+          final entry = _downloads[downloadKey];
           if (entry?.status == DownloadStatus.downloading) {
-            _downloads[hash] = entry!.copyWith(progress: progress);
+            _downloads[downloadKey] = entry!.copyWith(progress: progress);
             notifyListeners();
           }
         },
@@ -607,7 +650,7 @@ class DownloadController extends ChangeNotifier {
         debugPrint('[时音][download] 代际过期，丢弃传输结果: ${song.title}');
         return;
       }
-      _downloads[hash] = DownloadEntry(
+      _downloads[downloadKey] = DownloadEntry(
         song: song,
         quality: quality,
         status: DownloadStatus.downloaded,
@@ -625,11 +668,11 @@ class DownloadController extends ChangeNotifier {
       }
       if (error is DioException && error.type == DioExceptionType.cancel) {
         // 用户主动取消：保持移除状态，不写失败条目（否则“已取消”变“下载失败”）
-        _downloads.remove(hash);
+        _downloads.remove(downloadKey);
         notifyListeners();
         return;
       }
-      _downloads[hash] = DownloadEntry(
+      _downloads[downloadKey] = DownloadEntry(
         song: song,
         quality: quality,
         status: DownloadStatus.failed,
@@ -682,20 +725,21 @@ class DownloadController extends ChangeNotifier {
 
   /// 移除一条失败记录（从失败列表清除）。
   void removeFailed(Song song) {
-    final entry = _downloads[song.hash];
+    final key = _downloadKey(song);
+    final entry = _downloads[key];
     if (entry?.status != DownloadStatus.failed) return;
-    _downloads.remove(song.hash);
+    _downloads.remove(key);
     notifyListeners();
   }
 
   /// 取消下载。
   Future<void> cancelDownload(Song song) async {
-    final hash = song.hash;
-    final entry = _downloads[hash];
+    final downloadKey = _downloadKey(song);
+    final entry = _downloads[downloadKey];
     if (entry?.status != DownloadStatus.downloading) return;
     final key = _service.cacheKeyFor(song, entry!.quality);
     await _service.cancel(key);
-    _downloads.remove(hash);
+    _downloads.remove(downloadKey);
     notifyListeners();
   }
 
@@ -704,8 +748,8 @@ class DownloadController extends ChangeNotifier {
 
   /// 删除单个已下载歌曲。
   Future<void> deleteDownload(Song song) async {
-    final hash = song.hash;
-    final entry = _downloads[hash];
+    final key = _downloadKey(song);
+    final entry = _downloads[key];
     if (entry?.filePath != null) {
       if (_isPlayingFile(entry!.filePath!)) {
         // 在播文件删了会打断播放（代理后续 Range 404），保留条目待播完再删。
@@ -714,7 +758,7 @@ class DownloadController extends ChangeNotifier {
       }
       await _service.deleteFile(entry.filePath!);
     }
-    _downloads.remove(hash);
+    _downloads.remove(key);
     notifyListeners();
     await _persistDownloads();
   }
@@ -784,12 +828,14 @@ class DownloadController extends ChangeNotifier {
 
     var changed = false;
     var removed = 0;
-    // 快照遍历：搬移/移除结果先记账，循环后统一写回表
+    // 快照遍历：搬移/移除结果先记账，循环后统一写回表。
+    // 记账与表 key 同口径（归一 hash，见 [_downloadKey]）。
     final snapshot = List.of(_downloads.values);
-    final rewrites = <String, String>{}; // hash -> 磁盘上的真实路径
+    final rewrites = <String, String>{}; // 归一 hash -> 磁盘上的真实路径
     final drops = <String>{};
     for (final entry in snapshot) {
       if (entry.status != DownloadStatus.downloaded) continue;
+      final downloadKey = _downloadKey(entry.song);
       final path = entry.filePath;
       if (path == null || path.isEmpty) continue;
       final file = File(path);
@@ -805,7 +851,7 @@ class DownloadController extends ChangeNotifier {
             !_isPlayingFile(path)) {
           final moved = await _moveIntoDownloadDir(file, currentDir);
           if (moved != null) {
-            rewrites[entry.song.hash] = moved;
+            rewrites[downloadKey] = moved;
             changed = true;
           }
         }
@@ -816,7 +862,7 @@ class DownloadController extends ChangeNotifier {
       if (currentDir != null && name != null) {
         final candidate = File('${currentDir.path}/$name');
         if (await candidate.exists()) {
-          rewrites[entry.song.hash] = candidate.path;
+          rewrites[downloadKey] = candidate.path;
           changed = true;
           continue;
         }
@@ -838,7 +884,7 @@ class DownloadController extends ChangeNotifier {
           if (moved != null) resolved = moved;
           // 搬移失败（文件被占用等）：索引指向历史路径原地采用，仍可播
         }
-        rewrites[entry.song.hash] = resolved;
+        rewrites[downloadKey] = resolved;
         changed = true;
         continue;
       }
@@ -852,21 +898,23 @@ class DownloadController extends ChangeNotifier {
       //   全丢」）。目录在而文件不在才是可判定的「外部删除」。
       if (!canPrune) continue;
       if (!await file.parent.exists()) continue;
-      drops.add(entry.song.hash);
+      drops.add(downloadKey);
       removed++;
       changed = true;
     }
 
     if (!changed) return 0;
     for (final entry in snapshot) {
-      final hash = entry.song.hash;
+      final downloadKey = _downloadKey(entry.song);
       // 对账期间用户已对该条目发起删除/重下（表内对象已换）：以最新
       // 状态为准，不回写过期结论（如删掉刚重下的条目、复活刚删的）。
-      if (!identical(_downloads[hash], entry)) continue;
-      if (drops.contains(hash)) {
-        _downloads.remove(hash);
-      } else if (rewrites.containsKey(hash)) {
-        _downloads[hash] = entry.copyWith(filePath: rewrites[hash]);
+      if (!identical(_downloads[downloadKey], entry)) continue;
+      if (drops.contains(downloadKey)) {
+        _downloads.remove(downloadKey);
+      } else if (rewrites.containsKey(downloadKey)) {
+        _downloads[downloadKey] = entry.copyWith(
+          filePath: rewrites[downloadKey],
+        );
       }
     }
     debugPrint(
@@ -975,7 +1023,7 @@ class DownloadController extends ChangeNotifier {
     final key = _service.cacheKeyFor(song, quality);
     // 已有缓存、已下载/正在下载或在途缓存任务则跳过
     if (_playCache[key] != null) return;
-    final downloadStatus = _downloads[song.hash]?.status;
+    final downloadStatus = _downloads[_downloadKey(song)]?.status;
     if (downloadStatus == DownloadStatus.downloading ||
         downloadStatus == DownloadStatus.downloaded) {
       return;
