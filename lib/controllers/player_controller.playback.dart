@@ -122,7 +122,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _isLoadingPersonalFm = false;
       _personalFmRequestSerial++;
     }
-    final isSameSong = currentSong?.hash == song.hash;
+    // 同一首歌判定统一走身份：非空 hash 仍按 hash（行为与旧实现等价），
+    // 空 hash（云盘/边缘接口）退回音频 id/歌曲 id，避免两首不同的歌被
+    // 当成同一首而跳过「清歌词/清高亮/重装载」。
+    final isSameSong = _isSameSongIdentity(currentSong, song);
     if (!preserveClimax) {
       _climaxEndTime = null;
       climax = null;
@@ -216,7 +219,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       this.queue = [song];
     }
     if (playbackMode == PlaybackMode.shuffle) {
-      final songIndex = this.queue.indexWhere((item) => item.hash == song.hash);
+      // 随机起点统一走 currentIndex 的身份兜底：旧实现按 hash 内联查找，
+      // 无 hash 歌会命中队列第一首空 hash 歌（或 -1 → 落到 0），起点错位。
+      final songIndex = currentIndex;
       if (queueChanged || _shuffleQueue.length != this.queue.length) {
         _shuffleQueue.reset(
           this.queue.length,

@@ -23,16 +23,6 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
     return index >= 0 && index == queue.length - 1;
   }
 
-  String _songIdentity(Song song) {
-    if (song.hash.isNotEmpty) {
-      return 'hash:${song.hash}';
-    }
-    if (song.albumAudioId?.isNotEmpty == true) {
-      return 'audio:${song.albumAudioId}';
-    }
-    return song.id.isEmpty ? '' : 'id:${song.id}';
-  }
-
   @override
   bool _isSameQueue(List<Song> a, List<Song> b) {
     if (identical(a, b)) return true;

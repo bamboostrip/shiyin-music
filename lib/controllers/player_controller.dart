@@ -866,12 +866,75 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   MusicApi get api => _api;
 
+  /// 歌曲身份串：同一首歌在不同入口/接口返回里可能只有 hash 大小写差异，
+  /// 云盘等来源还可能没有 hash。优先级与 [currentIndex] 的身份兜底一致：
+  /// 非空 hash > 专辑音频 id > 歌曲 id；三者皆空返回空串（无法识别）。
+  String _songIdentity(Song song) {
+    if (song.hash.isNotEmpty) {
+      return 'hash:${song.hash}';
+    }
+    if (song.albumAudioId?.isNotEmpty == true) {
+      return 'audio:${song.albumAudioId}';
+    }
+    return song.id.isEmpty ? '' : 'id:${song.id}';
+  }
+
+  /// 两首歌是否同一首。
+  ///
+  /// hash 非空时仍按 hash 比较（与旧 `a.hash == b.hash` 逐字节等价，正常
+  /// 歌曲行为不变）；hash 为空时退回 [_songIdentity] 的专辑音频 id/歌曲
+  /// id，避免云盘/边缘接口的无 hash 歌被误判成同一首（旧实现两首空 hash
+  /// 歌恒等，切歌时不会清歌词/进度、`playSongKeepingQueue` 也会把不同歌
+  /// 当成当前歌而跳过重播）。
+  bool _isSameSongIdentity(Song? a, Song? b) {
+    if (a == null || b == null) return false;
+    if (identical(a, b)) return true;
+    return _songIdentity(a) == _songIdentity(b);
+  }
+
+  /// 当前歌曲在播放队列中的位置；不在队列返回 -1。
+  ///
+  /// 四段兜底（对齐上游 3.3.0，修复无 hash 歌曲定位丢失）：旧实现只按
+  /// hash 查找，云盘等 `hash == ''` 的歌恒定位到队列里第一首空 hash 歌
+  /// （或 -1），导致播放页队列高亮丢失、单曲循环/随机播放下上一首退化。
+  /// 1. `identical`：队列里就是当前 Song 实例（最可靠，优先命中）；
+  /// 2. 歌曲身份：hash 非空按 hash，否则专辑音频 id / 歌曲 id；
+  /// 3. hash 相等（身份段已覆盖，保留与上游一致的显式兜底）；
+  /// 4. 歌曲 id 相等。
+  ///
+  /// 全部是只读查找，不改变任何播放状态；正常歌曲（非空 hash）命中结果
+  /// 与旧实现一致（同 hash 唯一时）。
   int get currentIndex {
     final song = currentSong;
     if (song == null) {
       return -1;
     }
-    return queue.indexWhere((item) => item.hash == song.hash);
+    final identicalIndex = queue.indexWhere((item) => identical(item, song));
+    if (identicalIndex >= 0) {
+      return identicalIndex;
+    }
+    final identity = _songIdentity(song);
+    if (identity.isNotEmpty) {
+      final identityIndex = queue.indexWhere(
+        (item) => _songIdentity(item) == identity,
+      );
+      if (identityIndex >= 0) {
+        return identityIndex;
+      }
+    }
+    if (song.hash.isNotEmpty) {
+      final hashIndex = queue.indexWhere((item) => item.hash == song.hash);
+      if (hashIndex >= 0) {
+        return hashIndex;
+      }
+    }
+    if (song.id.isNotEmpty) {
+      final idIndex = queue.indexWhere((item) => item.id == song.id);
+      if (idIndex >= 0) {
+        return idIndex;
+      }
+    }
+    return -1;
   }
 
   int get activeLyricIndex =>

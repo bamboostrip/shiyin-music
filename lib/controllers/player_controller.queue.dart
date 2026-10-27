@@ -50,8 +50,9 @@ mixin _PlayerQueue on _PlayerControllerBase {
     List<Song>? fallbackQueue,
     Duration? initialPosition,
   }) async {
-    String keyOf(Song item) => item.hash.isNotEmpty ? item.hash : item.id;
-
+    // 队列定位/去重统一走歌曲身份：hash 非空按 hash（与旧 keyOf 等价），
+    // 空 hash 退回专辑音频 id/歌曲 id。旧 keyOf 在空 hash 且无 id 时让两首
+    // 不同的歌互相误判为同一首（点歌不重播 / 已在队列的判定失效）。
     if (queue.isEmpty) {
       final nextQueue = fallbackQueue != null && fallbackQueue.isNotEmpty
           ? List<Song>.of(fallbackQueue)
@@ -61,14 +62,16 @@ mixin _PlayerQueue on _PlayerControllerBase {
     }
 
     final current = currentSong;
-    if (current != null && keyOf(current) == keyOf(song)) {
+    if (current != null && _isSameSongIdentity(current, song)) {
       if (!isPlaying) {
         await togglePlay();
       }
       return;
     }
 
-    final existingIndex = queue.indexWhere((item) => keyOf(item) == keyOf(song));
+    final existingIndex = queue.indexWhere(
+      (item) => _isSameSongIdentity(item, song),
+    );
     if (existingIndex >= 0) {
       await playSong(song, queue: queue, initialPosition: initialPosition);
       return;
