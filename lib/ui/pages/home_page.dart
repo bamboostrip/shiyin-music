@@ -2849,11 +2849,18 @@ class _TopSongCard extends StatelessWidget {
   }
 }
 
-/// 首页「推荐歌曲」6 组横滑卡（酷狗 `/top/card`，上游 f230444）。
+/// 首页「推荐歌曲」6 组卡（酷狗 `/top/card`，上游 f230444）。
 ///
-/// 空数据不渲染；桌面宽窗（宿主为 tab 级 CustomScrollView）由 [AppHorizontalRail]
-/// 按内容宽度自适配横轨/网格，本体只需外包 SliverToBoxAdapter；车机 Column
-/// 宿主（asSlivers=false）返回普通盒子。
+/// 三种宿主形态，与「推荐歌单」/「新歌速递」同口径：
+/// - 桌面宽窗（asSlivers=true，宿主为 tab 级 CustomScrollView）：内容宽 ≥840
+///   时标题 + 懒构建 SliverGrid，封面随格宽撑满、列宽与下方「推荐歌单」网格
+///   一致；窄内容区回退横轨；
+/// - 手机/平板窄内容区（asSlivers=true）：与改造前完全一致的横轨；
+/// - 车机 Column 宿主（asSlivers=false）：预览网格（最多取前 6 张），列宽/列距
+///   与「推荐歌单」车机网格一致，宽高比同「新歌速递」车机网格。
+///
+/// 空数据不渲染。此前桌面/车机都直接复用 [AppHorizontalRail] 的通用网格，
+/// 格子按 2×itemWidth 放宽而封面固定 120，出现「图小格大」的大片留白。
 class _RecommendedSongCardRail extends StatelessWidget {
   const _RecommendedSongCardRail({
     super.key,
@@ -2866,15 +2873,55 @@ class _RecommendedSongCardRail extends StatelessWidget {
   final ValueChanged<RecommendedSongCard> onTap;
   final bool asSlivers;
 
-  @override
-  Widget build(BuildContext context) {
-    if (cards.isEmpty) {
-      if (asSlivers) {
-        return const SliverToBoxAdapter(child: SizedBox.shrink());
-      }
-      return const SizedBox.shrink();
-    }
-    final rail = AppHorizontalRail<RecommendedSongCard>(
+  /// 桌面宽窗网格：列宽 160、列距 14、方形封面 + 两行文字按 0.72 宽高比
+  /// 留位，与「新歌速递」桌面网格逐字一致。
+  static const _desktopGridDelegate =
+      SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 160,
+        mainAxisSpacing: 16,
+        crossAxisSpacing: 14,
+        childAspectRatio: 0.72,
+      );
+
+  Widget _sectionHeader() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(18, 20, 18, 12),
+      child: _SectionHeader(title: '推荐歌曲', action: SizedBox.shrink()),
+    );
+  }
+
+  /// 桌面宽窗懒构建：标题 + SliverGrid；窄内容区回退横轨。
+  Widget _buildSliver() {
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        if (AdaptiveLayout.isGridWidth(constraints.crossAxisExtent)) {
+          return SliverMainAxisGroup(
+            slivers: [
+              SliverToBoxAdapter(child: _sectionHeader()),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                sliver: SliverGrid(
+                  gridDelegate: _desktopGridDelegate,
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => _RecommendedSongCardTile(
+                      card: cards[index],
+                      onTap: () => onTap(cards[index]),
+                    ),
+                    childCount: cards.length,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        return SliverToBoxAdapter(child: _buildRail());
+      },
+    );
+  }
+
+  /// 横轨形态（手机/平板窄内容区）：与改造前完全一致。
+  Widget _buildRail() {
+    return AppHorizontalRail<RecommendedSongCard>(
       title: '推荐歌曲',
       items: cards,
       height: 172,
@@ -2884,10 +2931,57 @@ class _RecommendedSongCardRail extends StatelessWidget {
         onTap: () => onTap(card),
       ),
     );
-    if (asSlivers) {
-      return SliverToBoxAdapter(child: rail);
+  }
+
+  /// 车机 Column 宿主：预览网格（最多取前 6 张）。列宽 180 / 列距 14 与
+  /// 「推荐歌单」车机网格一致；0.72 宽高比同「新歌速递」车机网格
+  /// （同为方形封面 + 两行文字）。
+  Widget _buildBoxGrid() {
+    final preview = cards.length > 6 ? cards.sublist(0, 6) : cards;
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 18),
+            child: _SectionHeader(title: '推荐歌曲', action: SizedBox.shrink()),
+          ),
+          const SizedBox(height: 12),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            itemCount: preview.length,
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 180,
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 14,
+              childAspectRatio: 0.72,
+            ),
+            itemBuilder: (context, index) => _RecommendedSongCardTile(
+              card: preview[index],
+              onTap: () => onTap(preview[index]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (cards.isEmpty) {
+      if (asSlivers) {
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
+      }
+      return const SizedBox.shrink();
     }
-    return rail;
+
+    if (asSlivers) return _buildSliver();
+    // 宿主形态仅由调用处 asSlivers 决定：当前 false 只来自车机 Column 宿主
+    // （见 home_page 车机分支）。未来新增非车机盒子宿主时需同步调整本分支。
+    return _buildBoxGrid();
   }
 }
 
@@ -2905,32 +2999,43 @@ class _RecommendedSongCardTile extends StatelessWidget {
       onTap: onTap,
       mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(radius),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(radius),
-            child: Artwork(url: card.coverUrl, size: 120),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            card.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-          ),
-          Text(
-            card.description?.trim().isNotEmpty == true
-                ? card.description!
-                : card.songSummary,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 横轨下外层定宽 120；桌面/车机网格下封面撑满格宽（此前固定 120，
+          // 格子比图宽一圈，桌面「推荐歌曲」网格出现大片留白）。
+          final coverWidth =
+              constraints.maxWidth.isFinite ? constraints.maxWidth : 120.0;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(radius),
+                child: Artwork(url: card.coverUrl, size: coverWidth),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                card.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+              Text(
+                card.description?.trim().isNotEmpty == true
+                    ? card.description!
+                    : card.songSummary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
