@@ -78,6 +78,14 @@ Future<void> checkAppUpdateManually({
     return;
   }
 
+  // 渠道包（非官方 applicationId）不支持在线更新：官方 APK 无法覆盖安装，
+  // 这里先拦下，避免弹出更新对话框把用户引向装不上的官方包。服务层
+  // checkForUpdate 也有同样的守卫，此处拦截只为给出更准确的提示文案。
+  if (!await AppUpdateService.isOfficialPackage()) {
+    Toast.info('本渠道包不支持在线更新，请从渠道方获取新版');
+    return;
+  }
+
   Toast.info('正在检测更新...');
 
   try {

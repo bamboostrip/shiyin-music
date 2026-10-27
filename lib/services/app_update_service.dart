@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,6 +42,61 @@ import '../models/app_version.dart';
 /// （宁多提示不漏提示）；L3 拿不到正文，不做平台过滤，维持 semver 兜底。
 class AppUpdateService {
   AppUpdateService();
+
+  /// 原生更新通道（MainActivity 的 `shiyin_music/update`）。
+  ///
+  /// 除 `downloadAndInstallApk` 外还提供 `getPackageName`：渠道包
+  /// （`-PcustomPackageName`）的 applicationId 与官方包不同，官方 APK
+  /// 无法覆盖升级，必须先识别包名再决定是否检查更新。改用固定通道名
+  /// 而非平台默认通道，桌面端会走 MissingPluginException 兜底。
+  static const MethodChannel updateChannel = MethodChannel(
+    'shiyin_music/update',
+  );
+
+  /// 官方包名（applicationId）。渠道构建会用 customPackageName 覆盖它。
+  @visibleForTesting
+  static const String officialPackageName = 'shiyin.famlife.top';
+
+  /// 包名查询结果缓存：一次进程内 applicationId 不会变，避免每次自动
+  /// 检查都往平台通道跑一趟。
+  static Future<bool>? _officialPackageFuture;
+
+  /// 是否为官方包名（纯函数）：null/空白视为官方。
+  ///
+  /// 只拦截"明确已知的非官方包名"——桌面端、测试环境、通道未就绪等
+  /// 拿不到包名的情况按官方处理，避免误伤官方包的更新能力。
+  @visibleForTesting
+  static bool isOfficialPackageName(String? name) =>
+      name == null || name.trim().isEmpty || name.trim() == officialPackageName;
+
+  /// 当前安装是否为官方包名（结果缓存，进程内只查询一次）。
+  ///
+  /// 原生通道不可用（桌面/测试）或任意异常（MissingPluginException /
+  /// PlatformException）时恒返回 true：识别失败时宁可照常检查更新，
+  /// 也不能把官方包误判成渠道包而永久关闭更新。
+  static Future<bool> isOfficialPackage() {
+    return _officialPackageFuture ??= _queryOfficialPackageName();
+  }
+
+  static Future<bool> _queryOfficialPackageName() async {
+    try {
+      final name = await updateChannel.invokeMethod<String>('getPackageName');
+      return isOfficialPackageName(name);
+    } on MissingPluginException {
+      return true;
+    } on PlatformException {
+      return true;
+    } catch (_) {
+      // 兜底：任何未预期异常都不拦截更新检查。
+      return true;
+    }
+  }
+
+  /// 清空包名缓存（测试隔离：每个用例 mock 的原生返回值可能不同）。
+  @visibleForTesting
+  static void resetOfficialPackageCacheForTest() {
+    _officialPackageFuture = null;
+  }
 
   /// 应用内下载安装包用 HTTP 客户端（GitHub 下载会 302 到 CDN，dio 自动跟随）。
   final Dio _dio = Dio(
@@ -136,6 +192,14 @@ class AppUpdateService {
   /// 返回非 null 表示存在比当前版本更新的 Release。
   Future<AppVersionInfo?> checkForUpdate({bool manual = false}) async {
     if (!isSupportedPlatform) {
+      return null;
+    }
+
+    // 渠道包（-PcustomPackageName）的 applicationId 与官方包不同：官方
+    // APK 覆盖安装会因包名不匹配失败，同签名时还会并存成第二个应用。
+    // 非官方包名一律跳过在线更新检查（自动 + 手动），由渠道方自行发版。
+    if (!await isOfficialPackage()) {
+      debugPrint('[AppUpdate] 非官方包名构建，跳过在线更新检查（渠道包请由渠道方发版）');
       return null;
     }
 

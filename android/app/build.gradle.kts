@@ -53,8 +53,10 @@ android {
         //    分目录，与原版互不可见（用户需重新登录、重新扫描本地音乐）；
         // 2) 应用内更新隔离：README/Release 里的官方包 applicationId 仍是
         //    shiyin.famlife.top，自定义包无法被官方 APK 覆盖升级（同签名会
-        //    并存成两个「时音」，不同签名直接安装失败），必须按渠道自行发版，
-        //    并在该渠道包内关闭应用内更新检查；
+        //    并存成两个「时音」，不同签名直接安装失败），必须按渠道自行发版。
+        //    已内置运行时包名识别（MainActivity 的 getPackageName +
+        //    Dart 侧 AppUpdateService.isOfficialPackage）：非官方包名会自动
+        //    跳过自动/手动更新检查，不会引导用户安装官方包，渠道方无需改代码；
         // 3) 其余随包名走的项已自动跟随或与包名无关：FileProvider authority
         //    是 `${applicationId}.fileprovider`（Manifest 占位符自动跟随），
         //    MainActivity 里 `"$packageName.fileprovider"` 取运行时包名；

@@ -181,6 +181,10 @@ class MainActivity : AudioServiceActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shiyin_music/update")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    // 渠道包识别：返回运行时 applicationId（Configure 里
+                    // -PcustomPackageName 覆盖时即为自定义包名）。Dart 侧
+                    // 据此判断是否官方包、是否跳过在线更新检查。
+                    "getPackageName" -> result.success(packageName)
                     "downloadAndInstallApk" -> {
                         val url = call.argument<String>("url")
                         val fileName = call.argument<String>("fileName") ?: "shiyin_update.apk"
