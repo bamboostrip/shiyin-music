@@ -22,6 +22,12 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   bool _playing = false;
   final ProcessingState _processingState = ProcessingState.idle;
 
+  /// 记录 setVolume 调用（P0-2 切歌静音/还原的观测点）。
+  final volumeCalls = <double>[];
+
+  /// 与 handler.callLogs 共享时序（验证「静音早于 loadSong」）。
+  void Function(double volume)? onVolume;
+
   @override
   Stream<Duration> get positionStream => _positionController.stream;
 
@@ -46,7 +52,10 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   double get volume => 1.0;
 
   @override
-  Future<void> setVolume(double volume) async {}
+  Future<void> setVolume(double volume) async {
+    volumeCalls.add(volume);
+    onVolume?.call(volume);
+  }
 
   @override
   Future<void> setSpeed(double speed) async {}
@@ -199,11 +208,14 @@ void main() {
   }
 
   group('切歌与播放失败状态同步', () {
-    testWidgets('切换新歌立即暂停旧歌，且 pause 调用早于新歌 loadSong', (tester) async {
+    testWidgets('切换新歌只静音旧音频不 pause（保住 AudioFocus/WakeLock），且静音早于 loadSong', (
+      tester,
+    ) async {
       await pumpToastHost(tester);
 
       final song1 = _song(1);
       final song2 = _song(2);
+      final song2Hash = song2.hash;
       controller.queue = [song1, song2];
 
       // 先起播第一首歌
@@ -212,21 +224,42 @@ void main() {
       expect(controller.isPlaying, isTrue);
       expect(handler.playCallCount, 1);
 
-      // 清空调用日志，准备观察切歌
+      // 清空调用日志，准备观察切歌（volume 与 handler 调用共用一条时序日志）
       handler.callLogs.clear();
       handler.pauseCallCount = 0;
+      fakeAudioPlayer.volumeCalls.clear();
+      fakeAudioPlayer.onVolume = (volume) => handler.callLogs.add('volume:$volume');
 
       // 切换到第二首歌
       await controller.playSong(song2);
       await tester.pump();
 
-      // 验证切换新歌时立即调用了 pause
-      expect(handler.pauseCallCount, greaterThanOrEqualTo(1));
-      final pauseIndex = handler.callLogs.indexOf('pause');
-      final loadIndex = handler.callLogs.indexOf('loadSong:${song2.hash}');
-      expect(pauseIndex, greaterThanOrEqualTo(0));
-      expect(loadIndex, greaterThan(pauseIndex),
-          reason: '切新歌时应先 pause 旧音频，再 loadSong 新音频');
+      // P0-2 新语义：切歌不再 pause（pause 会让系统释放 WakeLock/撤销
+      // AudioFocus，黑屏后台自动切歌后下一曲起播不回来）；
+      // 改为先把旧音频音量压到 0.0，新音源加载完成后再还原用户音量。
+      expect(
+        handler.pauseCallCount,
+        0,
+        reason: 'P0-2：切歌不得调用 pause，否则会丢 AudioFocus/WakeLock',
+      );
+      expect(
+        fakeAudioPlayer.volumeCalls.first,
+        0.0,
+        reason: '切歌窗口必须先把旧音频静音到 0.0',
+      );
+      expect(
+        fakeAudioPlayer.volumeCalls.last,
+        closeTo(1.0, 0.01),
+        reason: '新音源加载完成后必须还原用户音量',
+      );
+      final muteIndex = handler.callLogs.indexOf('volume:0.0');
+      final loadIndex = handler.callLogs.indexOf('loadSong:$song2Hash');
+      expect(muteIndex, greaterThanOrEqualTo(0), reason: '切歌应发生静音调用');
+      expect(
+        loadIndex,
+        greaterThan(muteIndex),
+        reason: '应先静音旧音频，再 loadSong 新音频',
+      );
 
       controller.dispose();
       fakeAudioPlayer.disposeStreams();

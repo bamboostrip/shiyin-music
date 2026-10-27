@@ -39,6 +39,51 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
   }
 
+  // ==== 切歌代际静音（对齐上游 PR #156 / 2050a8e）====
+  //
+  // 旧实现切歌时无条件 `_audioHandler.pause()`：audio_service 会广播
+  // playing=false → Android 释放 WakeLock/撤销 AudioFocus；黑屏后台切歌
+  // （尤其自然播完自动下一首）后下一曲起播可能拿不回焦点，表现为
+  // 「下一曲暂停不播、必须点亮屏幕才恢复」。修复思路：不再暂停，只把引擎
+  // 音量压到 0（播放状态保持 playing，焦点/WakeLock 不中断），新音源加载
+  // 完成后再按 fork 的「用户音量 × 响度增益」还原。
+  //
+  // 代际号用于快速连切：迟到的旧流程不得解除新流程的静音。
+  bool _engineMutedForSwitch = false;
+  int _switchMuteGeneration = 0;
+
+  /// 切歌时静音旧音频（不 pause）。返回本次静音代际，供按代际解除。
+  int _muteEngineForSourceSwitch({required Song from, required Song to}) {
+    final generation = ++_switchMuteGeneration;
+    _engineMutedForSwitch = true;
+    // 只压引擎音量，绝不调 _audioHandler.pause()：保持 audio_service 的
+    // playing 状态，AudioFocus/WakeLock 才不会在后台切歌时被系统收回。
+    unawaited(audioPlayer.setVolume(0.0));
+    debugPrint(
+      '[时音][player] 切歌静音旧音频(代际=$generation): '
+      '${from.title} → ${to.title}（不 pause，保持焦点/WakeLock）',
+    );
+    return generation;
+  }
+
+  /// 按代际解除切歌静音；仅当代际仍是当前且确在静音态时执行。
+  ///
+  /// 还原必须走 [_applyLoudnessGain]（userVolume × 响度增益），不能盲
+  /// `setVolume(1.0)`——否则会冲掉用户音量与响度均衡设置。
+  Future<void> _unmuteEngineForSourceSwitch(
+    int? generation, {
+    required String reason,
+  }) async {
+    if (generation == null ||
+        generation != _switchMuteGeneration ||
+        !_engineMutedForSwitch) {
+      return;
+    }
+    _engineMutedForSwitch = false;
+    debugPrint('[时音][player] 解除切歌静音(代际=$generation, 原因=$reason)');
+    await _applyLoudnessGain(instant: true);
+  }
+
   String get playbackSpeedLabel {
     if (playbackSpeed == playbackSpeed.roundToDouble()) {
       return '${playbackSpeed.round()}x';
@@ -118,10 +163,34 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     );
     final hasLocalAudio = local != null || song.source == SongSource.local;
 
+    // 切歌前旧音频是否真的在播：只有「真实在播」才需要压静音旧音频。
+    // completed（自然播完自动切歌）/ 已暂停 / 冷启动都不做任何 pause，
+    // 避免 audio_service 广播 playing=false 丢 AudioFocus/WakeLock。
+    // `_isHandlingCompletion` 期间引擎已经/即将进入 completed，按未在播处理。
+    final wasPlaying = isPlaying &&
+        audioPlayer.processingState != ProcessingState.completed &&
+        !_isHandlingCompletion;
+    // 本次切歌的静音代际；null = 本次没有静音，无需解除。
+    int? switchMuteGeneration;
+
     // 切新歌必须清空歌词并重置歌词行；同一首歌重播/从冷启动恢复播放时保留已有歌词防闪烁
     if (!isSameSong) {
-      // 切换新歌立即暂停旧歌，避免新歌加载/解析期间旧音频继续播放导致音画脱节
-      unawaited(_audioHandler.pause());
+      if (wasPlaying) {
+        // 旧歌仍在出声：改为「只静音不暂停」。加载/解析期间旧音频被压到 0
+        // 既不外放，又不让系统释放焦点/WakeLock（后台切歌可继续起播）。
+        switchMuteGeneration = _muteEngineForSourceSwitch(
+          from: currentSong ?? song,
+          to: song,
+        );
+      } else {
+        // 旧实现在这里无条件 pause()；completed/已暂停时那次 pause 反而会让
+        // audio_service 释放 WakeLock（黑屏后台自动切歌失败的主因），必须跳过。
+        debugPrint(
+          '[时音][player] 切歌不静音不暂停: isPlaying=$isPlaying '
+          'state=${audioPlayer.processingState.name} '
+          'handlingCompletion=$_isHandlingCompletion',
+        );
+      }
       duration = song.duration ?? Duration.zero;
       lyrics = const [];
       _lastDesktopLyricIndex = -1;
@@ -208,13 +277,26 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       final pre = _loudness.gainFromCache(song.hash);
       if (pre.fromCache) {
         _pendingGainDb = pre.gainDb;
-        unawaited(_applyLoudnessGain(instant: true));
+        // 切歌静音期间先不应用：任何 setVolume 都会提前解除本次静音，
+        // 让加载/解析期间的旧歌重新外放（等于白静音）。加载完成统一还原。
+        if (!_engineMutedForSwitch) {
+          unawaited(_applyLoudnessGain(instant: true));
+        }
+      } else if (_engineMutedForSwitch) {
+        // 静音期间同样不应用旧歌增益：等价 _resetStaleLoudnessGain 的清空，
+        // 但跳过其中的 setVolume（否则会提前解除静音）。
+        _pendingGainDb = null;
       } else {
         // 未命中:新歌增益未知,上一首的增益先中性化(渐变回用户音量),
         // 杜绝新歌开头带着旧增益播放(分析完成后会再渐变到真实值)。
         _resetStaleLoudnessGain();
       }
-      unawaited(_analyzeAndApplyLoudness(song: song, url: url));
+      // 静音期间连渐进响度分析也要推迟：原生分析每 500ms 推一次进度，
+      // 回调里的 _applyLoudnessGain 会在加载期把引擎音量拉回、解除静音。
+      final deferLoudnessAnalysis = _engineMutedForSwitch;
+      if (!deferLoudnessAnalysis) {
+        unawaited(_analyzeAndApplyLoudness(song: song, url: url));
+      }
       await _audioHandler.loadSong(
         song: song,
         url: url,
@@ -231,6 +313,17 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       }
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
+      }
+      // 新音源已加载（且定位完成）→ 起播前按代际解除静音，还原
+      // userVolume × 响度增益。必须在 _requestPlayback() 之前：起播瞬间
+      // 引擎音量已就位，不会出现「先响一下再变音量」。
+      await _unmuteEngineForSourceSwitch(
+        switchMuteGeneration,
+        reason: 'loadSong-ready',
+      );
+      if (deferLoudnessAnalysis) {
+        // 静音期间推迟的渐进响度分析，解除静音后补启动。
+        unawaited(_analyzeAndApplyLoudness(song: song, url: url));
       }
       _pendingInitialPosition = null;
       isPreparing = false;
@@ -324,6 +417,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         return;
       }
       unawaited(_audioHandler.pause());
+      // 失败收尾：本次切歌可能已把旧音频静音，按代际解除，避免引擎停留在
+      // 静音态（先 pause 再还原音量，用户不会再听到旧歌外放）。
+      await _unmuteEngineForSourceSwitch(
+        switchMuteGeneration,
+        reason: 'play-failed',
+      );
       duration = song.duration ?? Duration.zero;
       _pendingInitialPosition = null;
       _setPositionBase(Duration.zero, playing: false);
@@ -336,6 +435,17 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 已走完 VIP 领取与自动重试仍失败：计一次最终失败，达阈值自动前进。
       _registerPlaybackFailure(song);
     } finally {
+      // 兜底：任何提前 return/异常路径都不得让引擎停在本次静音态（否则整首
+      // 歌永久无声）。代际不匹配说明已有更新的切歌流程接管，由它负责解除，
+      // 旧流程不得抢着还原。
+      if (!_disposed) {
+        unawaited(
+          _unmuteEngineForSourceSwitch(
+            switchMuteGeneration,
+            reason: 'playSong-finally',
+          ),
+        );
+      }
       var depth = _changingSourceDepth;
       if (depth > 0) {
         depth = --_changingSourceDepth;

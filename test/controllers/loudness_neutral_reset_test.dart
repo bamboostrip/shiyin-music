@@ -1,7 +1,14 @@
-// 响度均衡切歌缓存未命中的增益中性化（回归：新歌增益未知时不得残留
-// 上一首的增益）。hashA 缓存命中 instant 应用 -6dB（引擎音量 ≈0.5），
-// 切到无缓存的 hashB 时必须先渐变回用户音量（≈1.0），等真实分析出来
-// 再渐变到目标——期间不携带旧增益播放。
+// 响度均衡切歌缓存未命中时的「旧增益不残留」回归。
+//
+// hashA 缓存命中 instant 应用 -6dB（引擎音量 ≈0.5）→ 切到无缓存的 hashB 时，
+// 旧增益绝不允许残留到新歌开头，最终引擎音量必须回到用户音量 ≈1.0。
+//
+// 注意：P0-2「后台切歌不丢 AudioFocus/WakeLock」落地后切歌窗口语义已变——
+// 旧实现在切歌时 pause() 并把旧增益用 250ms 渐变（ramp）中性化；新实现
+// 不再 pause（避免 audio_service 广播 playing=false 丢 WakeLock/AudioFocus），
+// 而是把旧音频音量**立即压到 0.0**，新音源加载完成后**立即**还原
+// userVolume×增益（instant，无 fade-in）。因此本测试不再断言 0.5→1.0 的
+// 渐变形状，改为断言「先静音 0.0、后还原 ≈1.0」且切歌期间没有 pause。
 //
 // hashB 的分析用 RustLib.initMock 挂起（不发事件也不关流），模拟 PC
 // 网络源下载/流式分析需要数秒的窗口：若修复缺失，旧增益会在整个窗口
@@ -30,7 +37,7 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   final _errorController = StreamController<PlayerException>.broadcast();
   final _androidAudioSessionIdController = StreamController<int?>.broadcast();
 
-  /// 记录所有 setVolume 调用值，用于断言 instant 应用与 250ms 渐变序列。
+  /// 记录所有 setVolume 调用值，用于断言切歌窗口的静音/还原序列。
   final volumes = <double>[];
   double _volume = 1.0;
 
@@ -199,8 +206,10 @@ class _HangingLoudnessRustApi extends Fake implements RustLibApi {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('切歌缓存未命中时旧响度增益先中性化（渐变回用户音量），不残留到新歌开头', (tester) async {
-    // 桌面（mpv 后端）分支语义：衰减/中性化都走 setVolume 渐变。
+  testWidgets('切歌缓存未命中时旧增益不残留：静音旧音频→立即还原用户音量（分析在途）', (
+    tester,
+  ) async {
+    // 桌面（mpv 后端）分支语义：衰减/静音/还原都走 setVolume。
     // testWidgets 的不变量校验要求 override 在测试体返回前复位，
     // 用 try/finally 包裹（与 settings_desktop_gate_test 同款做法）。
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
@@ -220,7 +229,7 @@ void main() {
       audioFile.writeAsStringSync('not really audio');
 
       // hashA 实测 LUFS=-8 → 增益 = -14-(-8) = -6dB → 引擎音量 ≈0.5。
-      // hashB 无缓存 → 切过去时增益未知，必须先中性化。
+      // hashB 无缓存 → 切过去时增益未知，必须先静音旧音频并还原用户音量。
       SharedPreferences.setMockInitialValues(<String, Object>{
         'loudness_enabled': true,
         'loudness_cache': '{"hashA": -8.0}',
@@ -264,9 +273,14 @@ void main() {
       );
       expect(rustApi.analyzeCallCount, 0, reason: 'hashA 缓存命中不应触发原生分析');
 
-      // 2) 切到 hashB（缓存未命中）：旧增益先中性化，250ms 渐变回用户音量。
-      //    分析挂起在途（窗口内不得有任何来自分析的增益修正）。
-      final volumeCountBeforeReset = fakeAudioPlayer.volumes.length;
+      // 2) 切到 hashB（缓存未命中）：P0-2 新语义——旧音频先静音到 0.0
+      //    （不 pause，保住 AudioFocus/WakeLock），新音源加载完成后立即还原
+      //    用户音量；旧 -6dB 增益在窗口内不得残留。分析挂起在途（窗口内
+      //    不得有任何来自分析的增益修正）。
+      final volumeCountBeforeSwitch = fakeAudioPlayer.volumes.length;
+      final pauseCountBeforeSwitch = handler.callLogs
+          .where((log) => log == 'pause')
+          .length;
       await controller.playSong(songB);
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 50));
@@ -275,26 +289,32 @@ void main() {
       expect(
         fakeAudioPlayer.volumes.last,
         closeTo(1.0, 0.01),
-        reason: '缓存未命中应中性化旧增益，渐变回用户音量 1.0（分析在途时不得残留 -6dB）',
+        reason: '缓存未命中应还原用户音量 1.0（分析在途时不得残留 -6dB）',
+      );
+      expect(
+        handler.callLogs.where((log) => log == 'pause').length,
+        pauseCountBeforeSwitch,
+        reason: 'P0-2：切歌不得 pause（否则 audio_service 广播 playing=false，'
+            '系统释放 WakeLock/撤销 AudioFocus）',
       );
 
-      // 对照断言：重置确实走了渐变（而非未发生或直设）——新增的调用里
-      // 应存在从 0.5 附近向 1.0 爬升的 ramp 中间值。
-      final rampVolumes = fakeAudioPlayer.volumes.sublist(
-        volumeCountBeforeReset,
+      // 新语义的「静音形状」：切换窗口内先出现 0.0（旧音频静音，替代 pause），
+      // 随后出现还原调用；不再是 0.5→1.0 的 250ms ramp。
+      final switchVolumes = fakeAudioPlayer.volumes.sublist(
+        volumeCountBeforeSwitch,
       );
-      expect(rampVolumes, isNotEmpty, reason: '中性化应产生 setVolume 调用');
+      expect(switchVolumes, isNotEmpty, reason: '切歌应产生 setVolume 调用');
       expect(
-        rampVolumes.first,
-        allOf(lessThan(1.0), greaterThan(0.5)),
-        reason: 'ramp 应从 0.5 附近起步',
+        switchVolumes.first,
+        closeTo(0.0, 0.01),
+        reason: '切歌窗口必须先把旧音频静音到 0.0（替代 pause，保住焦点/WakeLock）',
       );
       expect(
-        rampVolumes.any((v) => v > 0.55 && v < 0.95),
-        isTrue,
-        reason: '应存在 0.5→1.0 的渐变中间值，证明走的是 ramp 而非直设',
+        switchVolumes.last,
+        closeTo(1.0, 0.01),
+        reason: '加载完成后应立即还原用户音量（instant，不残留旧增益）',
       );
-      expect(rampVolumes.last, greaterThan(rampVolumes.first));
+      expect(switchVolumes.last, greaterThan(switchVolumes.first));
 
       // 收尾：终结挂起的分析（关流 → 按被取消返回 null，此时 _pendingGainDb
       // 已为 null，null 分支 no-op），再释放控制器。

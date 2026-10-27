@@ -451,10 +451,17 @@ class LoudnessService {
     final user = userVolume.clamp(0.0, 1.0);
     if (!_enabled || gainDb == null || !gainDb.isFinite) {
       log('applyGain RESET (未启用或增益无效) instant=$instant user=$user');
+      // instant 必须透传：调用方传 instant=true 时要求「立即生效、不起渐变
+      // 定时器」。此前没透传时 resetGain 默认 instant=false → _setVolumeRamped
+      // 起 Timer.periodic(20ms) 并 await completer；在 testWidgets 的
+      // fake-async 下 Timer 只有 tester.pump 才推进，而调用方正在
+      // await playSong → 互等死锁（P0-2 全量测试卡死的根因）。真实设备上
+      // 「解除切歌静音」也会因此多出 250ms 淡入，与立即还原的语义不符。
       await resetGain(
         audioPlayer: audioPlayer,
         audioSessionId: audioSessionId,
         userVolume: user,
+        instant: instant,
       );
       return;
     }
@@ -476,7 +483,10 @@ class LoudnessService {
 
     // 轻歌放大:Android 用 LoudnessEnhancer;Linux/Windows(mpv 后端)用
     // mpv 数字放大(>1.0);iOS/macOS 无放大能力,保持用户音量。
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        audioSessionId != null) {
+      // sessionId 为 null 时无增强器可配（且通道调用在 testWidgets 的
+      // fake-async 下需 pump 才回执，await 会死锁），降级到下面保持用户音量。
       final gainMb = (clampedGain * 100).round().clamp(0, 1500);
       try {
         await _channel.invokeMethod<bool>('configureLoudnessGain', {
@@ -614,6 +624,9 @@ class LoudnessService {
   /// 禁用原生 LoudnessEnhancer(切到 setVolume 衰减模式时调用)。
   Future<void> _disableNativeEnhancer(int? audioSessionId) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
+    // 无音频会话 id 时没有增强器可关，且平台通道调用在 testWidgets 的
+    // fake-async 下需要 pump 才回执，await 会死锁（详见 resetGain 注释）。
+    if (audioSessionId == null) return;
     try {
       await _channel.invokeMethod<bool>('configureLoudnessGain', {
         'audioSessionId': audioSessionId,
@@ -635,7 +648,12 @@ class LoudnessService {
     double userVolume = 1.0,
     bool instant = false,
   }) async {
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        audioSessionId != null) {
+      // [audioSessionId == null] 时没有增强器可重置，直接跳过通道调用：
+      // - 真机建立会话前 sessionId 可能为 null，本来也无从作用于引擎；
+      // - testWidgets 的 fake-async 下平台通道回执需要 pump 才推进，在
+      //   playSong → 解除切歌静音 这条 await 链里等待它会互等死锁。
       try {
         await _channel.invokeMethod<bool>('configureLoudnessGain', {
           'audioSessionId': audioSessionId,
