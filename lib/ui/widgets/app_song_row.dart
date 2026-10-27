@@ -5,6 +5,7 @@ import '../../models/music_models.dart';
 import 'artwork.dart';
 import 'marquee_text.dart';
 import 'now_playing_badge.dart';
+import 'toast.dart';
 
 /// 移动端统一歌曲行（歌单 / 搜索结果 / 歌手页共用；桌面端表格不动）。
 ///
@@ -22,6 +23,7 @@ class AppSongRow extends StatefulWidget {
     this.trailing = const [],
     this.highlighted = false,
     this.excludeSemantics = false,
+    this.showDownloadedBadge = true,
   });
 
   final Song song;
@@ -40,6 +42,12 @@ class AppSongRow extends StatefulWidget {
   /// 高亮底（如多选中态）：10% 主色底，优先于播中态。
   final bool highlighted;
   final bool excludeSemantics;
+
+  /// 是否在封面左下角显示「已下载」角标（默认显示）。
+  ///
+  /// 「已下载」「本地音乐」等整页都是本地文件的列表里传 false：
+  /// 每行都挂角标纯属冗余；歌单/搜索/歌手页等混合来源列表用默认值。
+  final bool showDownloadedBadge;
 
   @override
   State<AppSongRow> createState() => _AppSongRowState();
@@ -107,6 +115,17 @@ class _AppSongRowState extends State<AppSongRow> {
                               size: 46,
                               borderRadius: 8,
                             ),
+                            // 左下角「已下载」角标；右下角已有播中律动标，两者
+                            // 分居两侧不重叠。
+                            if (widget.showDownloadedBadge)
+                              Positioned(
+                                left: 3,
+                                bottom: 3,
+                                child: _DownloadedBadge(
+                                  player: player,
+                                  song: song,
+                                ),
+                              ),
                             if (active)
                               Positioned(
                                 right: 3,
@@ -181,6 +200,53 @@ class _AppSongRowState extends State<AppSongRow> {
           },
         ),
       ),
+    );
+  }
+}
+
+/// 封面左下角「已下载」角标。
+///
+/// 刻意做成独立 widget 并只订阅下载控制器：下载进度（每 tick notify）
+/// 只重建这枚 16px 角标，不会带着整行（跑马灯/封面/操作槽）一起重建；
+/// [PlayerController.downloadController] 未注入（单测 / 初始化早期）时
+/// 静默隐藏，不抛错。
+class _DownloadedBadge extends StatelessWidget {
+  const _DownloadedBadge({required this.player, required this.song});
+
+  final PlayerController player;
+  final Song song;
+
+  @override
+  Widget build(BuildContext context) {
+    final downloads = player.downloadController;
+    if (downloads == null) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: downloads,
+      builder: (context, _) {
+        if (!downloads.isDownloaded(song)) return const SizedBox.shrink();
+        final colorScheme = Theme.of(context).colorScheme;
+        // 与右下角播中标同款「92% surface 底 + 圆角 6 容器」写法，
+        // 绿色 check 沿用下载完成语义色。
+        return Tooltip(
+          message: '已下载',
+          child: Material(
+            color: colorScheme.surface.withValues(alpha: .92),
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: () => Toast.info('已下载，播放时将优先使用本地文件'),
+              child: const Padding(
+                padding: EdgeInsets.all(2),
+                child: Icon(
+                  Icons.check_rounded,
+                  size: 12,
+                  color: Color(0xFF24C768),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

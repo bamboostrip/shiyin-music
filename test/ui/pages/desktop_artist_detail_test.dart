@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/auth_controller.dart';
+import 'package:shiyin_music/controllers/download_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
@@ -83,6 +84,11 @@ class _FakePlayerController extends ChangeNotifier
 
   @override
   List<Song> queue = [];
+
+  // AppSongRow 的「已下载」角标会读该字段（真实控制器由 main 注入；
+  // 该页单测不涉及下载，置 null 时角标静默隐藏）。
+  @override
+  DownloadController? downloadController;
 
   @override
   final ValueNotifier<Duration> positionListenable =

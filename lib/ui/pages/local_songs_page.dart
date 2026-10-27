@@ -542,9 +542,11 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                           itemBuilder: (context, index) {
                             final song = filteredSongs[index];
                             // 行视觉与歌单/搜索/歌手页统一见 AppSongRow。
+                            // 本页歌全部来自本机文件，不显示「已下载」角标。
                             return AppSongRow(
                               song: song,
                               player: widget.player,
+                              showDownloadedBadge: false,
                               onTap: () {
                                 if (openPlayerIfSameSong(
                                   context,

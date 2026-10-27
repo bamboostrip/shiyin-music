@@ -496,6 +496,8 @@ class _DownloadedSongRow extends StatelessWidget {
       song: song,
       player: player,
       onTap: play,
+      // 本页整页都是已下载歌曲，行内再挂「已下载」角标纯冗余。
+      showDownloadedBadge: false,
       trailing: [
         AppSongRowMenuButton(onPressed: () => _showActions(context, song)),
       ],
