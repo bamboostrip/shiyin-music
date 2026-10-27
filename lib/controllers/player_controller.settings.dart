@@ -353,6 +353,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     addListeningTimeEnabled =
         prefs.getBool(_listenTimeSettingKey) ?? addListeningTimeEnabled;
+    // 听歌时长跨会话累计（上游 3.3.0 #151）：读回未满上报周期的余量，
+    // 重启后接着累计，不再从 0 起算。脏数据（类型不符等）静默忽略——
+    // 统计不是关键路径，不能因此中断其余设置恢复。
+    try {
+      final savedPendingListenTimeMs =
+          prefs.getInt(_pendingListenTimeMsKey) ?? 0;
+      if (savedPendingListenTimeMs > 0) {
+        _pendingListenTime = Duration(milliseconds: savedPendingListenTimeMs);
+      }
+    } catch (_) {}
     keepScreenOnEnabled =
         prefs.getBool(_keepScreenOnSettingKey) ?? keepScreenOnEnabled;
     lyricPageSkipButtonsEnabled =
@@ -568,6 +578,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     if (startedAt != null) {
       _pendingListenTime += DateTime.now().difference(startedAt);
       _listenTimeStartedAt = null;
+      // 暂停/切歌/dispose 都会走到这里：把本段新增时长并入余量后落盘，
+      // 否则进程被杀时这段时长直接丢失（上游 3.3.0 #151）。
+      unawaited(_savePendingListenTime());
     }
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
@@ -578,6 +591,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     _pendingListenTime = Duration.zero;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
+    // 重置要落盘：只清内存的话，下次启动会把旧余量读回来（关闭开关后
+    // 仍在上报）。这里显式写 0 而非删除 key——语义明确、也避免读到脏值。
+    unawaited(_savePendingListenTime());
   }
 
   Duration _trackedListeningTime() {
@@ -611,10 +627,36 @@ mixin _PlayerSettings on _PlayerControllerBase {
         _listenTimeTimer?.cancel();
         _listenTimeTimer = null;
       }
+      // 上报成功后余量（可能不足 5min）同样落盘：下次启动接着累计。
+      unawaited(_savePendingListenTime());
     } catch (error) {
       debugPrint('[时音][listen-time] report failed: $error');
     } finally {
       _isReportingListenTime = false;
     }
   }
+
+  /// 把未满上报周期的听歌时长余量写入本地（跨会话累计）。
+  ///
+  /// 失败静默：统计不是关键路径，写失败最多让重启后少累计一个周期，
+  /// 不能因此弹错误或影响播放。
+  Future<void> _savePendingListenTime() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        _pendingListenTimeMsKey,
+        _pendingListenTime.inMilliseconds,
+      );
+    } catch (_) {}
+  }
+
+  // ---- 仅供测试的只读/触发钩子（见 test/controllers/player_listen_time_test.dart）----
+  // 听歌时长由 Timer + DateTime 驱动，5min 周期无法在单测里真实等待；
+  // 暴露只读余量与单次上报触发点，使 restore/落盘/失败路径可确定性验证。
+
+  @visibleForTesting
+  Duration get pendingListenTimeForTest => _pendingListenTime;
+
+  @visibleForTesting
+  Future<void> reportListeningTimeForTest() => _maybeReportListeningTime();
 }

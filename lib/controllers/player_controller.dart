@@ -100,6 +100,10 @@ enum PlayConfirm {
 // PlayerController 的私有设置键/常量（原类内 static const，拆分后提升为库级常量，
 // 仅同库可见，引用方式不变）。
 const _listenTimeSettingKey = 'settings.add_listening_time_enabled';
+// 未满一个上报周期的听歌时长（毫秒，int）：跨会话累计，正常退出/进程被杀
+// 都不丢这段时长。恢复见 _PlayerSettings._restoreSettings，落盘见
+// _PlayerSettings._savePendingListenTime（reset 时显式写 0）。
+const _pendingListenTimeMsKey = 'settings.pending_listen_time_ms';
 const _audioQualitySettingKey = 'settings.audio_quality';
 const _equalizerEnabledSettingKey = 'settings.equalizer_enabled';
 const _equalizerLevelsSettingKey = 'settings.equalizer_levels';
@@ -146,8 +150,11 @@ const _lyricPageSkipButtonsSettingKey = 'settings.lyric_page_skip_buttons';
 const _searchPlayReplaceQueueSettingKey = 'settings.search_play_replace_queue';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
-const _listenTimeReportInterval = Duration(minutes: 30);
-const _listenTimeCheckInterval = Duration(minutes: 1);
+// 听歌时长上报周期/检查周期：对齐上游 3.3.0（e9dde17 #151）由 30min/1min
+// 收紧为 5min/15s，缩短服务端同步延迟；未满周期的余量跨会话持久化见
+// [_pendingListenTimeMsKey] 与 _PlayerSettings._savePendingListenTime。
+const _listenTimeReportInterval = Duration(minutes: 5);
+const _listenTimeCheckInterval = Duration(seconds: 15);
 const _defaultEqualizerLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// 歌词进度调节步进（一次点按的调整量，主流播放器惯例 0.5 秒）。
