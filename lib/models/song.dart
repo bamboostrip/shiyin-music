@@ -208,12 +208,18 @@ class Song {
       artist: resolvedArtist,
       hash: hash,
       albumId: asString(json['album_id']),
-      albumAudioId: mixSongId ?? songId,
+      // 播放地址（/song/url 的 album_audio_id 参数）优先用专辑音频 id，
+      // 缺失时才回退 mixsongid/songid（上游 3.3.0 #156）。
+      albumAudioId: asString(json['album_audio_id']) ?? mixSongId ?? songId,
       albumName: asString(json['album_name']),
       coverUrl: normalizeImageUrl(asString(json['sizable_cover'])),
       artists: artists,
-      // /top/card 的 time_length 是带小数的秒数（如 259.16）。
-      duration: durationFromTopCardSeconds(json['time_length']),
+      // /top/card 的 time_length 是带小数的秒数（如 259.16），优先按毫秒
+      // 解析；字段缺失/异形时依次回退整数秒与 timelen 毫秒（上游 3.3.0）。
+      duration:
+          durationFromTopCardSeconds(json['time_length']) ??
+          durationFromSeconds(json['time_length']) ??
+          durationFromMilliseconds(json['timelen']),
     );
   }
 
@@ -246,11 +252,20 @@ class Song {
           asString(json['hash_flac']) ??
           '',
       albumId: asString(json['album_id']),
-      albumAudioId: asString(json['mixsongid']) ?? songId,
+      // 与 fromTopCard 对齐：album_audio_id 优先，缺失回退 mixsongid/songid
+      // （上游 3.3.0 #156）。
+      albumAudioId:
+          asString(json['album_audio_id']) ??
+          asString(json['mixsongid']) ??
+          songId,
       albumName: asString(json['album_name']),
       coverUrl: normalizeImageUrl(asString(json['sizable_cover'])),
       artists: artists,
-      duration: durationFromSeconds(json['time_length']),
+      duration:
+          durationFromTopCardSeconds(json['time_length']) ??
+          durationFromSeconds(json['time_length']) ??
+          durationFromMilliseconds(json['timelen']) ??
+          durationFromMilliseconds(json['timelength']),
     );
   }
 

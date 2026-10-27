@@ -192,4 +192,99 @@ void main() {
       );
     });
   });
+
+  // 上游 3.3.0 #156 附带：album_audio_id 优先 + 时长回退链（本 fork backport）。
+  group('Song.fromTopCard album_audio_id / 时长回退（3.3.0）', () {
+    test('album_audio_id 优先于 mixsongid/songid；id 语义不变', () {
+      final song = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'songid': 1001,
+        'mixsongid': '2002',
+        'album_audio_id': 'AAID_9',
+      });
+
+      // 播放地址参数用 album_audio_id；歌曲身份 id 仍保持 mixsongid 优先。
+      expect(song.albumAudioId, 'AAID_9');
+      expect(song.id, '2002');
+    });
+
+    test('album_audio_id 缺失回退 mixsongid，再缺失回退 songid', () {
+      final byMix = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'songid': 1001,
+        'mixsongid': '2002',
+      });
+      expect(byMix.albumAudioId, '2002');
+
+      final bySong = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'songid': 3003,
+      });
+      expect(bySong.albumAudioId, '3003');
+
+      // 三个字段全缺失时保持 null（不得写成空串，music_api 依赖 null 省略参数）。
+      final none = Song.fromTopCard({'songname': '晴天', 'hash': 'HASH_001'});
+      expect(none.albumAudioId, isNull);
+    });
+
+    test('album_audio_id 为空串视为缺失', () {
+      final song = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'songid': 1001,
+        'mixsongid': '2002',
+        'album_audio_id': '   ',
+      });
+
+      expect(song.albumAudioId, '2002');
+    });
+
+    test('时长回退：time_length 优先，其次 timelen 毫秒', () {
+      // 两者都有时 time_length（小数秒）优先。
+      final both = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'time_length': 259.16,
+        'timelen': 999999,
+      });
+      expect(both.duration, const Duration(milliseconds: 259160));
+
+      // time_length 缺失时用 timelen（毫秒，不是秒）。
+      final ms = Song.fromTopCard({
+        'songname': '晴天',
+        'hash': 'HASH_001',
+        'timelen': 199000,
+      });
+      expect(ms.duration, const Duration(seconds: 199));
+
+      // 全缺失/null 时保持 null。
+      expect(
+        Song.fromTopCard({'songname': '晴天', 'hash': 'HASH_001'}).duration,
+        isNull,
+      );
+    });
+
+    test('时长容错：time_length 为整数或数字字符串仍按毫秒精度解析', () {
+      expect(
+        Song.fromTopCard({'hash': 'H1', 'time_length': 259}).duration,
+        const Duration(milliseconds: 259000),
+      );
+      expect(
+        Song.fromTopCard({'hash': 'H2', 'time_length': '259.16'}).duration,
+        const Duration(milliseconds: 259160),
+      );
+      // time_length 异形（非数字）时回退 timelen。
+      expect(
+        Song.fromTopCard({
+          'hash': 'H3',
+          'time_length': '--',
+          'timelen': 87000,
+        }).duration,
+        const Duration(milliseconds: 87000),
+      );
+    });
+  });
 }
