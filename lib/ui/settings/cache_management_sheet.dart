@@ -486,7 +486,15 @@ class _DownloadDirInfoState extends State<DownloadDirInfo> {
   Future<void> _copyPath() async {
     final path = _path;
     if (path == null || path.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: path));
+    try {
+      await Clipboard.setData(ClipboardData(text: path));
+    } catch (error) {
+      // 剪贴板平台通道极少数情况下会失败（系统剪贴板服务被占用/受限），
+      // 兜底提示而不是把未捕获异常抛给 Zone；失败时不再提示「已复制」。
+      debugPrint('[CacheManagement] 写入剪贴板失败: $error');
+      Toast.error('复制失败，请稍后重试');
+      return;
+    }
     Toast.success('下载目录路径已复制');
   }
 

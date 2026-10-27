@@ -1012,17 +1012,31 @@ class _DesktopSongMenuHeader extends StatelessWidget {
           ),
           // 分享：先关菜单再写剪贴板/Toast（菜单 route 退场期间提示不与之竞争）；
           // 原「复制歌曲信息」入口已并入此处，桌面菜单只保留这一个分享入口。
-          IconButton(
-            tooltip: '分享歌曲',
-            icon: const Icon(Icons.share_outlined, size: 18),
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            color: colorScheme.onSurfaceVariant,
-            onPressed: () {
-              Navigator.of(context).pop();
-              copySongShareText(song);
-            },
+          //
+          // 这里用 28×28 的 InkResponse 而不是 IconButton：Material3 下
+          // IconButton 外层 _InputPadding 仍按 48−8（compact density）=40 布局，
+          // 会把 header 行高从 32 撑到 40、整个菜单 +8px，并挤占标题宽度；
+          // InkResponse 精确占 28×28，行高仍由 32px 封面决定（祖先 Material
+          // 由菜单面板提供，见 _DesktopSongActionMenuPanel / 级联菜单面板）。
+          Tooltip(
+            message: '分享歌曲',
+            child: InkResponse(
+              radius: 18,
+              containedInkWell: true,
+              customBorder: const CircleBorder(),
+              onTap: () {
+                Navigator.of(context).pop();
+                copySongShareText(song);
+              },
+              child: SizedBox.square(
+                dimension: 28,
+                child: Icon(
+                  Icons.share_outlined,
+                  size: 18,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
           ),
         ],
       ),

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
+import 'package:shiyin_music/ui/widgets/artwork.dart';
 import 'package:shiyin_music/ui/widgets/song_action_sheets.dart';
 import 'package:shiyin_music/ui/widgets/song_share.dart';
 import 'package:shiyin_music/ui/widgets/toast.dart';
@@ -253,6 +254,20 @@ void main() {
 
       expect(find.byType(Dialog), findsNothing); // 有 anchor 时走级联菜单路由
       expect(find.byTooltip('分享歌曲'), findsOneWidget);
+
+      final headerRow = find
+          .ancestor(of: find.byType(Artwork), matching: find.byType(Row))
+          .first;
+
+      // 分享入口必须是 28×28 的紧凑点击区且不撑高 header 行：
+      // 旧实现用 IconButton，Material3 compact density 下外层 _InputPadding
+      // 仍按 48−8=40 布局，会把 header 行高从 32 撑到 40、菜单整体 +8px。
+      final shareSize = tester.getSize(find.byTooltip('分享歌曲'));
+      expect(shareSize, const Size(28, 28));
+      // header 内 32px 封面不应被撑大（行高由它决定，保持 32 而非 40）。
+      expect(tester.getSize(find.byType(Artwork)), const Size(32, 32));
+      // header 行高实测保持 32：分享按钮不再把整行撑到 40（菜单 +8px）。
+      expect(tester.getSize(headerRow).height, 32);
 
       await tester.tap(find.byTooltip('分享歌曲'));
       await tester.pump();

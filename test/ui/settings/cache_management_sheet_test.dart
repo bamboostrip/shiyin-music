@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/download_controller.dart';
 import 'package:shiyin_music/ui/settings/cache_management_sheet.dart';
+import 'package:shiyin_music/ui/widgets/toast.dart';
 
 const _defaultDir = r'C:\Users\Test\Downloads\shiyin_downloads';
 const _customDir = r'D:\MyMusic\shiyin_downloads';
@@ -118,6 +119,52 @@ void main() {
       );
       expect(clipboardCalls, hasLength(1));
       expect((clipboardCalls.first.arguments as Map)['text'], _defaultDir);
+    });
+
+    testWidgets('剪贴板写入失败时提示「复制失败」且不抛异常', (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          throw PlatformException(code: 'clipboard-unavailable');
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      // 走真实 Toast 通道：需要把 navigatorKey 挂到 MaterialApp 才能拿到 Overlay。
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: Toast.navigatorKey,
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 420,
+                child: DownloadDirInfo(downloads: _FakeDownloads()),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('复制路径'));
+      // 先让失败的平台通道调用落到 catch，再等 Toast 淡入。
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('复制失败，请稍后重试'), findsOneWidget);
+      // 失败时不能误报成功文案。
+      expect(find.text('下载目录路径已复制'), findsNothing);
+
+      // 错误 Toast 3 秒后自动消失：pump 完计时器与退场动画，
+      // 避免测试结束时留下 pending timer。
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('复制失败，请稍后重试'), findsNothing);
     });
   });
 
