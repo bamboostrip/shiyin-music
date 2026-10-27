@@ -95,7 +95,7 @@ void main() {
       expect(find.byIcon(Icons.check_rounded), findsNothing);
     });
 
-    testWidgets('downloads.notifyListeners 后角标随之出现/消失（只重建角标子树）', (
+    testWidgets('downloads.notifyListeners 后角标随之出现/消失', (
       tester,
     ) async {
       final downloads = _FakeDownloads();

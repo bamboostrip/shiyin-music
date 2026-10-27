@@ -7,11 +7,18 @@ import 'toast.dart';
 /// 歌曲分享文案（纯函数，便于单测）。
 ///
 /// 统一格式：`🎵 推荐歌曲：《歌名》 - 歌手（专辑：xxx）\n来自 时音`；
-/// 专辑为空（null / 空白）时不带括号段，避免出现「（专辑：）」空壳。
+/// 专辑为空（null / 空白）时不带括号段，避免出现「（专辑：）」空壳；
+/// 歌手为空（空白）时整段「 - 歌手」省略、歌名空白时用「未知歌曲」占位，
+/// 避免残缺文案（Song 各 factory 一般已有兜底，这里只做纯函数健壮性）。
 String buildSongShareText(Song song) {
   final album = song.albumName?.trim() ?? '';
   final albumSegment = album.isEmpty ? '' : '（专辑：$album）';
-  return '🎵 推荐歌曲：《${song.title}》 - ${song.artist}$albumSegment\n来自 时音';
+  // 只用 trim 结果做空判定，非空字段按原样输出，保证正常文案逐字节不变。
+  final hasTitle = song.title.trim().isNotEmpty;
+  final hasArtist = song.artist.trim().isNotEmpty;
+  final displayTitle = hasTitle ? song.title : '未知歌曲';
+  final artistSegment = hasArtist ? ' - ${song.artist}' : '';
+  return '🎵 推荐歌曲：《$displayTitle》$artistSegment$albumSegment\n来自 时音';
 }
 
 /// 复制歌曲分享文案到剪贴板，并给一致的 Toast 反馈。

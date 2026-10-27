@@ -50,6 +50,44 @@ void main() {
     );
   }
 
+  /// 桌面 Dialog 形态宿主：与真实桌面缓存弹层一致（Dialog + 最大宽度 520）。
+  Widget buildDialogSheet() {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Dialog(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: CacheManagementSheet(
+                  downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
+                  isDialog: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 取 Dialog 内容外层 SingleChildScrollView 对应的 Scrollable。
+  ///
+  /// SelectableText 内部的 EditableText 也自带一个 Scrollable，直接
+  /// `find.byType(Scrollable).first` 可能取错；这里限定在 SingleChildScrollView
+  /// 子树内，且外层的 Scrollable 先于 EditableText 被遍历到。
+  ScrollableState dialogScrollable(WidgetTester tester) {
+    return tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(SingleChildScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+  }
+
   group('缓存弹层「下载存储目录」信息块', () {
     testWidgets('有自定义目录时显示路径 + (自定义) 标记', (tester) async {
       await tester.pumpWidget(
@@ -195,6 +233,25 @@ void main() {
       expect(find.text('暂不可用'), findsNothing);
     });
 
+    testWidgets('桌面 Dialog 形态：正常窗口高度下内容不滚动、无溢出', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(buildDialogSheet());
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      // 正常窗口（1280×800）内容完全放得下：不应出现可滚动余量，
+      // 否则弹层会被撑成可滚动容器、鼠标滚轮误滚内容。
+      expect(dialogScrollable(tester).position.maxScrollExtent, 0);
+      expect(find.text('下载存储目录'), findsOneWidget);
+      expect(find.text('播放缓存上限'), findsOneWidget);
+    });
+
     testWidgets('桌面 Dialog 形态：低窗口高度下内容可滚动、不溢出', (tester) async {
       tester.view.physicalSize = const Size(800, 520);
       tester.view.devicePixelRatio = 1.0;
@@ -203,34 +260,37 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Center(
-              child: Dialog(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-                    child: CacheManagementSheet(
-                      downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
-                      isDialog: true,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
+      await tester.pumpWidget(buildDialogSheet());
       await tester.pumpAndSettle();
 
       // 桌面窗口最小 360×520：新增目录块后内容可能超过可用高度，
       // Dialog 形态必须可滚动而不是 RenderFlex 溢出。
       expect(tester.takeException(), isNull);
+      final scrollable = dialogScrollable(tester);
+      expect(scrollable.position.maxScrollExtent, greaterThan(0));
+
       await tester.drag(find.text('下载存储目录'), const Offset(0, -400));
       await tester.pumpAndSettle();
+      // drag 后滚动位置确实前进了，而不是「内容未溢出、拖了个寂寞」。
+      expect(scrollable.position.pixels, greaterThan(0));
       expect(find.text('播放缓存上限'), findsOneWidget);
+    });
+
+    testWidgets('底部弹层形态：正常渲染目录信息与下载文件条目，不抛异常', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          CacheManagementSheet(
+            downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('下载文件'), findsOneWidget);
+      expect(find.text('下载存储目录'), findsOneWidget);
+      expect(find.text(_defaultDir), findsOneWidget);
+      expect(find.text('(自定义)'), findsOneWidget);
     });
   });
 }

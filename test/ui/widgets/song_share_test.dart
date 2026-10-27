@@ -129,6 +129,44 @@ void main() {
       expect(text, isNot(contains('专辑：')));
     });
 
+    test('artist 为空：不残留「 - 」分隔符', () {
+      const song = Song(
+        id: '104',
+        title: '晴天',
+        artist: '',
+        hash: 'hash_qingtian_no_artist',
+      );
+      final text = buildSongShareText(song);
+      expect(text, '🎵 推荐歌曲：《晴天》\n来自 时音');
+      expect(text, isNot(contains(' - ')));
+    });
+
+    test('title 为空：用「未知歌曲」占位而不是空书名号', () {
+      const song = Song(
+        id: '105',
+        title: '',
+        artist: '周杰伦',
+        hash: 'hash_unknown_title',
+      );
+      final text = buildSongShareText(song);
+      expect(text, '🎵 推荐歌曲：《未知歌曲》 - 周杰伦\n来自 时音');
+      expect(text, isNot(contains('《》')));
+    });
+
+    test('title 与 artist 均为空：文案仍完整可用，无残缺分隔符', () {
+      const song = Song(
+        id: '106',
+        title: '',
+        artist: '',
+        hash: 'hash_empty_meta',
+      );
+      final text = buildSongShareText(song);
+      expect(text, '🎵 推荐歌曲：《未知歌曲》\n来自 时音');
+      expect(text, isNot(contains('《》')));
+      expect(text, isNot(contains(' - ')));
+      expect(text.endsWith('\n来自 时音'), isTrue);
+    });
+
     test('品牌行固定为「来自 时音」，不残留上游 KA Music 品牌', () {
       for (final song in [testSong, testSongWithoutAlbum]) {
         final text = buildSongShareText(song);
@@ -160,6 +198,43 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
       expect(find.text('已复制歌曲分享信息到剪贴板'), findsNothing);
+    });
+
+    testWidgets('剪贴板写入失败：不抛未捕获异常、提示失败且不误报成功', (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          throw PlatformException(code: 'clipboard-unavailable');
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: Toast.navigatorKey,
+          home: const Scaffold(body: SizedBox.shrink()),
+        ),
+      );
+
+      await copySongShareText(testSong);
+      // 先让失败的平台通道调用落到 catch，再等错误 Toast 淡入。
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('复制失败，请稍后重试'), findsOneWidget);
+      // 失败时不能误报成功文案。
+      expect(find.text('已复制歌曲分享信息到剪贴板'), findsNothing);
+
+      // 错误 Toast 3 秒后自动消失：pump 完计时器与退场动画，
+      // 避免测试结束时留下 pending timer。
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('复制失败，请稍后重试'), findsNothing);
     });
   });
 
