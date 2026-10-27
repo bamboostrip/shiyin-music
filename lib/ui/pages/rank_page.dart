@@ -186,7 +186,11 @@ class RankPageState extends SwrSectionState<RankPage, List<RankCategory>>
       );
       if (!mounted) return;
       if (first.songs.isEmpty) return;
-      await widget.player.playSong(first.songs.first, queue: first.songs);
+      // 防御拷贝：接口结果列表在本方法内还要交给后台补全逻辑当起点快照，
+      // playSong 会接管并持有队列引用；拷贝一份，避免播放队列与本地快照
+      // 共用同一 List。
+      final queueSongs = List<Song>.of(first.songs);
+      await widget.player.playSong(first.songs.first, queue: queueSongs);
       if (!mounted) return;
       setState(() => _playingRankId = null);
       // 首屏已在播：后台拉全榜补齐队列（用户切走则放弃，不抢队列）。
@@ -425,6 +429,10 @@ class _NewSongsSection extends StatelessWidget {
         // 为空时直接收起：刷新等待态由顶部均衡器动画统一表达，
         // 这里不再单独放转圈，避免一次刷新出现两个指示器。
         if (songs.isEmpty) return const SizedBox.shrink();
+        // 防御拷贝：songs 来自 FutureBuilder 快照或 fallback（_cachedNewSongs
+        // 页面缓存，可复用），playSong 会接管并持有队列引用；统一拷贝一份，
+        // 避免播放器队列与页面缓存列表跨所有权共享同一 List。
+        final queueSongs = List<Song>.of(songs);
 
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Padding(
@@ -454,7 +462,10 @@ class _NewSongsSection extends StatelessWidget {
                   ),
                   const Spacer(),
                   FilledButton.icon(
-                    onPressed: () => player.playSong(songs.first, queue: songs),
+                    onPressed: () => player.playSong(
+                      songs.first,
+                      queue: queueSongs,
+                    ),
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
                     label: const Text('播放'),
                     style: FilledButton.styleFrom(
@@ -501,7 +512,7 @@ class _NewSongsSection extends StatelessWidget {
                               )) {
                                 return;
                               }
-                              player.playSong(song, queue: songs);
+                              player.playSong(song, queue: queueSongs);
                             },
                             isPlaying: player.currentSong?.hash == song.hash &&
                                 song.hash.isNotEmpty,
@@ -534,7 +545,7 @@ class _NewSongsSection extends StatelessWidget {
                                 )) {
                                   return;
                                 }
-                                player.playSong(song, queue: songs);
+                                player.playSong(song, queue: queueSongs);
                               },
                               isPlaying:
                                   player.currentSong?.hash == song.hash &&

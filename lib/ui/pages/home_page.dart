@@ -817,7 +817,10 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
         if (hasRestored) {
           widget.player.resumePlayback();
         } else {
-          widget.player.playSong(songs.first, queue: songs);
+          // 防御拷贝（对齐上游 PR #156）：songs 取自 data.daily，是首页模型
+          // 持有的可复用列表；playSong 会接管并持有队列引用，拷贝一份再交给
+          // 播放器，避免后续刷新/重置首页数据时与播放队列共用同一 List。
+          widget.player.playSong(songs.first, queue: List<Song>.of(songs));
         }
       });
     });
@@ -1169,7 +1172,10 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
     )) {
       return;
     }
-    widget.player.playSong(song, queue: queue);
+    // 防御拷贝（对齐上游 PR #156）：调用方传入的是 data.topSongs 等首页模型
+    // 持有的可复用列表，playSong 会接管并持有队列引用；拷贝一份，避免播放器
+    // 队列与页面状态列表跨所有权共享同一 List。
+    widget.player.playSong(song, queue: List<Song>.of(queue));
   }
 
   void _openArtist(Song song) {
@@ -3611,7 +3617,9 @@ class _RadioSectionState extends SwrSectionState<_RadioSection, _RadioData> {
         Toast.info('这个电台暂时没有可播放歌曲');
         return;
       }
-      widget.player.playSong(queue.first, queue: queue);
+      // 防御拷贝：queue 可能取自 station.previewSongs（电台模型持有的可复用
+      // 列表），playSong 会接管并持有队列引用；统一拷贝后再交给播放器。
+      widget.player.playSong(queue.first, queue: List<Song>.of(queue));
     } catch (error) {
       if (!mounted) {
         return;

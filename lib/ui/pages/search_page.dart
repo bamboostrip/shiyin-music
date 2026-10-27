@@ -332,7 +332,13 @@ class _SearchPageState extends State<SearchPage> {
     // 默认只把该曲插入当前播放队列并起播，不打断正在听的歌单（issue #6-3）；
     // 设置里打开「搜索点歌替换播放队列」后才回到旧行为：整页搜索结果当队列。
     if (widget.player.searchPlayReplaceQueue) {
-      unawaited(widget.player.playSong(song, queue: _results));
+      // 防御拷贝：_results 是搜索页 state 持有的可复用结果列表，playSong 会
+      // 接管并持有队列引用；拷贝一份，避免播放器队列与页面结果列表共享同一
+      // List（不替换队列的分支由 playSongKeepingQueue 内部自行拷贝
+      // fallbackQueue，无需重复）。
+      unawaited(
+        widget.player.playSong(song, queue: List<Song>.of(_results)),
+      );
     } else {
       unawaited(
         widget.player.playSongKeepingQueue(song, fallbackQueue: _results),
