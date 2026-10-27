@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -156,6 +157,37 @@ class MusicAudioHandler extends BaseAudioHandler
   Future<void> Function()? _onPrevious;
   int _queueIndex = 0;
 
+  /// 当前投递给系统媒体会话的歌曲：歌词元数据（LyricInfo/extras）重建
+  /// MediaItem 时以它为基准，由 [loadSong]/[setSongQueue] 更新。
+  Song? _currentSong;
+
+  /// 手环/AVRCP 歌词标题同步：开启时 MediaItem.title = 当前歌词行，供只能
+  /// 读 AVRCP 标题的手环、手表与车机仪表盘显示歌词（上游 3.3.0 #134）。
+  /// 由控制器按「车载蓝牙歌词 && 手环标题同步」的合成开关下发，默认关闭。
+  bool _bluetoothLyricsTitleSync = false;
+
+  /// 开关手环/AVRCP 歌词标题同步（见 [_bluetoothLyricsTitleSync]）。
+  ///
+  /// 立即用最近一次歌词快照重建 MediaItem：开启时 title 马上变为当前歌词行
+  /// （手环/车机仪表盘无需等下一句），关闭时立即回落歌名。快照为空（暂停/
+  /// 未加载歌词）则只恢复歌名，不凭空造歌词行。
+  void setBluetoothLyricsTitleSync(bool enabled) {
+    if (_bluetoothLyricsTitleSync == enabled) return;
+    _bluetoothLyricsTitleSync = enabled;
+    _pushCurrentMediaItem();
+    debugPrint('[AudioHandler] 手环/AVRCP 歌词标题同步: $enabled');
+  }
+
+  /// 最近一次下发的歌词字段快照。
+  ///
+  /// 系统媒体会话的队列刷新（replaceQueue/addSongsToQueue 换队列但当前曲
+  /// 不变）与标题开关切换都会重建 MediaItem，必须复用这份快照；否则已推送
+  /// 的歌词与手环标题会被覆盖回纯歌名，直到下一句歌词才恢复。
+  String? _lastLyricText;
+  String? _lastTranslationText;
+  String? _lastRomanizationText;
+  String? _lastFullLyricLrc;
+
   HttpServer? _proxy;
   /// 进行中的代理端口绑定：并发首载共享同一次 bind，避免各自绑定一个
   /// HttpServer（多余的那个永远泄漏）。失败时置空以便下次重试。
@@ -283,14 +315,25 @@ class MusicAudioHandler extends BaseAudioHandler
     required int queueIndex,
   }) async {
     _hasLoadedMedia = true;
+    // 同曲重载（切音质/失败重试/曲末重播）保留已发布的歌词快照：fork 在
+    // 同一首歌重载时不会清空应用内歌词，锁屏歌词/手环标题也不该闪回歌名；
+    // 真换歌才清空快照，避免上一首的句子带进新歌。
+    final sameAsLoaded = _isSameSystemSong(_currentSong, song);
+    _currentSong = song;
+    if (!sameAsLoaded) {
+      _resetLyricSnapshot();
+    }
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
-    final currentItem = _mediaItemFor(song, includeArt: true);
     final items = _buildSystemQueue(queueSongs, _queueIndex);
 
     if (items.isNotEmpty) {
       queue.add(items);
     }
-    mediaItem.add(currentItem);
+    if (sameAsLoaded) {
+      _pushCurrentMediaItem();
+    } else {
+      mediaItem.add(_mediaItemFor(song, includeArt: true));
+    }
 
     // 本地文件与远端 URL 统一经代理（Range/UA 处理一致），
     // 路由按 seq 注册见 [_loadViaProxy]。
@@ -564,8 +607,217 @@ class MusicAudioHandler extends BaseAudioHandler
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
     queue.add(_buildSystemQueue(queueSongs, _queueIndex));
     if (currentSong != null) {
-      mediaItem.add(_mediaItemFor(currentSong, includeArt: true));
+      // 换队列但当前曲没变（歌单分页补全、插入下一首）时复用歌词快照重建，
+      // 别把锁屏歌词/手环标题冲掉；真正换歌则清空快照按新歌重建。
+      final sameAsLoaded = _isSameSystemSong(_currentSong, currentSong);
+      _currentSong = currentSong;
+      if (sameAsLoaded) {
+        _pushCurrentMediaItem();
+      } else {
+        _resetLyricSnapshot();
+        mediaItem.add(_mediaItemFor(currentSong, includeArt: true));
+      }
     }
+  }
+
+  /// 两首歌是否同一首（系统媒体会话换队列时复用歌词快照的判据）：
+  /// 非空 hash 按 hash，hash 为空（云盘等来源）退回歌曲 id。
+  static bool _isSameSystemSong(Song? a, Song? b) {
+    if (a == null || b == null) return false;
+    if (identical(a, b)) return true;
+    if (a.hash.isNotEmpty || b.hash.isNotEmpty) return a.hash == b.hash;
+    return a.id == b.id;
+  }
+
+  /// 用最近一次歌词快照重建当前媒体的 MediaItem（队列刷新 / 标题开关切换）。
+  void _pushCurrentMediaItem() {
+    final song = _currentSong;
+    if (song == null) return;
+    mediaItem.add(
+      buildLyricMediaItem(
+        song: song,
+        lyricText: _lastLyricText,
+        translationText: _lastTranslationText,
+        romanizationText: _lastRomanizationText,
+        fullLyricLrc: _lastFullLyricLrc,
+        bluetoothLyricsTitleSync: _bluetoothLyricsTitleSync,
+      ),
+    );
+  }
+
+  /// 清空歌词快照（新歌开播/换歌时调用）。
+  void _resetLyricSnapshot() {
+    _lastLyricText = null;
+    _lastTranslationText = null;
+    _lastRomanizationText = null;
+    _lastFullLyricLrc = null;
+  }
+
+  // ---- 系统媒体会话歌词（LyricInfo 协议，上游 3.3.0 #134/#151）----------
+  //
+  // Android 系统媒体会话（ColorOS/OriginOS 锁屏岛、状态栏歌词）与
+  // Lyricon/LyricProvider 等三方歌词插件不读应用内歌词，只从 MediaSession
+  // metadata 的 extras 里取：`lyric/currentLyric/translationLyric/romanLyric`
+  // 为当前行，`full_lrc` 与 `org.akanework.lyricinfo.FULL_LYRICS` 为整首标准
+  // LRC，另有 `lyricInfo` JSON 走 LyricInfo 协议。fork 重写 handler 时漏移
+  // 这段桥接，导致上述消费方全部拿不到歌词（triage §4.1）。
+
+  /// 更新当前播放歌曲的 MediaSession 元数据，写入歌词字段。
+  ///
+  /// [lyricText] 为 `null` 表示清空歌词（暂停/切歌/无歌词）：整组歌词字段
+  /// 一并移除，避免锁屏停在半句上；[fullLyricLrc] 为整首标准 LRC，只在当前
+  /// 行/歌词列表变化时由控制器传入（控制器侧按歌词列表 identity 缓存，
+  /// 不会每个位置 tick 重新格式化）。
+  ///
+  /// 无当前歌曲（系统会话尚未 loadSong）时静默忽略：此时 mediaItem 还不存在，
+  /// 凭空 add 会让 audio_service 贴出无内容的媒体通知。
+  void updateLyricMetadata({
+    String? lyricText,
+    String? translationText,
+    String? romanizationText,
+    String? fullLyricLrc,
+  }) {
+    final song = _currentSong;
+    if (song == null) return;
+    _lastLyricText = lyricText;
+    _lastTranslationText = translationText;
+    _lastRomanizationText = romanizationText;
+    _lastFullLyricLrc = fullLyricLrc;
+    _pushCurrentMediaItem();
+  }
+
+  /// 构建带歌词字段的 MediaItem（纯函数：单测不创建 AudioPlayer/不碰平台通道）。
+  @visibleForTesting
+  static MediaItem buildLyricMediaItem({
+    required Song song,
+    String? lyricText,
+    String? translationText,
+    String? romanizationText,
+    String? fullLyricLrc,
+    bool bluetoothLyricsTitleSync = false,
+  }) {
+    return MediaItem(
+      id: song.hash.isEmpty ? song.id : song.hash,
+      album: song.albumName,
+      title: buildLyricMediaTitle(
+        song: song,
+        lyricText: lyricText,
+        bluetoothLyricsTitleSync: bluetoothLyricsTitleSync,
+      ),
+      artist: song.artist,
+      duration: song.duration,
+      artUri: song.coverUrl == null ? null : Uri.tryParse(song.coverUrl!),
+      extras: buildLyricMediaExtras(
+        song: song,
+        lyricText: lyricText,
+        translationText: translationText,
+        romanizationText: romanizationText,
+        fullLyricLrc: fullLyricLrc,
+      ),
+    );
+  }
+
+  /// 媒体标题：手环/AVRCP 标题同步开启且当前行非空时为歌词行，否则歌名。
+  ///
+  /// 只覆盖 title，artist/album 保持歌曲信息：手环与部分车机只显示 title，
+  /// 覆盖后即可见实时歌词；关闭时回落到歌名（清空歌词的暂停态同理）。
+  @visibleForTesting
+  static String buildLyricMediaTitle({
+    required Song song,
+    String? lyricText,
+    bool bluetoothLyricsTitleSync = false,
+  }) {
+    if (bluetoothLyricsTitleSync && lyricText != null && lyricText.isNotEmpty) {
+      return lyricText;
+    }
+    return song.title;
+  }
+
+  /// 歌词元数据 extras（供 MediaSession/第三方歌词插件读取）。
+  ///
+  /// 字段与上游 3.3.0 对齐：
+  /// - `lyric/currentLyric`：当前行原文；
+  /// - `translationLyric/romanLyric`：当前行翻译/音译；
+  /// - `full_lrc`：整首标准 LRC；`org.akanework.lyricinfo.FULL_LYRICS`：同值
+  ///   协议别名；`org.akanework.lyricinfo.CURRENT_LYRIC`：当前行协议别名；
+  /// - `lyricInfo`：LyricInfo JSON（见 [buildLyricInfoJson]）。
+  ///
+  /// 值为空（null 或空串）的字段整体省略（不是写空串）：系统侧不区分
+  /// null/空串，写空字段只会让第三方歌词插件把当前行渲染成空行；清空歌词
+  /// 时 extras 只剩 `hash/songId`，与上游「lyricText 为 null = 清空」一致。
+  @visibleForTesting
+  static Map<String, dynamic> buildLyricMediaExtras({
+    required Song song,
+    String? lyricText,
+    String? translationText,
+    String? romanizationText,
+    String? fullLyricLrc,
+  }) {
+    final line = _nonEmptyOrNull(lyricText);
+    final translation = _nonEmptyOrNull(translationText);
+    final romanization = _nonEmptyOrNull(romanizationText);
+    final fullLrc = _nonEmptyOrNull(fullLyricLrc);
+    final lyricInfoJson = buildLyricInfoJson(
+      song: song,
+      lyricText: line,
+      translationText: translation,
+      romanizationText: romanization,
+      fullLyricLrc: fullLrc,
+    );
+    return <String, dynamic>{
+      'hash': song.hash,
+      'songId': song.id,
+      // Dart 3.8 null-aware elements：值为 null 时该键整体省略。
+      'lyric': ?line,
+      'currentLyric': ?line,
+      'translationLyric': ?translation,
+      'romanLyric': ?romanization,
+      'full_lrc': ?fullLrc,
+      'org.akanework.lyricinfo.FULL_LYRICS': ?fullLrc,
+      'org.akanework.lyricinfo.CURRENT_LYRIC': ?line,
+      'lyricInfo': ?lyricInfoJson,
+    };
+  }
+
+  /// 空串归一化为 null（歌词字段统一按「有内容才写」处理）。
+  static String? _nonEmptyOrNull(String? value) =>
+      value == null || value.isEmpty ? null : value;
+
+  /// LyricInfo 协议 JSON（ColorOS/OriginOS 锁屏岛、状态栏歌词）。
+  ///
+  /// 结构对齐上游 3.3.0：`songName/artist/album/songId/lyric` 必有，
+  /// `translation/roma` 非空才带；`lyric` 优先整首 LRC（锁屏岛按全量歌词
+  /// 滚动），没有 LRC 时退回当前行。
+  ///
+  /// 与上游的差异（有意为之）：上游只在**当前行非空**时才生成 JSON，纯音乐
+  /// 间奏（空行）会让锁屏歌词整体消失再重建；这里只要还有整首 LRC 就保留
+  /// JSON，仅省略当前行字段，滚动歌词不闪断。
+  ///
+  /// 返回 `null` 表示没有可下发的歌词内容（清空/无歌词）。
+  @visibleForTesting
+  static String? buildLyricInfoJson({
+    required Song song,
+    String? lyricText,
+    String? translationText,
+    String? romanizationText,
+    String? fullLyricLrc,
+  }) {
+    final hasCurrentLine = lyricText != null && lyricText.isNotEmpty;
+    final hasFullLrc = fullLyricLrc != null && fullLyricLrc.isNotEmpty;
+    if (!hasCurrentLine && !hasFullLrc) return null;
+    final map = <String, dynamic>{
+      'songName': song.title,
+      'artist': song.artist,
+      if (song.albumName != null && song.albumName!.isNotEmpty)
+        'album': song.albumName,
+      'songId': song.id.isNotEmpty ? song.id : song.hash,
+      'lyric': hasFullLrc ? fullLyricLrc : lyricText,
+      if (translationText != null && translationText.isNotEmpty)
+        'translation': translationText,
+      if (romanizationText != null && romanizationText.isNotEmpty)
+        'roma': romanizationText,
+    };
+    return jsonEncode(map);
   }
 
   @override

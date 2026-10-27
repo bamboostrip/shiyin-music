@@ -28,6 +28,9 @@ mixin _PlayerLyrics on _PlayerControllerBase {
     bluetoothLyricsEnabled = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_bluetoothLyricsEnabledSettingKey, enabled);
+    // 手环/AVRCP 标题同步是「车载蓝牙歌词」的下级开关：关闭后标题必须
+    // 立即回落歌名（开关同时被隐藏，用户无法再单独关它）。
+    _applyBluetoothLyricsTitleSyncSetting();
     if (!enabled && currentSong != null) {
       unawaited(
         _bluetoothLyrics.broadcastMetaChanged(
@@ -328,6 +331,10 @@ mixin _PlayerLyrics on _PlayerControllerBase {
   }
 
   void _syncBluetoothLyricsFromPosition() {
+    // 系统媒体会话歌词（ColorOS/OriginOS 锁屏岛、Lyricon 等）与蓝牙广播
+    // 开关无关，但共用同一个「位置流歌词同步」入口：先无条件同步系统歌词，
+    // 再按开关决定是否发车机广播（triage §4.1）。
+    _syncMediaSessionLyricFromPosition();
     if (!bluetoothLyricsEnabled) return;
     if (currentSong == null) return;
     final index = lyrics.isEmpty ? -1 : activeLyricIndex;
@@ -391,5 +398,112 @@ mixin _PlayerLyrics on _PlayerControllerBase {
         ),
       );
     }
+  }
+
+  // ---- 系统媒体会话歌词（LyricInfo/extras，上游 3.3.0 #134/#151）--------
+  //
+  // ColorOS/OriginOS 锁屏岛、状态栏歌词与 Lyricon/LyricProvider 等三方歌词
+  // 插件只从 MediaSession metadata（extras/lyricInfo）取歌词。它是一套通用
+  // 系统能力，**不依赖** [bluetoothLyricsEnabled]（上游把这段挂在蓝牙开关里，
+  // 导致不开车机就完全没有系统歌词；fork 按 triage §4.1 拆开）。手环/AVRCP
+  // 的「标题=歌词行」覆盖则受 [bluetoothLyricsTitleSyncEnabled] 控制。
+
+  /// 系统歌词协议只对 Android 系统媒体会话有消费方（ColorOS/OriginOS/
+  /// Lyricon）；桌面 SMTC/MPRIS 没有对应读取方，每行一次 mediaItem.add 只会
+  /// 白刷元数据（triage §4.1 风险项），故按平台短路。
+  static bool get _isMediaSessionLyricPlatform =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// 整首标准 LRC：按歌词列表 identity 缓存，只在列表换新时格式化一次
+  /// （禁止每个位置 tick 重复拼接整首歌词）。
+  String? get _mediaSessionFullLrc {
+    if (!identical(_mediaSessionFullLrcSource, lyrics)) {
+      _mediaSessionFullLrcSource = lyrics;
+      _mediaSessionFullLrcCache = LrcFormatter.buildFullLrc(lyrics);
+    }
+    return _mediaSessionFullLrcCache;
+  }
+
+  /// 空串视为无内容（MediaSession extras 里省略该键而非写空串）。
+  String? _nonEmptyLyricText(String? value) =>
+      value == null || value.isEmpty ? null : value;
+
+  /// 位置流中的系统媒体会话歌词同步。
+  ///
+  /// 推送时机（其余 tick 直接返回，不重建 MediaItem）：
+  /// - 歌词行变化（含歌词列表换新，翻译/音译随新列表一起更新）；
+  /// - 暂停后恢复播放（重推当前行，暂停时已清空）；
+  /// - 切歌后新歌当前行（切歌时先清空旧歌，再按新歌状态推/等歌词加载）。
+  ///
+  /// 清空时机：切歌、暂停、无歌曲、播放中但没有歌词（纯音乐/歌词未加载）。
+  /// 清空是幂等的（同一状态只 add 一次），避免暂停期间每 tick 重建通知。
+  /// 手环标题开关切换不经过这里：handler 收到开关后会用歌词快照自行重建标题。
+  void _syncMediaSessionLyricFromPosition() {
+    if (!_isMediaSessionLyricPlatform) return;
+    final song = currentSong;
+    final identity = song == null ? null : _songIdentity(song);
+    final sameSong =
+        identity != null && _mediaSessionLyricSongIdentity == identity;
+    final songChanged = !sameSong;
+    final lyricsChanged = !identical(_mediaSessionLyricLines, lyrics);
+    final wasPlaying = _mediaSessionLyricPlaying;
+    _mediaSessionLyricSongIdentity = identity;
+    _mediaSessionLyricLines = lyrics;
+    _mediaSessionLyricPlaying = isPlaying;
+
+    // 无歌曲/切歌/暂停：旧歌词必须立刻从锁屏消失。只清一次：索引 -1 表示
+    // 已清空/从未发布，重复 add 只会白白重建媒体通知。
+    if (song == null || songChanged || !isPlaying) {
+      if (_mediaSessionLyricIndex != -1) {
+        _mediaSessionLyricIndex = -1;
+        _audioHandler.updateLyricMetadata();
+      }
+      if (song == null || !isPlaying) return;
+      // 切歌且仍在播放：继续往下尝试推新歌当前行（歌词可能已就绪）。
+    }
+
+    final index = lyrics.isEmpty ? -1 : activeLyricIndex;
+    final lineChanged = index != _mediaSessionLyricIndex;
+    final resumed = !wasPlaying;
+    if (!lineChanged && !resumed && !lyricsChanged) return;
+    _mediaSessionLyricIndex = index;
+    if (index < 0) {
+      // 播放中但无可显示歌词：上面已清空（或从未发布），标记索引即可。
+      return;
+    }
+    final clampedIndex = index.clamp(0, lyrics.length - 1);
+    final line = lyrics[clampedIndex];
+    _audioHandler.updateLyricMetadata(
+      // 空文本行（间奏占位）不发布为当前行，但整首 LRC 仍保留，锁屏滚动
+      // 歌词不会因此整体消失（见 MusicAudioHandler.buildLyricInfoJson）。
+      lyricText: _nonEmptyLyricText(line.text),
+      translationText: _nonEmptyLyricText(line.translation),
+      romanizationText: _nonEmptyLyricText(line.romanization),
+      fullLyricLrc: _mediaSessionFullLrc,
+    );
+  }
+
+  /// 开关手环/AVRCP 歌词标题同步（仅在车载蓝牙歌词开启时可见）。
+  ///
+  /// 真正下发 handler 的是「车载蓝牙歌词 && 本开关」的合成值：关闭车载
+  /// 蓝牙歌词后本开关被隐藏，若不合成用户就再也关不掉标题覆盖。
+  Future<void> setBluetoothLyricsTitleSyncEnabled(bool enabled) async {
+    if (bluetoothLyricsTitleSyncEnabled == enabled) return;
+    bluetoothLyricsTitleSyncEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_bluetoothLyricsTitleSyncSettingKey, enabled);
+    _applyBluetoothLyricsTitleSyncSetting();
+    notifyListeners();
+  }
+
+  /// 下发「车载蓝牙歌词 && 手环标题同步」的合成开关。
+  ///
+  /// handler 收到后会立即用最近一次歌词快照重建 MediaItem（标题立刻生效/
+  /// 回落），无需控制器再补推：暂停态快照为空则只回落歌名。
+  void _applyBluetoothLyricsTitleSyncSetting() {
+    final effective = bluetoothLyricsEnabled && bluetoothLyricsTitleSyncEnabled;
+    if (effective == _bluetoothLyricsTitleSyncApplied) return;
+    _bluetoothLyricsTitleSyncApplied = effective;
+    _audioHandler.setBluetoothLyricsTitleSync(effective);
   }
 }

@@ -27,6 +27,7 @@ import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/local_lyrics_service.dart';
+import '../services/lrc_formatter.dart';
 import '../services/music_api.dart';
 import '../services/music_audio_handler.dart';
 import '../services/network_monitor.dart';
@@ -140,6 +141,12 @@ const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
 const _autoPlayOnDeviceConnectedSettingKey =
     'settings.auto_play_on_device_connected';
 const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
+// 手环/AVRCP 歌词标题同步（上游 3.3.0 #134）：开启后系统媒体会话的 title
+// 变成当前歌词行，供只能读 AVRCP 标题的手环/手表/车机仪表盘显示。仅在
+// 车载蓝牙歌词开启时可见/生效（合成开关见 _PlayerLyrics 的
+// _applyBluetoothLyricsTitleSyncSetting），默认关闭。
+const _bluetoothLyricsTitleSyncSettingKey =
+    'settings.bluetooth_lyrics_title_sync_enabled';
 // 歌词进度偏移：按歌曲 hash 保存毫秒值（正 = 歌词提前），见 lyricOffset。
 const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
@@ -698,6 +705,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool autoResumeAfterInterruption = false;
   bool autoPlayOnDeviceConnected = false;
   bool bluetoothLyricsEnabled = false;
+
+  /// 手环/AVRCP 歌词标题同步：开启后 MediaSession 的 title 为当前歌词行
+  /// （见 [MusicAudioHandler.setBluetoothLyricsTitleSync]）。
+  ///
+  /// 仅在 [bluetoothLyricsEnabled] 为真时在设置页可见、也才真正生效：
+  /// 下发 handler 的是两者的合成开关（关闭车载蓝牙歌词后 title 立即回落
+  /// 歌名，不会因为开关被隐藏而无法关闭），默认关闭。
+  bool bluetoothLyricsTitleSyncEnabled = false;
   bool desktopLyricsEnabled = false;
   // 平台出厂默认：桌面透明双行两端对齐 / 移动（Android）半透双行。
   // 不能用 const 默认构造——移动端首启即应是 50% 背景（构造默认透明度 0 是桌面值）。
@@ -725,6 +740,31 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   int _lastBluetoothLyricIndex = -1;
   bool _lastBluetoothPlaying = false;
   int _lastDesktopLyricIndex = -1;
+
+  // 系统媒体会话歌词（LyricInfo/extras）同步状态。与蓝牙广播是两条独立
+  // 通道（系统歌词不依赖蓝牙歌词开关），逻辑见
+  // _PlayerLyrics._syncMediaSessionLyricFromPosition。
+  /// 上一条歌词元数据所属的歌曲身份（切歌判定，见 `_songIdentity`）。
+  String? _mediaSessionLyricSongIdentity;
+
+  /// 上一条推送的歌词行索引（-1 = 已清空/从未发布）。
+  int _mediaSessionLyricIndex = -1;
+
+  /// 上一次同步时的播放态：false→true 视为恢复播放，需重推当前行。
+  bool _mediaSessionLyricPlaying = false;
+
+  /// 上一次同步的歌词列表（identity 比较：列表换新才需要重推/重新取值）。
+  List<LyricLine>? _mediaSessionLyricLines;
+
+  /// 整首 LRC 缓存及其来源列表：只在歌词列表换新时格式化一次，
+  /// 不随位置 tick 重复拼接（见 _PlayerLyrics 的 `_mediaSessionFullLrc`）。
+  List<LyricLine>? _mediaSessionFullLrcSource;
+  String? _mediaSessionFullLrcCache;
+
+  /// 已下发给 handler 的「车载蓝牙歌词 && 手环标题同步」合成开关值，
+  /// 用于避免设置恢复/重复 set 时无意义地跨对象调用（也保证默认关闭
+  /// 时不触碰 handler）。
+  bool _bluetoothLyricsTitleSyncApplied = false;
 
   Timer? _autoResumeTimer;
   Duration? sleepTimerRemaining;

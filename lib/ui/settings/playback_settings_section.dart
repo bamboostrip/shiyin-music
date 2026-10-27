@@ -268,6 +268,20 @@ class PlaybackSettingsSection extends StatelessWidget {
                   value: player.bluetoothLyricsEnabled,
                   onChanged: player.setBluetoothLyricsEnabled,
                 ),
+                // 手环/AVRCP 标题同步是车载蓝牙歌词的下级能力：只有车机
+                // 广播开启时才可见（关闭后隐藏，避免「看得到但无效」），
+                // 默认关闭——覆盖 title 会让锁屏/车机的歌名变成歌词行。
+                if (player.bluetoothLyricsEnabled) ...[
+                  SettingsDivider(),
+                  SettingsSwitchTile(
+                    icon: Icons.watch_rounded,
+                    iconColor: const Color(0xFF2979FF),
+                    title: '手环 / AVRCP 歌词同步',
+                    subtitle: '将实时歌词同步为媒体标题，供手环、手表与车机仪表盘显示',
+                    value: player.bluetoothLyricsTitleSyncEnabled,
+                    onChanged: player.setBluetoothLyricsTitleSyncEnabled,
+                  ),
+                ],
               ],
             ],
           ],

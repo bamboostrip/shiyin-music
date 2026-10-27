@@ -410,6 +410,19 @@ mixin _PlayerSettings on _PlayerControllerBase {
     bluetoothLyricsEnabled =
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;
+
+    // 手环/AVRCP 歌词标题同步（上游 3.3.0 #134）：恢复用户偏好，并把
+    // 「车载蓝牙歌词 && 标题同步」的合成开关下发给 handler。默认关闭时
+    // 保持 handler 默认值、不跨对象调用（既有 fake handler 单测零改动）。
+    bluetoothLyricsTitleSyncEnabled =
+        prefs.getBool(_bluetoothLyricsTitleSyncSettingKey) ??
+        bluetoothLyricsTitleSyncEnabled;
+    final effectiveBluetoothTitleSync =
+        bluetoothLyricsEnabled && bluetoothLyricsTitleSyncEnabled;
+    if (effectiveBluetoothTitleSync) {
+      _bluetoothLyricsTitleSyncApplied = true;
+      _audioHandler.setBluetoothLyricsTitleSync(true);
+    }
     // 逐曲歌词进度偏移：先恢复整张映射，当前歌的装载放到方法末尾
     // （此刻桌面歌词等设置已就绪，补推不会拿着半成品设置）。
     _restoreLyricOffsets(prefs);
