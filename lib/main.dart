@@ -58,9 +58,11 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 落盘日志尽早接管 debugPrint：现有诊断（[shiyin][next]/SYNOTIF/代理错误）
   // 零改动同步落文件，用户侧偶发问题（曲末不跳、通知按钮失灵）事后才有
-  // 现场可取证。接管同步先行、路径解析异步不阻塞——之前的启动日志先进
-  // 内存缓冲，落盘就绪后随下一轮 flush 一并写入。
-  unawaited(AppLogService.install());
+  // 现场可取证。接管同步先行、路径解析异步不阻塞启动；install 完成后补一次
+  // flush，把「路径就绪前先进内存缓冲」的启动日志立刻落盘。
+  unawaited(
+    AppLogService.install().then((_) => AppLogService.instance.flush()),
+  );
   // 全局未捕获异步异常兜底：此前无任何 onError，异常只进控制台且 release
   // 下不可见。这里仅记录并标记已处理（返回 true），不改变既有降级行为。
   PlatformDispatcher.instance.onError = (error, stack) {
