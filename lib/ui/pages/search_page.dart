@@ -1187,6 +1187,14 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
   late final PageController _pageController = PageController();
   var _page = 0;
 
+  // tab 条滚轨的 controller 由 HorizontalWheelScroll 注入并持有，这里只记
+  // 引用供「选中胶囊滚入视野」用；桌面滚轮事件仍挂在该 controller 上，
+  // 不受影响。
+  ScrollController? _tabScrollController;
+  // 轨道（视口）与各胶囊的 key：切页后测量选中胶囊在轨道内的位置。
+  final _tabStripKey = GlobalKey();
+  var _tabKeys = <GlobalKey>[];
+
   @override
   void dispose() {
     _pageController.dispose();
@@ -1206,6 +1214,44 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
     );
   }
 
+  /// 切页（横滑 / 箭头 / tab 点击三路同归 onPageChanged）后把选中胶囊滚入
+  /// tab 条视野：越界侧留 8px 呼吸边，已完整可见则不动，避免每次切换都
+  /// 抖一下。测量用相对轨道盒子的坐标，不受外层页面纵向滚动影响。
+  void _revealActiveTab(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 期间又切了页：旧页的滚入作废，由最新一次回调负责。
+      if (!mounted || index != _page) return;
+      final controller = _tabScrollController;
+      if (controller == null || !controller.hasClients) return;
+      if (index < 0 || index >= _tabKeys.length) return;
+      final tabBox =
+          _tabKeys[index].currentContext?.findRenderObject() as RenderBox?;
+      final stripBox =
+          _tabStripKey.currentContext?.findRenderObject() as RenderBox?;
+      if (tabBox == null || stripBox == null) return;
+      final position = controller.position;
+      final left = tabBox.localToGlobal(Offset.zero, ancestor: stripBox).dx;
+      final right = left + tabBox.size.width;
+      const margin = 8.0;
+      final width = stripBox.size.width;
+      double target;
+      if (left < margin) {
+        target = position.pixels + left - margin;
+      } else if (right > width - margin) {
+        target = position.pixels + right - width + margin;
+      } else {
+        return; // 已完整可见
+      }
+      final clamped = target.clamp(0.0, position.maxScrollExtent);
+      if ((clamped - position.pixels).abs() < 0.5) return;
+      controller.animateTo(
+        clamped,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final categories = widget.categories;
@@ -1213,6 +1259,10 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
     final page = _page.clamp(0, categories.length - 1);
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 热榜刷新导致分类数变化时，按位置重建胶囊 key 列表。
+    if (_tabKeys.length != categories.length) {
+      _tabKeys = List.generate(categories.length, (_) => GlobalKey());
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1264,6 +1314,9 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
         ),
         const SizedBox(height: 12),
         // 分段胶囊 tab 条：与首页顶部 tab 同一语言，选中态为立体白卡。
+        // 胶囊全量构建（Row）而非懒加载 ListView：切页后要按 key 测量选中
+        // 胶囊并滚入视野（_revealActiveTab），懒加载会把视口外的胶囊留在
+        // 树外无从测量；就 9 个左右的全量构建成本可忽略。
         Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
@@ -1273,23 +1326,33 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: SizedBox(
+            key: _tabStripKey,
             height: 34,
             child: HorizontalWheelScroll(
-              builder: (context, controller) => ListView.separated(
-                controller: controller,
-                scrollDirection: Axis.horizontal,
-                padding: EdgeInsets.zero,
-                itemCount: categories.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 4),
-                itemBuilder: (context, index) {
-                  final active = index == page;
-                  return _CategoryTab(
-                    label: categories[index].name,
-                    active: active,
-                    onTap: () => _goToPage(index, categories.length),
-                  );
-                },
-              ),
+              builder: (context, controller) {
+                _tabScrollController = controller;
+                return SingleChildScrollView(
+                  controller: controller,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < categories.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 4),
+                        KeyedSubtree(
+                          key: _tabKeys[i],
+                          child: _CategoryTab(
+                            label: categories[i].name,
+                            active: i == page,
+                            onTap: () => _goToPage(i, categories.length),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -1304,7 +1367,13 @@ class _HotSearchPanelState extends State<_HotSearchPanel> {
             controller: _pageController,
             child: PageView.builder(
               controller: _pageController,
-              onPageChanged: (i) => setState(() => _page = i),
+              onPageChanged: (i) {
+                setState(() => _page = i);
+                // 三路切榜（横滑/箭头/tab 点击）同归这里：选中胶囊滚入
+                // tab 条视野，修复"横滑切榜后顶部标题行不动、选中项被
+                // 截在轨道外看不见"的问题。
+                _revealActiveTab(i);
+              },
               itemCount: categories.length,
               itemBuilder: (context, index) {
                 return _CategoryKeywordList(
