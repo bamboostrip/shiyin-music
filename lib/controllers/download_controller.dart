@@ -108,6 +108,13 @@ class DownloadController extends ChangeNotifier {
   static const _playCacheIndexKey = 'shiyin_play_cache_index';
   static const _playCacheLimitKey = 'settings.play_cache_limit';
 
+  /// 下载音质覆盖值：缺失或 `'follow'` = 跟随播放音质。
+  ///
+  /// 值取 [AudioQuality.apiValue]（`128` / `320` / `flac`）。脏值一律按
+  /// 「跟随」处理（见 [_parseDownloadQuality]），避免手改/旧数据把下载
+  /// 锁死在某档后用户找不到恢复入口。
+  static const downloadQualityKey = 'settings.download_quality';
+
   /// 归一化 hash（下载识别键）：`trim + 小写`。
   ///
   /// 同一首歌在不同入口（歌单导入、搜索、云盘、历史恢复）返回的 hash
@@ -159,6 +166,42 @@ class DownloadController extends ChangeNotifier {
   int _playCacheLimit = 300 * 1024 * 1024; // 默认 300MB
   int get playCacheLimit => _playCacheLimit;
 
+  /// 下载音质覆盖值；null = 跟随播放音质（默认行为，等同加设置前的版本）。
+  AudioQuality? _downloadQualityOverride;
+  AudioQuality? get downloadQualityOverride => _downloadQualityOverride;
+
+  /// 生效的下载音质：独立设置优先，未设置时跟随 [playbackQuality]。
+  ///
+  /// UI 下载入口继续传 `player.audioQuality`（11 处调用点不改），由这里
+  /// 统一解析，保证单曲/批量/行内下载口径一致。
+  AudioQuality resolveDownloadQuality(AudioQuality playbackQuality) =>
+      _downloadQualityOverride ?? playbackQuality;
+
+  /// 写入 / 清除下载音质设置（null = 跟随播放音质）。
+  Future<void> setDownloadQuality(AudioQuality? quality) async {
+    if (_downloadQualityOverride == quality) return;
+    _downloadQualityOverride = quality;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (quality == null) {
+      await prefs.remove(downloadQualityKey);
+    } else {
+      await prefs.setString(downloadQualityKey, quality.apiValue);
+    }
+    debugPrint(
+      '[设置] 下载音质已更新: ${quality?.apiValue ?? 'follow'}',
+    );
+  }
+
+  /// 脏值一律按「跟随播放音质」处理，避免旧/手改数据把下载锁死在某档。
+  static AudioQuality? _parseDownloadQuality(String? raw) {
+    if (raw == null || raw.isEmpty || raw == 'follow') return null;
+    for (final quality in AudioQuality.values) {
+      if (quality.apiValue == raw) return quality;
+    }
+    return null;
+  }
+
   Future<void> setPlayCacheLimit(int limitInBytes) async {
     _playCacheLimit = limitInBytes;
     final prefs = await SharedPreferences.getInstance();
@@ -173,6 +216,9 @@ class DownloadController extends ChangeNotifier {
     _initialized = true;
     final prefs = await SharedPreferences.getInstance();
     _playCacheLimit = prefs.getInt(_playCacheLimitKey) ?? (300 * 1024 * 1024);
+    _downloadQualityOverride = _parseDownloadQuality(
+      prefs.getString(downloadQualityKey),
+    );
     await _loadDownloads();
     // 磁盘对账：历史目录迁移（桌面）+ 外部删除同步，随加载一次完成
     await reconcileDownloads();
@@ -456,7 +502,19 @@ class DownloadController extends ChangeNotifier {
   // ===== 下载操作 =====
 
   /// 用户主动下载歌曲。
-  Future<void> download(Song song, AudioQuality quality) async {
+  ///
+  /// [playbackQuality] 是调用点传入的播放音质；真正用于下载的档位由
+  /// [resolveDownloadQuality] 解析（设置页「下载音质」优先，否则跟随）。
+  /// [respectQualityOverride] 传 false 表示「失败重试」：按条目原档位重下，
+  /// 不跟随新设置——否则用户改了设置再点重试，重试请求会被悄悄换档。
+  Future<void> download(
+    Song song,
+    AudioQuality playbackQuality, {
+    bool respectQualityOverride = true,
+  }) async {
+    final quality = respectQualityOverride
+        ? resolveDownloadQuality(playbackQuality)
+        : playbackQuality;
     final downloadKey = _downloadKey(song);
     final key = _service.cacheKeyFor(song, quality);
     final existing = _downloads[downloadKey];
@@ -477,11 +535,8 @@ class DownloadController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final playUrl = await _api.songUrl(song, quality: quality);
-      if (playUrl.url.isEmpty) {
-        throw Exception('这首歌暂时没有可播放地址');
-      }
-      await _transfer(song, quality, playUrl.url);
+      final source = await _resolveDownloadUrl(song, quality);
+      await _transfer(song, source.quality, source.url);
     } catch (error) {
       // 等待地址解析期间已被清空/取消（条目移除）：不再写回失败条目。
       // _transfer 内部自捕获不会抛到此处，能到这里只会是解析本身失败。
@@ -507,8 +562,11 @@ class DownloadController extends ChangeNotifier {
   ///   [AppConfig.maxConcurrentDownloads]），支持进度与断点续传。
   Future<BatchDownloadResult> enqueueBatch(
     List<Song> songs,
-    AudioQuality quality,
+    AudioQuality playbackQuality,
   ) async {
+    // 批量没有「同曲重试」语义，恒尊重设置：整单按解析后的档位取地址，
+    // 与单曲下载口径一致。
+    final quality = resolveDownloadQuality(playbackQuality);
     // 批次内按归一 hash 去重，避免同一首歌（入口不同导致 hash 大小写
     // 漂移）被重复下载。
     final seen = <String>{};
@@ -555,7 +613,8 @@ class DownloadController extends ChangeNotifier {
         // 开始即计数，结束（无论成败）恰好一次，保证计数守恒。
         tracker?.trackStarted();
         try {
-          final playUrl = await _api.songUrl(song, quality: quality);
+          // 解析地址按档位降级（无源才降；网络异常直接进 catch 记失败）。
+          final source = await _resolveDownloadUrl(song, quality);
           // 等待解析期间已被清空/取消（代际过期或条目不在下载态）：
           // 静默中止，不写回条目；tracker 仍要结束计数以保守恒。
           if (_disposed ||
@@ -564,24 +623,12 @@ class DownloadController extends ChangeNotifier {
             tracker?.trackFinished(succeeded: false);
             continue;
           }
-          if (playUrl.url.isEmpty) {
-            _downloads[downloadKey] = DownloadEntry(
-              song: song,
-              quality: quality,
-              status: DownloadStatus.failed,
-              error: '这首歌暂时没有可播放地址',
-            );
-            notifyListeners();
-            failed++;
-            tracker?.trackFinished(succeeded: false);
-            continue;
-          }
           enqueued++;
           unawaited(
             _transfer(
               song,
-              quality,
-              playUrl.url,
+              source.quality,
+              source.url,
               partOfBatch: true,
               batchTracker: tracker,
             ),
@@ -616,6 +663,50 @@ class DownloadController extends ChangeNotifier {
       failed: failed,
     );
   }
+
+  /// 按档位降级解析下载地址。
+  ///
+  /// 只在「服务端明确没有该档音源」时降档（空地址 / 需要 VIP）；
+  /// 网络异常、超时等直接抛出，由调用方按原错误写失败条目——否则弱网
+  /// 会被伪装成「这首歌只有低音质」，用户以为音源就这样而不再重试。
+  Future<({AudioQuality quality, String url})> _resolveDownloadUrl(
+    Song song,
+    AudioQuality requested,
+  ) async {
+    Object? lastError;
+    for (final quality in _downloadQualityFallbackChain(requested)) {
+      try {
+        final playUrl = await _api.songUrl(song, quality: quality);
+        if (playUrl.url.isNotEmpty) {
+          if (quality != requested) {
+            debugPrint(
+              '[时音][download] 音质降级 ${requested.badge} → '
+              '${quality.badge}: ${song.hash}',
+            );
+          }
+          return (quality: quality, url: playUrl.url);
+        }
+        lastError = Exception('这首歌暂时没有可播放地址');
+      } on VipRequiredException catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? Exception('这首歌暂时没有可播放地址');
+  }
+
+  /// 降级顺序：flac → 320 → 128（128 是最低档，无源即失败）。
+  static List<AudioQuality> _downloadQualityFallbackChain(
+    AudioQuality quality,
+  ) =>
+      switch (quality) {
+        AudioQuality.lossless => const [
+          AudioQuality.lossless,
+          AudioQuality.high,
+          AudioQuality.standard,
+        ],
+        AudioQuality.high => const [AudioQuality.high, AudioQuality.standard],
+        AudioQuality.standard => const [AudioQuality.standard],
+      };
 
   /// 文件传输（播放地址已解析）。成功后写入已下载索引，失败进入失败列表。
   ///

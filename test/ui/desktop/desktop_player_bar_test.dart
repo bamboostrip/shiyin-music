@@ -20,7 +20,11 @@ class _FakeDownloadController extends ChangeNotifier implements DownloadControll
   @override
   bool isDownloaded(Song song) => downloaded;
   @override
-  Future<void> download(Song song, AudioQuality quality) async {
+  Future<void> download(
+    Song song,
+    AudioQuality quality, {
+    bool respectQualityOverride = true,
+  }) async {
     downloadCalls++;
   }
   @override

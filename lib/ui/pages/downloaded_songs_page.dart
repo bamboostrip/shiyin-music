@@ -717,7 +717,12 @@ class _FailedRow extends StatelessWidget {
             tooltip: '重新下载',
             icon: const Icon(Icons.refresh_rounded),
             color: colorScheme.primary,
-            onPressed: () => downloads.download(song, entry.quality),
+            onPressed: () => downloads.download(
+              song,
+              entry.quality,
+              // 重试按条目原档位重下：设置页后来改了「下载音质」也不受影响。
+              respectQualityOverride: false,
+            ),
           ),
           IconButton(
             tooltip: '移除',
