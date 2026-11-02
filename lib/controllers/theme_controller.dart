@@ -13,6 +13,7 @@ import '../ui/form_factor.dart';
 ///
 /// 管理：
 /// - 全局种子色（影响配色方案）
+/// - 外观模式（跟随系统/浅色/深色）
 /// - 自定义全局背景图（开关 + 图片路径 + 透明度）
 ///
 /// 通过 SharedPreferences 持久化，通过 ChangeNotifier 驱动 UI 重建。
@@ -32,6 +33,7 @@ class ThemeController extends ChangeNotifier {
   static const _landscapeEnabledKey = 'theme.landscape_enabled';
   static const _carModeEnabledKey = 'theme.car_mode_enabled';
   static const _fontScaleKey = 'theme.font_scale';
+  static const _themeModeKey = 'theme.mode';
   static const _carDisplayScaleKey = 'theme.car_display_scale';
   static const _carMarginTopKey = 'theme.car_margin_top';
   static const _carMarginBottomKey = 'theme.car_margin_bottom';
@@ -71,6 +73,7 @@ class ThemeController extends ChangeNotifier {
   static const defaultSeedColor = Color(0xFFF6A200);
 
   Color _seedColor = defaultSeedColor;
+  ThemeMode _themeMode = ThemeMode.system;
   bool _backgroundEnabled = false;
   String? _backgroundImagePath;
   double _backgroundOpacity = 0.15;
@@ -88,6 +91,17 @@ class ThemeController extends ChangeNotifier {
   bool? _lastAppliedCarModeEnabled;
 
   Color get seedColor => _seedColor;
+
+  /// 当前外观模式（跟随系统/浅色/深色）。
+  ThemeMode get themeMode => _themeMode;
+
+  /// 外观模式的中文标签（设置页选项文案）。
+  String get themeModeLabel => switch (_themeMode) {
+    ThemeMode.system => '跟随系统',
+    ThemeMode.light => '浅色模式',
+    ThemeMode.dark => '深色模式',
+  };
+
   bool get backgroundEnabled => _backgroundEnabled;
   String? get backgroundImagePath => _backgroundImagePath;
   double get backgroundOpacity => _backgroundOpacity;
@@ -162,6 +176,13 @@ class ThemeController extends ChangeNotifier {
     if (opacity != null) {
       _backgroundOpacity = opacity.clamp(0.0, 0.8);
     }
+    // 外观模式：键不存在（老用户）或存了非法值时回落跟随系统。
+    final themeModeValue = prefs.getString(_themeModeKey);
+    _themeMode = switch (themeModeValue) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
     applyOrientations(AdaptiveLayout.isTabletByPlatform());
     notifyListeners();
 
@@ -178,6 +199,15 @@ class ThemeController extends ChangeNotifier {
     _seedColor = color;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_seedColorKey, color.toARGB32());
+    notifyListeners();
+  }
+
+  /// 设置外观模式（跟随系统/浅色/深色），持久化并通知 UI 重建。
+  Future<void> setThemeMode(ThemeMode mode) async {
+    if (_themeMode == mode) return;
+    _themeMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_themeModeKey, mode.name);
     notifyListeners();
   }
 

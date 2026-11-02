@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/theme_controller.dart';
 import '../form_factor.dart';
+import '../widgets/theme_mode_selector.dart';
 import '../widgets/toast.dart';
 
-/// 个性化设置页面：全局皮肤配色 + 自定义背景图。
+/// 个性化设置页面：全局外观模式 + 皮肤配色 + 自定义背景图。
 class PersonalizationSettingsPage extends StatefulWidget {
   const PersonalizationSettingsPage({super.key, required this.themeController});
 
@@ -32,6 +33,18 @@ class _PersonalizationSettingsPageState
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
+              // ===== 外观模式 =====
+              _SectionHeader(title: '外观模式'),
+              const SizedBox(height: 8),
+              _SettingsCard(
+                children: [
+                  ThemeModeSelector(
+                    currentMode: tc.themeMode,
+                    onChanged: (mode) => tc.setThemeMode(mode),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
               // ===== 配色方案 =====
               _SectionHeader(title: '配色方案'),
               const SizedBox(height: 8),

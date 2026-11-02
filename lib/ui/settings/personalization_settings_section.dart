@@ -9,19 +9,21 @@ import 'settings_widgets.dart';
 /// 设置页「个性化」分节。
 ///
 /// [showOrientationTiles] 由页面按形态计算后传入（移动端手机+平板展示，
-/// 桌面不展示）；[onSelectFontScale] 由页面注入（字体大小弹窗保留在
-/// settings_page）。
+/// 桌面不展示）；[onSelectFontScale]、[onSelectThemeMode] 由页面注入
+/// （字体大小/外观模式弹窗保留在 settings_page）。
 class PersonalizationSettingsSection extends StatelessWidget {
   const PersonalizationSettingsSection({
     super.key,
     required this.theme,
     required this.showOrientationTiles,
     required this.onSelectFontScale,
+    required this.onSelectThemeMode,
   });
 
   final ThemeController theme;
   final bool showOrientationTiles;
   final VoidCallback onSelectFontScale;
+  final VoidCallback onSelectThemeMode;
 
   @override
   Widget build(BuildContext context) {
@@ -37,13 +39,21 @@ class PersonalizationSettingsSection extends StatelessWidget {
               icon: Icons.palette_rounded,
               iconColor: const Color(0xFFAB47BC),
               title: '皮肤与背景',
-              subtitle: '配色方案与自定义全局背景图',
+              subtitle: '外观模式、配色方案与自定义全局背景图',
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>
                       PersonalizationSettingsPage(themeController: theme),
                 ),
               ),
+            ),
+            SettingsDivider(),
+            SettingsTile(
+              icon: Icons.contrast_rounded,
+              iconColor: const Color(0xFF546E7A),
+              title: '外观模式',
+              subtitle: theme.themeModeLabel,
+              onTap: onSelectThemeMode,
             ),
             SettingsDivider(),
             SettingsTile(

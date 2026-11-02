@@ -378,6 +378,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         'desktopLyricsEnabled=${_player.desktopLyricsEnabled}');
     unawaited(NetworkMonitor.instance.start());
     _theme = widget.themeController;
+    // 手动切换外观模式时父级 build 不会重建（MaterialApp 由 AnimatedBuilder
+    // 局部重建），需监听控制器同步主窗原生擦除底色。
+    _theme.addListener(_syncWindowEraseBackground);
     _auth.restore();
     // AI/外部 DeepLink（shiyin://）：仅 Android 原生侧有 MethodChannel 实现，
     // 桌面平台不注册。start() 内部异步读取冷启动链接、对缺原生实现/非法
@@ -473,6 +476,7 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     _deepLink?.dispose();
     _auth.removeListener(_refreshNotificationButtons);
     _player.removeListener(_onPlayerChangedForNotificationButtons);
+    _theme.removeListener(_syncWindowEraseBackground);
     WidgetsBinding.instance.removeObserver(this);
     unawaited(NetworkMonitor.instance.stop());
     // 注意：NetworkMonitor 是进程单例，其广播流不得在这里 dispose，
@@ -489,20 +493,26 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
 
   @override
   void didChangePlatformBrightness() {
-    // 主题跟随系统（ThemeMode.system）：系统深浅色切换时同步主窗原生擦除
-    // 底色，避免窗口最大化/缩放过渡边缘闪出旧主题色（ MaterialApp 内部
-    // 自行响应亮度重建，这里无需 setState）。
+    // 跟随系统（ThemeMode.system）时系统深浅色切换会改变实际主题；手动锁定
+    // 浅/深色时不再影响实际主题，但仍需同步一次主窗擦除底色（内部同值去重），
+    // 避免窗口最大化/缩放过渡边缘闪出旧主题色（MaterialApp 内部自行响应亮度
+    // 重建，这里无需 setState）。
     _syncWindowEraseBackground();
   }
 
-  /// 主窗原生擦除底色与当前主题页面底色保持一致。
+  /// 主窗原生擦除底色与当前实际生效的主题页面底色保持一致。
   ///
+  /// 跟随系统时按系统亮度解析，手动锁定浅/深色时忽略系统亮度。
   /// 取值与 AppTheme 的 scaffoldBackgroundColor（非透明背景分支）一致：
   /// 深色 0xFF06070A / 浅色纯白。
   void _syncWindowEraseBackground() {
-    final dark =
+    final dark = switch (_theme.themeMode) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system =>
         WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-        Brightness.dark;
+            Brightness.dark,
+    };
     unawaited(
       DesktopWindow.syncEraseBackground(
         dark ? const Color(0xFF06070A) : Colors.white,
@@ -563,7 +573,7 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
           title: AppConfig.appName,
           debugShowCheckedModeBanner: false,
           navigatorKey: Toast.navigatorKey,
-          themeMode: ThemeMode.system,
+          themeMode: _theme.themeMode,
           theme: AppTheme.light(
             seedColor: _theme.seedColor,
             transparentBackground: _theme.backgroundEnabled,

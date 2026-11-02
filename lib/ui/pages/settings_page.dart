@@ -22,6 +22,7 @@ import '../settings/personalization_settings_section.dart';
 import '../settings/playback_settings_section.dart';
 import '../settings/settings_widgets.dart';
 import '../widgets/audio_quality_sheet.dart';
+import '../widgets/theme_mode_selector.dart';
 import '../widgets/toast.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -215,6 +216,177 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
+  /// 选择外观模式：桌面端居中 Dialog，移动端 BottomSheet。
+  ///
+  /// 选项文案取自 [themeModeOptions]，与个性化页三卡片选择器同源。
+  Future<void> _selectThemeMode(
+    BuildContext context,
+    ThemeController theme,
+  ) async {
+    Widget buildOptions(BuildContext ctx) {
+      final colorScheme = Theme.of(ctx).colorScheme;
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      return Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .92),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in themeModeOptions) ...[
+                InkWell(
+                  mouseCursor: isDesktopFormFactor
+                      ? SystemMouseCursors.click
+                      : null,
+                  onTap: () => Navigator.of(ctx).pop(option.mode),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          option.mode == theme.themeMode
+                              ? Icons.radio_button_checked_rounded
+                              : Icons.radio_button_off_rounded,
+                          color: option.mode == theme.themeMode
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant.withValues(
+                                  alpha: .6,
+                                ),
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                option.label,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              Text(
+                                option.subtitle,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (option != themeModeOptions.last)
+                  Divider(
+                    height: 1,
+                    indent: 52,
+                    color: colorScheme.outlineVariant.withValues(alpha: .24),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    final ThemeMode? selected;
+    if (isDesktopFormFactor) {
+      selected = await showDialog<ThemeMode>(
+        context: context,
+        builder: (dialogContext) {
+          return Dialog(
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '外观模式',
+                          style: Theme.of(dialogContext).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    buildOptions(dialogContext),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      selected = await showModalBottomSheet<ThemeMode>(
+        context: context,
+        showDragHandle: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        builder: (sheetContext) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '外观模式',
+                    style: Theme.of(sheetContext).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  buildOptions(sheetContext),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    if (selected != null) {
+      await theme.setThemeMode(selected);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -282,6 +454,7 @@ class SettingsPage extends StatelessWidget {
                     theme: theme,
                     showOrientationTiles: showOrientationTiles,
                     onSelectFontScale: () => _selectFontScale(context, theme),
+                    onSelectThemeMode: () => _selectThemeMode(context, theme),
                   ),
                   // 车机显示分节：仅车机模式开启（移动形态）时有意义，
                   // 桌面形态恒隐藏（车机模式下 PC 布局不生效）。
