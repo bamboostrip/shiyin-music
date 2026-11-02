@@ -247,10 +247,12 @@ class DownloadService {
   /// 判定顺序：
   /// 1. 目录在应用专属目录内（`Android/data/<包名>/files` / 文档目录）：
   ///    无需权限，直接创建使用；
-  /// 2. 目录在公共存储（如 `Music`、`Download`）：需要「所有文件访问」
-  ///    授权，未授权则不采用自定义目录；
-  /// 3. 目录创建失败（卷离线、只读介质、路径指向文件）：记日志后回退，
-  ///    设置值保留，存储恢复后自动重新生效。
+  /// 2. 目录在公共存储（如 `Music`、`Download`）：先看「所有文件访问」标志，
+  ///    标志为未授权时**再做一次真实写入探测**——权限标志
+  ///    （`isExternalStorageManager`）在部分 ROM / 授权返回时序下会滞后或
+  ///    误报，以实际可写为准，避免「明明能写却被判成不可用」；
+  /// 3. 真实不可写（未授权、卷离线、只读介质、路径指向文件）：记日志后
+  ///    回退默认目录，设置值保留，存储恢复后自动重新生效。
   Future<Directory?> _resolveAndroidCustomDir(String path) async {
     final appDirs = <String>[];
     try {
@@ -262,13 +264,25 @@ class DownloadService {
     try {
       appDirs.add((await getApplicationDocumentsDirectory()).path);
     } catch (_) {}
-    if (!isPathWithinDirectories(path, appDirs) &&
+    final withinAppDirs = isPathWithinDirectories(path, appDirs);
+    if (!withinAppDirs &&
         !await AndroidStorageAccess.hasSharedStorageAccess()) {
-      debugPrint(
-        '[DownloadService] 自定义下载目录缺少「所有文件访问」权限，'
-        '本次回退默认目录: $path',
-      );
-      return null;
+      // 标志说未授权：可能是真的没授权，也可能只是标志滞后/误报。用一次
+      // 探测写做最终判定（探测失败会抛 StateError，消息可直接给用户看）。
+      try {
+        final dir = await ensureWritableDir(path);
+        debugPrint(
+          '[DownloadService] 「所有文件访问」标志为未授权，但目录实际可写，'
+          '继续使用自定义目录: $path',
+        );
+        return dir;
+      } catch (error) {
+        debugPrint(
+          '[DownloadService] 自定义下载目录不可用（$error），'
+          '本次回退默认目录: $path',
+        );
+        return null;
+      }
     }
     try {
       return await _ensureDir(Directory(path));

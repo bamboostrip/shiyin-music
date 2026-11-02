@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -42,6 +43,10 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
   /// 当前实际生效的下载目录（解析失败时为 null，配合 [_loaded] 区分
   /// 「还在读」与「读不到」）。
   String? _effectivePath;
+
+  /// 配置了自定义目录但当前没生效时的可读原因（权限/目录不可写等），
+  /// 用于把「不能用」变成可操作的提示，而不是干巴巴一句不可用。
+  String? _unavailableReason;
   bool _loaded = false;
   bool _picking = false;
 
@@ -61,12 +66,40 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
       // 用户仍可在此改选或恢复默认。不能回填 custom 冒充生效目录。
       debugPrint('[设置] 解析下载位置失败: $e');
     }
+    String? reason;
+    if (custom != null && effective != custom) {
+      reason = await _diagnoseUnavailable(custom);
+    }
     if (!mounted) return;
     setState(() {
       _custom = custom;
       _effectivePath = effective;
+      _unavailableReason = reason;
       _loaded = true;
     });
+  }
+
+  /// 诊断「自定义目录配置了却没生效」的具体原因（仅展示与日志，不修改设置）。
+  Future<String> _diagnoseUnavailable(String custom) async {
+    if (!Platform.isAndroid) return '目录无法访问（可能在已拔出的磁盘/共享盘上）';
+    final status = await AndroidStorageAccess.status();
+    debugPrint(
+      '[设置] 自定义下载目录未生效：sdk=${status.sdkInt} '
+      'granted=${status.granted} canRequest=${status.canRequest} path=$custom',
+    );
+    if (!status.granted) {
+      return status.canRequest
+          ? '未授予「所有文件访问」权限，点此重新授权'
+          : '当前系统（Android 10）不支持写入系统文件夹';
+    }
+    try {
+      await DownloadService.ensureWritableDir(custom);
+      // 探测能过说明只是上一次解析瞬时时序问题：下次下载会重新生效。
+      return '目录可写，重新进入本页可刷新状态';
+    } catch (error) {
+      debugPrint('[设置] 自定义下载目录探测失败: $error');
+      return '目录不可写（云盘/网络位置或已被删除）';
+    }
   }
 
   /// 默认下载位置的用户可读称呼（Android 是应用专属目录，桌面是系统下载目录）。
@@ -74,6 +107,33 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
       Platform.isAndroid ? '应用专属目录' : '系统下载目录';
 
   Future<void> _pick() async {
+    final custom = _custom;
+    // 已配置但没生效：先尝试修复（补齐授权 / 重建目录），而不是让用户
+    // 重新选一遍、或者以为设置丢了。
+    if (custom != null && _effectivePath != custom) {
+      await _repair(custom);
+      return;
+    }
+    await _chooseFolder();
+  }
+
+  /// 修复已配置但未生效的自定义目录，成功后刷新状态。
+  Future<void> _repair(String custom) async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      if (await _ensureWritable(custom)) {
+        Toast.success('下载位置已恢复');
+      } else {
+        Toast.error('该文件夹仍不可用，请重新选择下载位置');
+      }
+      await _load();
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _chooseFolder() async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
@@ -264,7 +324,9 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
             null => '当前下载位置不可用',
             _ when custom == null => '默认 · $effective',
             _ when customActive => '自定义 · $effective',
-            _ => '自定义目录不可用，暂用默认 · $effective',
+            _ =>
+              '自定义目录不可用：${_unavailableReason ?? '未知原因'}'
+                  '\n目标：$custom\n暂用默认：$effective',
           };
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -278,6 +340,26 @@ class _DownloadLocationSettingsState extends State<DownloadLocationSettings> {
           loading: _picking,
           onTap: _pick,
         ),
+        if (custom != null && !customActive) ...[
+          SettingsDivider(),
+          // 已配置但未生效时给「修复」与「重新选」两条路，避免用户以为
+          // 必须先去系统设置里翻权限。
+          SettingsTile(
+            icon: Icons.build_circle_outlined,
+            iconColor: const Color(0xFF7B1FA2),
+            title: '修复下载位置',
+            subtitle: '重新授权并检测所选文件夹',
+            onTap: () => unawaited(_repair(custom)),
+          ),
+          SettingsDivider(),
+          SettingsTile(
+            icon: Icons.drive_file_move_rounded,
+            iconColor: const Color(0xFF1E88E5),
+            title: '重新选择下载位置',
+            subtitle: '当前文件夹不可用，改选其他文件夹',
+            onTap: () => unawaited(_chooseFolder()),
+          ),
+        ],
         if (custom != null) ...[
           SettingsDivider(),
           SettingsTile(
