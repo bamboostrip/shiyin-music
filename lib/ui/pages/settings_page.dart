@@ -274,8 +274,9 @@ class SettingsPage extends StatelessWidget {
                   CacheSettingsSection(
                     onOpenManager: () => _showCacheManagement(context),
                   ),
-                  // Download section（桌面与 Android：下载位置；iOS 不展示）
-                  const DownloadSettingsSection(),
+                  // Download section（桌面与 Android：下载位置、下载音质；
+                  // iOS 不展示）
+                  DownloadSettingsSection(downloads: downloads, player: player),
                   // Personalization section
                   PersonalizationSettingsSection(
                     theme: theme,
