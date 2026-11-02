@@ -20,6 +20,7 @@ import '../form_factor.dart';
 import '../widgets/app_song_row.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/artwork.dart';
+import '../widgets/audio_quality_badge.dart';
 import '../widgets/desktop_song_table_row.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_action_sheets.dart';
@@ -311,6 +312,8 @@ class _DownloadedList extends StatelessWidget {
             final entry = completed[index];
             return DesktopSongTableRow(
               song: entry.song,
+              // 桌面表格同样标注实际档位（与移动端行一致）。
+              trailingBadge: AudioQualityBadge(quality: entry.quality),
               index: index + 1,
               player: player,
               auth: auth,
@@ -491,7 +494,7 @@ class _DownloadedSongRow extends StatelessWidget {
     }
 
     // 行视觉与歌单/搜索/歌手页统一见 AppSongRow；点行即播，
-    // 右侧只留 ⋮（删下载/看文件夹/拷路径），播放圈按钮已收敛掉。
+    // 右侧只留音质徽标 + ⋮（删下载/看文件夹/拷路径），播放圈按钮已收敛掉。
     return AppSongRow(
       song: song,
       player: player,
@@ -499,6 +502,8 @@ class _DownloadedSongRow extends StatelessWidget {
       // 本页整页都是已下载歌曲，行内再挂「已下载」角标纯冗余。
       showDownloadedBadge: false,
       trailing: [
+        // 实际落盘档位：无损无源自动降档后，用户能一眼看出拿到的是哪一档。
+        AudioQualityBadge(quality: entry.quality),
         AppSongRowMenuButton(onPressed: () => _showActions(context, song)),
       ],
     );

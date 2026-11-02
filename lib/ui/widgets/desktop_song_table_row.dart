@@ -214,6 +214,7 @@ class DesktopSongTableRow extends StatefulWidget {
     this.onSecondaryMore,
     this.showHoverActions = true,
     this.showCover = true,
+    this.trailingBadge,
   });
 
   final Song song;
@@ -244,6 +245,12 @@ class DesktopSongTableRow extends StatefulWidget {
 
   /// 是否在歌曲标题前展示封面缩略图（36×36，hover 时支持单击播放）。
   final bool showCover;
+
+  /// 标题后附加的徽标（如已下载页的 128K/320K/FLAC 档位微标）；null 不占位。
+  ///
+  /// 与按标题猜的 Hi-Res/SQ/VIP 微标互不影响：后者来自歌曲元数据，
+  /// 本参数由页面按业务状态（实际下载档位）传入，两者可以同时出现。
+  final Widget? trailingBadge;
 
   @override
   State<DesktopSongTableRow> createState() => _DesktopSongTableRowState();
@@ -464,6 +471,12 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                   case final badge?) ...[
                                 const SizedBox(width: 6),
                                 IgnorePointer(child: badge),
+                              ],
+                              // 页面传入的业务徽标（如实际下载档位），排在
+                              // 标题猜出来的属性微标之后，两者语义不重叠。
+                              if (widget.trailingBadge != null) ...[
+                                const SizedBox(width: 6),
+                                IgnorePointer(child: widget.trailingBadge!),
                               ],
                             ],
                           ),
