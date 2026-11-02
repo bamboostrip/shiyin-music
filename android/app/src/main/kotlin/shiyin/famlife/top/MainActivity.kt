@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import android.media.MediaScannerConnection
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
@@ -58,6 +59,9 @@ class MainActivity : AudioServiceActivity() {
     // 让解码循环立即结束,避免旧歌曲分析空跑占 CPU。
     @Volatile private var loudnessAnalysisCancelled: Boolean = false
     private var pendingPermissionResult: MethodChannel.Result? = null
+    // 「所有文件访问」（自定义下载目录到公共文件夹）申请中的回调：系统设置页
+    // 返回后按 Environment.isExternalStorageManager() 的真实结果回给 Dart。
+    private var pendingStorageResult: MethodChannel.Result? = null
     // AI / 外部 DeepLink（shiyin://）：原生只负责搬运 intent，解析与执行
     // 全在 Dart 侧（channel: shiyin_music/deep_link）。冷启动链接先暂存在
     // 这里，等 Dart 主动 getInitialLink 时取走。
@@ -67,6 +71,8 @@ class MainActivity : AudioServiceActivity() {
 
     companion object {
         private const val REQUEST_READ_AUDIO = 1001
+        private const val REQUEST_ALL_FILES_ACCESS = 1002
+        private const val REQUEST_WRITE_STORAGE = 1003
         private const val TAG_SUPER_LYRIC = "SuperLyricPublisher"
         private const val TAG_BLUETOOTH_LYRICS = "BluetoothLyrics"
         private const val TAG_LYRICS_OVERLAY = "LyricsOverlay"
@@ -839,6 +845,32 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler { call, result ->
                 AudioCaptureHandler.handle(call, result, this)
             }
+
+        // 自定义下载目录：file_picker 选目录只返回路径、不携带 SAF 授权，
+        // 系统公共文件夹的按路径写入依赖「所有文件访问」（MANAGE_EXTERNAL_STORAGE）。
+        // 该通道只做权限状态查询与申请；未授权时 Dart 侧回退应用专属目录。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shiyin_music/storage")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getStatus" -> result.success(storageAccessStatus())
+                    "requestAccess" -> requestStorageAccess(result)
+                    "scanFile" -> {
+                        // 下载到公共目录的文件不会自动进系统媒体库：主动扫描
+                        // 后车机/其他播放器/相册才看得到（应用专属目录会被
+                        // 系统忽略，调用无副作用）。
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        val ok = runCatching {
+                            MediaScannerConnection.scanFile(this, arrayOf(path), null, null)
+                        }.isSuccess
+                        result.success(ok)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     private fun readAudioPermission(): String {
@@ -862,6 +894,101 @@ class MainActivity : AudioServiceActivity() {
         )
     }
 
+    /**
+     * 「所有文件访问」（MANAGE_EXTERNAL_STORAGE）是否已授予；API 29 及以下
+     * 没有该权限，恒为 false（Android 10 会走「不支持」提示，9 及以下走
+     * WRITE_EXTERNAL_STORAGE 的 granted 分支）。
+     *
+     * 单独成函数是为了让 lint 能识别 `SDK_INT >= R` 的版本门控（NewApi）。
+     */
+    private fun hasAllFilesAccess(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            false
+        }
+    }
+
+    /**
+     * 当前存储访问状态：Android 11+ 看「所有文件访问」，Android 9 及以下看
+     * WRITE_EXTERNAL_STORAGE；Android 10 强制分区存储且没有对应开关，
+     * granted / canRequest 均为 false，Dart 侧据此提示不支持公共目录。
+     */
+    private fun storageAccessStatus(): Map<String, Any> {
+        val sdk = Build.VERSION.SDK_INT
+        val granted = when {
+            sdk >= Build.VERSION_CODES.R -> hasAllFilesAccess()
+            sdk >= Build.VERSION_CODES.Q -> false
+            else -> ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        // Android 10（API 29）没有任何可申请的公共目录写权限。
+        val canRequest = sdk >= Build.VERSION_CODES.R || sdk < Build.VERSION_CODES.Q
+        return mapOf<String, Any>(
+            "sdkInt" to sdk,
+            "granted" to granted,
+            "canRequest" to canRequest
+        )
+    }
+
+    private fun requestStorageAccess(result: MethodChannel.Result) {
+        val sdk = Build.VERSION.SDK_INT
+        if (storageAccessStatus()["granted"] == true) {
+            result.success(true)
+            return
+        }
+        // 上一次申请还没返回（用户没退出设置页就又点了一次）：先按未授权
+        // 结束旧回调，避免 Dart 侧 future 悬挂、也避免回调被覆盖后泄漏。
+        pendingStorageResult?.success(false)
+        pendingStorageResult = null
+        when {
+            sdk >= Build.VERSION_CODES.R -> {
+                pendingStorageResult = result
+                val appIntent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                val appLaunched = runCatching {
+                    startActivityForResult(appIntent, REQUEST_ALL_FILES_ACCESS)
+                }.isSuccess
+                if (!appLaunched) {
+                    // 部分 ROM 没有应用级开关入口，退回「所有文件访问」列表页。
+                    val listIntent =
+                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    val listLaunched = runCatching {
+                        startActivityForResult(listIntent, REQUEST_ALL_FILES_ACCESS)
+                    }.isSuccess
+                    if (!listLaunched) {
+                        pendingStorageResult = null
+                        result.success(false)
+                    }
+                }
+            }
+            sdk < Build.VERSION_CODES.Q -> {
+                pendingStorageResult = result
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    REQUEST_WRITE_STORAGE
+                )
+            }
+            else -> result.success(false)
+        }
+    }
+
+    // 「所有文件访问」设置页没有可用的 resultCode（用户可能直接返回），
+    // 回来后以系统真实授权状态为准。
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ALL_FILES_ACCESS) {
+            val pending = pendingStorageResult
+            pendingStorageResult = null
+            pending?.success(hasAllFilesAccess())
+        }
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -873,6 +1000,12 @@ class MainActivity : AudioServiceActivity() {
                     grantResults[0] == PackageManager.PERMISSION_GRANTED
             pendingPermissionResult?.success(granted)
             pendingPermissionResult = null
+        }
+        if (requestCode == REQUEST_WRITE_STORAGE) {
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingStorageResult?.success(granted)
+            pendingStorageResult = null
         }
         AudioCaptureHandler.onRequestPermissionsResult(requestCode, grantResults)
     }
@@ -1295,6 +1428,10 @@ class MainActivity : AudioServiceActivity() {
     }
 
     override fun onDestroy() {
+        // 权限申请中的回调：Activity 销毁后 Dart 侧不会再收到结果（界面会
+        // 一直转圈到超时），先按未授权结束；引擎已失效时忽略失败。
+        runCatching { pendingStorageResult?.success(false) }
+        pendingStorageResult = null
         releaseEqualizer()
         releaseBassBoost()
         releaseVirtualizer()

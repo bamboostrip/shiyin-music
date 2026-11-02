@@ -46,11 +46,18 @@ void main() {
   }
 
   /// 以真实磁盘目录驱动对账：当前目录 + 两个历史目录候选。
-  DownloadController buildController({bool withLegacyDirs = true}) {
+  ///
+  /// [customDirUnavailable] 模拟「自定义下载目录配置了却解析不到」（如
+  /// Android「所有文件访问」被回收）：此时不应按外部删除裁剪索引。
+  DownloadController buildController({
+    bool withLegacyDirs = true,
+    bool customDirUnavailable = false,
+  }) {
     return DownloadController(
       _FakeDownloadService(
         currentDir: currentDir,
         legacyDirs: withLegacyDirs ? [legacyDir, legacyKaDir] : const [],
+        customDirUnavailable: customDirUnavailable,
       ),
       _FakeApi(),
     );
@@ -217,7 +224,8 @@ void main() {
   });
 
   test('移动端口径：无历史目录时仅做外部删除同步', () async {
-    // legacyDirs 为空（对应移动端 legacyDownloadDirs 返回空列表）
+    // legacyDirs 为空：模拟没有任何历史候选的情况（如全新安装/自定义
+    // 下载目录从未换过，legacyDownloadDirs 只返回当前目录被排除后的空集）
     final controller = buildController(withLegacyDirs: false);
     await seedIndex(_song, '${legacyDir.path}/a.mp3');
     // 文件确实存在于旧路径（移动端旧路径原地可用的等价模拟）
@@ -299,6 +307,20 @@ void main() {
     );
   });
 
+  test('自定义目录解析不到（权限被回收）→ 不按外部删除裁剪索引', () async {
+    // 自定义目录不可用时 downloadDir 会回退默认目录；若仍按「文件已丢」
+    // 口径裁剪，存储恢复后条目就没了。目录在、文件不在也不裁剪。
+    final goneDir = Directory('${tmpRoot.path}/gone_custom')..createSync();
+    final controller = buildController(customDirUnavailable: true);
+    await seedIndex(_song, '${goneDir.path}/a.mp3');
+
+    await controller.initialize();
+
+    final entry = controller.entryFor(_song);
+    expect(entry?.status, DownloadStatus.downloaded);
+    expect(entry?.filePath, '${goneDir.path}/a.mp3');
+  });
+
   test('下载根不可用（卷断开/共享盘失联）：不裁剪，条目保留', () async {
     // downloadDir 抛错 → canPrune=false：全表 exists()==false 也不得清空
     final controller = DownloadController(
@@ -334,6 +356,7 @@ class _FakeDownloadService implements DownloadService {
     required this.legacyDirs,
     this.hangTransfers = false,
     this.failDownloadDir = false,
+    this.customDirUnavailable = false,
   });
 
   final Directory currentDir;
@@ -342,6 +365,9 @@ class _FakeDownloadService implements DownloadService {
 
   /// 模拟下载根解析失败（下载卷未挂载/共享盘断开时 downloadDir 抛错）。
   final bool failDownloadDir;
+
+  /// 模拟「配置了自定义目录但解析不到」（Android 存储权限被回收）。
+  final bool customDirUnavailable;
 
   final Completer<void> _hangCompleter = Completer<void>();
   final DownloadService _real = DownloadService();
@@ -354,6 +380,9 @@ class _FakeDownloadService implements DownloadService {
     if (!currentDir.existsSync()) currentDir.createSync(recursive: true);
     return currentDir;
   }
+
+  @override
+  Future<bool> customDownloadDirUnavailable() async => customDirUnavailable;
 
   @override
   Future<List<Directory>> legacyDownloadDirs() async => legacyDirs;

@@ -15,6 +15,19 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 听歌识曲麦克风采集(仅识曲页使用,运行时动态申请) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 自定义下载位置（Android 11+）：用户把下载目录选到系统「音乐」「下载」
+         等公共文件夹后，按路径写入需要「所有文件访问」。未设置自定义目录时
+         不会申请该权限，下载仍落在应用专属目录（Android/data/<包名>/files）；
+         未授权时 Dart 侧自动回退应用专属目录，不会导致下载失败。
+         tools:ignore="ScopedStorage"：本权限仅由用户主动选择公共目录时使用。 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <!-- Android 9 及以下写公共目录的运行时权限；Android 10+ 分区存储改用
+         MANAGE_EXTERNAL_STORAGE，故限制 maxSdkVersion。 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
         <!-- 自定义 Application：任何组件（Activity/Service/Receiver）启动前先创建
              通知渠道，防止 audio_service 在车机上以 IMPORTANCE_LOW 预建渠道导致

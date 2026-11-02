@@ -61,7 +61,10 @@ void main() {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
                 child: CacheManagementSheet(
-                  downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
+                  downloads: _FakeDownloads(
+                    dirPath: _customDir,
+                    customDir: _customDir,
+                  ),
                   isDialog: true,
                 ),
               ),
@@ -95,7 +98,7 @@ void main() {
           DownloadDirInfo(
             downloads: _FakeDownloads(
               dirPath: _customDir,
-              customDir: r'D:\MyMusic',
+              customDir: _customDir,
             ),
           ),
         ),
@@ -106,6 +109,23 @@ void main() {
       expect(find.text(_customDir), findsOneWidget);
       expect(find.text('(自定义)'), findsOneWidget);
       expect(find.byTooltip('复制路径'), findsOneWidget);
+    });
+
+    testWidgets('配置了自定义目录但未生效时标注未生效，不误标为自定义', (tester) async {
+      // Android「所有文件访问」被回收 / 外置盘离线：实际生效目录回退默认，
+      // 此时不能显示「(自定义)」误导用户以为文件落在自定义目录。
+      await tester.pumpWidget(
+        wrap(
+          DownloadDirInfo(
+            downloads: _FakeDownloads(customDir: _customDir),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(_defaultDir), findsOneWidget);
+      expect(find.text('(自定义)'), findsNothing);
+      expect(find.text('(自定义未生效)'), findsOneWidget);
     });
 
     testWidgets('未自定义（跟随系统默认）时只显示路径，不显示自定义标记', (tester) async {
@@ -211,7 +231,10 @@ void main() {
       await tester.pumpWidget(
         wrap(
           CacheManagementSheet(
-            downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
+            downloads: _FakeDownloads(
+              dirPath: _customDir,
+              customDir: _customDir,
+            ),
           ),
         ),
       );
@@ -219,9 +242,9 @@ void main() {
 
       expect(find.text('下载文件'), findsOneWidget);
       expect(find.text('下载存储目录'), findsOneWidget);
-      expect(find.text(_defaultDir), findsOneWidget);
+      expect(find.text(_customDir), findsOneWidget);
       expect(find.text('(自定义)'), findsOneWidget);
-      // fork 桌面设置已有下载位置入口：缓存弹层不重复放「更改目录 / 恢复默认」。
+      // 下载位置的更改/恢复默认入口在设置页「下载」分节，缓存弹层不重复放。
       expect(find.text('更改目录'), findsNothing);
       expect(find.text('恢复默认'), findsNothing);
     });
@@ -280,7 +303,10 @@ void main() {
       await tester.pumpWidget(
         wrap(
           CacheManagementSheet(
-            downloads: _FakeDownloads(customDir: r'D:\MyMusic'),
+            downloads: _FakeDownloads(
+              dirPath: _customDir,
+              customDir: _customDir,
+            ),
           ),
         ),
       );
@@ -289,7 +315,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('下载文件'), findsOneWidget);
       expect(find.text('下载存储目录'), findsOneWidget);
-      expect(find.text(_defaultDir), findsOneWidget);
+      expect(find.text(_customDir), findsOneWidget);
       expect(find.text('(自定义)'), findsOneWidget);
     });
   });

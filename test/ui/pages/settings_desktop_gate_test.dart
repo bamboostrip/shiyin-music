@@ -139,8 +139,9 @@ void main() {
       expect(find.text('桌面'), findsNothing);
       expect(find.text('开机自启'), findsNothing);
       expect(find.text('关闭时最小化到托盘'), findsNothing);
-      // 下载位置仅 PC 桌面形态提供（移动端下载走 App 专属目录，无此概念）。
-      expect(find.text('下载位置'), findsNothing);
+      // 下载位置不再是桌面专属：Android 同样可改下载目录（issue #10），
+      // 移动形态下保留入口；它挂在共用的「下载」分节而不是「桌面」分节。
+      expect(find.text('下载位置'), findsOneWidget);
       expect(find.text('重置窗口'), findsNothing);
       // 车机模式未开启时「车机显示」分节不出现。
       expect(find.text('车机显示'), findsNothing);

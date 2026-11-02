@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import '../models/music_models.dart';
+import 'android_storage_access.dart';
 import 'id3_tag_writer.dart';
 import 'image_disk_cache.dart';
 
@@ -49,10 +50,12 @@ class _PendingTask {
 class DownloadService {
   DownloadService();
 
-  /// 用户自定义下载目录的 prefs 键（PC 设置页「下载位置」写入）。
+  /// 用户自定义下载目录的 prefs 键（设置页「下载 - 下载位置」写入，
+  /// 桌面与 Android 共用）。
   ///
   /// 空 / 未设置 = 跟随系统默认（桌面为系统「下载」目录下的
-  /// [AppConfig.downloadDirName] 子目录）。只影响之后的新下载；
+  /// [AppConfig.downloadDirName] 子目录，Android 为应用专属外部目录）。
+  /// 只影响之后的新下载；
   /// 已有条目的索引是绝对路径，文件留在原处仍可播可删；换目录前的
   /// 旧自定义目录会记入 [downloadDirOverrideHistoryKey]，下次对账
   /// 按「以文件为准」语义搬入新目录（见 [legacyDownloadDirs]）。
@@ -175,9 +178,14 @@ class DownloadService {
 
   /// 持久下载目录。
   ///
-  /// - Android：App 专属外部目录（`Android/data/<包名>/files/shiyin_downloads`），
-  ///   无需存储权限，卸载自动清理，不被系统相册/音乐扫描。
-  ///   API29+ 分区存储下公共 Download 裸写必 EACCES，故不再使用公共目录。
+  /// 所有支持自定义下载位置的平台（桌面 + Android）优先使用用户在
+  /// 设置页选择的目录；Android 选到系统公共目录时需要「所有文件访问」
+  /// 权限（见 [AndroidStorageAccess]），未授权或目录不可用时回退默认目录，
+  /// 避免整个下载功能被一个已失效的路径卡死。
+  ///
+  /// - Android：默认 App 专属外部目录（`Android/data/<包名>/files/
+  ///   shiyin_downloads`），无需存储权限，卸载自动清理，不被系统相册/
+  ///   音乐扫描。API29+ 分区存储下公共 Download 裸写必 EACCES。
   ///   存量用户旧索引仍是公共目录绝对路径，文件本身还在就继续可播可删；
   ///   新下载落新目录，目录大小统计口径随之切换（一次性显示回落，属预期）。
   /// - 桌面端（Windows/Linux/macOS）：系统"下载"目录（path_provider 的
@@ -188,6 +196,11 @@ class DownloadService {
   /// - 其他平台（iOS 等）或获取失败时回退到应用文档目录。
   Future<Directory> downloadDir() async {
     if (Platform.isAndroid) {
+      final custom = await customDownloadDirOverride();
+      if (custom != null) {
+        final resolved = await _resolveAndroidCustomDir(custom);
+        if (resolved != null) return resolved;
+      }
       try {
         final external = await getExternalStorageDirectory();
         if (external != null) {
@@ -204,7 +217,7 @@ class DownloadService {
       );
     }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      // 用户自定义下载位置（PC 设置-桌面-下载位置）优先于系统 Downloads。
+      // 用户自定义下载位置（设置-下载-下载位置）优先于系统 Downloads。
       // 目录失效（卷未挂载、共享盘断开）时 _ensureDir 抛错，由调用方转
       // 用户可读提示；对账侧已有「下载根不可用时保留全部条目」兜底。
       final custom = await customDownloadDirOverride();
@@ -228,6 +241,46 @@ class DownloadService {
     );
   }
 
+  /// Android 用户自定义目录解析：不可用时返回 null，由 [downloadDir]
+  /// 回退默认目录（而不是让每次下载都失败）。
+  ///
+  /// 判定顺序：
+  /// 1. 目录在应用专属目录内（`Android/data/<包名>/files` / 文档目录）：
+  ///    无需权限，直接创建使用；
+  /// 2. 目录在公共存储（如 `Music`、`Download`）：需要「所有文件访问」
+  ///    授权，未授权则不采用自定义目录；
+  /// 3. 目录创建失败（卷离线、只读介质、路径指向文件）：记日志后回退，
+  ///    设置值保留，存储恢复后自动重新生效。
+  Future<Directory?> _resolveAndroidCustomDir(String path) async {
+    final appDirs = <String>[];
+    try {
+      final external = await getExternalStorageDirectory();
+      if (external != null) appDirs.add(external.path);
+    } catch (_) {
+      // path_provider 偶尔不可用：退化为仍需权限判断，保守侧更安全
+    }
+    try {
+      appDirs.add((await getApplicationDocumentsDirectory()).path);
+    } catch (_) {}
+    if (!isPathWithinDirectories(path, appDirs) &&
+        !await AndroidStorageAccess.hasSharedStorageAccess()) {
+      debugPrint(
+        '[DownloadService] 自定义下载目录缺少「所有文件访问」权限，'
+        '本次回退默认目录: $path',
+      );
+      return null;
+    }
+    try {
+      return await _ensureDir(Directory(path));
+    } on FileSystemException catch (error) {
+      debugPrint(
+        '[DownloadService] 自定义下载目录不可用（$error），'
+        '本次回退默认目录: $path',
+      );
+      return null;
+    }
+  }
+
   /// 目录确保存在；创建失败（如 XDG 目录指向无权限位置）原样抛出，
   /// 由调用方转为用户可读的下载失败提示。
   Future<Directory> _ensureDir(Directory dir) async {
@@ -237,43 +290,66 @@ class DownloadService {
     return dir;
   }
 
-  /// 桌面端历史下载目录候选（不含当前目录），供索引与磁盘对账：
-  /// 目录布局历经过两次变更——改名（ka_music_* → shiyin_*）与 Windows
-  /// 下载目录对齐系统 Downloads（此前落在文档目录）——旧索引条目里的
-  /// 绝对路径可能指向以下任一历史位置：
+  /// 历史下载目录候选（不含当前目录），供索引与磁盘对账。
+  ///
+  /// 桌面端目录布局历经过两次变更——改名（ka_music_* → shiyin_*）与
+  /// Windows 下载目录对齐系统 Downloads（此前落在文档目录）——旧索引条目
+  /// 里的绝对路径可能指向以下任一历史位置：
   /// - `<文档目录>/shiyin_downloads`、`<文档目录>/ka_music_downloads`
   ///   （415b76a 前 Windows/macOS 的下载落点；改名迁移只重写了索引
   ///   字符串时文件仍留在 ka_music 目录）
   /// - `<系统下载目录>/ka_music_downloads`（改名前的 Linux 落点）
-  /// 移动端返回空列表：Android 的存量旧路径（公共 Download）按既有
-  /// 决策保持原地可用，不参与搬移。
+  /// - 历史自定义目录（[customDownloadDirHistory]）：换过下载位置后旧目录
+  ///   里的文件仍在原处，不纳入搬移就会变成「换了目录 = 旧歌丢索引」。
+  ///
+  /// Android 只把**应用专属目录**当历史候选：
+  /// - 默认落点（`Android/data/<包名>/files/shiyin_downloads`、外置存储
+  ///   不可用时的文档目录）参与搬移——用户首次改到自定义目录后，旧下载
+  ///   跟着搬走，不会留在既看不见、又随卸载删除的私有目录里；
+  /// - 用户主动选过的公共目录（如「音乐」「下载」）**不参与搬移**：恢复
+  ///   默认或换目录时，文件保留在用户选择的位置，不会被静默移回应用
+  ///   专属目录（那样其他播放器/车机就看不到这些歌了）。索引仍指向原
+  ///   文件，照常可播可删。
   Future<List<Directory>> legacyDownloadDirs() async {
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
-      return const [];
-    }
     final dirs = <Directory>[];
-    Directory? docs;
-    Directory? downloads;
-    try {
-      docs = await getApplicationDocumentsDirectory();
-    } catch (_) {}
-    try {
-      downloads = await getDownloadsDirectory();
-    } catch (_) {}
-    for (final base in [docs, downloads]) {
-      if (base == null) continue;
-      for (final name in _legacyDownloadDirNameCandidates) {
-        dirs.add(Directory('${base.path}/$name'));
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      Directory? docs;
+      Directory? downloads;
+      try {
+        docs = await getApplicationDocumentsDirectory();
+      } catch (_) {}
+      try {
+        downloads = await getDownloadsDirectory();
+      } catch (_) {}
+      for (final base in [docs, downloads]) {
+        if (base == null) continue;
+        for (final name in _legacyDownloadDirNameCandidates) {
+          dirs.add(Directory('${base.path}/$name'));
+        }
       }
-    }
-    // 历史自定义目录：用户换过下载位置时，旧目录里的文件仍在原处，
-    // 纳入对账才能按「以文件为准」搬入当前目录（否则换目录=旧歌丢索引）。
-    try {
-      for (final historyPath in await customDownloadDirHistory()) {
-        dirs.add(Directory(historyPath));
+      // 桌面历史自定义目录：换位置后旧文件搬入当前目录，与「以文件为准」
+      // 的桌面口径一致。
+      try {
+        for (final historyPath in await customDownloadDirHistory()) {
+          dirs.add(Directory(historyPath));
+        }
+      } catch (_) {
+        // prefs 读取失败不影响既有历史目录对账
       }
-    } catch (_) {
-      // prefs 读取失败不影响既有历史目录对账
+    } else if (Platform.isAndroid) {
+      final bases = <Directory?>[];
+      try {
+        bases.add(await getExternalStorageDirectory());
+      } catch (_) {}
+      try {
+        bases.add(await getApplicationDocumentsDirectory());
+      } catch (_) {}
+      for (final base in bases) {
+        if (base == null) continue;
+        for (final name in _legacyDownloadDirNameCandidates) {
+          dirs.add(Directory('${base.path}/$name'));
+        }
+      }
     }
     // 排除当前下载目录（macOS/Linux 下文档目录兜底路径可能与历史路径重合）
     Directory? current;
@@ -285,6 +361,21 @@ class DownloadService {
       dirs.removeWhere((d) => d.path == resolved.path);
     }
     return dirs;
+  }
+
+  /// 配置了自定义下载目录、但当前解析不到它（权限被回收、卷离线等）。
+  ///
+  /// 对账用：[downloadDir] 此时会回退默认目录，若仍按「文件已被外部删除」
+  /// 口径裁剪索引，存储恢复后条目就丢了。返回 true 时对账只做保留与采用。
+  Future<bool> customDownloadDirUnavailable() async {
+    final custom = await customDownloadDirOverride();
+    if (custom == null) return false;
+    try {
+      final current = await downloadDir();
+      return current.path != custom;
+    } catch (_) {
+      return true;
+    }
   }
 
   /// 临时播放缓存目录。
@@ -499,6 +590,13 @@ class DownloadService {
       if (task.kind == DownloadTaskKind.download &&
           finalPath.toLowerCase().endsWith('.mp3')) {
         await _injectId3Tag(finalPath, task.song);
+      }
+
+      // Android：按路径写入公共目录的文件不会自动进系统媒体库，主动触发
+      // 一次扫描，车机 / 其他播放器 / 相册才能立即看到（应用专属目录会被
+      // 系统忽略，调用无副作用）。扫描是尽力而为，不阻塞下载结果。
+      if (task.kind == DownloadTaskKind.download) {
+        unawaited(AndroidStorageAccess.scanFile(finalPath));
       }
 
       return finalPath;

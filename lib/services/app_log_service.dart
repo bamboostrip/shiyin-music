@@ -93,8 +93,9 @@ class LogStats {
 /// 不可见）。本服务在保留原「落盘 + debugPrint 接管」能力的基础上补齐
 /// 结构化日志（级别/tag）、统计与用户侧导出通道。
 ///
-/// - 文件位置与下载目录同源（Android 取 app 专属外部存储，桌面取文档目录，
-///   见 [resolveLogFilePath]）；导出目录见 [resolveExportDirectory]
+/// - 文件位置独立于下载目录（Android 取 app 专属外部存储，桌面取文档目录，
+///   见 [resolveLogFilePath]）：日志不跟随用户自定义下载位置，避免诊断文件
+///   被写进用户的音乐/下载文件夹；导出目录见 [resolveExportDirectory]
 ///   （Android 用 app 专属外部目录，桌面用系统下载目录，**绝不写公共
 ///   Download、不新增存储权限**）；
 /// - 上限四保险：内存 [_kMaxRecentEntries] 条环形缓存；待写缓冲

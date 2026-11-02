@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shiyin_music/ui/settings/desktop_settings_section.dart';
+import 'package:shiyin_music/ui/settings/download_location_settings.dart';
 
 /// 「下载位置」file_picker 失败时的 PowerShell WinForms 兜底：
 /// 脚本构造与 -EncodedCommand 编码的确定性。

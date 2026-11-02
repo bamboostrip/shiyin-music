@@ -807,13 +807,14 @@ class DownloadController extends ChangeNotifier {
   /// 下载索引对账：让列表回到与磁盘一致的真实状态。
   ///
   /// 两个来源会造成索引与磁盘脱节：
-  /// 1. 桌面端下载落点两次变迁（ka_music 改名、Windows 从文档目录对齐
-  ///    系统 Downloads），旧条目的绝对路径可能指向历史目录；
+  /// 1. 下载落点变迁（桌面 ka_music 改名、Windows 从文档目录对齐系统
+  ///    Downloads；各平台用户换过自定义下载位置），旧条目的绝对路径可能
+  ///    指向历史目录；
   /// 2. 用户在文件管理器里手动删除/移动歌曲文件，索引无从感知。
   ///
   /// 对每个已下载条目（现代桌面软件"以文件为准、列表随磁盘"的口径）：
-  /// - 文件仍在历史目录 → 搬入当前下载目录并重写路径（仅桌面，
-  ///   [DownloadService.legacyDownloadDirs] 在移动端返回空列表）；
+  /// - 文件仍在历史目录 → 搬入当前下载目录并重写路径（桌面与 Android
+  ///   的历史自定义目录都参与，见 [DownloadService.legacyDownloadDirs]）；
   /// - 索引路径已失效，但同名文件在当前/历史目录 → 采用（覆盖改名
   ///   迁移只重写了索引字符串、文件仍在旧目录的错位）；
   /// - 到处不存在 → 移除条目（外部删除同步）。
@@ -834,7 +835,15 @@ class DownloadController extends ChangeNotifier {
     // 下载根都解析/创建失败（下载卷未挂载、共享盘断开等）时 exists()
     // 会全员 false，此时裁剪等于把整张索引清空，存储恢复后"下载全丢"。
     // 只在下载根可用时才判定"外部删除"；根不可用时本轮保留所有条目。
-    final canPrune = currentDir != null;
+    // 「自定义目录配置了但当前解析不到」（Android 存储权限被回收等）同理：
+    // downloadDir 已回退默认目录，不能据此认定文件被删。
+    var customDirUnavailable = false;
+    if (currentDir != null) {
+      try {
+        customDirUnavailable = await _service.customDownloadDirUnavailable();
+      } catch (_) {}
+    }
+    final canPrune = currentDir != null && !customDirUnavailable;
 
     var changed = false;
     var removed = 0;

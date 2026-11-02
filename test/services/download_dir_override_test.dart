@@ -108,5 +108,54 @@ void main() {
       await DownloadService.setCustomDownloadDir(null);
       expect(await DownloadService.customDownloadDirOverride(), isNull);
     });
+
+    test('legacyDownloadDirs 收纳历史自定义目录，供换位置后找回旧文件', () async {
+      final tmp = await Directory.systemTemp.createTemp('shiyin_dl_hist_');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      final sep = Platform.pathSeparator;
+      final oldDir = '${tmp.path}${sep}MusicA';
+      final currentDir = '${tmp.path}${sep}MusicB';
+      await DownloadService.setCustomDownloadDir(oldDir);
+      // 换到新目录：旧目录进入历史，旧文件仍留在原处。
+      await DownloadService.setCustomDownloadDir(currentDir);
+
+      final dirs = await DownloadService().legacyDownloadDirs();
+      final paths = dirs.map((d) => d.path).toSet();
+
+      expect(paths, contains(oldDir), reason: '旧自定义目录必须参与对账');
+      expect(paths, isNot(contains(currentDir)),
+          reason: '当前下载目录不能出现在历史候选里（否则被当成待搬移）');
+    });
+
+    test('customDownloadDirUnavailable：配置了却解析不到才算不可用', () async {
+      final tmp = await Directory.systemTemp.createTemp('shiyin_dl_unavail_');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+
+      // 未配置自定义目录：跟随默认目录，不算不可用。
+      expect(await DownloadService().customDownloadDirUnavailable(), isFalse);
+
+      // 配置了可创建目录：可用。
+      final sep = Platform.pathSeparator;
+      await DownloadService.setCustomDownloadDir('${tmp.path}${sep}Music');
+      expect(await DownloadService().customDownloadDirUnavailable(), isFalse);
+
+      // 父路径是普通文件：目录创建必失败 → 解析不到 → 不可用。
+      final blocker = File('${tmp.path}${sep}blocker');
+      await blocker.writeAsString('x');
+      await DownloadService.setCustomDownloadDir(
+        '${blocker.path}${sep}sub',
+      );
+      expect(await DownloadService().customDownloadDirUnavailable(), isTrue);
+
+      await DownloadService.setCustomDownloadDir(null);
+    });
   });
 }

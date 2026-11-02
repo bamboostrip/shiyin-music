@@ -460,28 +460,37 @@ class _DownloadDirInfoState extends State<DownloadDirInfo> {
   }
 
   Future<void> _load() async {
+    String? path;
+    var failed = false;
     try {
-      final path = await widget.downloads.getDownloadDirPath();
-      final custom = await widget.downloads.getCustomDownloadDir();
-      if (!mounted) return;
-      setState(() {
-        _path = path;
-        _customDir = custom;
-        _failed = false;
-      });
+      path = await widget.downloads.getDownloadDirPath();
     } catch (_) {
       // 目录不可用（卷未挂载、权限不足、path_provider 失败等）：静默占位。
-      if (!mounted) return;
-      setState(() {
-        _path = null;
-        _customDir = null;
-        _failed = true;
-      });
+      failed = true;
     }
+    // 自定义目录配置单独读取：目录解析失败时也要保留，才能标注「未生效」。
+    String? custom;
+    try {
+      custom = await widget.downloads.getCustomDownloadDir();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _path = path;
+      _customDir = custom;
+      _failed = failed;
+    });
   }
 
-  /// 是否为用户自定义目录（空串/空白视为跟随默认）。
-  bool get _isCustom => (_customDir ?? '').trim().isNotEmpty;
+  /// 自定义目录是否就是当前实际生效目录（空串/空白视为跟随默认）。
+  ///
+  /// 配置了自定义目录但当前没生效（Android「所有文件访问」被回收、外置
+  /// 盘离线等）时不能标注「(自定义)」误导用户，单独提示未生效。
+  bool get _isCustom =>
+      (_customDir ?? '').trim().isNotEmpty && _customDir == _path;
+
+  /// 配置了自定义目录但当前未生效（已回退默认目录）。
+  bool get _customUnavailable =>
+      (_customDir ?? '').trim().isNotEmpty && _customDir != _path;
 
   Future<void> _copyPath() async {
     final path = _path;
@@ -505,6 +514,9 @@ class _DownloadDirInfoState extends State<DownloadDirInfo> {
     final isDark = theme.brightness == Brightness.dark;
     final pathText = _failed ? '暂不可用' : (_path ?? '正在获取路径…');
     final canCopy = _path != null && _path!.isNotEmpty && !_failed;
+    final badgeLabel = _isCustom
+        ? '(自定义)'
+        : (_customUnavailable ? '(自定义未生效)' : null);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -557,7 +569,7 @@ class _DownloadDirInfoState extends State<DownloadDirInfo> {
                         ),
                       ),
                     ),
-                    if (_isCustom) ...[
+                    if (badgeLabel != null) ...[
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -569,7 +581,7 @@ class _DownloadDirInfoState extends State<DownloadDirInfo> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          '(自定义)',
+                          badgeLabel,
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,

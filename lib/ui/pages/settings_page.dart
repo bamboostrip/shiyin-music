@@ -17,6 +17,7 @@ import '../settings/cache_management_sheet.dart';
 import '../settings/cache_settings_section.dart';
 import '../settings/car_display_settings_section.dart';
 import '../settings/desktop_settings_section.dart';
+import '../settings/download_settings_section.dart';
 import '../settings/personalization_settings_section.dart';
 import '../settings/playback_settings_section.dart';
 import '../settings/settings_widgets.dart';
@@ -273,6 +274,8 @@ class SettingsPage extends StatelessWidget {
                   CacheSettingsSection(
                     onOpenManager: () => _showCacheManagement(context),
                   ),
+                  // Download section（桌面与 Android：下载位置；iOS 不展示）
+                  const DownloadSettingsSection(),
                   // Personalization section
                   PersonalizationSettingsSection(
                     theme: theme,
