@@ -2,6 +2,11 @@ part of 'music_api.dart';
 
 /// 歌单域：我的歌单 / 推荐歌单 / 相似歌单 / 歌单详情与曲目管理 / 外部歌单解析。
 mixin _MusicApiPlaylist on _MusicApiBase {
+  /// 云歌单「下架曲名称」短缓存：开页/上滑/全量补全可能在同一歌单内多次
+  /// 触发补全，避免每页都重复请求 cloudlist。
+  final Map<String, ({DateTime at, Map<String, Song> songs})>
+  _shieldedMetaCache = {};
+
   Future<List<PlaylistSummary>> userPlaylists({
     int page = 1,
     int pageSize = 30,
@@ -85,8 +90,15 @@ mixin _MusicApiPlaylist on _MusicApiBase {
   /// 保留原始顺序供展示层置灰显示。原始条数累计后与过滤后条数之差
   /// 即「不可播放」的数量，供歌单详情页对齐元信息 count 与可播放条数
   /// （issue #6：收藏 530 首只显示 514 首）。
-  Future<SongPage> playlistSongsPageAll(String id) async {
-    final allSongs = <Song>[];
+  ///
+  /// [includeShieldedMeta] 为 true 时，额外用自家云歌单接口按 fileid 补全
+  /// 下架曲目的原始文件名/歌手（上游歌单接口对它们只返回 `{fileid, shield}`）。
+  Future<SongPage> playlistSongsPageAll(
+    String id, {
+    bool includeShieldedMeta = false,
+    String? listId,
+  }) async {
+    var allSongs = <Song>[];
     final playableSongs = <Song>[];
     var rawItemCount = 0;
     var currentPage = 1;
@@ -108,6 +120,9 @@ mixin _MusicApiPlaylist on _MusicApiBase {
       if (songPage.rawItemCount < perPage) break;
       currentPage++;
     }
+    if (includeShieldedMeta && allSongs.any((song) => song.hash.isEmpty)) {
+      allSongs = await _fillShieldedMeta(allSongs, id, listId: listId);
+    }
     return SongPage(
       songs: playableSongs,
       rawItemCount: rawItemCount,
@@ -119,6 +134,8 @@ mixin _MusicApiPlaylist on _MusicApiBase {
     String id, {
     int page = 1,
     int pageSize = 80,
+    bool includeShieldedMeta = false,
+    String? listId,
   }) async {
     final json = asMap(
       await _client.get('/playlist/track/all', {
@@ -131,15 +148,140 @@ mixin _MusicApiPlaylist on _MusicApiBase {
     // 无 hash（下架/无版权等）不进可播放列表，但仍保留在 allSongs 里：
     // 设置开启时展示层可以按原始顺序置灰显示，rawItemCount 仍用接口条数
     // 判断分页。
-    final parsed = items
+    var ordered = items
         .whereType<Map<String, dynamic>>()
         .map(Song.fromPlaylist)
         .toList();
-    final songs = parsed.where((song) => song.hash.isNotEmpty).toList();
+    if (includeShieldedMeta && ordered.any((song) => song.hash.isEmpty)) {
+      ordered = await _fillShieldedMeta(ordered, id, listId: listId);
+    }
+    final songs = ordered.where((song) => song.hash.isNotEmpty).toList();
     return SongPage(
       songs: songs,
       rawItemCount: items.length,
-      allSongs: parsed,
+      allSongs: ordered,
+    );
+  }
+
+  /// 自家云歌单里已下架/无版权曲目的原始文件名（fileid → Song，hash 恒空）。
+  ///
+  /// `/playlist/track/all` 对这类条目只给 `{fileid, shield:1}`，而 cloudlist
+  /// 接口（`/v4/get_list_all_file`）仍保留用户收藏时的文件名、时长与
+  /// mixsongid。仅对自己的歌单有效；收藏来的他人歌单会返回空，调用方静默
+  /// 保留占位即可。任何异常都返回空表，不能让「显示已下架歌曲」拖垮歌单加载。
+  Future<Map<String, Song>> playlistUnavailableMeta(
+    String playlistId, {
+    String? listId,
+  }) async {
+    final numericListId = (listId != null && listId.trim().isNotEmpty)
+        ? listId.trim()
+        : _parseListId(playlistId);
+    if (numericListId == null || numericListId.isEmpty) {
+      return const <String, Song>{};
+    }
+    final cached = _shieldedMetaCache[numericListId];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < const Duration(minutes: 5)) {
+      return cached.songs;
+    }
+    final meta = <String, Song>{};
+    const pageSize = 200;
+    // 防御页数上限：异常 count 不应导致无限翻页。
+    const maxPages = 20;
+    for (var page = 1; page <= maxPages; page++) {
+      final json = asMap(
+        await _client.get('/playlist/track/all/new', {
+          'listid': numericListId,
+          'page': page,
+          'pagesize': pageSize,
+        }),
+      );
+      final info = asList(
+        json['info'],
+      ).whereType<Map<String, dynamic>>().toList();
+      for (final item in info) {
+        final song = _songFromCloudList(item);
+        if (song.id.isNotEmpty) meta[song.id] = song;
+      }
+      final count = asInt(json['count']) ?? 0;
+      if (info.length < pageSize || meta.length >= count) break;
+    }
+    _shieldedMetaCache[numericListId] = (at: DateTime.now(), songs: meta);
+    return meta;
+  }
+
+  /// 从 `collection_3_<userid>_<listid>_0` 解析出云歌单需要的数字 listid。
+  String? _parseListId(String playlistId) {
+    final match = RegExp(
+      r'^collection_3_\d+_(\d+)_0$',
+    ).firstMatch(playlistId.trim());
+    return match?.group(1);
+  }
+
+  Future<List<Song>> _fillShieldedMeta(
+    List<Song> songs,
+    String playlistId, {
+    String? listId,
+  }) async {
+    if (!songs.any((song) => song.hash.isEmpty)) return songs;
+    try {
+      final meta = await playlistUnavailableMeta(
+        playlistId,
+        listId: listId,
+      );
+      if (meta.isEmpty) return songs;
+      return [
+        for (final song in songs)
+          song.hash.isEmpty ? (meta[song.id] ?? song) : song,
+      ];
+    } catch (_) {
+      // 名称补全只是锦上添花：接口失败时保留「未知歌曲」占位，不影响加载/播放。
+      return songs;
+    }
+  }
+
+  /// 把 cloudlist 条目转成仅用于展示的 [Song]。
+  ///
+  /// cloudlist 的 `name` 是用户收藏时的文件名（形如 `歌手 - 歌名.mp3`），
+  /// `singerinfo` 对已下架曲目通常为空名，需要从文件名前缀兜底解析歌手。
+  /// 注意：`hash` 是用户本地上传文件哈希，不是可播放源，必须保持为空，
+  /// 否则下架曲会被误当成可播放曲目加入队列。
+  Song _songFromCloudList(Map<String, dynamic> json) {
+    var name = (asString(json['name']) ?? '').trim();
+    name = name.replaceFirst(
+      RegExp(r'\.(mp3|flac|m4a|aac|wav|ogg|ape|wma)$', caseSensitive: false),
+      '',
+    );
+    var prefixArtist = '';
+    final separator = name.indexOf(' - ');
+    if (separator > 0) {
+      prefixArtist = name.substring(0, separator).trim();
+      name = name.substring(separator + 3).trim();
+    }
+    final singerNames = asList(json['singerinfo'])
+        .whereType<Map<String, dynamic>>()
+        .map((item) => asString(item['name']) ?? '')
+        .where((item) => item.isNotEmpty)
+        .toList();
+    final artist = singerNames.isNotEmpty
+        ? singerNames.join(' / ')
+        : prefixArtist;
+    final album = asMap(json['albuminfo']);
+    final albumName = asString(album['name']);
+    return Song(
+      id: asString(json['fileid']) ?? '',
+      title: name.isEmpty ? '未知歌曲' : name,
+      rawTitle: name.isEmpty ? null : name,
+      artist: artist.isEmpty ? '未知艺人' : artist,
+      hash: '',
+      albumId: asString(json['album_id']),
+      albumAudioId: asString(json['mixsongid']),
+      albumName: albumName != null && albumName.isNotEmpty ? albumName : null,
+      coverUrl: normalizeImageUrl(asString(json['cover'])),
+      duration: durationFromMilliseconds(json['timelen']),
+      artists: artist.isEmpty
+          ? const []
+          : [ArtistRef(id: '', name: artist)],
     );
   }
 

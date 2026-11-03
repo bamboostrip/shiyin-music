@@ -67,6 +67,24 @@ class _FakeSongPageApiClient implements ApiClientInterface {
         return <String, dynamic>{
           'songs': playlistItems.skip(start).take(pageSize).toList(),
         };
+      case '/playlist/track/all/new':
+        // cloudlist：已下架曲仍保留用户收藏时的文件名（形如「歌手 - 歌名.mp3」）。
+        final info = playlistItems
+            .map(
+              (item) => <String, dynamic>{
+                'fileid': item['fileid'],
+                'name': '歌手 - ${item['name']}.mp3',
+                'singerinfo': [
+                  {'id': 0, 'name': ''},
+                ],
+                'timelen': item['timelen'],
+              },
+            )
+            .toList();
+        return <String, dynamic>{
+          'count': info.length,
+          'info': info.skip(start).take(pageSize).toList(),
+        };
       case '/album/songs':
         return albumItems.skip(start).take(pageSize).toList();
       default:
@@ -157,6 +175,48 @@ void main() {
       final songs = await api.albumSongs('album_1');
 
       expect(songs.length, 117);
+    });
+
+    test('includeShieldedMeta：下架曲用 cloudlist 文件名补全歌名/歌手，hash 仍为空', () async {
+      final page = await api.playlistSongPage(
+        'collection_3_1_99_0',
+        page: 1,
+        pageSize: 50,
+        includeShieldedMeta: true,
+        listId: '99',
+      );
+
+      expect(page.rawItemCount, 50);
+      expect(page.songs.length, 41);
+      // 前 9 条原始为「歌曲0..8」的无 hash 占位；补全后应显示文件名里的
+      // 歌名与歌手前缀，而不是「未知歌曲 / 未知艺人」，且仍不可播放。
+      expect(page.orderedSongs.length, 50);
+      final first = page.orderedSongs.first;
+      expect(first.hash, isEmpty);
+      expect(first.title, '歌曲0');
+      expect(first.artist, '歌手');
+      expect(page.orderedSongs[9].hash, 'hash_9');
+    });
+
+    test('playlistSongsPageAll(includeShieldedMeta)：全量下架曲均补全名称', () async {
+      final page = await api.playlistSongsPageAll(
+        'collection_3_1_99_0',
+        includeShieldedMeta: true,
+      );
+
+      expect(page.rawItemCount, 530);
+      expect(page.songs.length, 521);
+      expect(page.orderedSongs.length, 530);
+      expect(
+        page.orderedSongs.where((song) => song.hash.isEmpty).length,
+        9,
+      );
+      expect(
+        page.orderedSongs
+            .where((song) => song.hash.isEmpty)
+            .every((song) => song.title != '未知歌曲' && song.artist == '歌手'),
+        isTrue,
+      );
     });
   });
 }

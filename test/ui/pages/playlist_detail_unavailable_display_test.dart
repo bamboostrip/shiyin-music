@@ -50,6 +50,8 @@ class _FakeMusicApi implements MusicApi {
     String id, {
     int page = 1,
     int pageSize = 80,
+    bool includeShieldedMeta = false,
+    String? listId,
   }) async {
     if (page > 1) {
       return const SongPage(songs: [], rawItemCount: 0);
@@ -62,7 +64,11 @@ class _FakeMusicApi implements MusicApi {
   }
 
   @override
-  Future<SongPage> playlistSongsPageAll(String id) async {
+  Future<SongPage> playlistSongsPageAll(
+    String id, {
+    bool includeShieldedMeta = false,
+    String? listId,
+  }) async {
     return SongPage(
       songs: _playableSongs,
       rawItemCount: _orderedSongs.length,

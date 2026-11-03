@@ -590,6 +590,25 @@ impl KugouEngine {
                     .unwrap_or(0i64);
                 playlist::playlist_tracks(client, session, id, begin_idx, pagesize).await
             }
+            // 自家歌单（云歌单）全量曲目：/playlist/track/all 对已下架/无版权曲目
+            // 只下发 {fileid, shield:1}，没有名称/歌手；cloudlist 接口仍保留用户
+            // 收藏时的原始文件名，Dart 展示层用它按 fileid 补全置灰行（issue #6）。
+            ("GET", "/playlist/track/all/new") => {
+                let listid = params
+                    .get("listid")
+                    .or_else(|| params.get("listId"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let page = params
+                    .get("page")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(1);
+                let pagesize = params
+                    .get("pagesize")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(200i64);
+                playlist::playlist_tracks_new(client, session, listid, page, pagesize).await
+            }
             ("POST", "/playlist/external/parse") => {
                 // Dart body: { sourceText };兼容 body 里的 SourceText / query 传参
                 let body_val: Value =

@@ -174,6 +174,8 @@ class _PaginatedApi implements MusicApi {
     String id, {
     int page = 1,
     int pageSize = 50,
+    bool includeShieldedMeta = false,
+    String? listId,
   }) async {
     songPageCalls++;
     final start = (page - 1) * pageSize;
@@ -182,7 +184,11 @@ class _PaginatedApi implements MusicApi {
   }
 
   @override
-  Future<SongPage> playlistSongsPageAll(String id) async {
+  Future<SongPage> playlistSongsPageAll(
+    String id, {
+    bool includeShieldedMeta = false,
+    String? listId,
+  }) async {
     songsPageAllCalls++;
     if (songsPageAllCalls == 1) {
       // 进页后的后台静默预加载：主动失败，让补队列由点歌后的第 2 次驱动。

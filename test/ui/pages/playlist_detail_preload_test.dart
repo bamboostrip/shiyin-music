@@ -20,6 +20,8 @@ class _FakeMusicApi implements MusicApi {
     String id, {
     int page = 1,
     int pageSize = 50,
+    bool includeShieldedMeta = false,
+    String? listId,
   }) async {
     final start = (page - 1) * pageSize;
     final songs = allSongs.skip(start).take(pageSize).toList();
@@ -39,7 +41,11 @@ class _FakeMusicApi implements MusicApi {
 
   /// 全量加载新入口（issue #6：带上原始条数以便对账不可播放曲目）。
   @override
-  Future<SongPage> playlistSongsPageAll(String id) async {
+  Future<SongPage> playlistSongsPageAll(
+    String id, {
+    bool includeShieldedMeta = false,
+    String? listId,
+  }) async {
     playlistSongsCallCount++;
     return SongPage(songs: allSongs, rawItemCount: allSongs.length);
   }

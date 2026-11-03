@@ -289,6 +289,40 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final show = widget.player.showUnavailableSongs;
     if (show == _showUnavailableSongs) return;
     setState(() => _showUnavailableSongs = show);
+    // 页面已打开时再打开开关：已加载的下架曲可能还是「未知歌曲」占位，
+    // 立即补一次名称（cloudlist 按 fileid 取原文件名），避免用户先看到占位。
+    if (show) {
+      unawaited(_ensureShieldedMeta());
+    }
+  }
+
+  /// 补全已加载下架曲的名称/歌手（只对自家歌单有效，失败静默）。
+  Future<void> _ensureShieldedMeta() async {
+    if (_isStaticCollection || _isDailyRecommend) return;
+    final needsMeta = _orderedSongs.any(
+      (song) =>
+          song.hash.isEmpty &&
+          (song.title == '未知歌曲' || song.artist == '未知艺人'),
+    );
+    if (!needsMeta) return;
+    try {
+      final meta = await widget.api.playlistUnavailableMeta(
+        widget.playlist.id,
+        listId: widget.playlist.listId,
+      );
+      if (!mounted || meta.isEmpty) return;
+      setState(() {
+        for (var i = 0; i < _orderedSongs.length; i++) {
+          final song = _orderedSongs[i];
+          if (song.hash.isEmpty) {
+            final enriched = meta[song.id];
+            if (enriched != null) _orderedSongs[i] = enriched;
+          }
+        }
+      });
+    } catch (_) {
+      // 名称补全失败保持占位，不影响播放/加载。
+    }
   }
 
   /// 见 _filteredSongs 的记忆化说明：任何 setState 都可能改了过滤/排序
@@ -332,18 +366,27 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  /// 展示层去重键：可播放用 hash，不可播放用 fileid/歌名兜底。
+  /// 展示层去重/合并键：优先用歌单内的 fileid（id），缺失时退回 hash。
   ///
-  /// 不能直接用 hash：下架/无版权曲目 hash 为空，多首会被误判为同一条。
-  String _entryKey(Song song) => song.hash.isNotEmpty
+  /// 不能直接用 hash：下架/无版权曲目 hash 为空，多首会被误判为同一条；
+  /// 且名称补全后同一首下架曲的 fileid 不变、标题会变，必须按 fileid 合并。
+  String _entryKey(Song song) => song.id.isNotEmpty
+      ? 'f:${song.id}'
+      : song.hash.isNotEmpty
       ? 'h:${song.hash}'
-      : 'u:${song.id}|${song.title}|${song.artist}';
+      : 'u:${song.title}|${song.artist}';
 
   bool _orderedEquals(List<Song> a, List<Song> b) {
     if (identical(a, b)) return true;
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (_entryKey(a[i]) != _entryKey(b[i])) return false;
+      // 除身份外也比标题/歌手：名称补全后同一 fileid 的展示文案会变，
+      // 只看 id 会误判相等，导致缓存里的「未知歌曲」不刷新。
+      if (_entryKey(a[i]) != _entryKey(b[i]) ||
+          a[i].title != b[i].title ||
+          a[i].artist != b[i].artist) {
+        return false;
+      }
     }
     return true;
   }
@@ -368,6 +411,28 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _orderedSongs.add(song);
       if (song.hash.isNotEmpty) _songs.add(song);
     }
+  }
+
+  /// 按 fileid 原位合并（用于全量补全/名称补全）：同一条目替换而不是追加，
+  /// 并据合并后的顺序重建可播放列表。
+  void _mergeSongsFrom(Iterable<Song> incoming) {
+    final indexByIdentity = <String, int>{};
+    for (var i = 0; i < _orderedSongs.length; i++) {
+      indexByIdentity[_entryKey(_orderedSongs[i])] = i;
+    }
+    for (final song in incoming) {
+      final key = _entryKey(song);
+      final index = indexByIdentity[key];
+      if (index != null) {
+        _orderedSongs[index] = song;
+      } else {
+        indexByIdentity[key] = _orderedSongs.length;
+        _orderedSongs.add(song);
+      }
+    }
+    _songs
+      ..clear()
+      ..addAll(_orderedSongs.where((song) => song.hash.isNotEmpty));
   }
 
   /// 对给定来源做搜索过滤 + 排序（不修改来源列表）。
@@ -518,8 +583,16 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       // 过期视为未命中，走网络重新拉全量，避免全量缓存永不失效。
       // 旧版本缓存只存可播放曲目（没有 ordered 标记），设置开启时无法还原
       // 下架曲的原始顺序，直接视为未命中重新拉取（仅一次，之后写新格式）。
+      // 设置开启时还要求 shieldedMeta 标记：旧缓存/关闭设置时写下的
+      // 「未知歌曲」占位需要联网用 cloudlist 补全名称后再展示。
       final cacheHasOrdered = fullCached?.data['ordered'] == true;
-      if (fullCached != null && !fullCached.isStale && cacheHasOrdered) {
+      final cacheHasShieldedMeta = fullCached?.data['shieldedMeta'] == true;
+      final cacheUsable =
+          fullCached != null &&
+          !fullCached.isStale &&
+          cacheHasOrdered &&
+          (!_showUnavailableSongs || _isAlbum || cacheHasShieldedMeta);
+      if (cacheUsable) {
         // 分片解析：大单 fromCache 同步循环每片让出一帧，避免卡顿；
         // 中途代际变化直接放弃。
         final raw =
@@ -543,7 +616,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       } else {
         final songPage = _isAlbum
             ? await widget.api.albumSongsPageAll(id)
-            : await widget.api.playlistSongsPageAll(id);
+            : await widget.api.playlistSongsPageAll(
+                id,
+                // 设置关闭时也补全名称并写入缓存：用户随后打开开关即可直接看到
+                // 真实名称，避免再等一次网络；仅含下架曲的歌单才多这一次请求。
+                includeShieldedMeta: true,
+                listId: widget.playlist.listId,
+              );
         if (_disposed || gen != _loadGeneration) return;
         allSongs = songPage.orderedSongs;
         unavailableCount = songPage.unavailableCount;
@@ -560,11 +639,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             await Future<void>.delayed(Duration.zero);
           }
         }
-        // 写入完整歌单缓存（含不可播放条数与 ordered 标记），后续播放可直接复用
+        // 写入完整歌单缓存（含不可播放条数、ordered/shieldedMeta 标记），
+        // 后续播放与「显示已下架歌曲」可直接复用，不必重新补名称。
         await _cache.write(fullCacheKey, {
           'songs': cacheList,
           'unavailableCount': unavailableCount,
           'ordered': true,
+          'shieldedMeta': !_isAlbum,
         });
         if (_disposed || gen != _loadGeneration) return;
       }
@@ -577,9 +658,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         return;
       }
       setState(() {
-        // 增量追加：保留已有歌曲与原始顺序，仅追加尚未加载的歌曲，
+        // 原位合并：保留已有顺序，同一 fileid 用补全后的名称替换占位，
         // 避免先清空再重建列表导致滚动位置被强制重置。
-        _appendSongsFrom(allSongs);
+        _mergeSongsFrom(allSongs);
         _allSongsLoaded = true;
         _hasMore = false;
         _isLoadingAllSongs = false;
@@ -766,6 +847,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             widget.playlist.id,
             page: 1,
             pageSize: _pageSize,
+            includeShieldedMeta: _showUnavailableSongs,
+            listId: widget.playlist.listId,
           ),
         ]);
         if (!mounted) return;
@@ -896,6 +979,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               widget.playlist.id,
               page: _nextPage,
               pageSize: _pageSize,
+              includeShieldedMeta: _showUnavailableSongs,
+              listId: widget.playlist.listId,
             );
       if (!mounted) return;
 

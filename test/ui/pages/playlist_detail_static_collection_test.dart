@@ -26,6 +26,8 @@ class _RecordingApi implements MusicApi {
     String id, {
     int page = 1,
     int pageSize = 50,
+    bool includeShieldedMeta = false,
+    String? listId,
   }) async {
     playlistSongPageCalls++;
     throw StateError('静态集合不应请求分页歌曲');
@@ -43,7 +45,11 @@ class _RecordingApi implements MusicApi {
   }
 
   @override
-  Future<SongPage> playlistSongsPageAll(String id) async {
+  Future<SongPage> playlistSongsPageAll(
+    String id, {
+    bool includeShieldedMeta = false,
+    String? listId,
+  }) async {
     playlistSongsCalls++;
     throw StateError('静态集合不应请求全量歌曲');
   }

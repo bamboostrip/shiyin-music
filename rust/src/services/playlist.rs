@@ -311,7 +311,12 @@ pub async fn playlist_tracks(
     transport::send(client, session, &req).await
 }
 
-#[allow(dead_code)]
+/// 自家云歌单全量曲目（cloudlist 接口）。
+///
+/// 与 `/playlist/track/all` 不同：已下架/无版权曲目仍保留用户收藏时的
+/// `name`（文件名）与 `timelen`/`mixsongid`，Dart 展示层据此把
+/// `{fileid, shield:1}` 占位补全成可读名称。`hash` 是用户本地上传文件的
+/// 哈希，不能当作可播放源，展示层必须保持 hash 为空。
 pub async fn playlist_tracks_new(
     client: &reqwest::Client,
     session: &KgSession,
