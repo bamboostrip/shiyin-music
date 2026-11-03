@@ -45,23 +45,18 @@ class PlaybackSettingsPage extends StatelessWidget {
       body: AnimatedBuilder(
         animation: player,
         builder: (context, _) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 32),
-                children: [
-                  PlaybackSettingsSection(
-                    api: api,
-                    auth: auth,
-                    player: player,
-                    showLyricPageSkipButtons: showLyricPageSkipButtons,
-                    onSelectDefaultAudioQuality: () =>
-                        _selectDefaultAudioQuality(context),
-                  ),
-                ],
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 32),
+            children: [
+              PlaybackSettingsSection(
+                api: api,
+                auth: auth,
+                player: player,
+                showLyricPageSkipButtons: showLyricPageSkipButtons,
+                onSelectDefaultAudioQuality: () =>
+                    _selectDefaultAudioQuality(context),
               ),
-            ),
+            ],
           );
         },
       ),

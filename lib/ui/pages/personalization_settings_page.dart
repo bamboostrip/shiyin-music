@@ -37,174 +37,169 @@ class _PersonalizationSettingsPageState
         animation: widget.themeController,
         builder: (context, _) {
           final tc = widget.themeController;
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              // ===== 外观模式 =====
+              SectionHeader(title: '外观模式'),
+              const SizedBox(height: 8),
+              SettingsCard(
                 children: [
-                  // ===== 外观模式 =====
-                  SectionHeader(title: '外观模式'),
-                  const SizedBox(height: 8),
-                  SettingsCard(
-                    children: [
-                      ThemeModeSelector(
-                        currentMode: tc.themeMode,
-                        onChanged: (mode) => tc.setThemeMode(mode),
-                      ),
-                    ],
+                  ThemeModeSelector(
+                    currentMode: tc.themeMode,
+                    onChanged: (mode) => tc.setThemeMode(mode),
                   ),
-                  const SizedBox(height: 24),
-                  // ===== 配色方案 =====
-                  SectionHeader(title: '配色方案'),
-                  const SizedBox(height: 8),
-                  SettingsCard(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                        child: Wrap(
-                          spacing: 14,
-                          runSpacing: 14,
-                          children: ThemeController.presetColors.map((preset) {
-                            final selected = tc.seedColor == preset.color;
-                            return _ColorDot(
-                              color: preset.color,
-                              label: preset.name,
-                              selected: selected,
-                              onTap: () => tc.setSeedColor(preset.color),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                      if (tc.hasCustomSeedColor) ...[
-                        const SettingsDivider(),
-                        SettingsTile(
-                          icon: Icons.refresh_rounded,
-                          iconColor: colorScheme.primary,
-                          title: '恢复默认配色',
-                          onTap: () =>
-                              tc.setSeedColor(ThemeController.defaultSeedColor),
-                        ),
-                      ],
-                    ],
+                ],
+              ),
+              const SizedBox(height: 24),
+              // ===== 配色方案 =====
+              SectionHeader(title: '配色方案'),
+              const SizedBox(height: 8),
+              SettingsCard(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                    child: Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: ThemeController.presetColors.map((preset) {
+                        final selected = tc.seedColor == preset.color;
+                        return _ColorDot(
+                          color: preset.color,
+                          label: preset.name,
+                          selected: selected,
+                          onTap: () => tc.setSeedColor(preset.color),
+                        );
+                      }).toList(),
+                    ),
                   ),
-                  const SizedBox(height: 24),
-                  // ===== 自定义背景图 =====
-                  SectionHeader(title: '全局背景图'),
-                  const SizedBox(height: 8),
-                  SettingsCard(
-                    children: [
-                      SettingsSwitchTile(
-                        icon: Icons.image_rounded,
-                        iconColor: colorScheme.primary,
-                        title: '启用自定义背景',
-                        subtitle: '在所有页面上方显示自定义背景图',
-                        value: tc.backgroundEnabled,
-                        onChanged: tc.backgroundImagePath == null
-                            ? null
-                            : (value) => tc.setBackgroundEnabled(value),
-                      ),
-                      const SettingsDivider(),
-                      SettingsTile(
-                        icon: Icons.photo_library_rounded,
-                        iconColor: colorScheme.primary,
-                        title: '选择背景图',
-                        subtitle: tc.backgroundImagePath == null
-                            ? '点击从相册选择图片'
-                            : '已选择背景图',
-                        onTap: () => _pickImage(),
-                      ),
-                      if (tc.backgroundImagePath != null) ...[
-                        const SettingsDivider(),
-                        SettingsTile(
-                          icon: Icons.visibility_rounded,
-                          iconColor: colorScheme.primary,
-                          title: '背景预览',
-                          subtitle: '点击查看当前背景效果',
-                          onTap: () =>
-                              _showPreview(context, tc.backgroundImagePath!),
-                        ),
-                        const SettingsDivider(),
-                        _BackgroundOpacitySlider(
-                          value: tc.backgroundOpacity,
-                          onChanged: (v) => tc.setBackgroundOpacity(v),
-                        ),
-                        const SettingsDivider(),
-                        SettingsTile(
-                          icon: Icons.delete_outline_rounded,
-                          iconColor: colorScheme.error,
-                          title: '移除背景图',
-                          titleColor: colorScheme.error,
-                          onTap: () => _confirmRemove(context),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  // ===== 字体与布局 =====
-                  SectionHeader(title: '字体与布局'),
-                  const SizedBox(height: 8),
-                  SettingsCard(
-                    children: [
-                      SettingsTile(
-                        icon: Icons.text_fields_rounded,
-                        iconColor: const Color(0xFF3F51B5),
-                        title: '字体大小',
-                        subtitle: fontScaleLabel(tc.fontScale),
-                        onTap: () => _selectFontScale(context),
-                      ),
-                      if (!isDesktopFormFactor) ...[
-                        const SettingsDivider(),
-                        SettingsSwitchTile(
-                          icon: Icons.screen_rotation_rounded,
-                          iconColor: const Color(0xFF00897B),
-                          title: '横屏模式',
-                          subtitle: '允许手机横屏时自动旋转（平板默认开启）',
-                          value: tc.landscapeEnabled,
-                          onChanged: (value) {
-                            tc.setLandscapeEnabled(
-                              value,
-                              AdaptiveLayout.isTablet(context),
-                            );
-                          },
-                        ),
-                        const SettingsDivider(),
-                        SettingsSwitchTile(
-                          icon: Icons.directions_car_rounded,
-                          iconColor: const Color(0xFFFF6F00),
-                          title: '车机模式',
-                          subtitle: '横屏时使用左侧播放面板布局并放大文字',
-                          value: tc.carModeEnabled,
-                          onChanged: (value) async {
-                            await tc.setCarModeEnabled(value);
-                            // 通知渠道在启动时按车机模式定向，切换后需完全重启
-                            // 进程才生效；原生车机设备始终走静默渠道，无需提示。
-                            if (!tc.isAutomotiveDevice) {
-                              Toast.show(
-                                '车机模式已切换，建议重启应用以同步通知栏显示方式',
-                                duration: const Duration(seconds: 4),
-                              );
-                            }
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
-                  // 车机显示分节：仅车机模式开启（移动形态）时有意义。
-                  if (!isDesktopFormFactor && tc.carModeEnabled) ...[
-                    const SizedBox(height: 24),
-                    CarDisplaySettingsSection(theme: tc),
-                  ],
-                  // ===== 背景预览区域 =====
-                  if (tc.backgroundImagePath != null) ...[
-                    const SizedBox(height: 24),
-                    SectionHeader(title: '当前背景预览'),
-                    const SizedBox(height: 8),
-                    _BackgroundPreviewCard(imagePath: tc.backgroundImagePath!),
+                  if (tc.hasCustomSeedColor) ...[
+                    const SettingsDivider(),
+                    SettingsTile(
+                      icon: Icons.refresh_rounded,
+                      iconColor: colorScheme.primary,
+                      title: '恢复默认配色',
+                      onTap: () =>
+                          tc.setSeedColor(ThemeController.defaultSeedColor),
+                    ),
                   ],
                 ],
               ),
-            ),
+              const SizedBox(height: 24),
+              // ===== 自定义背景图 =====
+              SectionHeader(title: '全局背景图'),
+              const SizedBox(height: 8),
+              SettingsCard(
+                children: [
+                  SettingsSwitchTile(
+                    icon: Icons.image_rounded,
+                    iconColor: colorScheme.primary,
+                    title: '启用自定义背景',
+                    subtitle: '在所有页面上方显示自定义背景图',
+                    value: tc.backgroundEnabled,
+                    onChanged: tc.backgroundImagePath == null
+                        ? null
+                        : (value) => tc.setBackgroundEnabled(value),
+                  ),
+                  const SettingsDivider(),
+                  SettingsTile(
+                    icon: Icons.photo_library_rounded,
+                    iconColor: colorScheme.primary,
+                    title: '选择背景图',
+                    subtitle: tc.backgroundImagePath == null
+                        ? '点击从相册选择图片'
+                        : '已选择背景图',
+                    onTap: () => _pickImage(),
+                  ),
+                  if (tc.backgroundImagePath != null) ...[
+                    const SettingsDivider(),
+                    SettingsTile(
+                      icon: Icons.visibility_rounded,
+                      iconColor: colorScheme.primary,
+                      title: '背景预览',
+                      subtitle: '点击查看当前背景效果',
+                      onTap: () =>
+                          _showPreview(context, tc.backgroundImagePath!),
+                    ),
+                    const SettingsDivider(),
+                    _BackgroundOpacitySlider(
+                      value: tc.backgroundOpacity,
+                      onChanged: (v) => tc.setBackgroundOpacity(v),
+                    ),
+                    const SettingsDivider(),
+                    SettingsTile(
+                      icon: Icons.delete_outline_rounded,
+                      iconColor: colorScheme.error,
+                      title: '移除背景图',
+                      titleColor: colorScheme.error,
+                      onTap: () => _confirmRemove(context),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 24),
+              // ===== 字体与布局 =====
+              SectionHeader(title: '字体与布局'),
+              const SizedBox(height: 8),
+              SettingsCard(
+                children: [
+                  SettingsTile(
+                    icon: Icons.text_fields_rounded,
+                    iconColor: const Color(0xFF3F51B5),
+                    title: '字体大小',
+                    subtitle: fontScaleLabel(tc.fontScale),
+                    onTap: () => _selectFontScale(context),
+                  ),
+                  if (!isDesktopFormFactor) ...[
+                    const SettingsDivider(),
+                    SettingsSwitchTile(
+                      icon: Icons.screen_rotation_rounded,
+                      iconColor: const Color(0xFF00897B),
+                      title: '横屏模式',
+                      subtitle: '允许手机横屏时自动旋转（平板默认开启）',
+                      value: tc.landscapeEnabled,
+                      onChanged: (value) {
+                        tc.setLandscapeEnabled(
+                          value,
+                          AdaptiveLayout.isTablet(context),
+                        );
+                      },
+                    ),
+                    const SettingsDivider(),
+                    SettingsSwitchTile(
+                      icon: Icons.directions_car_rounded,
+                      iconColor: const Color(0xFFFF6F00),
+                      title: '车机模式',
+                      subtitle: '横屏时使用左侧播放面板布局并放大文字',
+                      value: tc.carModeEnabled,
+                      onChanged: (value) async {
+                        await tc.setCarModeEnabled(value);
+                        // 通知渠道在启动时按车机模式定向，切换后需完全重启
+                        // 进程才生效；原生车机设备始终走静默渠道，无需提示。
+                        if (!tc.isAutomotiveDevice) {
+                          Toast.show(
+                            '车机模式已切换，建议重启应用以同步通知栏显示方式',
+                            duration: const Duration(seconds: 4),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ],
+              ),
+              // 车机显示分节：仅车机模式开启（移动形态）时有意义。
+              if (!isDesktopFormFactor && tc.carModeEnabled) ...[
+                const SizedBox(height: 24),
+                CarDisplaySettingsSection(theme: tc),
+              ],
+              // ===== 背景预览区域 =====
+              if (tc.backgroundImagePath != null) ...[
+                const SizedBox(height: 24),
+                SectionHeader(title: '当前背景预览'),
+                const SizedBox(height: 8),
+                _BackgroundPreviewCard(imagePath: tc.backgroundImagePath!),
+              ],
+            ],
           );
         },
       ),

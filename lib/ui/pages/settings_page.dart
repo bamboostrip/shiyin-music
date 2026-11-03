@@ -96,65 +96,60 @@ class SettingsPage extends StatelessWidget {
             auth.vipClaim,
           ]),
           builder: (context, _) {
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
+              children: [
+                // 账号
+                AccountSettingsSection(
+                  auth: auth,
+                  onClaimVip: () => _claimVipNow(context),
+                  onLogout: () => _confirmLogout(context),
+                ),
+                // 播放（二级页）
+                const SectionHeader(title: '播放'),
+                const SizedBox(height: 8),
+                SettingsCard(
                   children: [
-                    // 账号
-                    AccountSettingsSection(
-                      auth: auth,
-                      onClaimVip: () => _claimVipNow(context),
-                      onLogout: () => _confirmLogout(context),
+                    SettingsTile(
+                      icon: Icons.play_circle_outline_rounded,
+                      iconColor: const Color(0xFF3F51B5),
+                      title: '播放设置',
+                      subtitle:
+                          '${player.audioQuality.label} · '
+                          '智能音质${player.smartQualityEnabled ? '开' : '关'}',
+                      onTap: () => _openPlaybackSettings(context),
                     ),
-                    // 播放（二级页）
-                    const SectionHeader(title: '播放'),
-                    const SizedBox(height: 8),
-                    SettingsCard(
-                      children: [
-                        SettingsTile(
-                          icon: Icons.play_circle_outline_rounded,
-                          iconColor: const Color(0xFF3F51B5),
-                          title: '播放设置',
-                          subtitle:
-                              '${player.audioQuality.label} · '
-                              '智能音质${player.smartQualityEnabled ? '开' : '关'}',
-                          onTap: () => _openPlaybackSettings(context),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // 存储与下载（下载位置 + 下载音质 + 缓存管理）
-                    StorageSettingsSection(
-                      downloads: downloads,
-                      player: player,
-                      onOpenManager: () => _showCacheManagement(context),
-                    ),
-                    // 外观与个性化（二级页）
-                    const SectionHeader(title: '外观与个性化'),
-                    const SizedBox(height: 8),
-                    SettingsCard(
-                      children: [
-                        SettingsTile(
-                          icon: Icons.palette_rounded,
-                          iconColor: const Color(0xFFAB47BC),
-                          title: '主题与显示',
-                          subtitle:
-                              '${theme.themeModeLabel} · '
-                              '${fontScaleLabel(theme.fontScale)}字号',
-                          onTap: () => _openPersonalizationSettings(context),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // 桌面（仅桌面形态：托盘 + 登录自启 + 窗口重置）
-                    if (isDesktopFormFactor) const DesktopSettingsSection(),
-                    // 关于与诊断
-                    AboutSettingsSection(api: api),
                   ],
                 ),
-              ),
+                const SizedBox(height: 20),
+                // 存储与下载（下载位置 + 下载音质 + 缓存管理）
+                StorageSettingsSection(
+                  downloads: downloads,
+                  player: player,
+                  onOpenManager: () => _showCacheManagement(context),
+                ),
+                // 外观与个性化（二级页）
+                const SectionHeader(title: '外观与个性化'),
+                const SizedBox(height: 8),
+                SettingsCard(
+                  children: [
+                    SettingsTile(
+                      icon: Icons.palette_rounded,
+                      iconColor: const Color(0xFFAB47BC),
+                      title: '主题与显示',
+                      subtitle:
+                          '${theme.themeModeLabel} · '
+                          '${fontScaleLabel(theme.fontScale)}字号',
+                      onTap: () => _openPersonalizationSettings(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // 桌面（仅桌面形态：托盘 + 登录自启 + 窗口重置）
+                if (isDesktopFormFactor) const DesktopSettingsSection(),
+                // 关于与诊断
+                AboutSettingsSection(api: api),
+              ],
             );
           },
         ),
