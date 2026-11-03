@@ -18,11 +18,6 @@ name: Build iOS IPA
 #     Release 挂附件。
 on:
   push:
-    # TEMP(ios-ipa-test): 临时给测试分支开 push 触发，方便反复迭代；
-    # workflow_dispatch 需要 workflow 先存在于默认分支才能用。
-    # <<< 合入 main 前删掉这三行 branches 配置 >>>
-    branches:
-      - feat/ios-ipa
     tags:
       - 'v*'
   workflow_dispatch:
