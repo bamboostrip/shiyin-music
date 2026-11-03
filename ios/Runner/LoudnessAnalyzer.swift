@@ -90,7 +90,15 @@ enum LoudnessAnalyzer {
             }
             var length = 0
             var dataPointer: UnsafeMutablePointer<Int8>?
-            let status = CMBlockBufferGetDataPointer(blockBuffer, 0, &length, nil, &dataPointer)
+            // 新版 iOS SDK 给 CoreMedia 的 C 函数补了参数标签，老写法
+            // （位置参数）会报 Missing argument labels。
+            let status = CMBlockBufferGetDataPointer(
+                blockBuffer,
+                atOffset: 0,
+                lengthAtOffsetOut: &length,
+                totalLengthOut: nil,
+                dataPointerOut: &dataPointer
+            )
             guard status == kCMBlockBufferNoErr, let ptr = dataPointer, length > 0 else {
                 continue
             }

@@ -12,8 +12,11 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    if let engine = engineBridge.engine {
-      LoudnessChannel.register(with: engine.binaryMessenger)
+    // FlutterImplicitEngineBridge 只暴露 pluginRegistry（没有 engine 成员），
+    // 所以从 registry 取一个 registrar 拿 binaryMessenger——与 GeneratedPluginRegistrant
+    // 内部注册插件走的是同一套机制。
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "LoudnessChannel") {
+      LoudnessChannel.register(with: registrar.messenger())
     }
   }
 }
