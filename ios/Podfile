@@ -1,0 +1,53 @@
+# iOS 端 CocoaPods 配置（Flutter 标准模板 + 显式 deployment target）。
+#
+# 这份 Podfile 入库而不是让 `flutter build ios` 自动生成，原因：
+#   1) 构建可复现——自动生成会用 Flutter SDK 当时的模板，插件解析结果随之漂移；
+#   2) 与项目实际下限对齐（Runner 的 IPHONEOS_DEPLOYMENT_TARGET = 13.0）。
+# 升级 Flutter 大版本时请对照 `flutter_tools/templates/cocoapods/Podfile-ios`
+# 复核本文件是否需要同步（风险点是 flutter_ios_podfile_setup 的签名变化）。
+#
+# Rust 引擎不走 pod：它是静态库，由 ios/Flutter/*.xcconfig 的 -force_load
+# 直接链入 Runner（见该文件的注释与 scripts/build_rust_ios.sh）。
+
+platform :ios, '13.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+  end
+end

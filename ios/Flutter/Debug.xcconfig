@@ -1,1 +1,11 @@
 #include "Generated.xcconfig"
+
+// Rust 引擎静态库链接配置，与 Release.xcconfig 同一套（原因与坑见该文件注释，
+// -force_load 本体在 project.pbxproj 的 Runner target OTHER_LDFLAGS）。
+// 本地 flutter run 也指向 release 产物：省一份 cargo 构建目录，代价是 Rust 侧
+// 没有调试符号（Dart 断点、热重载不受影响）。
+RUST_IOS_TARGET_DIR[sdk=iphonesimulator*] = aarch64-apple-ios-sim
+RUST_IOS_TARGET_DIR[sdk=iphoneos*] = aarch64-apple-ios
+RUST_IOS_TARGET_DIR = aarch64-apple-ios
+
+DEAD_CODE_STRIPPING = NO

@@ -66,7 +66,7 @@ Windows 分发无签名要求（不做代码签名），但 Inno 的 `AppId` 一
 
 ## 版本适用平台标记（v3.0.2 起生效）
 
-发版永远是**全平台单 Release**（`v*` tag 三平台 CI 全建、附件全家桶、版本号全局统一）。
+发版永远是**全平台单 Release**（`v*` tag 四平台 CI 全建、附件全家桶、版本号全局统一）。
 「适用平台」标记只是 Release notes 首部的一行元信息（人可读 + 机器可读），用于
 **新版客户端**按平台过滤更新提示；它不改变任何发版/附件流程。
 
@@ -121,14 +121,14 @@ L1（API 通道）取最近 30 个、L2（Atom 通道）取最近约 10 个 Rele
 
 ### 维护者警示：不要改成"按端拆 Release"
 
-latest 必须永远是全家桶，**不能**把 Android/Windows/Linux 拆成多个 Release：
+latest 必须永远是全家桶，**不能**把 Android/Windows/Linux/iOS 拆成多个 Release：
 
 - **新用户/被推荐者只看 latest**：拆分后 latest 可能恰好缺其平台的附件，
   "下载更新"直接失败；
 - **老客户端只认 latest**：老版本不解析「适用平台」标记，永远从 latest 拿
   本平台附件——拆分后老客户端要么拿到缺附件的 Release，要么被引导去错误
   平台的 Release；
-- **标签爆炸**：三平台 × 多形态（apk 双变体/zip/exe/deb/tar.gz）拆分后
+- **标签爆炸**：四平台 × 多形态（apk 双变体/zip/exe/deb/tar.gz/ipa）拆分后
   tag 与 Release 数量成倍增长，版本号无法全局统一，回滚与 compare 链接
   全部失效。
 
@@ -141,7 +141,7 @@ git add -A
 git commit -m "release: v2.4.2"
 git push origin main
 
-# 推 v* tag：触发 Android / Windows / Linux 三条构建流水线
+# 推 v* tag：触发 Android / Windows / Linux / iOS 四条构建流水线
 git tag v2.4.2
 git push origin v2.4.2
 ```
@@ -162,12 +162,17 @@ gh release create v2.4.2 --draft --target main \
   --title "时音 v2.4.2" --notes-file <notes-file>
 ```
 
-三平台构建**全部成功后**，`publish-release.yml`（监听三条流水线的
+四平台构建**全部成功后**，`publish-release.yml`（监听四条流水线的
 workflow_run 事件）自动 `gh release edit <tag> --draft=false` 把草稿转正——
 转正即对公众可见、成为 latest，且此刻附件已全部就位。任一平台构建失败则
 Release 停留草稿，按文末「需要撤回已发布的版本」清理 tag 与草稿后重走流程；
 如需手动转正（例如补跑某条流水线后自动转正漏掉）：
 `gh release edit v2.4.2 -R bamboostrip/shiyin-music --draft=false`。
+
+> iOS 流水线（`Build iOS IPA`，macos-latest，10x 计费）同样参与 4/4 门禁：
+> 它比 Android 快，草稿可能还没建好，其附件上传步骤会轮询等待最多 10 分钟，
+> 所以「先推 tag 再建草稿」是安全顺序。产物是**未签名** IPA，仅供侧载重签，
+> 不参与应用内更新（`AppUpdateService.isSupportedPlatform` 已排除 iOS）。
 
 > 为什么构建工作流用 `gh release upload` 而不是 softprops/action-gh-release：
 > softprops 对已存在的草稿会在传完附件后自动 finalize（转正），最快的那条
@@ -210,6 +215,7 @@ Release 笔记模板：
 | [`shiyin-vX.Y.Z-windows-x64-setup.exe`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-windows-x64-setup.exe) | **Windows 标准安装版**：NSIS 安装包，支持应用内检查更新 |
 | [`shiyin-vX.Y.Z-linux-x64-portable.tar.gz`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-linux-x64-portable.tar.gz) | **Linux 便携版**：解压即用 |
 | [`shiyin-vX.Y.Z-linux-x64.deb`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-linux-x64.deb) | **Linux DEB 安装包**：Debian / Ubuntu 系 |
+| [`shiyin-vX.Y.Z-ios-arm64-unsigned.ipa`](https://github.com/bamboostrip/shiyin-music/releases/download/vX.Y.Z/shiyin-vX.Y.Z-ios-arm64-unsigned.ipa) | **iOS 侧载包（未签名）**：真机 arm64，需自行用 AltStore / Sideloadly / ESign 重签；非越狱设备不能直接安装 |
 ```
 
 > 首行「适用平台」按实际改动影响的平台修改（如 `> 适用平台：Windows、Linux`），
@@ -227,18 +233,18 @@ Release 笔记模板：
 >   （见 `AppVersionInfo` / `pickUpdateAssetUrl`），重命名产物必须同步客户端。
 
 > ⚠️ CI workflow 中 **不要** 开启 `generate_release_notes: true`，否则会覆盖手写笔记。
-> 当前两个 workflows 均配置为仅附加附件、不覆盖 body。
+> 各构建 workflow 均配置为仅附加附件、不覆盖 body。
 
 ## 七、确认 CI 构建
 
 ```bash
-gh run list -R bamboostrip/shiyin-music --limit 4   # 三平台构建 + Publish Release
+gh run list -R bamboostrip/shiyin-music --limit 5   # 四平台构建 + Publish Release
 gh run watch                                        # 实时跟踪（可选）
 gh release view v2.4.2 -R bamboostrip/shiyin-music  # 确认附件已附加、非草稿
 ```
 
-三平台全绿后 `publish-release.yml` 会自动把草稿转正；确认 Release 页面
-`isDraft=false` 且附件齐全即发版完成。若三线全绿但草稿未转正（自动转正
+四平台全绿后 `publish-release.yml` 会自动把草稿转正；确认 Release 页面
+`isDraft=false` 且附件齐全即发版完成。若四线全绿但草稿未转正（自动转正
 未触发），用第六节的手动转正命令兜底。
 
 CI 完成后 Release 页面应包含：
@@ -263,11 +269,15 @@ Linux（顺序不限）：
 - `shiyin-vX.Y.Z-linux-x64.deb`（deb 安装包，Ubuntu 22.04+/Debian 12+）
 - `shiyin-vX.Y.Z-linux-x64.deb.sha256`
 
+iOS（顺序不限）：
+- `shiyin-vX.Y.Z-ios-arm64-unsigned.ipa`（真机 arm64，未签名，需侧载重签）
+- `shiyin-vX.Y.Z-ios-arm64-unsigned.ipa.sha256`
+
 > **sha256 sidecar**：CI 为每个附件生成同名 `.sha256` 文件（sha256sum
 > 文本格式）。应用内更新（Windows 安装版的 setup.exe 下载）完成后拉取
 > 同 URL 的 `.sha256` 比对，不一致即删包报错，杜绝截断/损坏/被替换的
 > 安装包落地执行；手动下载的用户可 `sha256sum -c` 自行核对。每产物独立
-> sidecar 而非单一汇总清单，是为了三条流水线并发上传同一 Release
+> sidecar 而非单一汇总清单，是为了四条流水线并发上传同一 Release
 > 互不冲突。
 
 > 附件命名是应用内更新的识别约定，**必须严格遵守**：

@@ -375,6 +375,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-force_load",
+					"$(SRCROOT)/../rust/target/$(RUST_IOS_TARGET_DIR)/release/libkugou_engine.a",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -554,6 +559,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-force_load",
+					"$(SRCROOT)/../rust/target/$(RUST_IOS_TARGET_DIR)/release/libkugou_engine.a",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -576,6 +586,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				ENABLE_BITCODE = NO;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-force_load",
+					"$(SRCROOT)/../rust/target/$(RUST_IOS_TARGET_DIR)/release/libkugou_engine.a",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

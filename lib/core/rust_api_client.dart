@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+// ExternalLibrary 只在「自定义加载方式」时用，属 frb 的 generated 接口面
+// （默认的 RustLib.init() 内部也走它）。
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show ExternalLibrary;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
@@ -32,7 +37,17 @@ class RustApiClient implements ApiClientInterface {
 
   static Future<RustApiClient> getInstance() async {
     if (_instance != null) return _instance!;
-    await RustLib.init();
+    // iOS 的 Rust 引擎以静态库形式链入 Runner 主二进制（见 project.pbxproj
+    // 里 Runner target 的 OTHER_LDFLAGS），不是随 App 分发的 dylib/framework。
+    // frb 默认的 loader 按 `libkugou_engine.dylib` → `rust_builder.framework`
+    // → `kugou_engine.framework` 顺序 dlopen，iOS 上三者都不存在；改用
+    // DynamicLibrary.process() 在当前进程（即主二进制）的符号表里解析。
+    // 其余平台保持默认加载逻辑不变。
+    await RustLib.init(
+      externalLibrary: Platform.isIOS ? ExternalLibrary.process(
+        iKnowHowToUseIt: true,
+      ) : null,
+    );
     final dir = await getApplicationSupportDirectory();
     final engine = await createEngine(dataDir: dir.path);
     _instance = RustApiClient._(engine);

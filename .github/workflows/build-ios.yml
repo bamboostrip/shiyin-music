@@ -1,0 +1,206 @@
+name: Build iOS IPA
+
+# 与 Android/Windows/Linux 三条流水线同构：只在打 tag（v*）或手动触发时构建，
+# 避免每次 push 都消耗 macOS runner（计费倍率 10x）。
+# publish-release.yml 的发版门禁按「四条流水线全绿」判定——workflow 名称是
+# 判定键，改名必须同步改那边。
+#
+# 与上游（kgka_Music_hl）同名流水线的关键差异：
+#   * 上游第一步 `rm -rf ios/ && flutter create` 重建 iOS 工程；本仓库的 ios/
+#     是自己维护的（自定义 Swift 响度分析、SceneDelegate、Info.plist 品牌、
+#     bundle id、图标），重建会全部丢失 —— 这里绝不重建，只用现成工程；
+#   * 上游没有 Rust；本仓库 Rust 引擎是启动硬依赖，必须先交叉编译静态库，
+#     再由 Runner target 的 OTHER_LDFLAGS（project.pbxproj）用 -force_load
+#     整体链入主二进制（iOS/Flutter/*.xcconfig 另有 DEAD_CODE_STRIPPING=NO，
+#     两者缺一都会让 dlsym 拿不到符号）；
+#   * 上游用 softprops/action-gh-release 建 Release，会自动 finalize 草稿，与
+#     本仓库「四线全绿才把草稿转正」的发版模型冲突 —— 这里只往已存在的草稿
+#     Release 挂附件。
+on:
+  push:
+    # TEMP(ios-ipa-test): 临时给测试分支开 push 触发，方便反复迭代；
+    # workflow_dispatch 需要 workflow 先存在于默认分支才能用。
+    # <<< 合入 main 前删掉这三行 branches 配置 >>>
+    branches:
+      - feat/ios-ipa
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 往 Release 挂附件需要写权限。
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.44.8'
+  RUST_TARGET: aarch64-apple-ios
+
+jobs:
+  build-ipa:
+    name: Build unsigned IPA (arm64)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Setup Rust toolchain (${{ env.RUST_TARGET }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.RUST_TARGET }}
+
+      # 缓存 Rust 依赖/产物，避免每次 tag 都跑 LTO 全量编译（profile.release
+      # 是 opt-level=z + lto=true + codegen-units=1）。
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          shared-key: ios-${{ env.RUST_TARGET }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      # Rust 引擎是启动硬依赖：main.dart 在 runApp 之前就 RustLib.init()，
+      # 未链接时 IPA 能起但停在「启动初始化失败」兜底页。输出路径必须与
+      # project.pbxproj 里 Runner target 的 OTHER_LDFLAGS 完全一致。
+      - name: Build Rust engine (staticlib for iOS)
+        run: |
+          set -euo pipefail
+          cargo build --release --target "${RUST_TARGET}" --manifest-path rust/Cargo.toml
+          LIB="rust/target/${RUST_TARGET}/release/libkugou_engine.a"
+          if [ ! -f "${LIB}" ]; then
+            echo "::error::未生成 ${LIB}（rust/Cargo.toml 的 crate-type 需含 staticlib）"
+            exit 1
+          fi
+          ls -lh "${LIB}"
+
+      - name: Pod install
+        run: |
+          set -euo pipefail
+          cd ios
+          pod --version
+          pod install
+
+      # 未签名打包：--no-codesign 跳过证书与描述文件（无需任何 Secrets）。
+      # 显式把签名相关构建设置清空，避免 Flutter 在复用已构建 Runner.app 时
+      # 仍触发 DEVELOPMENT_TEAM 校验（3.44.x 的 _missingDevelopmentTeam 会在
+      # 构建失败归因时把「没有 Team」报成主因，掩盖真实错误）。
+      - name: Build iOS app (unsigned)
+        run: |
+          set -euo pipefail
+          export CODE_SIGNING_ALLOWED=NO
+          export CODE_SIGNING_REQUIRED=NO
+          export CODE_SIGN_IDENTITY=""
+          export DEVELOPMENT_TEAM=""
+          flutter build ios --release --no-codesign
+
+      # 构建期守卫：静态库必须由 -force_load 全量载入、且 Release 关闭死代码
+      # 剥离，符号才会留在主二进制里供 Dart 侧 ExternalLibrary.process() 的
+      # dlsym 解析。缺符号的 IPA 装上就是启动失败页，宁可在这里失败。
+      #
+      # 判定优先用 dyld_info -exports（看导出表，正是 dlsym 查的那张表），
+      # 退化到 nm -g（看符号表）。两者都没有说明链接/剥离配置有问题。
+      - name: Verify Rust engine is linked
+        run: |
+          set -euo pipefail
+          BIN="build/ios/iphoneos/Runner.app/Runner"
+          if [ ! -f "${BIN}" ]; then
+            echo "::error::未找到 ${BIN}"
+            exit 1
+          fi
+
+          COUNT=0
+          if command -v dyld_info >/dev/null 2>&1; then
+            COUNT=$(dyld_info -exports "${BIN}" 2>/dev/null | grep -c 'frbgen_shiyin_music' || true)
+            echo "dyld_info -exports 命中 ${COUNT} 个 Rust 符号"
+          fi
+          if [ "${COUNT}" -eq 0 ]; then
+            COUNT=$(nm -g "${BIN}" 2>/dev/null | grep -c 'frbgen_shiyin_music' || true)
+            echo "nm -g 命中 ${COUNT} 个 Rust 符号"
+          fi
+
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "::error::Runner 主二进制里没有 Rust 符号：检查 project.pbxproj 里 Runner target 的 OTHER_LDFLAGS(-force_load) 与 xcconfig 的 DEAD_CODE_STRIPPING"
+            ls -lh "${BIN}" build/ios/iphoneos/Runner.app 2>/dev/null || true
+            dyld_info -exports "${BIN}" 2>&1 | head -20 || true
+            nm -g "${BIN}" 2>&1 | head -20 || true
+            exit 1
+          fi
+          echo "✅ Rust 符号已链接进主二进制（${COUNT} 个 frbgen_shiyin_music*）"
+
+      - name: Package unsigned IPA
+        id: ipa
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          # branch 名可能带 /（如 feat/ios-ipa）：git ref 合法，但 zip 输出路径和
+          # workflow artifact 名不允许带 /，统一替换成 -。tag 场景不受影响。
+          SAFE_TAG="${TAG//\//-}"
+          NAME="shiyin-${SAFE_TAG}-ios-arm64-unsigned.ipa"
+
+          # .ipa 就是一个 zip：根下 Payload/ 目录内放 Runner.app。-y 保留
+          # 符号链接（app 内的 framework 可能有），否则签名/加载会出问题。
+          rm -rf Payload build/ios/Payload
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry "${NAME}" Payload
+          rm -rf Payload
+          shasum -a 256 "${NAME}" > "${NAME}.sha256"
+
+          echo "path=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "safe_tag=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
+          ls -lh "${NAME}" "${NAME}.sha256"
+
+          # 版本一致性守卫（仅 tag 为 x.y.z 时校验），与 Android 同口径：
+          # tag 与 pubspec.yaml 的 version 必须一致，否则客户端更新比对会错。
+          if [[ "${TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            TAG_VER="${BASH_REMATCH[1]}"
+            PUB_VER=$(grep -m1 -E '^version:' pubspec.yaml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            if [ -z "${PUB_VER}" ]; then
+              echo "::error::pubspec.yaml 中未找到 version: x.y.z"
+              exit 1
+            fi
+            if [ "${PUB_VER}" != "${TAG_VER}" ]; then
+              echo "::error::版本不一致：tag v${TAG_VER} 与 pubspec.yaml ${PUB_VER} 不匹配（见 RELEASE.md 第 1 步）"
+              exit 1
+            fi
+          fi
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa-arm64-${{ steps.ipa.outputs.safe_tag }}
+          path: |
+            ${{ steps.ipa.outputs.path }}
+            ${{ steps.ipa.outputs.path }}.sha256
+          retention-days: 30
+
+      # 与三条流水线一致：只传附件、不动 Release 状态（转正由
+      # publish-release.yml 在四线全绿后统一执行）。
+      # iOS 构建比 Android 快，草稿 Release 可能还没建好——轮询最多 10 分钟，
+      # 避免把「草稿未就绪」误判成构建失败而卡死 4/4 门禁。
+      - name: Upload IPA to draft Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA: ${{ steps.ipa.outputs.path }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          for i in $(seq 1 40); do
+            if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft >/dev/null 2>&1; then
+              break
+            fi
+            echo "等待草稿 Release ${TAG}（第 ${i}/40 次，15s 间隔）"
+            sleep 15
+          done
+          gh release upload "${TAG}" "${IPA}" "${IPA}.sha256" \
+            -R "${GITHUB_REPOSITORY}" --clobber

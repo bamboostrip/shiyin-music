@@ -1,1 +1,30 @@
 #include "Generated.xcconfig"
+
+// ── Rust 引擎（rust/，flutter_rust_bridge 生成的静态库） ────────────────
+// iOS 不允许 App 随便 dlopen 自带的 dylib，所以 Rust 不打 dylib/framework，
+// 而是以静态库直接链进 Runner 主二进制；运行时由
+// lib/core/rust_api_client.dart 用 ExternalLibrary.process() 走 dlsym 取符号。
+// 跑 flutter build/run 之前必须先执行 scripts/build_rust_ios.sh，否则链接期
+// 报 file not found。
+//
+// RUST_IOS_TARGET_DIR：真机与模拟器是不同的 Rust target 目录，供
+// project.pbxproj 里 Runner target 的 OTHER_LDFLAGS 展开。macOS Intel 宿主的
+// 模拟器还需另装 x86_64-apple-ios，届时按 `[arch=x86_64]` 再细分。
+RUST_IOS_TARGET_DIR[sdk=iphonesimulator*] = aarch64-apple-ios-sim
+RUST_IOS_TARGET_DIR[sdk=iphoneos*] = aarch64-apple-ios
+RUST_IOS_TARGET_DIR = aarch64-apple-ios
+
+// -force_load 为什么**不**写在这里（看起来更自然，实际会踩坑）：
+// Flutter 在首次 pod install 后会把
+//   #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+// **前置**到本文件顶部；而 base configuration 属同一层级，后写的
+// OTHER_LDFLAGS 会整体覆盖掉 Pods 那一份（$(inherited) 不保证跨 #include
+// 累积），插件 framework 随之全部掉链。所以 -force_load 放在 Runner target
+// 的 buildSettings（project.pbxproj）里——target 层对 xcconfig 层的
+// $(inherited) 继承语义是明确的。
+//
+// DEAD_CODE_STRIPPING = NO：Xcode Release 默认开死代码剥离，会把没有静态
+// 引用的 Rust 导出符号（frbgen_shiyin_music_* 等）从符号表删掉，dlsym 随之
+// 失败——现象是 IPA 能装能起，但停在「启动初始化失败」兜底页。本设置无竞争
+// 者，留在 xcconfig 即可。
+DEAD_CODE_STRIPPING = NO

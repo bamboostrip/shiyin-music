@@ -49,6 +49,12 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- 后台播放：audio_service/just_audio 在 iOS 上靠 UIBackgroundModes=audio
+	     维持锁屏/切后台后的继续播放，缺这个键切后台即被系统挂起。 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
