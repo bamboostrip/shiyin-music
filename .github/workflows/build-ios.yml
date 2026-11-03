@@ -82,12 +82,12 @@ jobs:
           fi
           ls -lh "${LIB}"
 
-      - name: Pod install
-        run: |
-          set -euo pipefail
-          cd ios
-          pod --version
-          pod install
+      # 不加 `pod install`：Flutter 3.44 对 iOS 默认走 Swift Package Manager。
+      # darwin_dependency_management.dart 的规则是「SPM 开启且插件全是 Swift
+      # Package 时不创建 Podfile、也不跑 CocoaPods」；本项目 10 个 iOS 插件
+      # 全部自带 Package.swift。反之，一旦仓库里存在 Podfile，Flutter 会退回
+      # CocoaPods 并在 SPM 集成后重建 workspace，触发
+      # "The sandbox is not in sync with the Podfile.lock"（2026-11-03 实测）。
 
       # 未签名打包：--no-codesign 跳过证书与描述文件（无需任何 Secrets）。
       # 显式把签名相关构建设置清空，避免 Flutter 在复用已构建 Runner.app 时

@@ -26,9 +26,8 @@ migrate_working_dir/
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
-# iOS：Podfile 与 Podfile.lock 入库（构建可复现），Pods 与 symlinks 不入库。
-# ios/Flutter/Generated.xcconfig 等生成物历史上已被跟踪，本轮不动以免制造
-# 大范围删除；但它们每个平台构建都会重写，提交前记得别带上。
+# iOS：本项目走 Flutter 默认的 Swift Package Manager，不存 Podfile / Pods。
+# 万一将来重新引入 CocoaPods，这两类生成物不要入库。
 **/ios/Pods/
 **/ios/.symlinks/
 .dart_tool/

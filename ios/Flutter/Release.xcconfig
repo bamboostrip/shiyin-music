@@ -14,14 +14,14 @@ RUST_IOS_TARGET_DIR[sdk=iphonesimulator*] = aarch64-apple-ios-sim
 RUST_IOS_TARGET_DIR[sdk=iphoneos*] = aarch64-apple-ios
 RUST_IOS_TARGET_DIR = aarch64-apple-ios
 
-// -force_load 为什么**不**写在这里（看起来更自然，实际会踩坑）：
-// Flutter 在首次 pod install 后会把
+// -force_load 为什么放在 project.pbxproj 的 Runner target 里、而不是这里：
+// 本工程走 Swift Package Manager（无 Podfile），其实写在 xcconfig 也能生效；
+// 但一旦有人重新引入 CocoaPods，Flutter 会把
 //   #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
-// **前置**到本文件顶部；而 base configuration 属同一层级，后写的
-// OTHER_LDFLAGS 会整体覆盖掉 Pods 那一份（$(inherited) 不保证跨 #include
-// 累积），插件 framework 随之全部掉链。所以 -force_load 放在 Runner target
-// 的 buildSettings（project.pbxproj）里——target 层对 xcconfig 层的
-// $(inherited) 继承语义是明确的。
+// **前置**到本文件顶部；base configuration 属同一层级，后写的 OTHER_LDFLAGS
+// 会整体覆盖掉 Pods 那一份（同层 $(inherited) 不保证跨 #include 累积），
+// 插件 framework 会随之全部掉链。放 target 层没有这个隐患——target 对
+// xcconfig 的 $(inherited) 继承语义是明确的。
 //
 // DEAD_CODE_STRIPPING = NO：Xcode Release 默认开死代码剥离，会把没有静态
 // 引用的 Rust 导出符号（frbgen_shiyin_music_* 等）从符号表删掉，dlsym 随之
