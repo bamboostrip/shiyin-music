@@ -33,6 +33,9 @@ import 'package:shiyin_music/ui/widgets/toast.dart';
 // ---------------------------------------------------------------------------
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
+  bool showUnavailableSongs = false;
+
+  @override
   bool isPersonalFmActive = false;
 
   @override

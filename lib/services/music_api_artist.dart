@@ -103,17 +103,19 @@ mixin _MusicApiArtist on _MusicApiBase {
     return songPage.songs;
   }
 
-  /// 全量拉取专辑曲目，并保留原始条数（含被过滤的无 hash 下架曲目）。
+  /// 全量拉取专辑曲目，保留原始顺序与原始条数（含无 hash 的下架曲目）。
   ///
-  /// 与 [albumSongs] 同一翻页策略，额外累计 [SongPage.rawItemCount]，
-  /// 供歌单/专辑详情页对账元信息 count 与可播放条数（issue #6）。
+  /// 与 [albumSongs] 同一翻页策略，额外保留 [SongPage.allSongs] 与
+  /// [SongPage.rawItemCount]，供歌单/专辑详情页置灰展示与对账
+  /// 元信息 count 和可播放条数（issue #6）。
   Future<SongPage> albumSongsPageAll(
     String id, {
     int startPage = 1,
     int pageSize = 50,
   }) async {
     final limit = pageSize.clamp(1, 50);
-    final songs = <Song>[];
+    final allSongs = <Song>[];
+    final playableSongs = <Song>[];
     var rawItemCount = 0;
     var currentPage = startPage;
     // 防御页数上限（与 rankAudioAll 的 maxPages 同构）：
@@ -125,12 +127,17 @@ mixin _MusicApiArtist on _MusicApiBase {
         page: currentPage,
         pageSize: limit,
       );
-      songs.addAll(songPage.songs);
+      allSongs.addAll(songPage.orderedSongs);
+      playableSongs.addAll(songPage.songs);
       rawItemCount += songPage.rawItemCount;
       if (songPage.rawItemCount < limit) break;
       currentPage++;
     }
-    return SongPage(songs: songs, rawItemCount: rawItemCount);
+    return SongPage(
+      songs: playableSongs,
+      rawItemCount: rawItemCount,
+      allSongs: allSongs,
+    );
   }
 
   Future<SongPage> albumSongPage(
@@ -152,11 +159,15 @@ mixin _MusicApiArtist on _MusicApiBase {
                 json['info'] ??
                 _firstListValue(json),
           );
-    final songs = items
+    final parsed = items
         .whereType<Map<String, dynamic>>()
         .map(Song.fromAlbum)
-        .where((song) => song.hash.isNotEmpty)
         .toList();
-    return SongPage(songs: songs, rawItemCount: items.length);
+    final songs = parsed.where((song) => song.hash.isNotEmpty).toList();
+    return SongPage(
+      songs: songs,
+      rawItemCount: items.length,
+      allSongs: parsed,
+    );
   }
 }

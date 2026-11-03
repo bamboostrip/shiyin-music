@@ -155,6 +155,9 @@ const _lyricPageSkipButtonsSettingKey = 'settings.lyric_page_skip_buttons';
 // 搜索点歌替换播放队列（issue #6-3）：默认关 = 只把该曲插入当前队列播放
 // （不摧毁正在听的歌单）；打开 = 用搜索结果整体替换队列（旧行为）。
 const _searchPlayReplaceQueueSettingKey = 'settings.search_play_replace_queue';
+// 显示已下架/无版权歌曲：默认关 = 歌单/专辑列表里过滤掉这些歌（保持现状）；
+// 打开 = 置灰显示、不可点击播放，让用户知道歌单里原有这些曲目。
+const _showUnavailableSongsSettingKey = 'settings.show_unavailable_songs';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
 // 听歌时长上报周期/检查周期：对齐上游 3.3.0（e9dde17 #151）由 30min/1min
@@ -670,6 +673,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 歌单）；true = 旧行为，把整页搜索结果当作新播放队列。
   /// 只影响搜索页单曲点击；听歌识曲恒为插入语义，不受此开关影响。
   bool searchPlayReplaceQueue = false;
+
+  /// 是否在歌单/专辑歌曲列表中显示已下架/无版权（hash 为空）的歌曲。
+  ///
+  /// 默认 false = 隐藏（当前行为，仅在列表上方提示数量）；
+  /// true = 按原始顺序置灰显示、不可播放，方便用户找其他版本。
+  bool showUnavailableSongs = false;
   AudioQuality audioQuality = AudioQuality.standard;
 
   /// 是否开启音质智能切换（播放失败时自动降级重试）。

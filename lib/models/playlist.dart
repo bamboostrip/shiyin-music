@@ -316,10 +316,30 @@ class PlaylistDetail {
 }
 
 class SongPage {
-  const SongPage({required this.songs, required this.rawItemCount});
+  const SongPage({
+    required this.songs,
+    required this.rawItemCount,
+    this.allSongs,
+  });
 
+  /// 可播放曲目（`hash` 非空）。队列/收藏/下载/多选等既有调用方只消费这部分。
   final List<Song> songs;
+
+  /// 接口原始顺序的全部曲目（含无 `hash` 的下架/无版权曲目）。
+  ///
+  /// 仅供展示层使用；为 `null` 表示调用方未提供原始列表（等价于 [songs]）。
+  /// 与 [songs] 共享同一批 Song 实例，不额外拷贝对象。
+  final List<Song>? allSongs;
+
+  /// 接口返回的原始条数（分页判末页与「元信息 count 对账」的口径）。
   final int rawItemCount;
+
+  /// 原始顺序的全部曲目；旧构造路径没有 [allSongs] 时回退 [songs]。
+  List<Song> get orderedSongs => allSongs ?? songs;
+
+  /// 无 hash（下架/无版权）曲目数量。
+  int get unavailableCount =>
+      rawItemCount > songs.length ? rawItemCount - songs.length : 0;
 }
 
 class ArtistDetail {

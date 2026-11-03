@@ -1,7 +1,9 @@
 // 歌单/专辑曲目分页的「原始条数」口径（issue #6-1）：
-// 上游会下发无 hash（下架/无版权）曲目，playlistSongPage/albumSongPage 会
-// 过滤掉它们，但 rawItemCount 必须保留原始条数：
-//   - 分页判末页不能按过滤后长度（否则满页无 hash 会提前截断）；
+// 上游会下发无 hash（下架/无版权）曲目，playlistSongPage/albumSongPage 的
+// songs 只保留可播放曲目，但：
+//   - rawItemCount 必须保留原始条数（分页判末页不能按过滤后长度，
+//     否则满页无 hash 会提前截断）；
+//   - allSongs 必须保留原始顺序（设置开启时列表可置灰展示下架曲目）；
 //   - 歌单详情页用「累计原始条数 - 可播放条数」向用户解释元信息 count 差。
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/core/api_client_interface.dart';
@@ -102,12 +104,22 @@ void main() {
       );
     });
 
-    test('playlistSongPage：过滤无 hash 曲目但保留原始条数', () async {
+    test('playlistSongPage：songs 过滤无 hash，allSongs 保留原始顺序', () async {
       final page = await api.playlistSongPage('pl_1', page: 1, pageSize: 50);
 
       expect(page.rawItemCount, 50);
       expect(page.songs.length, 41);
       expect(page.songs.every((song) => song.hash.isNotEmpty), isTrue);
+      expect(page.unavailableCount, 9);
+
+      // 展示层依赖的原始顺序：前 9 条是无 hash 下架曲，不能被挪到末尾。
+      expect(page.orderedSongs.length, 50);
+      expect(
+        page.orderedSongs.take(9).every((song) => song.hash.isEmpty),
+        isTrue,
+      );
+      expect(page.orderedSongs[9].hash, 'hash_9');
+      expect(page.orderedSongs.first.title, '歌曲0');
     });
 
     test('playlistSongsPageAll：翻满所有页并累计原始条数', () async {
@@ -115,6 +127,11 @@ void main() {
 
       expect(page.rawItemCount, 530);
       expect(page.songs.length, 521);
+      expect(page.orderedSongs.length, 530);
+      expect(
+        page.orderedSongs.where((song) => song.hash.isEmpty).length,
+        9,
+      );
     });
 
     test('playlistSongs(fetchAll:true) 行为不变：返回全部可播放曲目', () async {
@@ -123,11 +140,17 @@ void main() {
       expect(songs.length, 521);
     });
 
-    test('albumSongsPageAll：过滤无 hash 曲目但累计原始条数', () async {
+    test('albumSongsPageAll：songs 过滤无 hash，allSongs 保留原始顺序', () async {
       final page = await api.albumSongsPageAll('album_1');
 
       expect(page.rawItemCount, 120);
       expect(page.songs.length, 117);
+      expect(page.orderedSongs.length, 120);
+      expect(
+        page.orderedSongs.take(3).every((song) => song.hash.isEmpty),
+        isTrue,
+      );
+      expect(page.orderedSongs[3].hash, 'hash_3');
     });
 
     test('albumSongs：翻满所有页返回可播放曲目', () async {

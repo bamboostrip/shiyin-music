@@ -60,6 +60,9 @@ class _FakeMusicApi implements MusicApi {
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
+  bool showUnavailableSongs = false;
+
+  @override
   bool isPersonalFmActive = false;
 
   @override

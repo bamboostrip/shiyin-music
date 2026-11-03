@@ -211,6 +211,7 @@ class DesktopSongTableRow extends StatefulWidget {
     required this.onDelete,
     required this.onViewArtist,
     required this.onMore,
+    this.unavailable = false,
     this.onSecondaryMore,
     this.showHoverActions = true,
     this.showCover = true,
@@ -221,6 +222,12 @@ class DesktopSongTableRow extends StatefulWidget {
   final int index;
   final PlayerController player;
   final AuthController auth;
+
+  /// 无 hash（下架/无版权）：整行置灰、隐藏悬浮操作、点击不播放。
+  ///
+  /// 仅由歌单/专辑详情页在「显示已下架歌曲」设置开启时传入；不能按
+  /// `hash.isEmpty` 自动推断——本地/云盘等列表可能存在 hash 为空但可播放的歌。
+  final bool unavailable;
   final bool canDelete;
   final bool selecting;
   final bool selected;
@@ -280,6 +287,8 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
     final selecting = widget.selecting;
     final selected = widget.selected;
     final isFocused = widget.isFocused;
+    final unavailable = widget.unavailable;
+    final mutedColor = colorScheme.onSurface.withValues(alpha: 0.45);
 
     // 指针约定：行主体是双击播放 → hover 用默认箭头；单击子元素
     // （封面播放键 / 歌手链接 / 悬浮操作钮）各自覆盖为手型。
@@ -297,6 +306,7 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
             // hash 非空守卫：本地/占位歌曲可能 hash 为空，空 == 空 会把
             // 所有空 hash 行误判为正在播放（整列表“加粗高亮”假象）。
             final active = !selecting &&
+                !unavailable &&
                 song.hash.isNotEmpty &&
                 player.currentSong?.hash == song.hash;
             final isCurrentPlaying = active && player.isPlaying;
@@ -345,12 +355,18 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
               // Windows 微软雅黑等仅有 Regular/Bold 的字体上按字形回退合成，
               // 不同汉字合成路径不同，肉眼即“有的细浅、有的粗黑”。
               // 播放行用 w700 Bold（原生粗体）+ 主色高亮，区分明确且渲染一致。
-              color: active ? activeColor : colorScheme.onSurface,
+              color: unavailable
+                  ? mutedColor
+                  : active
+                      ? activeColor
+                      : colorScheme.onSurface,
               fontSize: 13.5,
               fontWeight: active ? FontWeight.w700 : FontWeight.w400,
             );
             final albumStyle = TextStyle(
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+              color: unavailable
+                  ? mutedColor.withValues(alpha: 0.8)
+                  : colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
               fontSize: 13,
               fontWeight: FontWeight.w400,
             );
@@ -411,7 +427,9 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                     index.toString().padLeft(2, '0'),
                                     style: TextStyle(
                                       color: colorScheme.onSurfaceVariant
-                                          .withValues(alpha: 0.75),
+                                          .withValues(
+                                            alpha: unavailable ? .4 : .75,
+                                          ),
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
                                       fontFeatures: const [
@@ -438,8 +456,9 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                 SizedBox.square(
                                   dimension: 36,
                                   child: CoverPlayOverlay(
-                                    enabled: true,
+                                    enabled: !unavailable,
                                     isHovered: !selecting &&
+                                        !unavailable &&
                                         _hovering &&
                                         widget.showHoverActions,
                                     isCurrent: active,
@@ -472,6 +491,33 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                 const SizedBox(width: 6),
                                 IgnorePointer(child: badge),
                               ],
+                              // 下架/无版权微标：明确告诉用户这不是加载失败。
+                              if (unavailable) ...[
+                                const SizedBox(width: 6),
+                                IgnorePointer(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(3),
+                                      color: colorScheme.onSurfaceVariant
+                                          .withValues(alpha: 0.12),
+                                    ),
+                                    child: Text(
+                                      '已下架',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.8),
+                                        height: 1.1,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                               // 页面传入的业务徽标（如实际下载档位），排在
                               // 标题猜出来的属性微标之后，两者语义不重叠。
                               if (widget.trailingBadge != null) ...[
@@ -492,6 +538,7 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                                 ? song.artist
                                 : '未知艺人',
                             onTap: widget.onViewArtist,
+                            enabled: !unavailable,
                           ),
                         ),
                       ),
@@ -510,7 +557,10 @@ class _DesktopSongTableRowState extends State<DesktopSongTableRow> {
                       SizedBox(
                         width: 140,
                         child:
-                            (!selecting && _hovering && widget.showHoverActions)
+                            (!selecting &&
+                                _hovering &&
+                                widget.showHoverActions &&
+                                !unavailable)
                             ? Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
@@ -738,10 +788,15 @@ class _HoverTipTextState extends State<_HoverTipText> {
 
 /// 歌手链接组件：支持悬停变色与点击跳转歌手主页。
 class _ArtistLinkText extends StatefulWidget {
-  const _ArtistLinkText({required this.artistName, required this.onTap});
+  const _ArtistLinkText({
+    required this.artistName,
+    required this.onTap,
+    this.enabled = true,
+  });
 
   final String artistName;
   final VoidCallback onTap;
+  final bool enabled;
 
   @override
   State<_ArtistLinkText> createState() => _ArtistLinkTextState();
@@ -754,25 +809,31 @@ class _ArtistLinkTextState extends State<_ArtistLinkText> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textStyle = TextStyle(
-      color: _hovering
+      color: _hovering && widget.enabled
           ? colorScheme.primary
-          : colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
+          : colorScheme.onSurfaceVariant.withValues(
+              alpha: widget.enabled ? 0.85 : 0.45,
+            ),
       fontSize: 13,
       // 与标题列同理：用原生 Regular，避免 w500 合成导致深浅不一。
       fontWeight: FontWeight.w400,
-      decoration: _hovering ? TextDecoration.underline : TextDecoration.none,
+      decoration: _hovering && widget.enabled
+          ? TextDecoration.underline
+          : TextDecoration.none,
       decorationColor: colorScheme.primary,
     );
 
     return Align(
       alignment: Alignment.centerLeft,
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
+        cursor: widget.enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
+          onTap: widget.enabled ? widget.onTap : null,
           child: Text(
             widget.artistName,
             maxLines: 1,

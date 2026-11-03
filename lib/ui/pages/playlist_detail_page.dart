@@ -100,7 +100,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
+  // 可播放曲目（hash 非空）：队列、收藏、下载、多选、定位只消费这一份。
   final _songs = <Song>[];
+  // 接口原始顺序的全部曲目（含无 hash 的下架/无版权曲目）。设置开启时
+  // 置灰展示；与 _songs 共享同一批 Song 实例，不额外拷贝对象。
+  final _orderedSongs = <Song>[];
   final _cache = CacheService();
 
   PlaylistSummary? _info;
@@ -116,7 +120,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   // 已加载曲目中「有原始数据但被过滤掉（无 hash：下架/无版权）」的条数。
   // 元信息 songCount（如 530）含这部分，列表却只展示可播放曲目（如 514），
   // 两处口径不一致会让用户误以为加载不全（issue #6）。这里累计原始条数
-  // 与过滤后条数之差，供列表上方提示「N 首不可播放」。
+  // 与过滤后条数之差，供列表上方提示「N 首不可播放」；设置开启时同一
+  // 数字用于「已置灰显示」的提示文案。
   int _unavailableSongCount = 0;
   // 后台静默补全进行中（点歌后扩展队列用，不驱动全屏 loading UI，
   // 避免列表被替换导致滚动位置丢失）。
@@ -145,19 +150,28 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   String _searchQuery = '';
   _SongSortMode _sortMode = _SongSortMode.defaultOrder;
   String? _focusedSongKey;
+  // 下架/无版权曲目是否置灰展示。镜像 player 设置：桌面分区保活时在设置页
+  // 拨动开关，本页仍存活，只读 player 字段不会触发重建，故监听变化后 setState。
+  bool _showUnavailableSongs = false;
 
-  // _filteredSongs 记忆化缓存：行构建器/吸顶代理/滚动监听每帧会多次调用
-  // 该 getter，全量拷贝 + 拼音排序开销大。影响结果的输入（_songs、
-  // _searchQuery、_sortMode）只在 setState 中变更，因此重写 setState
-  // 统一递增版本号使缓存失效（宽失效：宁可多算一次也不返回旧结果）。
+  // _filteredSongs / _visibleSongs 记忆化缓存：行构建器/吸顶代理/滚动监听
+  // 每帧会多次调用，全量拷贝 + 拼音排序开销大。影响结果的输入（_songs、
+  // _orderedSongs、显示开关、_searchQuery、_sortMode）只在 setState 中变更，
+  // 因此重写 setState 统一递增版本号使缓存失效（宽失效：宁可多算一次也不
+  // 返回旧结果）。
   int _filteredVersion = 0;
   List<Song>? _filteredCache;
   int? _filteredCacheVersion;
   String? _filteredCacheQuery;
   _SongSortMode? _filteredCacheSort;
+  List<Song>? _visibleCache;
+  int? _visibleCacheVersion;
+  String? _visibleCacheQuery;
+  _SongSortMode? _visibleCacheSort;
+  bool? _visibleCacheIncludeUnavailable;
 
   bool get _showDesktopTableHeader =>
-      isDesktopFormFactor && _filteredSongs.isNotEmpty;
+      isDesktopFormFactor && _visibleSongs.isNotEmpty;
 
   double get _stickyHeaderDelegateHeight =>
       _showDesktopTableHeader
@@ -259,11 +273,22 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   @override
   void initState() {
     super.initState();
+    _showUnavailableSongs = widget.player.showUnavailableSongs;
     _scrollController.addListener(_maybeLoadMore);
+    widget.player.addListener(_onPlayerChanged);
     if (widget.playlist.isLikedPlaylist) {
       widget.auth.addListener(_onLikedChanged);
     }
     _loadInitial();
+  }
+
+  /// 播放器设置变化时只关心「显示已下架歌曲」：其余通知（进度/播放态）
+  /// 由行内 AnimatedBuilder 各自处理，不整页重建。
+  void _onPlayerChanged() {
+    if (!mounted) return;
+    final show = widget.player.showUnavailableSongs;
+    if (show == _showUnavailableSongs) return;
+    setState(() => _showUnavailableSongs = show);
   }
 
   /// 见 _filteredSongs 的记忆化说明：任何 setState 都可能改了过滤/排序
@@ -282,11 +307,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     if (widget.playlist.isLikedPlaylist) {
       widget.auth.removeListener(_onLikedChanged);
     }
+    widget.player.removeListener(_onPlayerChanged);
     _scrollController
       ..removeListener(_maybeLoadMore)
       ..dispose();
     _searchController.dispose();
     _songs.clear();
+    _orderedSongs.clear();
     _info = null;
     super.dispose();
   }
@@ -294,26 +321,63 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   void _onLikedChanged() {
     if (!mounted) return;
     final before = _songs.length;
-    _songs.removeWhere((song) => !widget.auth.isLiked(song));
+    final removedKeys = <String>{
+      for (final song in _songs)
+        if (!widget.auth.isLiked(song)) _entryKey(song),
+    };
+    _songs.removeWhere((song) => removedKeys.contains(_entryKey(song)));
+    _orderedSongs.removeWhere((song) => removedKeys.contains(_entryKey(song)));
     if (_songs.length != before) {
       setState(() {});
     }
   }
 
-  List<Song> get _filteredSongs {
-    final cached = _filteredCache;
-    if (cached != null &&
-        _filteredCacheVersion == _filteredVersion &&
-        _filteredCacheQuery == _searchQuery &&
-        _filteredCacheSort == _sortMode) {
-      return cached;
+  /// 展示层去重键：可播放用 hash，不可播放用 fileid/歌名兜底。
+  ///
+  /// 不能直接用 hash：下架/无版权曲目 hash 为空，多首会被误判为同一条。
+  String _entryKey(Song song) => song.hash.isNotEmpty
+      ? 'h:${song.hash}'
+      : 'u:${song.id}|${song.title}|${song.artist}';
+
+  bool _orderedEquals(List<Song> a, List<Song> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (_entryKey(a[i]) != _entryKey(b[i])) return false;
     }
+    return true;
+  }
+
+  /// 用一份「原始顺序」列表重置可播放/全量两份状态（去重）。
+  void _resetSongsFrom(Iterable<Song> ordered) {
+    _songs.clear();
+    _orderedSongs.clear();
+    final seen = <String>{};
+    for (final song in ordered) {
+      if (!seen.add(_entryKey(song))) continue;
+      _orderedSongs.add(song);
+      if (song.hash.isNotEmpty) _songs.add(song);
+    }
+  }
+
+  /// 按原始顺序增量追加（供分页/全量补全），不重置已有顺序。
+  void _appendSongsFrom(Iterable<Song> ordered) {
+    final seen = _orderedSongs.map(_entryKey).toSet();
+    for (final song in ordered) {
+      if (!seen.add(_entryKey(song))) continue;
+      _orderedSongs.add(song);
+      if (song.hash.isNotEmpty) _songs.add(song);
+    }
+  }
+
+  /// 对给定来源做搜索过滤 + 排序（不修改来源列表）。
+  List<Song> _computeDisplayList(List<Song> source) {
     List<Song> list;
     if (_searchQuery.isEmpty) {
-      list = List<Song>.of(_songs);
+      list = List<Song>.of(source);
     } else {
       final q = _searchQuery.toLowerCase();
-      list = _songs.where((song) {
+      list = source.where((song) {
         return song.title.toLowerCase().contains(q) ||
             song.artist.toLowerCase().contains(q) ||
             (song.albumName?.toLowerCase().contains(q) ?? false);
@@ -336,10 +400,48 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       case _SongSortMode.defaultOrder:
         break;
     }
+    return list;
+  }
+
+  /// 可播放曲目的过滤/排序结果（队列、多选、定位、搜索点歌用）。
+  List<Song> get _filteredSongs {
+    final cached = _filteredCache;
+    if (cached != null &&
+        _filteredCacheVersion == _filteredVersion &&
+        _filteredCacheQuery == _searchQuery &&
+        _filteredCacheSort == _sortMode) {
+      return cached;
+    }
+    final list = _computeDisplayList(_songs);
     _filteredCache = list;
     _filteredCacheVersion = _filteredVersion;
     _filteredCacheQuery = _searchQuery;
     _filteredCacheSort = _sortMode;
+    return list;
+  }
+
+  /// 列表实际展示的曲目。
+  ///
+  /// 设置关闭（默认）：只展示可播放曲目，等同于 [_filteredSongs]；
+  /// 设置开启：按原始顺序展示全部曲目，无 hash 的下架/无版权曲目置灰且
+  /// 不可播放（issue #6 用户诉求：能看出哪些歌下架了，方便找其他版本）。
+  List<Song> get _visibleSongs {
+    final includeUnavailable = _showUnavailableSongs;
+    if (!includeUnavailable) return _filteredSongs;
+    final cached = _visibleCache;
+    if (cached != null &&
+        _visibleCacheVersion == _filteredVersion &&
+        _visibleCacheQuery == _searchQuery &&
+        _visibleCacheSort == _sortMode &&
+        _visibleCacheIncludeUnavailable == includeUnavailable) {
+      return cached;
+    }
+    final list = _computeDisplayList(_orderedSongs);
+    _visibleCache = list;
+    _visibleCacheVersion = _filteredVersion;
+    _visibleCacheQuery = _searchQuery;
+    _visibleCacheSort = _sortMode;
+    _visibleCacheIncludeUnavailable = includeUnavailable;
     return list;
   }
 
@@ -414,7 +516,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       // 网络拉取时由「原始条数 - 可播放条数」得出。
       var unavailableCount = 0;
       // 过期视为未命中，走网络重新拉全量，避免全量缓存永不失效。
-      if (fullCached != null && !fullCached.isStale) {
+      // 旧版本缓存只存可播放曲目（没有 ordered 标记），设置开启时无法还原
+      // 下架曲的原始顺序，直接视为未命中重新拉取（仅一次，之后写新格式）。
+      final cacheHasOrdered = fullCached?.data['ordered'] == true;
+      if (fullCached != null && !fullCached.isStale && cacheHasOrdered) {
         // 分片解析：大单 fromCache 同步循环每片让出一帧，避免卡顿；
         // 中途代际变化直接放弃。
         final raw =
@@ -427,8 +532,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           if (_disposed || gen != _loadGeneration) return;
           final end = (i + _cacheChunkSize).clamp(0, raw.length);
           for (var j = i; j < end; j++) {
-            final song = Song.fromCache(raw[j]);
-            if (song.hash.isNotEmpty) allSongs.add(song);
+            // 缓存里的无 hash 曲目也要保留：设置开启时按原始顺序置灰展示。
+            allSongs.add(Song.fromCache(raw[j]));
           }
           // 非末片让出一帧，保持列表可滚动
           if (end < raw.length) {
@@ -440,10 +545,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             ? await widget.api.albumSongsPageAll(id)
             : await widget.api.playlistSongsPageAll(id);
         if (_disposed || gen != _loadGeneration) return;
-        allSongs = songPage.songs;
-        unavailableCount = songPage.rawItemCount > songPage.songs.length
-            ? songPage.rawItemCount - songPage.songs.length
-            : 0;
+        allSongs = songPage.orderedSongs;
+        unavailableCount = songPage.unavailableCount;
         // 分片写缓存：toCache 同步映射同样分片让帧；取消后不写，
         // 避免退出后仍做大 JSON 编码浪费电量。
         final cacheList = <Map<String, dynamic>>[];
@@ -457,10 +560,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             await Future<void>.delayed(Duration.zero);
           }
         }
-        // 写入完整歌单缓存（含不可播放条数），后续播放可直接复用
+        // 写入完整歌单缓存（含不可播放条数与 ordered 标记），后续播放可直接复用
         await _cache.write(fullCacheKey, {
           'songs': cacheList,
           'unavailableCount': unavailableCount,
+          'ordered': true,
         });
         if (_disposed || gen != _loadGeneration) return;
       }
@@ -473,18 +577,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         return;
       }
       setState(() {
-        // 增量追加：保留已有歌曲，仅追加尚未加载的歌曲，
+        // 增量追加：保留已有歌曲与原始顺序，仅追加尚未加载的歌曲，
         // 避免先清空再重建列表导致滚动位置被强制重置。
-        final existingKeys = _songs
-            .map(_songKey)
-            .where((k) => k.isNotEmpty)
-            .toSet();
-        for (final song in allSongs) {
-          final key = _songKey(song);
-          if (key.isEmpty || existingKeys.contains(key)) continue;
-          _songs.add(song);
-          existingKeys.add(key);
-        }
+        _appendSongsFrom(allSongs);
         _allSongsLoaded = true;
         _hasMore = false;
         _isLoadingAllSongs = false;
@@ -537,12 +632,6 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }());
   }
 
-  /// 单页中「原始条数 - 可播放条数」= 被过滤的无 hash（下架/无版权）条数。
-  int _unavailableFromPage(SongPage page) =>
-      page.rawItemCount > page.songs.length
-          ? page.rawItemCount - page.songs.length
-          : 0;
-
   Future<void> _loadInitial() async {
     // 新一轮初始加载使在途全量补全失效（代际取消），避免旧单结果
     // 追加到新单列表里。新代际同步接管 guard flag 并复位：在途旧任务
@@ -560,7 +649,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _hasMore = true;
       _info = null;
       _unavailableSongCount = 0;
-      _songs.clear();
+      _resetSongsFrom(const <Song>[]);
     });
 
     // 静态集合（推荐歌曲卡/携带预览的每日推荐）：直接用入口传入的歌曲
@@ -569,9 +658,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       final songs = List<Song>.of(widget.initialSongs!);
       setState(() {
         _info = widget.playlist;
-        _songs
-          ..clear()
-          ..addAll(songs);
+        _resetSongsFrom(songs);
         _isInitialLoading = false;
         _allSongsLoaded = true;
         _hasMore = false;
@@ -589,9 +676,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             coverUrl: daily.coverUrl ??
                 (daily.songs.isNotEmpty ? daily.songs.first.coverUrl : null),
           );
-          _songs
-            ..clear()
-            ..addAll(daily.songs);
+          _resetSongsFrom(daily.songs);
           _isInitialLoading = false;
           _allSongsLoaded = true;
           _hasMore = false;
@@ -629,12 +714,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           _info = library.mergeWithDetail(PlaylistSummary.fromCache(infoJson));
         }
         _songs.clear();
-        _songs.addAll(
-          (cacheData['songs'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .map(Song.fromCache)
-              .toList(),
-        );
+        _orderedSongs.clear();
+        for (final song in (cacheData['songs'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(Song.fromCache)) {
+          _orderedSongs.add(song);
+          if (song.hash.isNotEmpty) _songs.add(song);
+        }
         _isInitialLoading = false;
         // 基础缓存只存第 1 页（pageSize 50）：网络降级失败时，滚动
         // 加载才能从第 2 页续传，否则会重复拉第 1 页造成列表重复。
@@ -652,15 +738,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         if (!mounted) return;
 
         setState(() {
-          final songs = songPage.songs;
+          final orderedSongs = songPage.orderedSongs;
           // 增量替换：仅当网络数据与当前列表不同时才更新，
           // 避免缓存已显示后网络刷新触发 clear+addAll 导致滚动位置重置。
-          final changed =
-              _songs.length != songs.length || !_listEquals(_songs, songs);
+          // 比较原始顺序（含无 hash 曲目），下架曲的位置/增减同样会触发刷新。
+          final changed = !_orderedEquals(_orderedSongs, orderedSongs);
           if (changed) {
-            _songs
-              ..clear()
-              ..addAll(songs);
+            _resetSongsFrom(orderedSongs);
           }
           _nextPage = 2;
           _hasMore =
@@ -669,11 +753,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           if (!_hasMore) {
             _allSongsLoaded = true;
           }
-          _unavailableSongCount = _unavailableFromPage(songPage);
+          _unavailableSongCount = songPage.unavailableCount;
           _isInitialLoading = false;
         });
         await _cache.write(cacheKey, {
-          'songs': songPage.songs.map((s) => s.toCache()).toList(),
+          'songs': songPage.orderedSongs.map((s) => s.toCache()).toList(),
         });
       } else {
         final results = await Future.wait([
@@ -688,21 +772,17 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
         final info = results[0] as PlaylistSummary;
         final songPage = results[1] as SongPage;
-        final songs = songPage.songs;
         setState(() {
           // 详情接口可能缺 type/listId；与入口/库内元数据合并，保证 canEdit 正确
           final library =
               widget.auth.findUserPlaylist(widget.playlist) ?? widget.playlist;
           _info = library.mergeWithDetail(info);
-          final songs = songPage.songs;
           // 增量替换：仅当网络数据与当前列表不同时才更新，
           // 避免缓存已显示后网络刷新触发 clear+addAll 导致滚动位置重置。
-          final changed =
-              _songs.length != songs.length || !_listEquals(_songs, songs);
+          final orderedSongs = songPage.orderedSongs;
+          final changed = !_orderedEquals(_orderedSongs, orderedSongs);
           if (changed) {
-            _songs
-              ..clear()
-              ..addAll(songs);
+            _resetSongsFrom(orderedSongs);
           }
           _nextPage = 2;
           _hasMore =
@@ -711,12 +791,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           if (!_hasMore) {
             _allSongsLoaded = true;
           }
-          _unavailableSongCount = _unavailableFromPage(songPage);
+          _unavailableSongCount = songPage.unavailableCount;
           _isInitialLoading = false;
         });
         await _cache.write(cacheKey, {
           'info': info.toCache(),
-          'songs': songs.map((s) => s.toCache()).toList(),
+          'songs': songPage.orderedSongs.map((s) => s.toCache()).toList(),
         });
       }
 
@@ -797,16 +877,6 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     }
   }
 
-  /// 比较两份歌曲列表是否内容一致（按 hash 逐项比较）。
-  bool _listEquals(List<Song> a, List<Song> b) {
-    if (identical(a, b)) return true;
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i].hash != b[i].hash) return false;
-    }
-    return true;
-  }
-
   Future<void> _loadMore() async {
     if (_isLoadingMore || !_hasMore) return;
 
@@ -830,8 +900,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       if (!mounted) return;
 
       setState(() {
-        final songs = songPage.songs;
-        _songs.addAll(songs);
+        // 按原始顺序追加：下架/无版权曲目保留在 _orderedSongs 中，
+        // 可播放的那部分同时进入 _songs（队列/多选只认后者）。
+        _appendSongsFrom(songPage.orderedSongs);
         _nextPage++;
         _hasMore =
             songPage.rawItemCount == _pageSize &&
@@ -839,7 +910,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         if (!_hasMore) {
           _allSongsLoaded = true;
         }
-        _unavailableSongCount += _unavailableFromPage(songPage);
+        _unavailableSongCount += songPage.unavailableCount;
         _isLoadingMore = false;
       });
     } catch (error) {
@@ -862,7 +933,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     if (current == null) return;
     _isLocating = true;
     try {
-      var index = _filteredSongs.indexWhere((s) => s.hash == current.hash);
+      // 滚动索引必须按「实际展示列表」计算：设置开启时列表含置灰的下架曲，
+      // 用可播放列表的下标会滚到错误位置。匹配仍按 hash（当前歌必可播放）。
+      var index = _visibleSongs.indexWhere((s) => s.hash == current.hash);
       if (index < 0 && _shouldSearchForCurrentSong(current)) {
         // 逐页加载直到找到（上限 24 页，异常情况不再继续）
         var pages = 0;
@@ -872,7 +945,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             _loadMoreError == null) {
           await _loadMore();
           if (!mounted) return;
-          index = _filteredSongs.indexWhere((s) => s.hash == current.hash);
+          index = _visibleSongs.indexWhere((s) => s.hash == current.hash);
         }
       }
       if (index >= 0 && mounted) {
@@ -931,7 +1004,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   /// 滚动到展示列表中 [displayIndex] 所在行：先按固定行高估算偏移跳转，
   /// 再用目标行 key 精确校正（兼容字体缩放等导致的估算误差）。
   Future<void> _scrollToSong(int displayIndex) async {
-    if (displayIndex < 0 || displayIndex >= _filteredSongs.length) return;
+    if (displayIndex < 0 || displayIndex >= _visibleSongs.length) return;
     if (!_scrollController.hasClients) {
       // 等待首帧布局完成（内容刚加载完时 ScrollView 可能尚未 attach）
       for (var i = 0; i < 20 && !_scrollController.hasClients && mounted; i++) {
@@ -1185,6 +1258,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       final keys = songs.map(_songKey).toSet();
       setState(() {
         _songs.removeWhere((s) => keys.contains(_songKey(s)));
+        _orderedSongs.removeWhere((s) => keys.contains(_songKey(s)));
       });
       _exitSelectMode();
     });
@@ -1278,7 +1352,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       // AuthController 失败只写 errorMessage 不抛出：此时不做本地乐观删除。
       if (widget.auth.errorMessage != null) return;
       if (mounted) {
-        setState(() => _songs.removeWhere((item) => item.id == song.id));
+        setState(() {
+          _songs.removeWhere((item) => item.id == song.id);
+          _orderedSongs.removeWhere((item) => item.id == song.id);
+        });
       }
     });
   }
@@ -1407,6 +1484,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     // 起播期间页面已退出：不再弹失败 Toast。
     if (!mounted || _disposed) return;
     _showPlaybackErrorIfNeeded();
+  }
+
+  /// 下架/无版权行点击反馈：置灰行不可播放，但给出可行动的提示。
+  void _showUnavailableSongTip() {
+    Toast.info('该歌曲已下架或暂无版权，可在搜索中寻找其他版本');
   }
 
   /// 起播失败时把 player 的最新错误转成用户可读 Toast；成功则静默。
@@ -1636,7 +1718,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         ? _songs.length
         : (_info?.songCount ?? _songs.length);
     final stickyTitle = _searchQuery.isNotEmpty
-        ? '搜索结果 · ${_filteredSongs.length} 首'
+        ? '搜索结果 · ${_visibleSongs.length} 首'
         : _allSongsLoaded || !_hasMore
             ? '${_songs.length} 首歌曲'
             : '共 $totalCount 首 · 已加载 ${_songs.length} 首';
@@ -1882,7 +1964,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       // 只有空列表时才用全屏 loading 占位；已有歌曲时保留列表、
                       // 仅在列表上方叠加一条小提示，避免 CustomScrollView 内容
                       // 高度塌陷导致滚动位置被钳制回顶部。
-                      if (_isLoadingAllSongs && _songs.isEmpty)
+                      if (_isLoadingAllSongs && _visibleSongs.isEmpty)
                         const SliverToBoxAdapter(
                           child: Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
@@ -1898,13 +1980,14 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                           ),
                         )
                       else if (_searchQuery.isNotEmpty &&
-                          _filteredSongs.isEmpty &&
+                          _visibleSongs.isEmpty &&
                           !_isLoadingAllSongs)
                         const SliverToBoxAdapter(child: _SearchEmpty())
                       else ...[
                         // 元信息 count（如 530）含下架/无版权曲，列表只展示
                         // 可播放曲目（如 514）。把「被隐藏的条数」显式告知，
                         // 避免用户把两处计数差误判为「歌曲没加载全」(issue #6)。
+                        // 设置开启时这些曲目会置灰出现，文案改为「已置灰显示」。
                         if (_allSongsLoaded &&
                             _unavailableSongCount > 0 &&
                             _searchQuery.isEmpty)
@@ -1912,8 +1995,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                             child: Padding(
                               padding: const EdgeInsets.fromLTRB(18, 4, 18, 2),
                               child: Text(
-                                '$_unavailableSongCount 首歌曲已下架或暂无版权，未在列表中显示',
-                                style: Theme.of(context).textTheme.bodySmall
+                                widget.player.showUnavailableSongs
+                                    ? '$_unavailableSongCount 首歌曲已下架或暂无版权，已置灰显示'
+                                    : '$_unavailableSongCount 首歌曲已下架或暂无版权，未在列表中显示',                                style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: Theme.of(
                                         context,
@@ -1956,7 +2040,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               itemExtent: _DesktopSongTableRow.rowHeight,
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
-                                  final song = _filteredSongs[index];
+                                  final song = _visibleSongs[index];
+                                  final unavailable = song.hash.isEmpty;
                                   return _DesktopSongTableRow(
                                     key: _locateTargetIndex == index
                                         ? _locateRowKey
@@ -1965,12 +2050,18 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                     index: index + 1,
                                     player: widget.player,
                                     auth: widget.auth,
-                                    canDelete: _canEdit,
+                                    unavailable: unavailable,
+                                    canDelete: _canEdit && !unavailable,
                                     selecting: _isSelecting,
-                                    selected: _isSongSelected(song),
-                                    isFocused:
+                                    selected:
+                                        !unavailable && _isSongSelected(song),
+                                    isFocused: !unavailable &&
                                         _focusedSongKey == _songKey(song),
                                     onTap: () {
+                                      if (unavailable) {
+                                        _showUnavailableSongTip();
+                                        return;
+                                      }
                                       if (_isSelecting) {
                                         _toggleSongSelection(song);
                                         return;
@@ -1980,26 +2071,40 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                       );
                                     },
                                     onDoubleTap: () async {
+                                      if (unavailable) {
+                                        _showUnavailableSongTip();
+                                        return;
+                                      }
                                       if (_isSelecting) return;
                                       final queue = _playbackQueueNow();
                                       if (queue.isEmpty) return;
                                       await _playFromVisibleQueue(song, queue);
                                     },
                                     onPlay: () async {
+                                      if (unavailable) {
+                                        _showUnavailableSongTip();
+                                        return;
+                                      }
                                       final queue = _playbackQueueNow();
                                       if (queue.isEmpty) return;
                                       await _playFromVisibleQueue(song, queue);
                                     },
-                                    onAddToPlaylist: () =>
-                                        _addSongToPlaylist(song),
+                                    onAddToPlaylist: () => unavailable
+                                        ? _showUnavailableSongTip()
+                                        : _addSongToPlaylist(song),
                                     onDelete: () => _removeSong(song),
-                                    onViewArtist: () => _openArtist(song),
-                                    onMore: () => _showSongMenu(song),
-                                    onSecondaryMore: (position) =>
-                                        _showSongMenu(song, anchor: position),
+                                    onViewArtist: () => unavailable
+                                        ? _showUnavailableSongTip()
+                                        : _openArtist(song),
+                                    onMore: () => unavailable
+                                        ? _showUnavailableSongTip()
+                                        : _showSongMenu(song),
+                                    onSecondaryMore: (position) => unavailable
+                                        ? _showUnavailableSongTip()
+                                        : _showSongMenu(song, anchor: position),
                                   );
                                 },
-                                childCount: _filteredSongs.length,
+                                childCount: _visibleSongs.length,
                               ),
                             ),
                           )
@@ -2012,22 +2117,29 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                               _isSelecting ? 110 : 16,
                             ),
                             sliver: SliverList.separated(
-                              itemCount: _filteredSongs.length,
+                              itemCount: _visibleSongs.length,
                               // 扁平行只靠呼吸间距分隔，不再用卡片式大间隙。
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: 2),
                               itemBuilder: (context, index) {
-                                final song = _filteredSongs[index];
+                                final song = _visibleSongs[index];
+                                final unavailable = song.hash.isEmpty;
                                 return _SongRow(
                                   key: _locateTargetIndex == index
                                       ? _locateRowKey
                                       : null,
                                   song: song,
+                                  unavailable: unavailable,
                                   player: widget.player,
-                                  canDelete: _canEdit,
+                                  canDelete: _canEdit && !unavailable,
                                   selecting: _isSelecting,
-                                  selected: _isSongSelected(song),
+                                  selected:
+                                      !unavailable && _isSongSelected(song),
                                   onTap: () async {
+                                    if (unavailable) {
+                                      _showUnavailableSongTip();
+                                      return;
+                                    }
                                     if (_isSelecting) {
                                       _toggleSongSelection(song);
                                       return;
@@ -2045,10 +2157,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                                     if (queue.isEmpty) return;
                                     await _playFromVisibleQueue(song, queue);
                                   },
-                                  onAddToPlaylist: () =>
-                                      _addSongToPlaylist(song),
+                                  onAddToPlaylist: () => unavailable
+                                      ? _showUnavailableSongTip()
+                                      : _addSongToPlaylist(song),
                                   onDelete: () => _removeSong(song),
-                                  onViewArtist: () => _openArtist(song),
+                                  onViewArtist: () => unavailable
+                                      ? _showUnavailableSongTip()
+                                      : _openArtist(song),
                                 );
                               },
                             ),
@@ -3406,6 +3521,7 @@ class _SongRow extends StatelessWidget {
     super.key,
     required this.song,
     required this.player,
+    required this.unavailable,
     required this.canDelete,
     required this.selecting,
     required this.selected,
@@ -3417,6 +3533,9 @@ class _SongRow extends StatelessWidget {
 
   final Song song;
   final PlayerController player;
+
+  /// 无 hash（下架/无版权）：置灰、不可播放，只响应提示点击。
+  final bool unavailable;
   final bool canDelete;
   final bool selecting;
   final bool selected;
@@ -3430,16 +3549,17 @@ class _SongRow extends StatelessWidget {
     return AppSongRow(
       song: song,
       player: player,
+      unavailable: unavailable,
       onTap: onTap,
       excludeSemantics: isDesktopPlatform,
       highlighted: selecting && selected,
       leading: selecting
           ? MusicCircleCheckbox(
               value: selected,
-              onChanged: (_) => onTap(),
+              onChanged: unavailable ? null : (_) => onTap(),
             )
           : null,
-      trailing: selecting
+      trailing: selecting || unavailable
           ? const []
           : [AppSongRowMenuButton(onPressed: () => _showMenu(context))],
     );

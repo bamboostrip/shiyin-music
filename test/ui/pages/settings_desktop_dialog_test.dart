@@ -199,6 +199,10 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
     notifyListeners();
   }
 
+  // 「显示已下架/无版权歌曲」：设置页只读该值，测试保持默认关闭。
+  @override
+  bool get showUnavailableSongs => false;
+
   /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
   @override
   bool keepScreenOnEnabled = true;
@@ -259,6 +263,13 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
 class _FakeTheme extends ChangeNotifier implements ThemeController {
   final List<double> fontScaleCalls = [];
   double _fontScale = 1.0;
+
+  // 个性化分节标题「外观模式」副标题读取该 getter（HEAD 测试 fake 漏补导致
+  // 既有失败，这里一并补全，避免每次构建 SettingsPage 都 NoSuchMethod）。
+  @override
+  ThemeMode get themeMode => ThemeMode.system;
+  @override
+  String get themeModeLabel => '跟随系统';
 
   @override
   double get fontScale => _fontScale;

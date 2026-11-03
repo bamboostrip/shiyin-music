@@ -84,6 +84,19 @@ class PlaybackSettingsSection extends StatelessWidget {
               onChanged: player.setSearchPlayReplaceQueue,
             ),
             SettingsDivider(),
+            // 已下架/无版权歌曲：默认隐藏（保持现状，仅提示数量）；打开后
+            // 按原始顺序置灰显示、不可播放，方便用户按名单找替代版本。
+            SettingsSwitchTile(
+              icon: Icons.visibility_off_rounded,
+              iconColor: const Color(0xFF607D8B),
+              title: '显示已下架/无版权歌曲',
+              subtitle: player.showUnavailableSongs
+                  ? '在歌单与专辑中置灰显示，点击不会播放'
+                  : '不显示这些歌曲，仅在列表上方提示数量',
+              value: player.showUnavailableSongs,
+              onChanged: player.setShowUnavailableSongs,
+            ),
+            SettingsDivider(),
             // 移动端/车机专属：桌面无蜂窝网络，显示纯属摆设（含前导分隔线）。
             if (!isDesktopFormFactor) ...[
               SettingsSwitchTile(

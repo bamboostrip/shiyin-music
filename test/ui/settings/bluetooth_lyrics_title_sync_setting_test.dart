@@ -64,6 +64,9 @@ class _FakePlayerController extends Fake implements PlayerController {
   bool get searchPlayReplaceQueue => false;
 
   @override
+  bool get showUnavailableSongs => false;
+
+  @override
   bool get allowCellularPrecache => false;
 
   @override

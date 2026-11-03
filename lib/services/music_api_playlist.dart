@@ -78,14 +78,16 @@ mixin _MusicApiPlaylist on _MusicApiBase {
     return (await playlistSongsPageAll(id)).songs;
   }
 
-  /// 全量拉取歌单曲目，并保留原始条数（[SongPage.rawItemCount]）。
+  /// 全量拉取歌单曲目，保留原始顺序与原始条数（[SongPage.rawItemCount]）。
   ///
   /// 上游 `/playlist/track/all` 会下发已下架/无版权（无 hash）的曲目，
-  /// [playlistSongPage] 会把它们过滤掉；原始条数累计后与过滤后条数之差
-  /// 即「不可播放且未展示」的数量，供歌单详情页对齐元信息 count 与
-  /// 实际可播放条数（issue #6：收藏 530 首只显示 514 首）。
+  /// [playlistSongPage] 的 [SongPage.songs] 会把它们过滤掉；[SongPage.allSongs]
+  /// 保留原始顺序供展示层置灰显示。原始条数累计后与过滤后条数之差
+  /// 即「不可播放」的数量，供歌单详情页对齐元信息 count 与可播放条数
+  /// （issue #6：收藏 530 首只显示 514 首）。
   Future<SongPage> playlistSongsPageAll(String id) async {
     final allSongs = <Song>[];
+    final playableSongs = <Song>[];
     var rawItemCount = 0;
     var currentPage = 1;
     const perPage = 200;
@@ -100,12 +102,17 @@ mixin _MusicApiPlaylist on _MusicApiBase {
         page: currentPage,
         pageSize: perPage,
       );
-      allSongs.addAll(songPage.songs);
+      allSongs.addAll(songPage.orderedSongs);
+      playableSongs.addAll(songPage.songs);
       rawItemCount += songPage.rawItemCount;
       if (songPage.rawItemCount < perPage) break;
       currentPage++;
     }
-    return SongPage(songs: allSongs, rawItemCount: rawItemCount);
+    return SongPage(
+      songs: playableSongs,
+      rawItemCount: rawItemCount,
+      allSongs: allSongs,
+    );
   }
 
   Future<SongPage> playlistSongPage(
@@ -121,13 +128,19 @@ mixin _MusicApiPlaylist on _MusicApiBase {
       }),
     );
     final items = asList(json['songs']);
-    // 无 hash（下架/无版权等）不展示；rawItemCount 仍用接口条数判断分页
-    final songs = items
+    // 无 hash（下架/无版权等）不进可播放列表，但仍保留在 allSongs 里：
+    // 设置开启时展示层可以按原始顺序置灰显示，rawItemCount 仍用接口条数
+    // 判断分页。
+    final parsed = items
         .whereType<Map<String, dynamic>>()
         .map(Song.fromPlaylist)
-        .where((song) => song.hash.isNotEmpty)
         .toList();
-    return SongPage(songs: songs, rawItemCount: items.length);
+    final songs = parsed.where((song) => song.hash.isNotEmpty).toList();
+    return SongPage(
+      songs: songs,
+      rawItemCount: items.length,
+      allSongs: parsed,
+    );
   }
 
   Future<PlaylistDetail> playlistDetail(String id) async {

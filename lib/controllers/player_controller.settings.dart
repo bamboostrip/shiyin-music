@@ -45,6 +45,18 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 开关「显示已下架/无版权歌曲」。
+  ///
+  /// 默认 false = 歌单/专辑里隐藏这些歌（当前行为）；true = 置灰显示、
+  /// 不可播放。
+  Future<void> setShowUnavailableSongs(bool enabled) async {
+    if (showUnavailableSongs == enabled) return;
+    showUnavailableSongs = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showUnavailableSongsSettingKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setAudioQuality(
     AudioQuality quality, {
     bool reloadCurrent = false,
@@ -371,6 +383,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     searchPlayReplaceQueue =
         prefs.getBool(_searchPlayReplaceQueueSettingKey) ??
         searchPlayReplaceQueue;
+    showUnavailableSongs =
+        prefs.getBool(_showUnavailableSongsSettingKey) ?? showUnavailableSongs;
     audioQuality = AudioQuality.fromApiValue(
       prefs.getString(_audioQualitySettingKey),
     );

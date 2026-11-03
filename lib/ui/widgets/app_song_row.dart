@@ -24,6 +24,7 @@ class AppSongRow extends StatefulWidget {
     this.highlighted = false,
     this.excludeSemantics = false,
     this.showDownloadedBadge = true,
+    this.unavailable = false,
   });
 
   final Song song;
@@ -49,6 +50,12 @@ class AppSongRow extends StatefulWidget {
   /// 每行都挂角标纯属冗余；歌单/搜索/歌手页等混合来源列表用默认值。
   final bool showDownloadedBadge;
 
+  /// 无 hash（下架/无版权）曲目：置灰展示、隐藏播中/下载标，点击不播放。
+  ///
+  /// 仅由歌单/专辑详情页在「显示已下架歌曲」设置开启时传入；其他列表
+  /// （本地音乐等）hash 为空并不代表不可播放，不能自动按 hash 推断。
+  final bool unavailable;
+
   @override
   State<AppSongRow> createState() => _AppSongRowState();
 }
@@ -63,7 +70,9 @@ class _AppSongRowState extends State<AppSongRow> {
     // 歌曲行响应 player 重建，高频更新会触发 Windows AXTree 竞态崩溃，
     // 调用方按平台决定是否排除（歌单页仅桌面平台排除；移动端保留无障碍）。
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: widget.unavailable
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: ExcludeSemantics(
@@ -73,13 +82,18 @@ class _AppSongRowState extends State<AppSongRow> {
           builder: (context, _) {
             final song = widget.song;
             final player = widget.player;
-            final active = player.currentSong?.hash == song.hash;
+            final unavailable = widget.unavailable;
+            final active =
+                !unavailable &&
+                song.hash.isNotEmpty &&
+                player.currentSong?.hash == song.hash;
             final activeColor = colorScheme.primary;
+            final mutedColor = colorScheme.onSurface.withValues(alpha: .45);
             final bgColor = widget.highlighted
                 ? activeColor.withValues(alpha: .10)
                 : active
                     ? activeColor.withValues(alpha: .08)
-                    : _hovering
+                    : _hovering && !unavailable
                         ? (isDark
                             ? Colors.white.withValues(alpha: .06)
                             : colorScheme.surfaceContainerHighest
@@ -110,14 +124,17 @@ class _AppSongRowState extends State<AppSongRow> {
                         dimension: 46,
                         child: Stack(
                           children: [
-                            Artwork(
-                              url: song.coverUrl,
-                              size: 46,
-                              borderRadius: 8,
+                            Opacity(
+                              opacity: unavailable ? .45 : 1,
+                              child: Artwork(
+                                url: song.coverUrl,
+                                size: 46,
+                                borderRadius: 8,
+                              ),
                             ),
                             // 左下角「已下载」角标；右下角已有播中律动标，两者
-                            // 分居两侧不重叠。
-                            if (widget.showDownloadedBadge)
+                            // 分居两侧不重叠。下架曲不显示下载标（无 hash 不可下载）。
+                            if (widget.showDownloadedBadge && !unavailable)
                               Positioned(
                                 left: 3,
                                 bottom: 3,
@@ -166,7 +183,11 @@ class _AppSongRowState extends State<AppSongRow> {
                                   .textTheme
                                   .bodyLarge
                                   ?.copyWith(
-                                    color: active ? activeColor : null,
+                                    color: unavailable
+                                        ? mutedColor
+                                        : active
+                                            ? activeColor
+                                            : null,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 15,
                                   ),
@@ -180,14 +201,20 @@ class _AppSongRowState extends State<AppSongRow> {
                                   .textTheme
                                   .bodySmall
                                   ?.copyWith(
-                                    color: active
-                                        ? activeColor.withValues(alpha: .72)
-                                        : colorScheme.onSurfaceVariant,
+                                    color: unavailable
+                                        ? mutedColor.withValues(alpha: .8)
+                                        : active
+                                            ? activeColor.withValues(alpha: .72)
+                                            : colorScheme.onSurfaceVariant,
                                   ),
                             ),
                           ],
                         ),
                       ),
+                      if (unavailable) ...[
+                        const SizedBox(width: 6),
+                        _UnavailableBadge(colorScheme: colorScheme),
+                      ],
                       if (widget.trailing.isNotEmpty) ...[
                         const SizedBox(width: 4),
                         ...widget.trailing,
@@ -198,6 +225,33 @@ class _AppSongRowState extends State<AppSongRow> {
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// 「已下架」微标：标识无 hash（下架/无版权）不可播放的歌曲行。
+class _UnavailableBadge extends StatelessWidget {
+  const _UnavailableBadge({required this.colorScheme});
+
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: colorScheme.onSurfaceVariant.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '已下架',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: colorScheme.onSurfaceVariant.withValues(alpha: .8),
+          height: 1.1,
         ),
       ),
     );

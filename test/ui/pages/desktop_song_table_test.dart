@@ -11,6 +11,9 @@ import 'package:shiyin_music/ui/widgets/now_playing_badge.dart';
 class _FakePlayerController extends ChangeNotifier
     implements PlayerController {
   @override
+  bool showUnavailableSongs = false;
+
+  @override
   bool isPersonalFmActive = false;
 
   @override
@@ -406,6 +409,67 @@ void main() {
       // 未高亮：序号仍显示（而非 NowPlayingBadge）。
       expect(find.byType(NowPlayingBadge), findsNothing);
       expect(find.text('01'), findsOneWidget);
+    });
+
+    testWidgets('下架行置灰并标注「已下架」，悬停不出操作、点击不播放', (tester) async {
+      // 设置开启后下架/无版权曲目按原位展示：整行置灰、标「已下架」，
+      // 悬停不显示播放/收藏等操作；点击仍回调 onTap（由页面弹提示）。
+      const unavailableSong = Song(
+        id: 'u1',
+        title: '已下架歌曲',
+        artist: '歌手',
+        duration: Duration(minutes: 3),
+        hash: '',
+      );
+      var taps = 0;
+      var plays = 0;
+      var doubleTaps = 0;
+
+      await tester.pumpWidget(
+        wrap(
+          DesktopSongTableRow(
+            song: unavailableSong,
+            index: 1,
+            player: _FakePlayerController(),
+            auth: _FakeAuthController(),
+            unavailable: true,
+            canDelete: false,
+            selecting: false,
+            selected: false,
+            isFocused: false,
+            onTap: () => taps++,
+            onDoubleTap: () => doubleTaps++,
+            onPlay: () => plays++,
+            onAddToPlaylist: () {},
+            onDelete: () {},
+            onViewArtist: () {},
+            onMore: () {},
+          ),
+        ),
+      );
+
+      expect(find.text('已下架'), findsOneWidget);
+
+      // 悬停：下架行隐藏悬浮操作列（播放/收藏/加歌单/更多）。
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      await gesture.moveTo(tester.getCenter(find.text('已下架歌曲')));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+      expect(find.byIcon(Icons.playlist_add_rounded), findsNothing);
+
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(DesktopSongTableRow)) +
+            const Offset(100, 22),
+      );
+      // 行同时注册了 onTap/onDoubleTap，Flutter 会等 350ms 双击超时后才回调单击。
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(taps, 1);
+      expect(plays, 0);
+      expect(doubleTaps, 0);
+
+      await gesture.removePointer();
     });
 
     testWidgets('多选模式下序号列转为勾选框', (tester) async {
