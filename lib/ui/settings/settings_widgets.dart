@@ -101,8 +101,8 @@ class SettingsTile extends StatelessWidget {
       child: InkWell(
         mouseCursor: isDesktopFormFactor
             ? (onTap != null
-                ? SystemMouseCursors.click
-                : SystemMouseCursors.basic)
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic)
             : null,
         onTap: onTap,
         child: Padding(
@@ -185,7 +185,9 @@ class SettingsSwitchTile extends StatelessWidget {
   final String title;
   final String? subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+
+  /// 为 null 时开关禁用（例如依赖前置条件未满足的选项）。
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -196,8 +198,12 @@ class SettingsSwitchTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        mouseCursor: isDesktopFormFactor ? SystemMouseCursors.click : null,
-        onTap: () => onChanged(!value),
+        mouseCursor: isDesktopFormFactor
+            ? (onChanged != null
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic)
+            : null,
+        onTap: onChanged == null ? null : () => onChanged!(!value),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(

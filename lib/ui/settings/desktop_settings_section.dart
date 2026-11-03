@@ -10,8 +10,8 @@ import 'settings_widgets.dart';
 
 /// 设置页「桌面」分节（仅桌面形态：托盘关闭行为 + 开机自启 + 窗口重置）。
 ///
-/// 「下载位置」已移到所有平台共用的「下载」分节
-/// （`download_settings_section.dart`），Android 同样可以改下载目录。
+/// 「下载位置」已移到所有平台共用的「存储与下载」分节
+/// （`storage_settings_section.dart`），Android 同样可以改下载目录。
 class DesktopSettingsSection extends StatelessWidget {
   const DesktopSettingsSection({super.key});
 
@@ -152,7 +152,7 @@ class _AutoStartSwitchState extends State<AutoStartSwitch> {
     return SettingsSwitchTile(
       icon: Icons.rocket_launch_rounded,
       iconColor: const Color(0xFF3949AB),
-      title: '开机自启',
+      title: '登录时自动启动',
       subtitle: '登录系统时自动启动时音',
       value: _enabled,
       onChanged: (value) => unawaited(_onChanged(value)),

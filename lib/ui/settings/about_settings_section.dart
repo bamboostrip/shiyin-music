@@ -18,7 +18,7 @@ class AboutSettingsSection extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader(title: '应用'),
+        const SectionHeader(title: '关于与帮助'),
         const SizedBox(height: 8),
         SettingsCard(
           children: [
@@ -36,7 +36,7 @@ class AboutSettingsSection extends StatelessWidget {
             SettingsTile(
               icon: Icons.info_outline_rounded,
               iconColor: const Color(0xFF607D8B),
-              title: '关于',
+              title: '关于时音',
               subtitle: AppUpdateService.isSupportedPlatform
                   ? '版本、更新日志与检查更新'
                   : '版本与更新日志',

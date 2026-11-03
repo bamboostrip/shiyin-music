@@ -29,6 +29,7 @@ void main() {
     testWidgets('默认音质弹窗使用居中 Dialog，非移动端 BottomSheet', (tester) async {
       final player = _FakePlayer();
       await _pump(tester, player: player);
+      await _openPlaybackSettings(tester);
 
       await tester.tap(find.text('默认音质'));
       await tester.pumpAndSettle();
@@ -49,6 +50,7 @@ void main() {
     testWidgets('字体大小弹窗使用居中 Dialog，非移动端 BottomSheet', (tester) async {
       final theme = _FakeTheme();
       await _pump(tester, theme: theme);
+      await _openAppearanceSettings(tester);
 
       await tester.tap(find.text('字体大小'));
       await tester.pumpAndSettle();
@@ -93,6 +95,7 @@ void main() {
     testWidgets('默认音质弹窗保持 BottomSheet', (tester) async {
       final player = _FakePlayer();
       await _pump(tester, player: player);
+      await _openPlaybackSettings(tester);
 
       await tester.tap(find.text('默认音质'));
       await tester.pumpAndSettle();
@@ -104,6 +107,7 @@ void main() {
     testWidgets('字体大小弹窗保持 BottomSheet', (tester) async {
       final theme = _FakeTheme();
       await _pump(tester, theme: theme);
+      await _openAppearanceSettings(tester);
 
       await tester.tap(find.text('字体大小'));
       await tester.pumpAndSettle();
@@ -124,6 +128,18 @@ void main() {
   });
 }
 
+/// 打开「播放设置」二级页（默认音质行已下沉）。
+Future<void> _openPlaybackSettings(WidgetTester tester) async {
+  await tester.tap(find.text('播放设置'));
+  await tester.pumpAndSettle();
+}
+
+/// 打开「外观与个性化」二级页（字体大小行已下沉）。
+Future<void> _openAppearanceSettings(WidgetTester tester) async {
+  await tester.tap(find.text('主题与显示'));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pump(
   WidgetTester tester, {
   _FakePlayer? player,
@@ -138,6 +154,7 @@ Future<void> _pump(
   await tester.pumpWidget(
     MaterialApp(
       navigatorKey: Toast.navigatorKey,
+      theme: ThemeData(pageTransitionsTheme: _noPageTransitions),
       home: Scaffold(
         body: SettingsPage(
           api: _FakeApi(),
@@ -150,6 +167,32 @@ Future<void> _pump(
   );
   await tester.pump();
   await tester.pump();
+}
+
+/// 超高视口（20000px）下页面转场会对整页做 SnapshotWidget，测试里禁用转场动画。
+const _noPageTransitions = PageTransitionsTheme(
+  builders: {
+    TargetPlatform.android: _NoTransitionsBuilder(),
+    TargetPlatform.iOS: _NoTransitionsBuilder(),
+    TargetPlatform.windows: _NoTransitionsBuilder(),
+    TargetPlatform.linux: _NoTransitionsBuilder(),
+    TargetPlatform.macOS: _NoTransitionsBuilder(),
+  },
+);
+
+class _NoTransitionsBuilder extends PageTransitionsBuilder {
+  const _NoTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return child;
+  }
 }
 
 class _FakeVipClaim extends ChangeNotifier implements VipBackgroundTask {
@@ -286,11 +329,32 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   @override
   bool get backgroundEnabled => false;
   @override
+  String? get backgroundImagePath => null;
+  @override
+  double get backgroundOpacity => 0.15;
+  @override
+  bool get hasCustomSeedColor => false;
+  @override
   bool get landscapeEnabled => false;
   @override
   bool get carModeEnabled => false;
   @override
   bool get isAutomotiveDevice => false;
+
+  @override
+  Future<void> setSeedColor(Color color) async {}
+  @override
+  Future<void> setBackgroundEnabled(bool enabled) async {}
+  @override
+  Future<void> setBackgroundOpacity(double opacity) async {}
+  @override
+  Future<bool> pickAndSetBackgroundImage() async => false;
+  @override
+  Future<void> clearBackgroundImage() async {}
+  @override
+  Future<void> setLandscapeEnabled(bool enabled, bool isTablet) async {}
+  @override
+  Future<void> setCarModeEnabled(bool enabled) async {}
 
   // 车机显示微调（桌面形态下分节不会构建，仅补全接口契约）。
   @override

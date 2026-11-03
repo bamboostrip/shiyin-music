@@ -5,13 +5,12 @@ import 'package:shiyin_music/controllers/download_controller.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/settings/download_quality_settings.dart';
-import 'package:shiyin_music/ui/settings/download_settings_section.dart';
+import 'package:shiyin_music/ui/settings/storage_settings_section.dart';
 
 /// 只覆写本组件实际调用的成员：真实 DownloadController 会碰 prefs、目录
 /// 对账与网络，widget 测试不需要也不该依赖这些。
 class _FakeDownloads extends ChangeNotifier implements DownloadController {
-  _FakeDownloads({AudioQuality? initialOverride})
-    : _override = initialOverride;
+  _FakeDownloads({AudioQuality? initialOverride}) : _override = initialOverride;
 
   AudioQuality? _override;
 
@@ -148,12 +147,13 @@ void main() {
     expect(find.text('跟随播放音质（当前 320K）'), findsOneWidget);
   });
 
-  testWidgets('注入 downloads 后「下载」分节内出现下载音质行', (tester) async {
+  testWidgets('注入 downloads 后「存储与下载」分节内出现下载音质行', (tester) async {
     await tester.pumpWidget(
       wrap(
-        DownloadSettingsSection(
+        StorageSettingsSection(
           downloads: _FakeDownloads(initialOverride: AudioQuality.standard),
           player: _FakePlayer(AudioQuality.high),
+          onOpenManager: () {},
         ),
       ),
     );
@@ -169,9 +169,10 @@ void main() {
     // 分节只留「下载位置」，不出现点了没用的「下载音质」。
     await tester.pumpWidget(
       wrap(
-        DownloadSettingsSection(
+        StorageSettingsSection(
           downloads: null,
           player: _FakePlayer(AudioQuality.high),
+          onOpenManager: () {},
         ),
       ),
     );

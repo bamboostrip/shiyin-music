@@ -24,7 +24,7 @@ import 'settings_widgets.dart';
 /// - Android：file_picker 选系统公共文件夹只返回路径、不携带 SAF 授权，
 ///   公共目录的按路径写入需要「所有文件访问」——探测失败时引导用户去
 ///   系统设置授权后重试；Android 10 没有该开关，给出明确说明；
-/// - iOS 等未适配平台不展示本项（见 `download_settings_section.dart`）。
+/// - iOS 等未适配平台不展示本项（见 `storage_settings_section.dart`）。
 ///
 /// 与桌面分节的托盘开关同模式：独立小组件自管状态，避免整页改
 /// Stateful。设了自定义位置时追加「恢复默认」一行。

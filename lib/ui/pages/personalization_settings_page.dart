@@ -3,11 +3,18 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../controllers/theme_controller.dart';
+import '../adaptive_layout.dart';
 import '../form_factor.dart';
+import '../settings/car_display_settings_section.dart';
+import '../settings/settings_widgets.dart';
 import '../widgets/theme_mode_selector.dart';
 import '../widgets/toast.dart';
 
-/// 个性化设置页面：全局外观模式 + 皮肤配色 + 自定义背景图。
+/// 「外观与个性化」二级页：外观模式 + 皮肤配色 + 自定义背景图 +
+/// 字体大小/横屏/车机模式 + 车机显示。
+///
+/// 这些选项原先散落在主设置页的「个性化」分节与「车机显示」分节里，
+/// 主页面只保留一个入口，避免一屏堆 5–9 个同类选项。
 class PersonalizationSettingsPage extends StatefulWidget {
   const PersonalizationSettingsPage({super.key, required this.themeController});
 
@@ -25,122 +32,354 @@ class _PersonalizationSettingsPageState
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('个性化')),
+      appBar: AppBar(title: const Text('外观与个性化')),
       body: AnimatedBuilder(
         animation: widget.themeController,
         builder: (context, _) {
           final tc = widget.themeController;
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              // ===== 外观模式 =====
-              _SectionHeader(title: '外观模式'),
-              const SizedBox(height: 8),
-              _SettingsCard(
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
-                  ThemeModeSelector(
-                    currentMode: tc.themeMode,
-                    onChanged: (mode) => tc.setThemeMode(mode),
+                  // ===== 外观模式 =====
+                  SectionHeader(title: '外观模式'),
+                  const SizedBox(height: 8),
+                  SettingsCard(
+                    children: [
+                      ThemeModeSelector(
+                        currentMode: tc.themeMode,
+                        onChanged: (mode) => tc.setThemeMode(mode),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              // ===== 配色方案 =====
-              _SectionHeader(title: '配色方案'),
-              const SizedBox(height: 8),
-              _SettingsCard(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                    child: Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: ThemeController.presetColors.map((preset) {
-                        final selected = tc.seedColor == preset.color;
-                        return _ColorDot(
-                          color: preset.color,
-                          label: preset.name,
-                          selected: selected,
-                          onTap: () => tc.setSeedColor(preset.color),
-                        );
-                      }).toList(),
-                    ),
+                  const SizedBox(height: 24),
+                  // ===== 配色方案 =====
+                  SectionHeader(title: '配色方案'),
+                  const SizedBox(height: 8),
+                  SettingsCard(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                        child: Wrap(
+                          spacing: 14,
+                          runSpacing: 14,
+                          children: ThemeController.presetColors.map((preset) {
+                            final selected = tc.seedColor == preset.color;
+                            return _ColorDot(
+                              color: preset.color,
+                              label: preset.name,
+                              selected: selected,
+                              onTap: () => tc.setSeedColor(preset.color),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      if (tc.hasCustomSeedColor) ...[
+                        const SettingsDivider(),
+                        SettingsTile(
+                          icon: Icons.refresh_rounded,
+                          iconColor: colorScheme.primary,
+                          title: '恢复默认配色',
+                          onTap: () =>
+                              tc.setSeedColor(ThemeController.defaultSeedColor),
+                        ),
+                      ],
+                    ],
                   ),
-                  if (tc.hasCustomSeedColor) ...[
-                    const _SettingsDivider(),
-                    _SettingsTile(
-                      icon: Icons.refresh_rounded,
-                      iconColor: colorScheme.primary,
-                      title: '恢复默认配色',
-                      onTap: () =>
-                          tc.setSeedColor(ThemeController.defaultSeedColor),
-                    ),
+                  const SizedBox(height: 24),
+                  // ===== 自定义背景图 =====
+                  SectionHeader(title: '全局背景图'),
+                  const SizedBox(height: 8),
+                  SettingsCard(
+                    children: [
+                      SettingsSwitchTile(
+                        icon: Icons.image_rounded,
+                        iconColor: colorScheme.primary,
+                        title: '启用自定义背景',
+                        subtitle: '在所有页面上方显示自定义背景图',
+                        value: tc.backgroundEnabled,
+                        onChanged: tc.backgroundImagePath == null
+                            ? null
+                            : (value) => tc.setBackgroundEnabled(value),
+                      ),
+                      const SettingsDivider(),
+                      SettingsTile(
+                        icon: Icons.photo_library_rounded,
+                        iconColor: colorScheme.primary,
+                        title: '选择背景图',
+                        subtitle: tc.backgroundImagePath == null
+                            ? '点击从相册选择图片'
+                            : '已选择背景图',
+                        onTap: () => _pickImage(),
+                      ),
+                      if (tc.backgroundImagePath != null) ...[
+                        const SettingsDivider(),
+                        SettingsTile(
+                          icon: Icons.visibility_rounded,
+                          iconColor: colorScheme.primary,
+                          title: '背景预览',
+                          subtitle: '点击查看当前背景效果',
+                          onTap: () =>
+                              _showPreview(context, tc.backgroundImagePath!),
+                        ),
+                        const SettingsDivider(),
+                        _BackgroundOpacitySlider(
+                          value: tc.backgroundOpacity,
+                          onChanged: (v) => tc.setBackgroundOpacity(v),
+                        ),
+                        const SettingsDivider(),
+                        SettingsTile(
+                          icon: Icons.delete_outline_rounded,
+                          iconColor: colorScheme.error,
+                          title: '移除背景图',
+                          titleColor: colorScheme.error,
+                          onTap: () => _confirmRemove(context),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  // ===== 字体与布局 =====
+                  SectionHeader(title: '字体与布局'),
+                  const SizedBox(height: 8),
+                  SettingsCard(
+                    children: [
+                      SettingsTile(
+                        icon: Icons.text_fields_rounded,
+                        iconColor: const Color(0xFF3F51B5),
+                        title: '字体大小',
+                        subtitle: fontScaleLabel(tc.fontScale),
+                        onTap: () => _selectFontScale(context),
+                      ),
+                      if (!isDesktopFormFactor) ...[
+                        const SettingsDivider(),
+                        SettingsSwitchTile(
+                          icon: Icons.screen_rotation_rounded,
+                          iconColor: const Color(0xFF00897B),
+                          title: '横屏模式',
+                          subtitle: '允许手机横屏时自动旋转（平板默认开启）',
+                          value: tc.landscapeEnabled,
+                          onChanged: (value) {
+                            tc.setLandscapeEnabled(
+                              value,
+                              AdaptiveLayout.isTablet(context),
+                            );
+                          },
+                        ),
+                        const SettingsDivider(),
+                        SettingsSwitchTile(
+                          icon: Icons.directions_car_rounded,
+                          iconColor: const Color(0xFFFF6F00),
+                          title: '车机模式',
+                          subtitle: '横屏时使用左侧播放面板布局并放大文字',
+                          value: tc.carModeEnabled,
+                          onChanged: (value) async {
+                            await tc.setCarModeEnabled(value);
+                            // 通知渠道在启动时按车机模式定向，切换后需完全重启
+                            // 进程才生效；原生车机设备始终走静默渠道，无需提示。
+                            if (!tc.isAutomotiveDevice) {
+                              Toast.show(
+                                '车机模式已切换，建议重启应用以同步通知栏显示方式',
+                                duration: const Duration(seconds: 4),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                  // 车机显示分节：仅车机模式开启（移动形态）时有意义。
+                  if (!isDesktopFormFactor && tc.carModeEnabled) ...[
+                    const SizedBox(height: 24),
+                    CarDisplaySettingsSection(theme: tc),
                   ],
-                ],
-              ),
-              const SizedBox(height: 24),
-              // ===== 自定义背景图 =====
-              _SectionHeader(title: '全局背景图'),
-              const SizedBox(height: 8),
-              _SettingsCard(
-                children: [
-                  _SettingsSwitchTile(
-                    icon: Icons.image_rounded,
-                    iconColor: colorScheme.primary,
-                    title: '启用自定义背景',
-                    subtitle: '在所有页面上方显示自定义背景图',
-                    value: tc.backgroundEnabled,
-                    onChanged: tc.backgroundImagePath == null
-                        ? null
-                        : (value) => tc.setBackgroundEnabled(value),
-                  ),
-                  const _SettingsDivider(),
-                  _SettingsTile(
-                    icon: Icons.photo_library_rounded,
-                    iconColor: colorScheme.primary,
-                    title: '选择背景图',
-                    subtitle: tc.backgroundImagePath == null
-                        ? '点击从相册选择图片'
-                        : '已选择背景图',
-                    onTap: () => _pickImage(),
-                  ),
+                  // ===== 背景预览区域 =====
                   if (tc.backgroundImagePath != null) ...[
-                    const _SettingsDivider(),
-                    _SettingsTile(
-                      icon: Icons.visibility_rounded,
-                      iconColor: colorScheme.primary,
-                      title: '背景预览',
-                      subtitle: '点击查看当前背景效果',
-                      onTap: () => _showPreview(context, tc.backgroundImagePath!),
-                    ),
-                    const _SettingsDivider(),
-                    _BackgroundOpacitySlider(
-                      value: tc.backgroundOpacity,
-                      onChanged: (v) => tc.setBackgroundOpacity(v),
-                    ),
-                    const _SettingsDivider(),
-                    _SettingsTile(
-                      icon: Icons.delete_outline_rounded,
-                      iconColor: colorScheme.error,
-                      title: '移除背景图',
-                      titleColor: colorScheme.error,
-                      onTap: () => _confirmRemove(context),
-                    ),
+                    const SizedBox(height: 24),
+                    SectionHeader(title: '当前背景预览'),
+                    const SizedBox(height: 8),
+                    _BackgroundPreviewCard(imagePath: tc.backgroundImagePath!),
                   ],
                 ],
               ),
-              const SizedBox(height: 24),
-              // ===== 背景预览区域 =====
-              if (tc.backgroundImagePath != null) ...[
-                _SectionHeader(title: '当前背景预览'),
-                const SizedBox(height: 8),
-                _BackgroundPreviewCard(imagePath: tc.backgroundImagePath!),
-              ],
-            ],
+            ),
           );
         },
       ),
     );
+  }
+
+  /// 选择字体大小：桌面端居中 Dialog，移动端 BottomSheet。
+  Future<void> _selectFontScale(BuildContext context) async {
+    final tc = widget.themeController;
+    Widget buildOptions(BuildContext ctx) {
+      final colorScheme = Theme.of(ctx).colorScheme;
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      return Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: .10)
+                : Colors.white.withValues(alpha: .92),
+            width: 1.1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final scale in ThemeController.fontScaleOptions) ...[
+                InkWell(
+                  mouseCursor: isDesktopFormFactor
+                      ? SystemMouseCursors.click
+                      : null,
+                  onTap: () => Navigator.of(ctx).pop(scale),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          scale == tc.fontScale
+                              ? Icons.radio_button_checked_rounded
+                              : Icons.radio_button_off_rounded,
+                          color: scale == tc.fontScale
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant.withValues(
+                                  alpha: .6,
+                                ),
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fontScaleLabel(scale),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              Text(
+                                scale == 1.0
+                                    ? '默认大小'
+                                    : scale == 1.1
+                                    ? '整体放大 10%'
+                                    : '整体放大 20%',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (scale != ThemeController.fontScaleOptions.last)
+                  Divider(
+                    height: 1,
+                    indent: 52,
+                    color: colorScheme.outlineVariant.withValues(alpha: .24),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    final double? selected;
+    if (isDesktopFormFactor) {
+      selected = await showDialog<double>(
+        context: context,
+        builder: (dialogContext) {
+          return Dialog(
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '字体大小',
+                          style: Theme.of(dialogContext).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    buildOptions(dialogContext),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      selected = await showModalBottomSheet<double>(
+        context: context,
+        showDragHandle: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        builder: (sheetContext) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '字体大小',
+                    style: Theme.of(sheetContext).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  buildOptions(sheetContext),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    if (selected != null) {
+      await tc.setFontScale(selected);
+    }
   }
 
   Future<void> _pickImage() async {
@@ -211,43 +450,51 @@ class _ColorDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      cursor:
-          isDesktopFormFactor ? SystemMouseCursors.click : MouseCursor.defer,
+      cursor: isDesktopFormFactor
+          ? SystemMouseCursors.click
+          : MouseCursor.defer,
       child: GestureDetector(
         onTap: onTap,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: selected
-                  ? Border.all(color: Theme.of(context).colorScheme.onSurface, width: 3)
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: selected
+                    ? Border.all(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        width: 3,
+                      )
+                    : null,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: .35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: selected
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    )
                   : null,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: .35),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
-            child: selected
-                ? const Icon(Icons.check_rounded, color: Colors.white, size: 24)
-                : null,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-                ),
-          ),
-        ],
-      ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -265,7 +512,8 @@ class _BackgroundOpacitySlider extends StatefulWidget {
   final ValueChanged<double> onChanged;
 
   @override
-  State<_BackgroundOpacitySlider> createState() => _BackgroundOpacitySliderState();
+  State<_BackgroundOpacitySlider> createState() =>
+      _BackgroundOpacitySliderState();
 }
 
 class _BackgroundOpacitySliderState extends State<_BackgroundOpacitySlider> {
@@ -294,7 +542,11 @@ class _BackgroundOpacitySliderState extends State<_BackgroundOpacitySlider> {
         children: [
           SizedBox(
             width: 32,
-            child: Icon(Icons.opacity_rounded, size: 22, color: colorScheme.primary),
+            child: Icon(
+              Icons.opacity_rounded,
+              size: 22,
+              color: colorScheme.primary,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -306,16 +558,16 @@ class _BackgroundOpacitySliderState extends State<_BackgroundOpacitySlider> {
                     Text(
                       '背景透明度',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const Spacer(),
                     Text(
                       '${(_current * 100).round()}%',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.primary,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ],
                 ),
@@ -364,7 +616,9 @@ class _BackgroundPreviewCard extends StatelessWidget {
                 cacheHeight: 300,
                 errorBuilder: (_, _, _) => Container(
                   color: colorScheme.surfaceContainerHighest,
-                  child: const Center(child: Icon(Icons.broken_image_rounded, size: 40)),
+                  child: const Center(
+                    child: Icon(Icons.broken_image_rounded, size: 40),
+                  ),
                 ),
               ),
             ),
@@ -378,7 +632,10 @@ class _BackgroundPreviewCard extends StatelessWidget {
               left: 16,
               bottom: 12,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: colorScheme.primary,
                   borderRadius: BorderRadius.circular(8),
@@ -386,9 +643,9 @@ class _BackgroundPreviewCard extends StatelessWidget {
                 child: Text(
                   '预览效果（透明度 15%）',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -402,7 +659,10 @@ class _BackgroundPreviewCard extends StatelessWidget {
 // ===== 全屏背景预览 =====
 
 class _FullBackgroundPreview extends StatelessWidget {
-  const _FullBackgroundPreview({required this.imagePath, required this.opacity});
+  const _FullBackgroundPreview({
+    required this.imagePath,
+    required this.opacity,
+  });
 
   final String imagePath;
   final double opacity;
@@ -422,9 +682,8 @@ class _FullBackgroundPreview extends StatelessWidget {
               fit: BoxFit.cover,
               cacheWidth: 800,
               cacheHeight: 800,
-              errorBuilder: (_, _, _) => Container(
-                color: colorScheme.surfaceContainerHighest,
-              ),
+              errorBuilder: (_, _, _) =>
+                  Container(color: colorScheme.surfaceContainerHighest),
             ),
           ),
           Positioned.fill(
@@ -450,16 +709,14 @@ class _FullBackgroundPreview extends StatelessWidget {
                       children: [
                         Text(
                           '背景透明度 ${(opacity * 100).round()}%',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           '这是实际使用时的背景效果。内容卡片会叠加在背景图上方，透明度越高背景图越明显。',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -470,208 +727,6 @@ class _FullBackgroundPreview extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ===== Shared widgets (mirrors settings_page.dart style) =====
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight:
-                  isDesktopFormFactor ? FontWeight.w600 : FontWeight.w800,
-              letterSpacing: 0.8,
-            ),
-      ),
-    );
-  }
-}
-
-class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(children: children),
-      ),
-    );
-  }
-}
-
-class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({
-    required this.icon,
-    required this.title,
-    this.iconColor,
-    this.titleColor,
-    this.subtitle,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final Color? iconColor;
-  final String title;
-  final Color? titleColor;
-  final String? subtitle;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        mouseCursor: isDesktopFormFactor
-            ? (onTap != null
-                ? SystemMouseCursors.click
-                : SystemMouseCursors.basic)
-            : null,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 32,
-                child: Icon(icon, size: 22, color: iconColor ?? colorScheme.primary),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: titleColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (onTap != null)
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 20,
-                  color: colorScheme.outline,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsSwitchTile extends StatelessWidget {
-  const _SettingsSwitchTile({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.onChanged,
-    this.iconColor,
-    this.subtitle,
-  });
-
-  final IconData icon;
-  final Color? iconColor;
-  final String title;
-  final String? subtitle;
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        mouseCursor: isDesktopFormFactor
-            ? (onChanged != null
-                ? SystemMouseCursors.click
-                : SystemMouseCursors.basic)
-            : null,
-        onTap: onChanged != null ? () => onChanged!(!value) : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 32,
-                child: Icon(icon, size: 22, color: iconColor ?? colorScheme.primary),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Switch(value: value, onChanged: onChanged),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsDivider extends StatelessWidget {
-  const _SettingsDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Divider(
-      height: 1,
-      indent: 62,
-      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .4),
     );
   }
 }

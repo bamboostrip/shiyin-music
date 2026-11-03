@@ -9,22 +9,22 @@ import '../../controllers/theme_controller.dart';
 import '../../services/cache_service.dart';
 import '../../services/music_api.dart';
 import '../../services/vip_background_task.dart';
-import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import '../settings/about_settings_section.dart';
 import '../settings/account_settings_section.dart';
 import '../settings/cache_management_sheet.dart';
-import '../settings/cache_settings_section.dart';
-import '../settings/car_display_settings_section.dart';
 import '../settings/desktop_settings_section.dart';
-import '../settings/download_settings_section.dart';
-import '../settings/personalization_settings_section.dart';
-import '../settings/playback_settings_section.dart';
 import '../settings/settings_widgets.dart';
-import '../widgets/audio_quality_sheet.dart';
-import '../widgets/theme_mode_selector.dart';
+import '../settings/storage_settings_section.dart';
 import '../widgets/toast.dart';
+import 'personalization_settings_page.dart';
+import 'playback_settings_page.dart';
 
+/// 设置主页面：只做「目录」。
+///
+/// 每个分节长度控制在 1–4 项，最长的「播放」与「外观与个性化」下沉到二级页，
+/// 「存储与下载」合并成一个分节；桌面端内容列限制最大宽度，避免卡片横跨
+/// 整个窗口。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
     super.key,
@@ -45,346 +45,30 @@ class SettingsPage extends StatelessWidget {
   final CacheService? cache;
   final DownloadController? downloads;
 
-  Future<void> _selectFontScale(
-    BuildContext context,
-    ThemeController theme,
-  ) async {
-    Widget buildOptions(BuildContext ctx) {
-      final colorScheme = Theme.of(ctx).colorScheme;
-      final isDark = Theme.of(ctx).brightness == Brightness.dark;
-      return Container(
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: .10)
-                : Colors.white.withValues(alpha: .92),
-            width: 1.1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
+  void _openPlaybackSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlaybackSettingsPage(
+          api: api,
+          auth: auth,
+          player: player,
+          // 歌词页切歌键只服务手机/平板形态：PC 与车机（车机模式或车机
+          // 设备）均无移动端歌词页底栏，隐藏开关避免「看得到但无效」。
+          showLyricPageSkipButtons:
+              !isDesktopFormFactor &&
+              !theme.carModeEnabled &&
+              !theme.isAutomotiveDevice,
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final scale in ThemeController.fontScaleOptions) ...[
-                InkWell(
-                  mouseCursor:
-                      isDesktopFormFactor ? SystemMouseCursors.click : null,
-                  onTap: () => Navigator.of(ctx).pop(scale),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          scale == theme.fontScale
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_off_rounded,
-                          color: scale == theme.fontScale
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant.withValues(
-                                  alpha: .6,
-                                ),
-                          size: 22,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                fontScaleLabel(scale),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              Text(
-                                scale == 1.0
-                                    ? '默认大小'
-                                    : scale == 1.1
-                                    ? '整体放大 10%'
-                                    : '整体放大 20%',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (scale != ThemeController.fontScaleOptions.last)
-                  Divider(
-                    height: 1,
-                    indent: 52,
-                    color: colorScheme.outlineVariant.withValues(alpha: .24),
-                  ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    final double? selected;
-    if (isDesktopFormFactor) {
-      selected = await showDialog<double>(
-        context: context,
-        builder: (dialogContext) {
-          return Dialog(
-            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '字体大小',
-                          style: Theme.of(dialogContext).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          tooltip: '关闭',
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    buildOptions(dialogContext),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    } else {
-      selected = await showModalBottomSheet<double>(
-        context: context,
-        showDragHandle: true,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        builder: (sheetContext) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '字体大小',
-                    style: Theme.of(sheetContext).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 12),
-                  buildOptions(sheetContext),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
-
-    if (selected != null) {
-      await theme.setFontScale(selected);
-    }
+      ),
+    );
   }
 
-  /// 选择外观模式：桌面端居中 Dialog，移动端 BottomSheet。
-  ///
-  /// 选项文案取自 [themeModeOptions]，与个性化页三卡片选择器同源。
-  Future<void> _selectThemeMode(
-    BuildContext context,
-    ThemeController theme,
-  ) async {
-    Widget buildOptions(BuildContext ctx) {
-      final colorScheme = Theme.of(ctx).colorScheme;
-      final isDark = Theme.of(ctx).brightness == Brightness.dark;
-      return Container(
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: .10)
-                : Colors.white.withValues(alpha: .92),
-            width: 1.1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? .18 : .06),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final option in themeModeOptions) ...[
-                InkWell(
-                  mouseCursor: isDesktopFormFactor
-                      ? SystemMouseCursors.click
-                      : null,
-                  onTap: () => Navigator.of(ctx).pop(option.mode),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          option.mode == theme.themeMode
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_off_rounded,
-                          color: option.mode == theme.themeMode
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant.withValues(
-                                  alpha: .6,
-                                ),
-                          size: 22,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                option.label,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              Text(
-                                option.subtitle,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (option != themeModeOptions.last)
-                  Divider(
-                    height: 1,
-                    indent: 52,
-                    color: colorScheme.outlineVariant.withValues(alpha: .24),
-                  ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    final ThemeMode? selected;
-    if (isDesktopFormFactor) {
-      selected = await showDialog<ThemeMode>(
-        context: context,
-        builder: (dialogContext) {
-          return Dialog(
-            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '外观模式',
-                          style: Theme.of(dialogContext).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          tooltip: '关闭',
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    buildOptions(dialogContext),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    } else {
-      selected = await showModalBottomSheet<ThemeMode>(
-        context: context,
-        showDragHandle: true,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        builder: (sheetContext) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '外观模式',
-                    style: Theme.of(sheetContext).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 12),
-                  buildOptions(sheetContext),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
-
-    if (selected != null) {
-      await theme.setThemeMode(selected);
-    }
+  void _openPersonalizationSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PersonalizationSettingsPage(themeController: theme),
+      ),
+    );
   }
 
   @override
@@ -412,74 +96,70 @@ class SettingsPage extends StatelessWidget {
             auth.vipClaim,
           ]),
           builder: (context, _) {
-            // 横屏/车机开关：移动端（手机+平板）全量展示，桌面恒横屏无此概念。
-            // 手机残留值曾因平板门控无 UI 可改，现还回开关即恢复可编辑。
-            final showOrientationTiles = !isDesktopFormFactor;
-            // 歌词页切歌键只服务手机/平板形态：PC 与车机（车机模式或车机
-            // 设备）均无移动端歌词页底栏，隐藏开关避免「看得到但无效」。
-            final showLyricPageSkipButtons =
-                !isDesktopFormFactor &&
-                !theme.carModeEnabled &&
-                !theme.isAutomotiveDevice;
-            return AdaptiveContentPadding(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
-                children: [
-                  // Account section
-                  AccountSettingsSection(
-                    auth: auth,
-                    onClaimVip: () => _claimVipNow(context),
-                    onLogout: () => _confirmLogout(context),
-                  ),
-                  // Playback section
-                  PlaybackSettingsSection(
-                    api: api,
-                    auth: auth,
-                    player: player,
-                    showLyricPageSkipButtons: showLyricPageSkipButtons,
-                    onSelectDefaultAudioQuality: () =>
-                        _selectDefaultAudioQuality(context),
-                  ),
-                  // Desktop section（仅桌面形态：托盘关闭行为 + 窗口重置）
-                  if (isDesktopFormFactor) const DesktopSettingsSection(),
-                  // Cache section
-                  CacheSettingsSection(
-                    onOpenManager: () => _showCacheManagement(context),
-                  ),
-                  // Download section（桌面与 Android：下载位置、下载音质；
-                  // iOS 不展示）
-                  DownloadSettingsSection(downloads: downloads, player: player),
-                  // Personalization section
-                  PersonalizationSettingsSection(
-                    theme: theme,
-                    showOrientationTiles: showOrientationTiles,
-                    onSelectFontScale: () => _selectFontScale(context, theme),
-                    onSelectThemeMode: () => _selectThemeMode(context, theme),
-                  ),
-                  // 车机显示分节：仅车机模式开启（移动形态）时有意义，
-                  // 桌面形态恒隐藏（车机模式下 PC 布局不生效）。
-                  if (!isDesktopFormFactor && theme.carModeEnabled)
-                    CarDisplaySettingsSection(theme: theme),
-                  // App section
-                  AboutSettingsSection(api: api),
-                ],
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 120),
+                  children: [
+                    // 账号
+                    AccountSettingsSection(
+                      auth: auth,
+                      onClaimVip: () => _claimVipNow(context),
+                      onLogout: () => _confirmLogout(context),
+                    ),
+                    // 播放（二级页）
+                    const SectionHeader(title: '播放'),
+                    const SizedBox(height: 8),
+                    SettingsCard(
+                      children: [
+                        SettingsTile(
+                          icon: Icons.play_circle_outline_rounded,
+                          iconColor: const Color(0xFF3F51B5),
+                          title: '播放设置',
+                          subtitle:
+                              '${player.audioQuality.label} · '
+                              '智能音质${player.smartQualityEnabled ? '开' : '关'}',
+                          onTap: () => _openPlaybackSettings(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    // 存储与下载（下载位置 + 下载音质 + 缓存管理）
+                    StorageSettingsSection(
+                      downloads: downloads,
+                      player: player,
+                      onOpenManager: () => _showCacheManagement(context),
+                    ),
+                    // 外观与个性化（二级页）
+                    const SectionHeader(title: '外观与个性化'),
+                    const SizedBox(height: 8),
+                    SettingsCard(
+                      children: [
+                        SettingsTile(
+                          icon: Icons.palette_rounded,
+                          iconColor: const Color(0xFFAB47BC),
+                          title: '主题与显示',
+                          subtitle:
+                              '${theme.themeModeLabel} · '
+                              '${fontScaleLabel(theme.fontScale)}字号',
+                          onTap: () => _openPersonalizationSettings(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    // 桌面（仅桌面形态：托盘 + 登录自启 + 窗口重置）
+                    if (isDesktopFormFactor) const DesktopSettingsSection(),
+                    // 关于与诊断
+                    AboutSettingsSection(api: api),
+                  ],
+                ),
               ),
             );
           },
         ),
       ),
     );
-  }
-
-  Future<void> _selectDefaultAudioQuality(BuildContext context) async {
-    final quality = await showAudioQualitySheet(
-      context: context,
-      selected: player.audioQuality,
-      title: '默认音质',
-      subtitle: '新播放的歌曲会使用这个音质',
-    );
-    if (quality == null) return;
-    await player.setAudioQuality(quality);
   }
 
   /// 打开缓存管理弹窗（桌面端居中 Dialog，移动端 BottomSheet）。
