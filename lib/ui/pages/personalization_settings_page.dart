@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../controllers/theme_controller.dart';
@@ -27,6 +25,10 @@ class PersonalizationSettingsPage extends StatefulWidget {
 
 class _PersonalizationSettingsPageState
     extends State<PersonalizationSettingsPage> {
+  /// 选图/安装进行中：选图是异步的（相册、复制、解码探测），连点会并发装
+  /// 出两张图，每次落盘都是新文件名，先完成的那张就成了文档目录里的孤儿。
+  bool _pickingBackgroundImage = false;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -197,7 +199,10 @@ class _PersonalizationSettingsPageState
                 const SizedBox(height: 24),
                 SectionHeader(title: '当前背景预览'),
                 const SizedBox(height: 8),
-                _BackgroundPreviewCard(imagePath: tc.backgroundImagePath!),
+                _BackgroundPreviewCard(
+                  imagePath: tc.backgroundImagePath!,
+                  opacity: tc.backgroundOpacity,
+                ),
               ],
             ],
           );
@@ -378,6 +383,8 @@ class _PersonalizationSettingsPageState
   }
 
   Future<void> _pickImage() async {
+    if (_pickingBackgroundImage) return;
+    _pickingBackgroundImage = true;
     try {
       final success = await widget.themeController.pickAndSetBackgroundImage();
       if (!mounted) return;
@@ -387,6 +394,8 @@ class _PersonalizationSettingsPageState
     } catch (error) {
       if (!mounted) return;
       Toast.error('选择图片失败：$error');
+    } finally {
+      _pickingBackgroundImage = false;
     }
   }
 
@@ -588,9 +597,16 @@ class _BackgroundOpacitySliderState extends State<_BackgroundOpacitySlider> {
 // ===== 背景预览卡片 =====
 
 class _BackgroundPreviewCard extends StatelessWidget {
-  const _BackgroundPreviewCard({required this.imagePath});
+  const _BackgroundPreviewCard({
+    required this.imagePath,
+    required this.opacity,
+  });
 
   final String imagePath;
+
+  /// 当前背景透明度（0.0 ~ 0.8），预览必须与全局背景层一致，
+  /// 不能固定成某一个值，否则用户调完滑杆看到的还是旧效果。
+  final double opacity;
 
   @override
   Widget build(BuildContext context) {
@@ -604,11 +620,16 @@ class _BackgroundPreviewCard extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              child: Image.file(
-                File(imagePath),
+              // 与全局背景层同一套等比例解码：缩略图按小上限解码，
+              // 避免背景开关关闭时为一个 160 高的小卡片解一张整屏大图。
+              child: Image(
+                image: buildBackgroundImageProvider(
+                  imagePath,
+                  cap: backgroundPreviewDecodeCap,
+                ),
                 fit: BoxFit.cover,
-                cacheWidth: 300,
-                cacheHeight: 300,
+                // 换图必然换文件名（=换 provider），不保留上一帧会闪一下空白。
+                gaplessPlayback: true,
                 errorBuilder: (_, _, _) => Container(
                   color: colorScheme.surfaceContainerHighest,
                   child: const Center(
@@ -620,7 +641,7 @@ class _BackgroundPreviewCard extends StatelessWidget {
             Positioned.fill(
               child: ColoredBox(
                 color: (isDark ? const Color(0xFF06070A) : Colors.white)
-                    .withValues(alpha: 1 - 0.15),
+                    .withValues(alpha: 1 - opacity),
               ),
             ),
             Positioned(
@@ -636,7 +657,7 @@ class _BackgroundPreviewCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '预览效果（透明度 15%）',
+                  '预览效果（透明度 ${(opacity * 100).round()}%）',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: colorScheme.onPrimary,
                     fontWeight: FontWeight.w700,
@@ -672,11 +693,11 @@ class _FullBackgroundPreview extends StatelessWidget {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.file(
-              File(imagePath),
+            // 与全局背景层同一 provider，预览即所见。
+            child: Image(
+              image: buildBackgroundImageProvider(imagePath),
               fit: BoxFit.cover,
-              cacheWidth: 800,
-              cacheHeight: 800,
+              gaplessPlayback: true,
               errorBuilder: (_, _, _) =>
                   Container(color: colorScheme.surfaceContainerHighest),
             ),

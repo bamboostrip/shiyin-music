@@ -75,4 +75,24 @@ void main() {
     expect(find.text('字体大小'), findsOneWidget);
     expect(find.text('标准'), findsOneWidget);
   });
+
+  testWidgets('背景预览等比例解码，并跟随真实透明度', (tester) async {
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setBackgroundImagePath('/tmp/not-exist-bg.jpg');
+    await theme.setBackgroundOpacity(0.5);
+
+    await pumpPage(tester, theme);
+
+    // 标签与遮罩都取真实滑杆值，不再固定 15%。
+    expect(find.text('预览效果（透明度 50%）'), findsOneWidget);
+
+    // 预览与全局背景层共用等比例解码（fit），不能用 cacheWidth+cacheHeight
+    // 把图压成正方形（issue #13「整体上传图片会变形」）；缩略图另取小上限。
+    final preview = tester.widget<Image>(find.byType(Image));
+    expect(preview.image, isA<ResizeImage>());
+    final resize = preview.image as ResizeImage;
+    expect(resize.policy, ResizeImagePolicy.fit);
+    expect(resize.width, backgroundPreviewDecodeCap);
+  });
 }
