@@ -18,7 +18,7 @@
     build\dist\shiyin-vX.Y.Z-windows-x64-setup.exe     # 安装版（Inno Setup，装到 %LocalAppData%\ShiYinMusic）
 
   要求:
-    - Flutter 已在 PATH（或 E:\flutter\flutter\bin\flutter.bat）
+    - Flutter 可被找到（PATH 里有，或设置 FLUTTER_ROOT；详见 scripts/flutter-env.ps1）
     - Inno Setup 6 已安装（winget: JRSoftware.InnoSetup，或官网 jrsoftware.org/isinfo.php）
       本机 winget 精简版缺 ChineseSimplified.isl 时，脚本会自动用随仓的
       installer\Languages\ChineseSimplified.isl 补齐，保证编出中文向导。
@@ -55,6 +55,9 @@ Write-Host '============================================'
 # 以脚本所在目录为仓库根，不依赖写死盘符
 Set-Location $PSScriptRoot
 
+# 工具链定位（FLUTTER_ROOT → PATH → 常见位置），与 build_apk.ps1 共用一份实现。
+. (Join-Path $PSScriptRoot 'scripts\flutter-env.ps1')
+
 # 从 pubspec.yaml / app_config.dart 取版本号（CI 同款：v 前缀 + fileVersion 兜底）。
 function Get-AppVersion {
     $ver = $null
@@ -75,11 +78,8 @@ function Get-AppVersion {
 }
 
 function Find-Flutter {
-    $cmd = Get-Command flutter -ErrorAction SilentlyContinue
-    if ($null -ne $cmd -and $cmd.Source) { return $cmd.Source }
-    $fallback = 'E:\flutter\flutter\bin\flutter.bat'
-    if (Test-Path $fallback) { return $fallback }
-    return $null
+    # 实现见 scripts/flutter-env.ps1，这里保留函数名以免改动下方调用点。
+    return Resolve-FlutterPath
 }
 
 function Find-Iscc {
@@ -113,7 +113,8 @@ function Ensure-ChineseLanguage {
 # ── 0. 依赖 ──
 $flutter = Find-Flutter
 if (-not $flutter) {
-    Write-Error '找不到 flutter：请先安装并加入 PATH'
+    Write-Error ('找不到 flutter：请把 Flutter SDK 的 bin 加入 PATH，或设置 FLUTTER_ROOT 环境变量' +
+        '（例：setx FLUTTER_ROOT C:\develop\flutter\flutter，然后重开终端）')
     exit 1
 }
 

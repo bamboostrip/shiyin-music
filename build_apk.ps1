@@ -9,11 +9,14 @@
     兼容老用法：.\build_apk.ps1 debug 等同 impeller + debug
   切渲染器或 ABI 自动 flutter clean（--dart-define 是编译期常量，
   不清会串味），同变体连打走增量构建。
+  工具链查找见 scripts/flutter-env.ps1（FLUTTER_ROOT → PATH → 常见位置），
+  脚本内不再写死任何盘符路径。
 .EXAMPLE
   .\build_apk.ps1
   .\build_apk.ps1 skia
   .\build_apk.ps1 skia debug
   .\build_apk.ps1 skia release arm32   # 老车机 32 位包
+  .\build_apk.ps1 -CheckOnly           # 只打印解析到的 flutter/JDK/SDK，不构建
 .NOTES
   若提示“无法加载文件，因为在此系统上禁止运行脚本”，执行一次即可：
     Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -24,7 +27,9 @@
 param(
     [string]$Renderer = 'impeller',
     [string]$BuildType = 'release',
-    [string]$Abi = 'arm64'
+    [string]$Abi = 'arm64',
+    # 只解析并打印工具链环境，不执行构建（换机器 / 排查 PATH 问题时用，秒出结果）
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,23 +59,29 @@ if ($Abi -notin @('arm64', 'arm32')) {
 # 以脚本所在目录为仓库根，不依赖写死盘符
 Set-Location $PSScriptRoot
 
-# 环境：沿用本机已有配置，缺啥再补默认值
-if (-not $env:JAVA_HOME -and (Test-Path 'E:\jdk17\jdk-17.0.12+7')) {
-    $env:JAVA_HOME = 'E:\jdk17\jdk-17.0.12+7'
+# 工具链定位统一交给 scripts/flutter-env.ps1：
+# 环境变量（FLUTTER_ROOT / JAVA_HOME / ANDROID_HOME）→ PATH → 常见安装位置。
+# 以前这里的兜底路径写死成 E:\...，换到没有 E: 盘的机器就两条都落空。
+. (Join-Path $PSScriptRoot 'scripts\flutter-env.ps1')
+
+$flutter = Resolve-FlutterPath
+if (-not $flutter) {
+    Write-Error ('找不到 flutter：请把 Flutter SDK 的 bin 加入 PATH，或设置 FLUTTER_ROOT 环境变量' +
+        '（例：setx FLUTTER_ROOT C:\develop\flutter\flutter，然后重开终端）')
+    exit 1
 }
-if (-not $env:ANDROID_HOME -and (Test-Path 'E:\AIwork\android-sdk')) {
-    $env:ANDROID_HOME = 'E:\AIwork\android-sdk'
-}
+if (-not $env:JAVA_HOME) { $env:JAVA_HOME = Resolve-JdkHome }
+if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Resolve-AndroidSdk }
 $env:JAVA_TOOL_OPTIONS = '-Dfile.encoding=UTF-8'
 
-$flutter = (Get-Command flutter -ErrorAction SilentlyContinue)?.Source
-if (-not $flutter) {
-    $fallback = 'E:\flutter\flutter\bin\flutter.bat'
-    if (Test-Path $fallback) { $flutter = $fallback }
-}
-if (-not $flutter) {
-    Write-Error '找不到 flutter：请先安装并加入 PATH'
-    exit 1
+Write-Host "[flutter]      $flutter" -ForegroundColor DarkGray
+Write-Host "[JAVA_HOME]    $(if ($env:JAVA_HOME) { $env:JAVA_HOME } else { '(未设置，交给 Gradle 从 PATH 找 java)' })" -ForegroundColor DarkGray
+Write-Host "[ANDROID_HOME] $(if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { '(未设置)' })" -ForegroundColor DarkGray
+
+if ($CheckOnly) {
+    Write-Host ''
+    Write-Host '[仅检查] 以上环境已解析，-CheckOnly 跳过构建。' -ForegroundColor Yellow
+    exit 0
 }
 
 Write-Host "[渲染引擎] $Renderer"
