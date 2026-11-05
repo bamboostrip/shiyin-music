@@ -207,6 +207,16 @@ impl KugouEngine {
         state.session.clone()
     }
 
+    /// 解析 `/login/cellphone` 的 userid 参数。前端按上游 HTTP API 契约传
+    /// camelCase 的 `userId`（多账号登录第二步把选中的账号带回来）；同时
+    /// 兼容小写 `userid` 写法。
+    fn login_userid_param(params: &HashMap<String, String>) -> Option<&str> {
+        params
+            .get("userId")
+            .or_else(|| params.get("userid"))
+            .map(|s| s.as_str())
+    }
+
     async fn dispatch_inner(
         &self,
         session: &KgSession,
@@ -225,7 +235,7 @@ impl KugouEngine {
             ("POST", "/login/cellphone") => {
                 let mobile = params.get("mobile").map(|s| s.as_str()).unwrap_or("");
                 let code = params.get("code").map(|s| s.as_str()).unwrap_or("");
-                let userid = params.get("userid").map(|s| s.as_str());
+                let userid = Self::login_userid_param(params);
                 let resp =
                     login::login_by_mobile(client, "", session, mobile, code, userid).await?;
                 self.persist_login(&resp);
@@ -915,6 +925,26 @@ mod tests {
         assert!(!KugouEngine::is_session_invalid_response(&json!({
             "status": 0, "msg": "服务内部错误"
         })));
+    }
+
+    #[test]
+    fn login_userid_param_accepts_camel_case_and_legacy_lowercase() {
+        // 前端（含多账号二次登录）按上游契约传 camelCase userId。
+        let params = HashMap::from([("userId".to_string(), "1002".to_string())]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1002"));
+
+        // 旧调用方 / 其他端可能仍用小写 userid。
+        let params = HashMap::from([("userid".to_string(), "1003".to_string())]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1003"));
+
+        // 两者同时存在时优先 camelCase。
+        let params = HashMap::from([
+            ("userId".to_string(), "1002".to_string()),
+            ("userid".to_string(), "1003".to_string()),
+        ]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1002"));
+
+        assert_eq!(KugouEngine::login_userid_param(&HashMap::new()), None);
     }
 
     /// 联网探针：实测 /fm/recommend 与 /fm/songs 的真实返回结构。

@@ -21,6 +21,121 @@ const LOGIN_ROUTER: &str = "login.user.kugou.com";
 const LOGIN_RETRY_HOST: &str = "https://loginserviceretry.kugou.com";
 const WEB_HOST: &str = "https://login-user.kugou.com";
 
+/// 手机号绑定多个酷狗账号时，`/v7/login_by_verifycode`（带 `support_multi=1`）
+/// 返回的错误码。此时响应里带 `data.info_list` 候选账号列表，需要用户选定
+/// 一个 `userid` 后重新登录。
+const MULTI_ACCOUNT_ERROR_CODE: i64 = 34175;
+
+/// 把数字或数字字符串解析为 i64（上游同一字段两种类型都出现过）。
+fn value_as_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+}
+
+/// 读取上游响应信封的错误码（`error_code`，兼容网关的 `errcode` 别名）。
+fn response_error_code(response: &Value) -> Option<i64> {
+    response
+        .get("error_code")
+        .and_then(value_as_i64)
+        .or_else(|| response.get("errcode").and_then(value_as_i64))
+}
+
+/// 把单个候选账号归一成前端契约的字段（userId/nickname/pic/appId/username）。
+/// 缺少有效 userid 的脏数据直接丢弃。
+fn normalize_account(item: &Value) -> Option<Value> {
+    let obj = item.as_object()?;
+    let userid = obj
+        .get("userid")
+        .or_else(|| obj.get("userId"))
+        .and_then(value_as_i64)
+        .filter(|id| *id > 0)?;
+    let appid = obj
+        .get("appid")
+        .or_else(|| obj.get("appId"))
+        .and_then(value_as_i64)
+        .unwrap_or(0);
+    Some(json!({
+        "userId": userid,
+        "nickname": obj.get("nickname").cloned().unwrap_or(Value::Null),
+        "pic": obj.get("pic").or_else(|| obj.get("avatar")).cloned().unwrap_or(Value::Null),
+        "appId": appid,
+        "username": obj.get("username").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+/// 从 `data.info_list`（兼容已被提升到根节点的 `info_list`）提取候选账号。
+fn multi_account_list(response: &Value) -> Vec<Value> {
+    response
+        .get("data")
+        .and_then(|data| data.get("info_list"))
+        .or_else(|| response.get("info_list"))
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter_map(normalize_account).collect())
+        .unwrap_or_default()
+}
+
+/// 多账号提示文案：`data` 本身可能就是一句提示字符串，其次是常见消息字段。
+fn multi_account_message(response: &Value) -> String {
+    if let Some(Value::String(text)) = response.get("data") {
+        let text = text.trim();
+        if !text.is_empty() {
+            return text.to_string();
+        }
+    }
+    if let Some(text) = response
+        .get("data")
+        .and_then(|data| data.get("message").or_else(|| data.get("msg")))
+        .and_then(|value| value.as_str())
+    {
+        let text = text.trim();
+        if !text.is_empty() {
+            return text.to_string();
+        }
+    }
+    for key in ["msg", "message", "errmsg", "error_msg", "error"] {
+        if let Some(Value::String(text)) = response.get(key) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return text.to_string();
+            }
+        }
+    }
+    "该手机号绑定了多个账号，请选择要登录的账号".to_string()
+}
+
+/// 把酷狗「手机号绑定多个账号」的失败响应归一成前端契约：
+/// `{status, error_code, errorCode, requiresUserSelection, message, accounts}`。
+///
+/// 上游 KA Music 的 HTTP API 服务会做这层包装，Dart 侧只认 `accounts`；
+/// 本仓库由 Rust 引擎直连酷狗，若不归一，`unwrapData` 会丢掉根节点的
+/// `error_code`，前端就按普通失败提示「没有注册账号」。
+/// 注意：响应中不能保留 `data` 字段——Dart 的 `unwrapData` 会把 Map 形态的
+/// `data` 展开成根节点，导致上面的状态字段丢失。
+fn normalize_multi_account_response(response: Value) -> Value {
+    if response_error_code(&response) != Some(MULTI_ACCOUNT_ERROR_CODE) {
+        return response;
+    }
+    let accounts = multi_account_list(&response);
+    if accounts.is_empty() {
+        return response;
+    }
+    let status = response.get("status").cloned().unwrap_or_else(|| json!(0));
+    let message = multi_account_message(&response);
+    tracing::info!(
+        count = accounts.len(),
+        "[login] 手机号绑定了多个账号，返回候选账号列表"
+    );
+    json!({
+        "status": status,
+        "error_code": MULTI_ACCOUNT_ERROR_CODE,
+        "errorCode": MULTI_ACCOUNT_ERROR_CODE,
+        "requiresUserSelection": true,
+        "message": message,
+        "accounts": accounts,
+    })
+}
+
 fn try_decrypt_response(response: Value, aes_key: Option<&str>) -> Value {
     let Some(aes_key) = aes_key else {
         return response;
@@ -115,7 +230,10 @@ pub async fn login_by_mobile(
 
     let login_userid = userid.filter(|s| !s.is_empty()).unwrap_or(&session.userid);
     if !login_userid.is_empty() && login_userid != "0" {
-        body["userid"] = json!(login_userid.parse::<i64>().unwrap_or(0));
+        // 多账号二次登录：与 .NET 参考实现一致，userid 以字符串下发（
+        // 酷狗同一字段既接受数字也接受字符串，字符串可避免前导 0 / 超长
+        // id 被 JSON 数字精度截断）。
+        body["userid"] = json!(login_userid);
     }
 
     let req = KgRequest::get("/v7/login_by_verifycode")
@@ -129,7 +247,7 @@ pub async fn login_by_mobile(
     let resp = transport::send(client, session, &req).await?;
     let resp = try_decrypt_response(resp, Some(&payload_enc.temp_key));
 
-    Ok(resp)
+    Ok(normalize_multi_account_response(resp))
 }
 
 pub async fn get_qr_key(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
@@ -229,4 +347,129 @@ pub async fn refresh_token(
 
 pub async fn logout(client: &reqwest::Client, _session_key: &str, session: &KgSession) {
     let _ = (client, session);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn multi_account_failure_is_normalized_into_account_selection_contract() {
+        // 酷狗实测形态：status=0 + error_code=34175 + data.info_list。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": {
+                "info_list": [
+                    {
+                        "userid": 1001,
+                        "nickname": "甲",
+                        "pic": "https://img.example/1.jpg",
+                        "appid": 3116,
+                        "username": "acc1"
+                    },
+                    {
+                        "userid": "1002",
+                        "nickname": "乙",
+                        "pic": null,
+                        "appid": "1001",
+                        "username": "acc2"
+                    },
+                    { "userid": 0, "nickname": "无效账号" }
+                ]
+            }
+        });
+
+        let normalized = normalize_multi_account_response(raw);
+
+        // Dart 侧 `_requiresUserSelection` 与 `PhoneLoginResult` 依赖的字段。
+        assert_eq!(normalized["requiresUserSelection"], json!(true));
+        assert_eq!(normalized["errorCode"], json!(34175));
+        assert_eq!(normalized["error_code"], json!(34175));
+        assert_eq!(normalized["status"], json!(0));
+        // 必须去掉 data：Dart 的 unwrapData 会把 Map 形态的 data 展开并丢掉根字段。
+        assert!(normalized.get("data").is_none());
+
+        let accounts = normalized["accounts"].as_array().expect("accounts 数组");
+        assert_eq!(accounts.len(), 2, "userid 无效的脏数据应被过滤");
+        assert_eq!(accounts[0]["userId"], json!(1001));
+        assert_eq!(accounts[0]["nickname"], json!("甲"));
+        assert_eq!(accounts[0]["pic"], json!("https://img.example/1.jpg"));
+        assert_eq!(accounts[0]["appId"], json!(3116));
+        assert_eq!(accounts[0]["username"], json!("acc1"));
+        // 字符串形态的 userid/appid 也要能归一成数字。
+        assert_eq!(accounts[1]["userId"], json!(1002));
+        assert_eq!(accounts[1]["appId"], json!(1001));
+    }
+
+    #[test]
+    fn multi_account_message_prefers_upstream_text_and_falls_back() {
+        let with_text = normalize_multi_account_response(json!({
+            "status": 0,
+            "errcode": "34175",
+            "data": {
+                "info_list": [{ "userid": 1 }]
+            },
+            "msg": "该手机号绑定了多个账号"
+        }));
+        assert_eq!(with_text["message"], json!("该手机号绑定了多个账号"));
+
+        let without_text = normalize_multi_account_response(json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": {
+                "info_list": [{ "userid": 2 }]
+            }
+        }));
+        assert_eq!(
+            without_text["message"],
+            json!("该手机号绑定了多个账号，请选择要登录的账号")
+        );
+    }
+
+    #[test]
+    fn data_string_message_is_propagated() {
+        // 部分网关把 data 直接下成提示字符串（无 info_list），不构成选账号。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": "请选择需要登录的账号"
+        });
+        let normalized = normalize_multi_account_response(raw.clone());
+        assert_eq!(
+            normalized, raw,
+            "没有候选账号时保持原响应，交由普通登录失败提示"
+        );
+    }
+
+    #[test]
+    fn non_multi_account_responses_are_untouched() {
+        let failure = json!({
+            "status": 0,
+            "error_code": 34174,
+            "msg": "验证码错误"
+        });
+        assert_eq!(normalize_multi_account_response(failure.clone()), failure);
+
+        let success = json!({
+            "status": 1,
+            "error_code": 0,
+            "userid": 1001,
+            "token": "token",
+            "t1": "t1"
+        });
+        assert_eq!(normalize_multi_account_response(success.clone()), success);
+
+        // 错误码对但 info_list 为空：不能当成选账号，否则前端会卡在空列表。
+        let empty_list = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": { "info_list": [] }
+        });
+        assert_eq!(
+            normalize_multi_account_response(empty_list.clone()),
+            empty_list
+        );
+    }
 }
