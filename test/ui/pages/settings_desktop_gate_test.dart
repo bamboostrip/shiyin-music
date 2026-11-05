@@ -611,7 +611,7 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   Future<bool> pickAndSetBackgroundImage() async => false;
 
   @override
-  Future<void> clearBackgroundImage() async {}
+  Future<bool> clearBackgroundImage() async => true;
 
   @override
   Future<void> setLandscapeEnabled(bool enabled, bool isTablet) async {}

@@ -3,8 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/ui/app_theme.dart';
+import 'package:shiyin_music/ui/background_crop.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
+import 'package:shiyin_music/ui/pages/background_crop_page.dart';
 import 'package:shiyin_music/ui/pages/personalization_settings_page.dart';
+import 'package:shiyin_music/ui/widgets/background_crop_view.dart';
 
 /// 「外观与个性化」二级页：外观模式 / 配色 / 背景 / 字体与布局四组齐全，
 /// 移动形态才出现的横屏与车机模式开关，以及外观模式点击写回 controller。
@@ -76,11 +79,14 @@ void main() {
     expect(find.text('标准'), findsOneWidget);
   });
 
-  testWidgets('背景预览等比例解码，并跟随真实透明度', (tester) async {
+  testWidgets('背景预览等比例解码，并跟随真实透明度与真实构图', (tester) async {
     final theme = ThemeController();
     await theme.load();
     await theme.setBackgroundImagePath('/tmp/not-exist-bg.jpg');
     await theme.setBackgroundOpacity(0.5);
+    // 用一个非默认构图，确保断言不是「两边都是默认值」的恒真。
+    const crop = BackgroundCrop(focusX: 0.3, focusY: 0.7, zoom: 2);
+    await theme.setBackgroundCrop(crop);
 
     await pumpPage(tester, theme);
 
@@ -89,10 +95,71 @@ void main() {
 
     // 预览与全局背景层共用等比例解码（fit），不能用 cacheWidth+cacheHeight
     // 把图压成正方形（issue #13「整体上传图片会变形」）；缩略图另取小上限。
-    final preview = tester.widget<Image>(find.byType(Image));
+    final preview = tester.widget<BackgroundCropView>(
+      find.byType(BackgroundCropView),
+    );
     expect(preview.image, isA<ResizeImage>());
     final resize = preview.image as ResizeImage;
     expect(resize.policy, ResizeImagePolicy.fit);
     expect(resize.width, backgroundPreviewDecodeCap);
+    // 预览复用全局背景层的裁剪参数，两者观感一致。
+    expect(preview.crop, crop);
+  });
+
+  testWidgets('已选择背景图时出现「调整背景位置」入口', (tester) async {
+    final theme = ThemeController();
+    await theme.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: PersonalizationSettingsPage(themeController: theme),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('调整背景位置'), findsNothing);
+
+    await theme.setBackgroundImagePath('/tmp/not-exist-bg.jpg');
+    await tester.pumpAndSettle();
+    expect(find.text('调整背景位置'), findsOneWidget);
+  });
+
+  testWidgets('点击「调整背景位置」打开裁剪页，取消后回到设置页', (tester) async {
+    tester.view.physicalSize = const Size(420, 940);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setBackgroundImagePath('/tmp/not-exist-bg.jpg');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: PersonalizationSettingsPage(themeController: theme),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 列表懒构建：先把入口滚进视口再点。
+    await tester.scrollUntilVisible(
+      find.text('调整背景位置'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('调整背景位置'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(find.byType(BackgroundCropPage), findsOneWidget);
+
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pump();
+    // 转场动画约 450ms；裁剪页里没有无限动画（图片按缺失文件处理），可以直接等完。
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump();
+
+    expect(find.byType(BackgroundCropPage), findsNothing);
+    expect(find.text('选择背景图'), findsOneWidget);
   });
 }

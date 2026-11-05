@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/theme_controller.dart';
 import '../adaptive_layout.dart';
+import '../background_crop.dart';
 import '../form_factor.dart';
 import '../settings/car_display_settings_section.dart';
 import '../settings/settings_widgets.dart';
+import '../widgets/background_crop_view.dart';
 import '../widgets/theme_mode_selector.dart';
 import '../widgets/toast.dart';
+import 'background_crop_page.dart';
 
 /// 「外观与个性化」二级页：外观模式 + 皮肤配色 + 自定义背景图 +
 /// 字体大小/横屏/车机模式 + 车机显示。
@@ -99,7 +102,9 @@ class _PersonalizationSettingsPageState
                     title: '启用自定义背景',
                     subtitle: '在所有页面上方显示自定义背景图',
                     value: tc.backgroundEnabled,
-                    onChanged: tc.backgroundImagePath == null
+                    onChanged:
+                        tc.backgroundImagePath == null ||
+                            _pickingBackgroundImage
                         ? null
                         : (value) => tc.setBackgroundEnabled(value),
                   ),
@@ -108,12 +113,24 @@ class _PersonalizationSettingsPageState
                     icon: Icons.photo_library_rounded,
                     iconColor: colorScheme.primary,
                     title: '选择背景图',
-                    subtitle: tc.backgroundImagePath == null
+                    subtitle: _pickingBackgroundImage
+                        ? '正在处理图片…'
+                        : tc.backgroundImagePath == null
                         ? '点击从相册选择图片'
                         : '已选择背景图',
-                    onTap: () => _pickImage(),
+                    onTap: _pickingBackgroundImage ? null : () => _pickImage(),
                   ),
                   if (tc.backgroundImagePath != null) ...[
+                    const SettingsDivider(),
+                    SettingsTile(
+                      icon: Icons.crop_free_rounded,
+                      iconColor: colorScheme.primary,
+                      title: '调整背景位置',
+                      subtitle: '拖动或缩放，决定画面显示哪一部分',
+                      onTap: _pickingBackgroundImage
+                          ? null
+                          : () => _adjustBackgroundCrop(context),
+                    ),
                     const SettingsDivider(),
                     SettingsTile(
                       icon: Icons.visibility_rounded,
@@ -134,7 +151,9 @@ class _PersonalizationSettingsPageState
                       iconColor: colorScheme.error,
                       title: '移除背景图',
                       titleColor: colorScheme.error,
-                      onTap: () => _confirmRemove(context),
+                      onTap: _pickingBackgroundImage
+                          ? null
+                          : () => _confirmRemove(context),
                     ),
                   ],
                 ],
@@ -202,6 +221,7 @@ class _PersonalizationSettingsPageState
                 _BackgroundPreviewCard(
                   imagePath: tc.backgroundImagePath!,
                   opacity: tc.backgroundOpacity,
+                  crop: tc.backgroundCrop,
                 ),
               ],
             ],
@@ -384,18 +404,61 @@ class _PersonalizationSettingsPageState
 
   Future<void> _pickImage() async {
     if (_pickingBackgroundImage) return;
-    _pickingBackgroundImage = true;
+    // 用 setState 进入/退出「处理中」：选图→裁剪→安装这段时间里要禁用
+    // 开关/移除/调整等入口，避免 install 在写盘期间被反向操作插队（安装
+    // 会同时写路径与构图，竞态下会出现两个相反的提示与半状态）。
+    setState(() => _pickingBackgroundImage = true);
     try {
-      final success = await widget.themeController.pickAndSetBackgroundImage();
+      // 选图与安装拆成两步：中间插一页裁剪，用户确认构图后才复制落盘；
+      // 取消裁剪就什么都不写，旧背景完全不受影响。
+      final source = await widget.themeController.pickBackgroundSourceFile();
+      if (source == null || !mounted) return;
+      final crop = await Navigator.of(context).push<BackgroundCrop>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => BackgroundCropPage(
+            image: buildBackgroundImageProvider(source.path),
+            initialCrop: BackgroundCrop.center,
+          ),
+        ),
+      );
+      if (crop == null || !mounted) return;
+      await widget.themeController.installBackgroundImage(source, crop: crop);
       if (!mounted) return;
-      if (success) {
-        Toast.success('背景图已设置');
-      }
+      Toast.success('背景图已设置');
     } catch (error) {
       if (!mounted) return;
       Toast.error('选择图片失败：$error');
     } finally {
-      _pickingBackgroundImage = false;
+      if (mounted) {
+        setState(() => _pickingBackgroundImage = false);
+      } else {
+        _pickingBackgroundImage = false;
+      }
+    }
+  }
+
+  /// 对已选中的背景图重新调整构图（不重新选图、不复制文件，只更新裁剪参数）。
+  Future<void> _adjustBackgroundCrop(BuildContext context) async {
+    final tc = widget.themeController;
+    final path = tc.backgroundImagePath;
+    if (path == null) return;
+    final crop = await Navigator.of(context).push<BackgroundCrop>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => BackgroundCropPage(
+          image: buildBackgroundImageProvider(path),
+          initialCrop: tc.backgroundCrop,
+        ),
+      ),
+    );
+    if (crop == null || !mounted) return;
+    final saved = await tc.setBackgroundCrop(crop);
+    if (!mounted) return;
+    if (saved) {
+      Toast.success('背景位置已更新');
+    } else {
+      Toast.error('背景位置保存失败，请重试');
     }
   }
 
@@ -405,6 +468,7 @@ class _PersonalizationSettingsPageState
         builder: (_) => _FullBackgroundPreview(
           imagePath: path,
           opacity: widget.themeController.backgroundOpacity,
+          crop: widget.themeController.backgroundCrop,
         ),
         fullscreenDialog: true,
       ),
@@ -430,8 +494,14 @@ class _PersonalizationSettingsPageState
       ),
     );
     if (confirmed == true) {
-      await widget.themeController.clearBackgroundImage();
-      if (mounted) Toast.success('已移除背景图');
+      final cleared = await widget.themeController.clearBackgroundImage();
+      if (!mounted) return;
+      // 持久化失败时什么都不该改：提示失败让用户重试，而不是假装移除成功。
+      if (cleared) {
+        Toast.success('已移除背景图');
+      } else {
+        Toast.error('移除失败，请重试');
+      }
     }
   }
 }
@@ -600,6 +670,7 @@ class _BackgroundPreviewCard extends StatelessWidget {
   const _BackgroundPreviewCard({
     required this.imagePath,
     required this.opacity,
+    required this.crop,
   });
 
   final String imagePath;
@@ -607,6 +678,9 @@ class _BackgroundPreviewCard extends StatelessWidget {
   /// 当前背景透明度（0.0 ~ 0.8），预览必须与全局背景层一致，
   /// 不能固定成某一个值，否则用户调完滑杆看到的还是旧效果。
   final double opacity;
+
+  /// 与全局背景层同一套裁剪参数，预览即所见。
+  final BackgroundCrop crop;
 
   @override
   Widget build(BuildContext context) {
@@ -620,17 +694,14 @@ class _BackgroundPreviewCard extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              // 与全局背景层同一套等比例解码：缩略图按小上限解码，
-              // 避免背景开关关闭时为一个 160 高的小卡片解一张整屏大图。
-              child: Image(
+              // 缩略图按小上限解码，避免为一个 160 高的小卡片解一张整屏大图。
+              child: BackgroundCropView(
                 image: buildBackgroundImageProvider(
                   imagePath,
                   cap: backgroundPreviewDecodeCap,
                 ),
-                fit: BoxFit.cover,
-                // 换图必然换文件名（=换 provider），不保留上一帧会闪一下空白。
-                gaplessPlayback: true,
-                errorBuilder: (_, _, _) => Container(
+                crop: crop,
+                errorBuilder: (context) => Container(
                   color: colorScheme.surfaceContainerHighest,
                   child: const Center(
                     child: Icon(Icons.broken_image_rounded, size: 40),
@@ -678,10 +749,12 @@ class _FullBackgroundPreview extends StatelessWidget {
   const _FullBackgroundPreview({
     required this.imagePath,
     required this.opacity,
+    required this.crop,
   });
 
   final String imagePath;
   final double opacity;
+  final BackgroundCrop crop;
 
   @override
   Widget build(BuildContext context) {
@@ -693,12 +766,11 @@ class _FullBackgroundPreview extends StatelessWidget {
       body: Stack(
         children: [
           Positioned.fill(
-            // 与全局背景层同一 provider，预览即所见。
-            child: Image(
+            // 与全局背景层同一 provider + 同一裁剪参数，预览即所见。
+            child: BackgroundCropView(
               image: buildBackgroundImageProvider(imagePath),
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, _, _) =>
+              crop: crop,
+              errorBuilder: (context) =>
                   Container(color: colorScheme.surfaceContainerHighest),
             ),
           ),

@@ -39,6 +39,7 @@ import 'ui/app_theme.dart';
 import 'ui/form_factor.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
+import 'ui/widgets/background_crop_view.dart';
 import 'ui/widgets/song_action_sheets.dart' show likeFailureMessage;
 import 'ui/widgets/toast.dart';
 
@@ -741,13 +742,11 @@ class _AppBackgroundState extends State<_AppBackground> {
 
     return Stack(
       children: [
-        // 背景图层（复用同一个背景图 provider，避免重复解码）
+        // 背景图层：按裁剪参数等比绘制（focus + 相对缩放），永不拉伸
         Positioned.fill(
-          child: Image(
+          child: BackgroundCropView(
             image: _imageProvider!,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            crop: widget.themeController.backgroundCrop,
           ),
         ),
         // 半透明遮罩（opacity 越大遮罩越透明，背景图越明显）
