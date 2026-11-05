@@ -136,12 +136,57 @@ pub fn aes_encrypt(data: &str, key: Option<&str>, iv: Option<&str>) -> AesEncryp
 }
 
 /// KGCrypto.AesDecrypt（AES-256-CBC，hex 密文，key 为 tempKey 明文）。
+///
+/// 保留作为与 .NET 行为一致的「会 panic」参照实现；解析不可信上游响应
+/// 一律走 [`try_aes_decrypt`]。
+#[allow(dead_code)]
 pub fn aes_decrypt(hex_data: &str, key: &str) -> String {
     let md5k = md5_str(key);
     let iv = md5k[md5k.len() - 16..].to_string();
     let cipher = hex::decode(hex_data).expect("AES 解密输入须为合法 hex");
     let plain = cbc_decrypt::<Aes256>(&cipher, md5k.as_bytes(), iv.as_bytes());
     String::from_utf8(plain).expect("AES 解密结果须为合法 UTF-8")
+}
+
+/// 与 [`aes_decrypt`] 相同的 AES-256-CBC/PKCS7 解密，但输入非法
+/// （hex 不合法、长度不是 16 字节倍数、填充非法、明文非 UTF-8）时返回
+/// `None` 而不是 panic。
+///
+/// 解析不可信的上游响应专用：`secu_params` 可能损坏或被错误的 key 加密，
+/// 不能让一次脏响应把引擎打崩（即便 FRB 会兜底成异常，界面上也只是一条
+/// 难懂的 panic 文案）。
+pub fn try_aes_decrypt(hex_data: &str, key: &str) -> Option<String> {
+    if key.is_empty() {
+        return None;
+    }
+    let cipher_data = hex::decode(hex_data).ok()?;
+    if cipher_data.is_empty() || !cipher_data.len().is_multiple_of(BLOCK_SIZE) {
+        return None;
+    }
+    let md5k = md5_str(key);
+    let iv = md5k.get(md5k.len() - 16..)?;
+    let cipher = Aes256::new(Array::from_slice(md5k.as_bytes()));
+    let mut prev: [u8; BLOCK_SIZE] = iv.as_bytes().try_into().ok()?;
+    let mut out = Vec::with_capacity(cipher_data.len());
+    for chunk in cipher_data.chunks(BLOCK_SIZE) {
+        let ct: [u8; BLOCK_SIZE] = chunk.try_into().ok()?;
+        let mut block = ct;
+        cipher.decrypt_block(Array::from_mut_slice(&mut block));
+        for i in 0..BLOCK_SIZE {
+            block[i] ^= prev[i];
+        }
+        out.extend_from_slice(&block);
+        prev = ct;
+    }
+    let pad = *out.last()? as usize;
+    if pad == 0 || pad > BLOCK_SIZE || pad > out.len() {
+        return None;
+    }
+    if !out[out.len() - pad..].iter().all(|b| *b as usize == pad) {
+        return None;
+    }
+    out.truncate(out.len() - pad);
+    String::from_utf8(out).ok()
 }
 
 /// KGCrypto.PlaylistAesEncrypt（AES-128-CBC，base64 密文）。
@@ -331,6 +376,33 @@ mod crypto_tests {
         let enc = aes_encrypt(plain, None, None);
         let dec = aes_decrypt(&enc.cipher_text, &enc.temp_key);
         assert_eq!(dec, plain);
+    }
+
+    #[test]
+    fn try_aes_decrypt_roundtrips_valid_input() {
+        for plain in ["", "a", "hello 酷狗 🎵", &"x".repeat(15), &"y".repeat(16)] {
+            let enc = aes_encrypt(plain, None, None);
+            assert_eq!(
+                try_aes_decrypt(&enc.cipher_text, &enc.temp_key).as_deref(),
+                Some(plain),
+                "合法密文应能解回原文"
+            );
+        }
+    }
+
+    #[test]
+    fn try_aes_decrypt_returns_none_instead_of_panicking() {
+        // 非 hex / 空串 / 长度不合法 / 空 key：全部 None，不 panic。
+        assert_eq!(try_aes_decrypt("not-hex", "key"), None);
+        assert_eq!(try_aes_decrypt("", "key"), None);
+        assert_eq!(try_aes_decrypt("00".repeat(15).as_str(), "key"), None);
+        assert_eq!(try_aes_decrypt("00".repeat(16).as_str(), ""), None);
+
+        // 合法长度但填充被篡改：最后一字节 XOR 0xFF 会破坏 PKCS7 填充。
+        let enc = aes_encrypt("123456789012345", None, None); // 15 字节 → pad=1
+        let mut raw = hex::decode(&enc.cipher_text).expect("hex");
+        *raw.last_mut().expect("non-empty") ^= 0xFF;
+        assert_eq!(try_aes_decrypt(&hex::encode(raw), &enc.temp_key), None);
     }
 
     #[test]

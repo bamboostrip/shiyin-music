@@ -148,31 +148,27 @@ fn normalize_multi_account_response(response: Value) -> Value {
     })
 }
 
-/// 上游返回的 `secu_params` 是否为可尝试解密的 AES 十六进制密文。
-/// 只做形状预检：长度必须按 16 字节对齐、字符全为 hex；避免脏字段进入
-/// `crypto::aes_decrypt` 的 hex 解码 / UTF-8 断言导致进程 panic。
-fn looks_like_aes_hex(value: &str) -> bool {
-    !value.is_empty()
-        && value.len().is_multiple_of(32)
-        && value.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
 /// 解密 `container.secu_params`（AES 随机 key 那一套）并把明文字段合并回
 /// 同一对象。返回是否成功解密并合并（无字段 / 形状不符 / 非对象明文 → false）。
+///
+/// 用 [`crypto::try_aes_decrypt`] 而不是会 panic 的 `aes_decrypt`：这是对
+/// 不可信上游响应的解析，脏密文/错误 key 只应降级为“解不出”，不能打崩引擎。
 fn decrypt_secu_params_into(container: &mut Value, aes_key: &str) -> bool {
     let Some(secu) = container
         .get("secu_params")
         .and_then(|v| v.as_str())
-        .filter(|s| looks_like_aes_hex(s))
         .map(str::to_owned)
     else {
         return false;
     };
-    let plain = crypto::aes_decrypt(&secu, aes_key);
+    let Some(plain) = crypto::try_aes_decrypt(&secu, aes_key) else {
+        tracing::warn!("[login] 解密 secu_params 失败（密文损坏或密钥不匹配）");
+        return false;
+    };
     let decrypted = match serde_json::from_str::<Value>(&plain) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "[login] 解密 secu_params 失败");
+            tracing::warn!(error = %e, "[login] secu_params 解密结果不是合法 JSON");
             return false;
         }
     };
@@ -600,6 +596,25 @@ mod tests {
             normalized["accounts"][0]["pic"],
             json!("https://img.example/2.jpg")
         );
+    }
+
+    #[test]
+    fn root_level_secu_params_still_decrypts_successful_login() {
+        // 成功登录时 transport 已把 data 提升到根，secu_params 在根级；
+        // 提取解密 helper 后这条主路径必须保持原行为。
+        let secret = json!({ "userid": 1001, "token": "tk", "t1": "t1" });
+        let enc = crate::kugou::crypto::aes_encrypt(&secret.to_string(), None, None);
+        let promoted = json!({
+            "status": 1,
+            "error_code": 0,
+            "secu_params": enc.cipher_text
+        });
+
+        let decrypted = try_decrypt_response(promoted, Some(&enc.temp_key));
+        assert_eq!(decrypted["userid"], json!(1001));
+        assert_eq!(decrypted["token"], json!("tk"));
+        assert_eq!(decrypted["t1"], json!("t1"));
+        assert_eq!(decrypted["status"], json!(1));
     }
 
     #[test]
