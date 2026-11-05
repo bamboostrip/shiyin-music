@@ -43,11 +43,16 @@ class BackgroundCrop {
   }
 
   /// 夹到合法范围：手改 prefs、旧版本/未来版本脏数据都能安全回落。
+  ///
+  /// 缩放值在 1 附近做一次吸附：`1.25 × 0.8` 在 double 下等于
+  /// `1.0000000000000002`，不吸附会让「重置」按钮在回到 100% 后仍然亮着，
+  /// 落盘 JSON 也会带一串浮点尾数。
   BackgroundCrop normalized() {
+    final clampedZoom = _clampFinite(zoom, minZoom, maxZoom, center.zoom);
     return BackgroundCrop(
       focusX: _clampFinite(focusX, 0, 1, center.focusX),
       focusY: _clampFinite(focusY, 0, 1, center.focusY),
-      zoom: _clampFinite(zoom, minZoom, maxZoom, center.zoom),
+      zoom: (clampedZoom - minZoom).abs() < 1e-9 ? minZoom : clampedZoom,
     );
   }
 

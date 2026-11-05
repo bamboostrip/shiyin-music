@@ -413,15 +413,24 @@ class _PersonalizationSettingsPageState
       // 取消裁剪就什么都不写，旧背景完全不受影响。
       final source = await widget.themeController.pickBackgroundSourceFile();
       if (source == null || !mounted) return;
-      final crop = await Navigator.of(context).push<BackgroundCrop>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => BackgroundCropPage(
-            image: buildBackgroundImageProvider(source.path),
-            initialCrop: BackgroundCrop.center,
-          ),
-        ),
-      );
+      final sourceProvider = buildBackgroundImageProvider(source.path);
+      // 必须推到根 Navigator：桌面端设置页在内层内容导航里，内层导航在
+      // AppShortcutScope / DesktopShell.Shortcuts 子树内，会把空格（播放）、
+      // ←/→（seek）、↑/↓（音量）、Enter（整屏播放页）带进裁剪页；点侧栏
+      // 或 Ctrl+4/5/6 还会 _popToContentRoot 把正在编辑的页面一起弹掉。
+      final crop = await Navigator.of(context, rootNavigator: true)
+          .push<BackgroundCrop>(
+            MaterialPageRoute(
+              fullscreenDialog: true,
+              builder: (_) => BackgroundCropPage(
+                image: sourceProvider,
+                initialCrop: BackgroundCrop.center,
+              ),
+            ),
+          );
+      // 裁剪页已退出：临时文件的解码结果不会再被用到，主动逐出，避免它
+      // 按 LRU 一直占着全尺寸解码位（安装后主层用的是新路径的键）。
+      await sourceProvider.evict();
       if (crop == null || !mounted) return;
       await widget.themeController.installBackgroundImage(source, crop: crop);
       if (!mounted) return;
@@ -443,15 +452,18 @@ class _PersonalizationSettingsPageState
     final tc = widget.themeController;
     final path = tc.backgroundImagePath;
     if (path == null) return;
-    final crop = await Navigator.of(context).push<BackgroundCrop>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => BackgroundCropPage(
-          image: buildBackgroundImageProvider(path),
-          initialCrop: tc.backgroundCrop,
-        ),
-      ),
-    );
+    // 同「选新图」：推到根 Navigator，避免桌面内层导航的全局快捷键与
+    // 侧栏切换把正在编辑的裁剪页一起弹掉。
+    final crop = await Navigator.of(context, rootNavigator: true)
+        .push<BackgroundCrop>(
+          MaterialPageRoute(
+            fullscreenDialog: true,
+            builder: (_) => BackgroundCropPage(
+              image: buildBackgroundImageProvider(path),
+              initialCrop: tc.backgroundCrop,
+            ),
+          ),
+        );
     if (crop == null || !mounted) return;
     final saved = await tc.setBackgroundCrop(crop);
     if (!mounted) return;

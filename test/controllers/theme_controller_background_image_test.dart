@@ -305,7 +305,8 @@ void main() {
       final path = theme.backgroundImagePath!;
       expect(await File(path).exists(), isTrue);
 
-      await theme.clearBackgroundImage();
+      // 返回值是设置页提示成功/失败的依据，必须为 true。
+      expect(await theme.clearBackgroundImage(), isTrue);
 
       expect(theme.backgroundImagePath, isNull);
       expect(theme.backgroundEnabled, isFalse);
@@ -449,7 +450,8 @@ void main() {
       await theme.load();
 
       // 手势计算异常可能产出非有限值；jsonEncode 遇到 NaN/Infinity 会抛，
-      // 所以必须在编码前 normalize 掉。
+      // 所以必须在编码前 normalize 掉。归一后等于当前默认构图 → 走「无变化
+      // 不写盘」分支：既不抛，也不会留下任何脏键。
       expect(
         await theme.setBackgroundCrop(
           const BackgroundCrop(
@@ -463,6 +465,23 @@ void main() {
       expect(theme.backgroundCrop, BackgroundCrop.center);
 
       final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('theme.bg_crop'), isNull);
+
+      // 先有非默认构图时，NaN 输入会把它归一成 center 并真正落盘。
+      expect(
+        await theme.setBackgroundCrop(const BackgroundCrop(zoom: 2)),
+        isTrue,
+      );
+      expect(
+        await theme.setBackgroundCrop(
+          const BackgroundCrop(
+            focusX: double.nan,
+            focusY: double.nan,
+            zoom: double.nan,
+          ),
+        ),
+        isTrue,
+      );
       final decoded =
           jsonDecode(prefs.getString('theme.bg_crop')!) as Map<String, dynamic>;
       expect(decoded['fx'], 0.5);
@@ -483,6 +502,26 @@ void main() {
       expect(restarted.backgroundCrop, crop);
     });
 
+    test('构图未变化时不写盘、不通知（打开裁剪页不改就完成）', () async {
+      final theme = ThemeController();
+      await theme.load();
+      var notifications = 0;
+      theme.addListener(() => notifications++);
+
+      expect(await theme.setBackgroundCrop(BackgroundCrop.center), isTrue);
+      expect(notifications, 0);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('theme.bg_crop'), isNull);
+
+      // 换成非默认构图仍然正常写盘并只通知一次。
+      expect(
+        await theme.setBackgroundCrop(const BackgroundCrop(zoom: 2)),
+        isTrue,
+      );
+      expect(notifications, 1);
+      expect(prefs.getString('theme.bg_crop'), isNotNull);
+    });
+
     test('清除背景图后构图回默认并移除持久化键，无图时也安全', () async {
       final theme = ThemeController();
       await theme.load();
@@ -493,14 +532,14 @@ void main() {
       );
       expect(theme.backgroundCrop, isNot(BackgroundCrop.center));
 
-      await theme.clearBackgroundImage();
+      expect(await theme.clearBackgroundImage(), isTrue);
 
       expect(theme.backgroundCrop, BackgroundCrop.center);
       var prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('theme.bg_crop'), isNull);
 
-      // path 为 null（本就没有背景图）时再次清除也不能抛。
-      await theme.clearBackgroundImage();
+      // path 为 null（本就没有背景图）时再次清除也不能抛，且仍返回 true。
+      expect(await theme.clearBackgroundImage(), isTrue);
       expect(theme.backgroundCrop, BackgroundCrop.center);
       prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('theme.bg_crop'), isNull);

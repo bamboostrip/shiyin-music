@@ -11,6 +11,9 @@ import 'package:shiyin_music/ui/widgets/background_crop_view.dart';
 /// widget 测试的 fake async 环境里做真实解码很容易卡住，这里用
 /// [createTestImage]（在 setUp 的真实异步里创建）包一层，测试只关心组件
 /// 生命周期与尺寸回调。
+///
+/// 注意：这些用例刻意依赖「同步投递 + 单次上报」的语义（模拟缓存命中）。
+/// 换成真实 FileImage 是异步解码，断言会全部失效——不要拿它替换。
 class _StubImageProvider extends ImageProvider<_StubImageProvider> {
   _StubImageProvider(this.image);
 

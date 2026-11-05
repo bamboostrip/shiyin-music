@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/ui/background_crop.dart';
 import 'package:shiyin_music/ui/pages/background_crop_page.dart';
@@ -73,18 +74,33 @@ class _HostPage extends StatelessWidget {
     required this.image,
     required this.initialCrop,
     required this.onPopped,
+    this.virtualScreenSize,
   });
 
   final ImageProvider image;
   final BackgroundCrop initialCrop;
   final ValueChanged<BackgroundCrop?> onPopped;
 
+  /// 非空时把裁剪页包进这个「虚拟屏幕」的 MediaQuery，模拟车机模式的
+  /// CarDisplayViewport（布局仍是真实窗口，但 MediaQuery 被换掉）。
+  final Size? virtualScreenSize;
+
   Future<void> _open(BuildContext context) async {
+    final virtual = virtualScreenSize;
     final crop = await Navigator.of(context).push<BackgroundCrop>(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) =>
-            BackgroundCropPage(image: image, initialCrop: initialCrop),
+        builder: (routeContext) {
+          final page = BackgroundCropPage(
+            image: image,
+            initialCrop: initialCrop,
+          );
+          if (virtual == null) return page;
+          return MediaQuery(
+            data: MediaQuery.of(routeContext).copyWith(size: virtual),
+            child: page,
+          );
+        },
       ),
     );
     onPopped(crop);
@@ -103,6 +119,19 @@ class _HostPage extends StatelessWidget {
   }
 }
 
+/// 页面里存在无限动画（加载转圈）时不能用 pumpAndSettle，按帧推进到
+/// [finder] 消失即可；比写死 900ms 之类的转场魔数更抗 Flutter 版本差异。
+Future<void> pumpUntilGone(
+  WidgetTester tester,
+  Finder finder, {
+  Duration step = const Duration(milliseconds: 50),
+  int maxSteps = 60,
+}) async {
+  for (var i = 0; i < maxSteps && finder.evaluate().isNotEmpty; i++) {
+    await tester.pump(step);
+  }
+}
+
 /// 裁剪页的手势与返回值测试。
 ///
 /// 拖拽方向、缩放锚点、夹紧等几何数学已由 test/ui/background_crop_test.dart
@@ -118,6 +147,11 @@ void main() {
     image = await createTestImage(width: 4, height: 2);
   });
 
+  tearDownAll(() {
+    // 各用例里的 provider 只 clone 使用，原句柄由这里统一释放。
+    image.dispose();
+  });
+
   /// 打开裁剪页。图片解码是同步的，尺寸会在首帧的帧后回调里上报，
   /// 因此这里可以直接 pumpAndSettle（转圈会在尺寸上报后消失）。
   Future<void> openPage(
@@ -125,6 +159,7 @@ void main() {
     required _Harness harness,
     ImageProvider? provider,
     BackgroundCrop initialCrop = BackgroundCrop.center,
+    Size? virtualScreenSize,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -132,6 +167,7 @@ void main() {
         home: _HostPage(
           image: provider ?? _StubImageProvider(image),
           initialCrop: initialCrop,
+          virtualScreenSize: virtualScreenSize,
           onPopped: (crop) {
             harness.result = crop;
             harness.completed = true;
@@ -142,6 +178,23 @@ void main() {
     await tester.tap(find.text('打开裁剪页'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('车机虚拟视口不改变裁剪框比例（按真实窗口取框）', (tester) async {
+    final harness = _Harness();
+    // 真实窗口 800×600（4:3）；车机虚拟视口故意给竖屏比例。若实现读的是
+    // MediaQuery，裁剪框会变成 0.6 宽高比，与背景层实际铺满的范围不一致。
+    await openPage(
+      tester,
+      harness: harness,
+      virtualScreenSize: const Size(600, 1000),
+    );
+
+    final rect = tester.getRect(find.byType(BackgroundCropView));
+    expect(
+      rect.width / rect.height,
+      closeTo(tester.view.physicalSize.aspectRatio, 0.01),
+    );
+  });
 
   testWidgets('合法初始 crop 透传给预览，「完成」原样返回并出栈', (tester) async {
     final harness = _Harness();
@@ -281,10 +334,7 @@ void main() {
     // 加载中也不能把用户困在页面里：取消必须可用。
     await tester.tap(find.byTooltip('取消'));
     await tester.pump();
-    // 加载中的转圈是无限动画，pumpAndSettle 永远不收敛；按时间推进到退场动画
-    // 结束（Android 全屏对话框约 450ms）再多一帧，让路由从 Overlay 摘除。
-    await tester.pump(const Duration(milliseconds: 900));
-    await tester.pump();
+    await pumpUntilGone(tester, find.byType(BackgroundCropPage));
 
     expect(harness.completed, isTrue);
     expect(harness.result, isNull);
@@ -302,7 +352,7 @@ void main() {
 
     final center = tester.getCenter(find.byType(BackgroundCropView));
     await tester.tapAt(center);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tapAt(center);
     await tester.pumpAndSettle();
 
@@ -374,5 +424,59 @@ void main() {
     } finally {
       handle.dispose();
     }
+  });
+
+  testWidgets('快速双击「完成」不会把下面的设置页一起弹掉', (tester) async {
+    final harness = _Harness();
+    await openPage(tester, harness: harness);
+
+    await tester.tap(find.text('完成'));
+    // 退场动画期间按钮仍在树上，第二次点击必须被闸门挡掉；
+    // 否则 Navigator.pop 会继续弹掉下面的宿主页。
+    await tester.pump();
+    await tester.tap(find.text('完成'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    expect(harness.completed, isTrue);
+    expect(harness.result, BackgroundCrop.center);
+    // 宿主页还在 = 没有被连带 pop。
+    expect(find.text('打开裁剪页'), findsOneWidget);
+  });
+
+  testWidgets('窗口比例变化后重新夹紧焦点，拖动不再有死区', (tester) async {
+    tester.view.physicalSize = const Size(800, 600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final harness = _Harness();
+    // 4:3 窗口 + 4×2 图 + zoom2：x 可见范围约 [1/6, 5/6]，0.2 合法。
+    await openPage(
+      tester,
+      harness: harness,
+      initialCrop: const BackgroundCrop(focusX: 0.2, focusY: 0.5, zoom: 2),
+    );
+
+    // 拉成 2:1 后 x 可见范围收窄到 [1/4, 3/4]，0.2 越界；应被帧后夹回 0.25。
+    tester.view.physicalSize = const Size(1200, 600);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+    expect(harness.result!.focusX, closeTo(0.25, 1e-9));
+  });
+
+  testWidgets('Esc 等同于取消', (tester) async {
+    final harness = _Harness();
+    await openPage(
+      tester,
+      harness: harness,
+      initialCrop: const BackgroundCrop(focusX: 0.25, zoom: 2),
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(harness.completed, isTrue);
+    expect(harness.result, isNull);
+    expect(find.byType(BackgroundCropPage), findsNothing);
   });
 }

@@ -162,4 +162,53 @@ void main() {
     expect(find.byType(BackgroundCropPage), findsNothing);
     expect(find.text('选择背景图'), findsOneWidget);
   });
+
+  testWidgets('裁剪页推到根 Navigator，不被内层导航的快捷键/侧栏波及', (tester) async {
+    tester.view.physicalSize = const Size(420, 940);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setBackgroundImagePath('/tmp/not-exist-bg.jpg');
+
+    final innerNavigatorKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Navigator(
+          key: innerNavigatorKey,
+          onGenerateRoute: (_) => MaterialPageRoute(
+            builder: (_) => PersonalizationSettingsPage(themeController: theme),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('调整背景位置'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('调整背景位置'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(find.byType(BackgroundCropPage), findsOneWidget);
+    // 桌面端设置页挂在内层内容 Navigator 里，它又在 AppShortcutScope /
+    // DesktopShell.Shortcuts 子树内；裁剪页必须推到根 Navigator 才能避开
+    // 空格播放、方向键 seek、Enter 叠播放页、点侧栏连弹编辑页这些穿透。
+    expect(
+      find.descendant(
+        of: find.byKey(innerNavigatorKey),
+        matching: find.byType(BackgroundCropPage),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BackgroundCropPage), findsNothing);
+  });
 }

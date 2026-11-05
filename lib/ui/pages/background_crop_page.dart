@@ -8,7 +8,7 @@ import '../background_crop.dart';
 import '../design_tokens.dart';
 import '../widgets/background_crop_view.dart';
 
-/// 「调整背景位置」页：在「当前屏幕比例」的预览框里拖动 / 缩放背景图。
+/// 「调整背景位置」页：在「真实窗口比例」的预览框里拖动 / 缩放背景图。
 ///
 /// 为什么单独开一页而不是在设置页里内联调：全局背景铺满的是整个窗口
 /// （状态栏、底部系统手势区也盖得住），设置页的卡片只能看到近似效果；
@@ -58,6 +58,15 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
   /// 解码失败标记。失败后要撤掉加载转圈，否则转圈会盖住 errorBuilder 提示。
   bool _failed = false;
 
+  /// 是否已经发起 pop。
+  ///
+  /// 「完成」在退场动画期间仍然可点：第二次 pop 会沿着导航栈把下面的
+  /// 设置页一起弹掉。所有返回路径共用这个闸门。
+  bool _popping = false;
+
+  /// 是否已经排了一个「帧后夹紧焦点」的回调（布局比例变化时用）。
+  bool _clampScheduled = false;
+
   @override
   void initState() {
     super.initState();
@@ -68,56 +77,85 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
   @override
   Widget build(BuildContext context) {
     final accent = _accentColor(context);
-    return Scaffold(
-      backgroundColor: _canvasColor,
-      appBar: AppBar(
-        backgroundColor: _canvasColor,
-        foregroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        // 本页永远是深色画布，浅色主题下也要让状态栏用浅色图标。
-        systemOverlayStyle: SystemUiOverlayStyle.light,
-        leading: IconButton(
-          tooltip: '取消',
-          onPressed: _cancel,
-          icon: const Icon(Icons.close_rounded),
-        ),
-        title: Text(widget.title),
-        actions: [
-          TextButton(
-            onPressed: _imageSize == null ? null : _confirm,
-            style: TextButton.styleFrom(
-              foregroundColor: accent,
-              disabledForegroundColor: Colors.white.withValues(alpha: .28),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              textStyle: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+    // 桌面习惯：Esc = 取消。本页是整屏模态、没有输入框，不会和输入法抢键；
+    // 页内 Focus 同时保证按键不会落到被整屏盖住的下面一页。
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): _cancel,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: _canvasColor,
+          appBar: AppBar(
+            backgroundColor: _canvasColor,
+            foregroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            // 本页永远是深色画布，浅色主题下也要让状态栏用浅色图标。
+            systemOverlayStyle: SystemUiOverlayStyle.light,
+            leading: IconButton(
+              tooltip: '取消',
+              onPressed: _cancel,
+              icon: const Icon(Icons.close_rounded),
+            ),
+            title: Text(widget.title),
+            actions: [
+              TextButton(
+                onPressed: _imageSize == null ? null : _confirm,
+                style: TextButton.styleFrom(
+                  foregroundColor: accent,
+                  disabledForegroundColor: Colors.white.withValues(alpha: .28),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: const Text('完成'),
               ),
-            ),
-            child: const Text('完成'),
+              const SizedBox(width: 4),
+            ],
           ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-              child: LayoutBuilder(builder: _buildPreview),
-            ),
+          body: Column(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+                  child: LayoutBuilder(builder: _buildPreview),
+                ),
+              ),
+              _buildControlBar(accent),
+            ],
           ),
-          _buildControlBar(accent),
-        ],
+        ),
       ),
     );
   }
 
-  /// 预览区：按当前屏幕宽高比居中框出裁剪范围。
+  /// 全局背景层铺满的是**真实窗口**。
+  ///
+  /// 不能直接用 `MediaQuery.sizeOf`：车机模式下本页拿到的 MediaQuery 被
+  /// [CarDisplayViewport] 换成了「按 scale 收缩、扣掉上下物理留白」的虚拟
+  /// 视口，而背景层在它外面、仍然铺满真实窗口；两者在开了车机留白时宽高比
+  /// 并不相同，用虚拟比例取框会让用户裁出来的画面对不上背景实际露出的部分。
+  double _backgroundAspectRatio(BuildContext context) {
+    final physical = View.of(context).physicalSize;
+    if (physical.width.isFinite &&
+        physical.height.isFinite &&
+        physical.width > 0 &&
+        physical.height > 0) {
+      final aspect = physical.width / physical.height;
+      if (aspect.isFinite && aspect > 0) return aspect;
+    }
+    // 拿不到窗口尺寸（极端平台/测试替身）时退回 MediaQuery，至少不会崩。
+    return MediaQuery.sizeOf(context).aspectRatio;
+  }
+
+  /// 预览区：按背景层的真实窗口宽高比居中框出裁剪范围。
   Widget _buildPreview(BuildContext context, BoxConstraints constraints) {
-    final screenAspect = MediaQuery.sizeOf(context).aspectRatio;
+    final screenAspect = _backgroundAspectRatio(context);
     final maxWidth = constraints.maxWidth;
     final maxHeight = constraints.maxHeight;
     if (!screenAspect.isFinite ||
@@ -130,8 +168,8 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
       return const SizedBox.shrink();
     }
 
-    // 背景图层铺满整个窗口，所以预览框必须取「屏幕」比例，而不是 AppBar
-    // 下方这块剩余空间的比例；否则用户看到的裁切结果和实际显示会偏。
+    // 预览框取「真实窗口」比例，而不是 AppBar 下方这块剩余空间的比例；
+    // 否则用户看到的裁切结果和实际显示会偏。车机模式的虚拟视口同理。
     var width = maxWidth;
     var height = width / screenAspect;
     if (height > maxHeight) {
@@ -141,7 +179,14 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
     final frameSize = Size(width, height);
     // 手势换算要的是框的真实像素尺寸。这里只写字段不 setState：
     // build 阶段改状态会触发「setState during build」。
+    final frameChanged = _frameSize != null && _frameSize != frameSize;
     _frameSize = frameSize;
+    if (frameChanged && _imageSize != null) {
+      // 旋转/改窗口大小/改车机参数后可见范围会变，旧焦点可能落到范围外：
+      // 渲染层会把它钉在边缘（画面不跳），但拖动会出现「先空走一段」。
+      // build 里不能直接 setState，放到帧后夹一次。
+      _scheduleCropClamp();
+    }
 
     return Center(
       child: SizedBox.fromSize(
@@ -337,6 +382,29 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
     });
   }
 
+  /// 帧后把焦点夹回当前可见范围（布局比例变化时调用）。
+  ///
+  /// 零位移的 [panBackgroundCrop] 只做夹紧、不改缩放，因此不会打断用户
+  /// 正在进行的操作；`_crop` 没变时也不 setState。
+  void _scheduleCropClamp() {
+    if (_clampScheduled) return;
+    _clampScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _clampScheduled = false;
+      if (!mounted) return;
+      final imageSize = _imageSize;
+      final boxSize = _frameSize;
+      if (imageSize == null || boxSize == null || boxSize.isEmpty) return;
+      final clamped = panBackgroundCrop(
+        crop: _crop,
+        delta: Offset.zero,
+        imageSize: imageSize,
+        boxSize: boxSize,
+      ).normalized();
+      if (clamped != _crop) setState(() => _crop = clamped);
+    });
+  }
+
   /// 解码失败时的提示。
   ///
   /// errorBuilder 是在 [BackgroundCropView] 的 build 里同步调用的，此时
@@ -473,11 +541,14 @@ class _BackgroundCropPageState extends State<BackgroundCropPage> {
   }
 
   void _confirm() {
-    if (_imageSize == null) return;
+    if (_imageSize == null || _popping) return;
+    _popping = true;
     Navigator.of(context).pop<BackgroundCrop>(_crop.normalized());
   }
 
   void _cancel() {
+    if (_popping) return;
+    _popping = true;
     // 系统返回同样会 pop null；调用方据 null 判断「用户放弃」，
     // 不会覆盖已有背景，因此这里不需要额外的「是否放弃」确认弹窗。
     Navigator.of(context).maybePop();

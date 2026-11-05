@@ -58,6 +58,19 @@ void main() {
         const BackgroundCrop(focusX: 0.2).hashCode,
       );
     });
+
+    test('1.25×0.8 的浮点尾数会被吸附回 1，重置按钮不会常亮', () {
+      // 1.25 * 0.8 == 1.0000000000000002：不吸附的话 isDefault 永远是 false，
+      // 「重置」会一直可点，落盘 JSON 也会带尾数。
+      final restored = const BackgroundCrop(
+        zoom: 1.25,
+      ).copyWith(zoom: 1.25 * 0.8).normalized();
+      expect(restored.zoom, 1);
+      expect(restored.isDefault, isTrue);
+
+      // 与 1 明显有差别的缩放不能被误吸附。
+      expect(const BackgroundCrop(zoom: 1.2).normalized().zoom, 1.2);
+    });
   });
 
   group('visibleImageFraction', () {

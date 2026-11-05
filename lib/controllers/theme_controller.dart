@@ -473,6 +473,9 @@ class ThemeController extends ChangeNotifier {
   /// 落盘的也永远是可直接渲染的合法参数。
   Future<bool> setBackgroundCrop(BackgroundCrop crop) async {
     final normalized = crop.normalized();
+    // 打开「调整背景位置」不改就点完成：参数没变就不写盘、不通知，
+    // 免得白白触发一次全局背景层重建与预缓存。
+    if (normalized == _backgroundCrop) return true;
     final previous = _backgroundCrop;
     _backgroundCrop = normalized;
     final persisted = await _persistBackgroundCrop(normalized);
@@ -612,7 +615,11 @@ class ThemeController extends ChangeNotifier {
       throw BackgroundImageException('背景图保存失败，请重试');
     }
     if (!await _persistBackgroundImagePath(permanentPath)) {
-      await _persistBackgroundCrop(previousCrop);
+      // 回滚已写入的构图键。回滚本身也可能失败（prefs 整体不可用）：
+      // 那只能接受「旧图 + 新构图」并在日志里留下证据，不能假装成功。
+      if (!await _persistBackgroundCrop(previousCrop)) {
+        debugPrint('[时音][背景] 构图回滚失败，重启后旧图可能沿用新构图');
+      }
       await deleteBackgroundImageFile(permanentPath);
       throw BackgroundImageException('背景图保存失败，请重试');
     }
@@ -644,7 +651,10 @@ class ThemeController extends ChangeNotifier {
     final completer = Completer<void>();
     late final ImageStreamListener listener;
     listener = ImageStreamListener(
-      (_, _) {
+      (ImageInfo info, bool _) {
+        // 监听器拿到的是 clone，探测结束必须自己释放，否则每装一张图就多
+        // 持有一个全尺寸解码句柄，要等 GC/finalizer 才回收（大图几十 MB）。
+        info.dispose();
         if (!completer.isCompleted) completer.complete();
       },
       onError: (Object error, StackTrace? stackTrace) {

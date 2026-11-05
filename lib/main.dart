@@ -713,8 +713,10 @@ class _AppBackgroundState extends State<_AppBackground> {
     }
     if (path == _cachedPath) return;
     _cachedPath = path;
-    // 与设置页预览共用同一个 provider：解码阶段等比例降采样
-    // （ResizeImagePolicy.fit），渲染时再由 BoxFit.cover 裁剪铺满。
+    // 与设置页「全屏预览」共用同一个默认档 provider（设置页小卡片另按
+    // backgroundPreviewDecodeCap 解码）：解码阶段等比例降采样
+    // （ResizeImagePolicy.fit），渲染时由 BackgroundCropView 按构图参数
+    // 等比裁剪铺满（源矩形与视口宽高比恒等，不会拉伸）。
     // 每次换图 ThemeController 都会落成新文件名，这里的路径比较才会生效。
     _imageProvider = buildBackgroundImageProvider(path);
   }
@@ -722,7 +724,7 @@ class _AppBackgroundState extends State<_AppBackground> {
   void _precacheBackground() {
     final provider = _imageProvider;
     if (provider == null) return;
-    // 文件被外部删除等情况不影响正常渲染（Image.errorBuilder 兜底），
+    // 文件被外部删除等情况不影响正常渲染（BackgroundCropView 的错误占位兜底），
     // 这里吞掉异常，避免 debug 期反复刷屏。
     precacheImage(provider, context, onError: (_, _) {});
   }
