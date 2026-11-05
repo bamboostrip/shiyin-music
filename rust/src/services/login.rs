@@ -41,26 +41,29 @@ fn response_error_code(response: &Value) -> Option<i64> {
         .or_else(|| response.get("errcode").and_then(value_as_i64))
 }
 
+/// 取对象里第一个存在且非 null 的字段（`"pic": null` 不应挡住 `avatar`）。
+fn first_non_null<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter()
+        .find_map(|key| obj.get(*key).filter(|value| !value.is_null()))
+}
+
 /// 把单个候选账号归一成前端契约的字段（userId/nickname/pic/appId/username）。
 /// 缺少有效 userid 的脏数据直接丢弃。
 fn normalize_account(item: &Value) -> Option<Value> {
     let obj = item.as_object()?;
-    let userid = obj
-        .get("userid")
-        .or_else(|| obj.get("userId"))
-        .and_then(value_as_i64)
-        .filter(|id| *id > 0)?;
-    let appid = obj
-        .get("appid")
-        .or_else(|| obj.get("appId"))
+    let userid = first_non_null(obj, &["userid", "userId"]).and_then(value_as_i64)?;
+    if userid <= 0 {
+        return None;
+    }
+    let appid = first_non_null(obj, &["appid", "appId"])
         .and_then(value_as_i64)
         .unwrap_or(0);
     Some(json!({
         "userId": userid,
-        "nickname": obj.get("nickname").cloned().unwrap_or(Value::Null),
-        "pic": obj.get("pic").or_else(|| obj.get("avatar")).cloned().unwrap_or(Value::Null),
+        "nickname": first_non_null(obj, &["nickname"]).cloned().unwrap_or(Value::Null),
+        "pic": first_non_null(obj, &["pic", "avatar"]).cloned().unwrap_or(Value::Null),
         "appId": appid,
-        "username": obj.get("username").cloned().unwrap_or(Value::Null),
+        "username": first_non_null(obj, &["username"]).cloned().unwrap_or(Value::Null),
     }))
 }
 
@@ -111,17 +114,26 @@ fn multi_account_message(response: &Value) -> String {
 /// 本仓库由 Rust 引擎直连酷狗，若不归一，`unwrapData` 会丢掉根节点的
 /// `error_code`，前端就按普通失败提示「没有注册账号」。
 /// 注意：响应中不能保留 `data` 字段——Dart 的 `unwrapData` 会把 Map 形态的
-/// `data` 展开成根节点，导致上面的状态字段丢失。
+/// `data` 展开成根节点，导致上面的状态字段丢失；即使拿不到候选账号，也要
+/// 返回不带 `data` 的失败信封，让前端能按 34175 给出准确文案。
 fn normalize_multi_account_response(response: Value) -> Value {
     if response_error_code(&response) != Some(MULTI_ACCOUNT_ERROR_CODE) {
         return response;
     }
-    let accounts = multi_account_list(&response);
-    if accounts.is_empty() {
-        return response;
-    }
     let status = response.get("status").cloned().unwrap_or_else(|| json!(0));
     let message = multi_account_message(&response);
+    let accounts = multi_account_list(&response);
+    if accounts.is_empty() {
+        // 统一置 status=0：Dart 的 _isSuccess 只看 status，若保留上游的
+        // status=1，会被当成登录成功并拿到空 session。
+        return json!({
+            "status": 0,
+            "error_code": MULTI_ACCOUNT_ERROR_CODE,
+            "errorCode": MULTI_ACCOUNT_ERROR_CODE,
+            "requiresUserSelection": false,
+            "message": message,
+        });
+    }
     tracing::info!(
         count = accounts.len(),
         "[login] 手机号绑定了多个账号，返回候选账号列表"
@@ -136,30 +148,64 @@ fn normalize_multi_account_response(response: Value) -> Value {
     })
 }
 
-fn try_decrypt_response(response: Value, aes_key: Option<&str>) -> Value {
-    let Some(aes_key) = aes_key else {
-        return response;
+/// 上游返回的 `secu_params` 是否为可尝试解密的 AES 十六进制密文。
+/// 只做形状预检：长度必须按 16 字节对齐、字符全为 hex；避免脏字段进入
+/// `crypto::aes_decrypt` 的 hex 解码 / UTF-8 断言导致进程 panic。
+fn looks_like_aes_hex(value: &str) -> bool {
+    !value.is_empty()
+        && value.len().is_multiple_of(32)
+        && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// 解密 `container.secu_params`（AES 随机 key 那一套）并把明文字段合并回
+/// 同一对象。返回是否成功解密并合并（无字段 / 形状不符 / 非对象明文 → false）。
+fn decrypt_secu_params_into(container: &mut Value, aes_key: &str) -> bool {
+    let Some(secu) = container
+        .get("secu_params")
+        .and_then(|v| v.as_str())
+        .filter(|s| looks_like_aes_hex(s))
+        .map(str::to_owned)
+    else {
+        return false;
     };
-    let secu = match response.get("secu_params").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s,
-        _ => return response,
-    };
-    let plain = crypto::aes_decrypt(secu, aes_key);
-    let decrypted_json = match serde_json::from_str::<Value>(&plain) {
+    let plain = crypto::aes_decrypt(&secu, aes_key);
+    let decrypted = match serde_json::from_str::<Value>(&plain) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(error = %e, "[login] 解密 secu_params 失败");
-            return response;
+            return false;
         }
     };
-
-    let mut root = response;
-    if let (Some(root_obj), Some(dec_obj)) = (root.as_object_mut(), decrypted_json.as_object()) {
-        for (k, v) in dec_obj {
-            root_obj.insert(k.clone(), v.clone());
-        }
+    let Some(dec_obj) = decrypted.as_object() else {
+        // 兼容旧协议：明文可能直接是 token 字符串，本函数只处理对象字段。
+        return false;
+    };
+    let Some(obj) = container.as_object_mut() else {
+        return false;
+    };
+    for (k, v) in dec_obj {
+        obj.insert(k.clone(), v.clone());
     }
-    root
+    true
+}
+
+/// 解密登录响应里的 `secu_params`。
+///
+/// 两种响应形态都要覆盖（与 .NET `RawLoginApi.TryDecryptResponse` 一致）：
+/// - 成功登录：`transport` 已把 `data` 提升到根节点，密文在根级 `secu_params`；
+/// - `status=1` 但 `error_code != 0`（例如多账号 34175）：`transport` 不解包，
+///   密文仍在 `data.secu_params` 里，账号列表可能藏在解密后的字段中。
+fn try_decrypt_response(mut response: Value, aes_key: Option<&str>) -> Value {
+    let Some(aes_key) = aes_key else {
+        return response;
+    };
+    if decrypt_secu_params_into(&mut response, aes_key) {
+        return response;
+    }
+    if let Some(data) = response.get_mut("data") {
+        decrypt_secu_params_into(data, aes_key);
+    }
+    response
 }
 
 pub async fn send_sms_code(
@@ -175,6 +221,18 @@ pub async fn send_sms_code(
         .json_body(body)
         .signature_type(SignatureType::Default);
     transport::send(client, session, &req).await
+}
+
+/// 把多账号二次登录选中的 userid 写入上游 body。
+///
+/// 与 .NET 参考实现一致以**字符串**下发（酷狗同一字段既接受数字也接受
+/// 字符串，字符串可避免超长 userid 的 JSON 数字精度问题）；空值 / "0" 不写，
+/// 未显式传时回退当前会话 userid。
+fn apply_login_userid(body: &mut Value, userid: Option<&str>, session_userid: &str) {
+    let login_userid = userid.filter(|s| !s.is_empty()).unwrap_or(session_userid);
+    if !login_userid.is_empty() && login_userid != "0" {
+        body["userid"] = json!(login_userid);
+    }
 }
 
 pub async fn login_by_mobile(
@@ -228,13 +286,7 @@ pub async fn login_by_mobile(
         "gitversion": "5f0b7c4"
     });
 
-    let login_userid = userid.filter(|s| !s.is_empty()).unwrap_or(&session.userid);
-    if !login_userid.is_empty() && login_userid != "0" {
-        // 多账号二次登录：与 .NET 参考实现一致，userid 以字符串下发（
-        // 酷狗同一字段既接受数字也接受字符串，字符串可避免前导 0 / 超长
-        // id 被 JSON 数字精度截断）。
-        body["userid"] = json!(login_userid);
-    }
+    apply_login_userid(&mut body, userid, &session.userid);
 
     let req = KgRequest::get("/v7/login_by_verifycode")
         .method(reqwest::Method::POST)
@@ -354,9 +406,18 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// 按 transport 的语义处理上游响应（成功提升 data，失败保留根信封）。
+    fn after_transport(raw: Value) -> Value {
+        match crate::kugou::api_response::parse(raw) {
+            crate::kugou::api_response::ParsedResponse::Success(v) => v,
+            crate::kugou::api_response::ParsedResponse::Failure { root, .. } => root,
+        }
+    }
+
     #[test]
     fn multi_account_failure_is_normalized_into_account_selection_contract() {
-        // 酷狗实测形态：status=0 + error_code=34175 + data.info_list。
+        // 参考实现（.NET / KuGouMusicApi）的多账号响应形态：
+        // status=0 + error_code=34175 + data.info_list。
         let raw = json!({
             "status": 0,
             "error_code": 34175,
@@ -429,18 +490,19 @@ mod tests {
     }
 
     #[test]
-    fn data_string_message_is_propagated() {
-        // 部分网关把 data 直接下成提示字符串（无 info_list），不构成选账号。
+    fn data_string_message_is_normalized_into_failure_without_data() {
+        // 部分网关把 data 直接下成提示字符串（无 info_list）：不能选账号，
+        // 但仍要去掉 data，避免 Dart 的 unwrapData 吞掉根 error_code。
         let raw = json!({
             "status": 0,
             "error_code": 34175,
             "data": "请选择需要登录的账号"
         });
-        let normalized = normalize_multi_account_response(raw.clone());
-        assert_eq!(
-            normalized, raw,
-            "没有候选账号时保持原响应，交由普通登录失败提示"
-        );
+        let normalized = normalize_multi_account_response(raw);
+        assert_eq!(normalized["errorCode"], json!(34175));
+        assert_eq!(normalized["requiresUserSelection"], json!(false));
+        assert_eq!(normalized["message"], json!("请选择需要登录的账号"));
+        assert!(normalized.get("data").is_none());
     }
 
     #[test]
@@ -460,16 +522,147 @@ mod tests {
             "t1": "t1"
         });
         assert_eq!(normalize_multi_account_response(success.clone()), success);
+    }
 
-        // 错误码对但 info_list 为空：不能当成选账号，否则前端会卡在空列表。
+    #[test]
+    fn empty_multi_account_list_becomes_failure_without_data() {
+        // 错误码对但 info_list 为空：不能当成选账号，否则前端会卡在空列表；
+        // 归一成不带 data 的失败信封，让 Dart 按 34175 给出准确文案。
         let empty_list = json!({
             "status": 0,
             "error_code": 34175,
             "data": { "info_list": [] }
         });
-        assert_eq!(
-            normalize_multi_account_response(empty_list.clone()),
-            empty_list
+        let normalized = normalize_multi_account_response(empty_list);
+        assert_eq!(normalized["errorCode"], json!(34175));
+        assert_eq!(normalized["requiresUserSelection"], json!(false));
+        assert!(normalized.get("data").is_none());
+    }
+
+    #[test]
+    fn status_one_multi_account_without_accounts_fails_instead_of_fake_success() {
+        // Dart 的 _isSuccess 只看 status==1；34175 却没账号时必须降级成失败，
+        // 否则会返回一个没有 token 的「成功」session。
+        let raw = json!({
+            "status": 1,
+            "error_code": 34175,
+            "data": { "info_list": [] }
+        });
+        let normalized = normalize_multi_account_response(raw);
+        assert_eq!(normalized["status"], json!(0));
+        assert_eq!(normalized["errorCode"], json!(34175));
+        assert_eq!(normalized["requiresUserSelection"], json!(false));
+    }
+
+    #[test]
+    fn plaintext_multi_account_survives_transport_envelope() {
+        // status=0 + 根 error_code=34175：transport 不解包 data，正常化要能识别。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": { "info_list": [{ "userid": 1001, "nickname": "甲" }] }
+        });
+        let normalized = normalize_multi_account_response(after_transport(raw));
+        assert_eq!(normalized["requiresUserSelection"], json!(true));
+        assert_eq!(normalized["accounts"].as_array().unwrap().len(), 1);
+        assert!(normalized.get("data").is_none());
+    }
+
+    #[test]
+    fn encrypted_status_one_multi_account_is_decrypted_then_normalized() {
+        // .NET/JS 参考实现对 status=1（即使 error_code=34175）的
+        // data.secu_params 也会解密；若真实响应是加密形态，必须同样覆盖。
+        let secret = json!({
+            "info_list": [
+                { "userid": "1002", "nickname": "乙", "pic": "https://img.example/2.jpg" }
+            ]
+        });
+        let enc = crate::kugou::crypto::aes_encrypt(&secret.to_string(), None, None);
+        let raw = json!({
+            "status": 1,
+            "error_code": 34175,
+            "data": { "secu_params": enc.cipher_text }
+        });
+
+        let decrypted = try_decrypt_response(raw, Some(&enc.temp_key));
+        assert!(
+            decrypted
+                .get("data")
+                .and_then(|data| data.get("info_list"))
+                .is_some(),
+            "data.secu_params 解密后应把 info_list 合并回 data"
         );
+
+        let normalized = normalize_multi_account_response(decrypted);
+        assert_eq!(normalized["requiresUserSelection"], json!(true));
+        assert_eq!(normalized["accounts"][0]["userId"], json!(1002));
+        assert_eq!(
+            normalized["accounts"][0]["pic"],
+            json!("https://img.example/2.jpg")
+        );
+    }
+
+    #[test]
+    fn root_level_info_list_is_supported() {
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "info_list": [{ "userid": 1001 }]
+        });
+        let normalized = normalize_multi_account_response(raw);
+        assert_eq!(normalized["requiresUserSelection"], json!(true));
+    }
+
+    #[test]
+    fn null_pic_does_not_shadow_avatar() {
+        let account = normalize_account(&json!({
+            "userid": 1001,
+            "nickname": null,
+            "pic": null,
+            "avatar": "https://img.example/a.jpg",
+            "appid": null,
+            "appId": 3116
+        }))
+        .expect("account");
+
+        assert_eq!(account["pic"], json!("https://img.example/a.jpg"));
+        assert_eq!(account["nickname"], json!(null));
+        assert_eq!(account["appId"], json!(3116));
+    }
+
+    #[test]
+    fn login_userid_is_written_as_string_and_skips_empty_values() {
+        let mut body = json!({});
+        apply_login_userid(&mut body, Some("1002"), "0");
+        assert_eq!(body["userid"], json!("1002"));
+        assert!(
+            body["userid"].is_string(),
+            "userid 应与 .NET 参考实现一致以字符串下发"
+        );
+
+        let mut body = json!({});
+        apply_login_userid(&mut body, None, "0");
+        assert!(body.get("userid").is_none());
+
+        let mut body = json!({});
+        apply_login_userid(&mut body, Some(""), "0");
+        assert!(body.get("userid").is_none());
+
+        // 未显式传时回退会话 userid（保留原有行为）。
+        let mut body = json!({});
+        apply_login_userid(&mut body, None, "1003");
+        assert_eq!(body["userid"], json!("1003"));
+    }
+
+    #[test]
+    fn malformed_secu_params_does_not_break_response() {
+        // 形状不符的脏字段不能进入 aes_decrypt 触发 panic。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": { "secu_params": "not-hex" }
+        });
+        let decrypted = try_decrypt_response(raw.clone(), Some("key"));
+        assert_eq!(decrypted, raw);
     }
 }

@@ -61,20 +61,15 @@ impl KugouEngine {
             .clone()
     }
 
-    pub async fn request(
-        &self,
-        method: &str,
-        path: &str,
-        query: &str,
-        body: Option<&str>,
-    ) -> AppResult<String> {
+    /// 合并 query 与 body 参数：query 优先，body 只补充 query 里没有的键
+    /// （兼容前端把参数放在 body 里传，例如 /login/cellphone 的 `userId`）。
+    fn merge_request_params(query: &str, body: Option<&str>) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = if query.is_empty() {
             HashMap::new()
         } else {
             serde_json::from_str(query).unwrap_or_default()
         };
 
-        // 将 body 中的字段也合并到 params，兼容前端通过 body 传参的情况
         if let Some(body_str) = body {
             if let Ok(body_map) = serde_json::from_str::<HashMap<String, Value>>(body_str) {
                 for (k, v) in body_map {
@@ -86,6 +81,17 @@ impl KugouEngine {
                 }
             }
         }
+        params
+    }
+
+    pub async fn request(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        body: Option<&str>,
+    ) -> AppResult<String> {
+        let params = Self::merge_request_params(query, body);
 
         let session = self.session_snapshot();
         let result = self
@@ -945,6 +951,38 @@ mod tests {
         assert_eq!(KugouEngine::login_userid_param(&params), Some("1002"));
 
         assert_eq!(KugouEngine::login_userid_param(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn merge_request_params_puts_body_values_into_params() {
+        // Dart 的 /login/cellphone 把 userId 放在 body 里，handler 从 params 读。
+        let params = KugouEngine::merge_request_params(
+            "",
+            Some(r#"{"mobile":"13800138000","code":"123456","userId":"1002"}"#),
+        );
+        assert_eq!(params.get("userId").map(String::as_str), Some("1002"));
+        assert_eq!(
+            params.get("mobile").map(String::as_str),
+            Some("13800138000")
+        );
+
+        // query 优先，body 里的同名键不覆盖。
+        let params = KugouEngine::merge_request_params(
+            r#"{"mobile":"query-mobile"}"#,
+            Some(r#"{"mobile":"body-mobile"}"#),
+        );
+        assert_eq!(
+            params.get("mobile").map(String::as_str),
+            Some("query-mobile")
+        );
+
+        // 非字符串 body 值会转成字符串，handler 统一按 &str 读取。
+        let params = KugouEngine::merge_request_params("", Some(r#"{"userid":1002}"#));
+        assert_eq!(params.get("userid").map(String::as_str), Some("1002"));
+
+        // 空 / 非法 body 不应 panic。
+        assert!(KugouEngine::merge_request_params("", Some("not-json")).is_empty());
+        assert!(KugouEngine::merge_request_params("", None).is_empty());
     }
 
     /// 联网探针：实测 /fm/recommend 与 /fm/songs 的真实返回结构。

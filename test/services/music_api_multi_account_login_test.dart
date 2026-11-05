@@ -2,6 +2,7 @@
 // 本仓库 Rust 引擎）返回账号选择信封，前端必须进入「选择登录账号」流程，
 // 并在用户选定后把 userId 带回 /login/cellphone 完成二次登录。
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/core/api_client.dart' show ApiException, unwrapData;
 import 'package:shiyin_music/core/api_client_interface.dart';
 import 'package:shiyin_music/services/music_api.dart';
 
@@ -144,5 +145,61 @@ void main() {
 
     expect(result.requiresUserSelection, isTrue);
     expect(result.accounts.single.userId, '1001');
+  });
+
+  test('34175 但候选账号为空时给出明确错误，而不是误导成「没有注册账号」', () async {
+    final client = _FakeLoginClient([
+      {
+        'status': 0,
+        'error_code': 34175,
+        'requiresUserSelection': true,
+        'accounts': <Map<String, dynamic>>[],
+      },
+    ]);
+
+    await expectLater(
+      MusicApi(
+        client,
+      ).loginWithPhone(mobile: '13800138000', code: '123456'),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.message,
+          'message',
+          contains('未能获取账号列表'),
+        ),
+      ),
+    );
+  });
+
+  test('归一后的账号选择信封不会被 RustApiClient 的 unwrapData 展平', () {
+    final envelope = <String, dynamic>{
+      'status': 0,
+      'error_code': 34175,
+      'errorCode': 34175,
+      'requiresUserSelection': true,
+      'message': '该手机号绑定了多个账号，请选择要登录的账号',
+      'accounts': [
+        {'userId': 1001, 'nickname': '甲'},
+      ],
+    };
+
+    // RustApiClient._request 会对引擎 JSON 调 unwrapData；没有 data 字段时
+    // 必须原样返回，否则错误码/候选账号会被吞掉（issue #18 的根因）。
+    expect(unwrapData(envelope), same(envelope));
+
+    // 反向确认根因：酷狗原始响应若带 data.info_list，unwrapData 会展开 data
+    // 并丢掉根节点的 error_code——所以引擎侧必须归一且不能保留 data。
+    final raw = <String, dynamic>{
+      'status': 0,
+      'error_code': 34175,
+      'data': {
+        'info_list': [
+          {'userid': 1001},
+        ],
+      },
+    };
+    final unwrapped = unwrapData(raw) as Map<String, dynamic>;
+    expect(unwrapped.containsKey('error_code'), isFalse);
+    expect(unwrapped.containsKey('info_list'), isTrue);
   });
 }
