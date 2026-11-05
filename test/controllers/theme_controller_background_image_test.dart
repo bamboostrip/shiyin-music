@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
+import 'package:shiyin_music/ui/background_crop.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
 
 /// 4×2 PNG（一张真实可解码的图），用来实测「降采样后宽高比是否还在」。
@@ -278,6 +279,7 @@ void main() {
       SharedPreferences.setMockInitialValues({
         'theme.bg_image_path': missing,
         'theme.bg_enabled': true,
+        'theme.bg_crop': '{"fx": 0.2, "fy": 0.8, "z": 2}',
       });
 
       final theme = ThemeController();
@@ -285,9 +287,12 @@ void main() {
 
       expect(theme.backgroundImagePath, isNull);
       expect(theme.backgroundEnabled, isFalse);
+      // 构图只服务于那张已不存在的图，自愈时一并清掉，避免套到下一张图上。
+      expect(theme.backgroundCrop, BackgroundCrop.center);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('theme.bg_image_path'), isNull);
       expect(prefs.getBool('theme.bg_enabled'), isFalse);
+      expect(prefs.getString('theme.bg_crop'), isNull);
     });
 
     test('清除背景图：路径置空、开关关闭、文件与持久化键都清掉', () async {
@@ -325,6 +330,180 @@ void main() {
       await second.load();
 
       expect(second.backgroundImagePath, path);
+    });
+  });
+
+  /// 背景构图（裁剪参数）的持久化契约：单键 JSON、坏数据自愈、与安装/清除
+  /// 联动。构图本身由 background_crop_test 锁数学，这里只关心控制器的落盘。
+  group('背景构图（裁剪参数）', () {
+    test('默认构图为居中 + 未放大，且不写 prefs', () async {
+      final theme = ThemeController();
+      await theme.load();
+
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+      expect(theme.backgroundCrop.isDefault, isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('theme.bg_crop'), isNull);
+    });
+
+    test('安装时传入构图：getter 生效并按单个 JSON 字符串落盘', () async {
+      final theme = ThemeController();
+      await theme.load();
+      const crop = BackgroundCrop(focusX: 0.2, focusY: 0.8, zoom: 2.5);
+
+      final ok = await theme.installBackgroundImage(
+        await pickedFile('crop.png', _png4x2Bytes),
+        targetDir: docsDir,
+        crop: crop,
+      );
+
+      expect(ok, isTrue);
+      expect(theme.backgroundCrop, crop);
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('theme.bg_crop');
+      expect(raw, isNotNull);
+      // 单键 JSON：fx/fy/z 分三个键写会「半写」（新焦点配旧缩放）。
+      final decoded = jsonDecode(raw!) as Map<String, dynamic>;
+      expect(decoded.keys, unorderedEquals(<String>['fx', 'fy', 'z']));
+      expect(decoded['fx'], closeTo(0.2, 1e-9));
+      expect(decoded['fy'], closeTo(0.8, 1e-9));
+      expect(decoded['z'], closeTo(2.5, 1e-9));
+    });
+
+    test('重启后恢复上次安装的构图', () async {
+      final first = ThemeController();
+      await first.load();
+      const crop = BackgroundCrop(focusX: 0.35, focusY: 0.65, zoom: 1.8);
+      await first.installBackgroundImage(
+        await pickedFile('restart_crop.png', _png4x2Bytes),
+        targetDir: docsDir,
+        crop: crop,
+      );
+      // 关掉开关，避免 load() 的预缓存再解一次图（本用例只关心构图恢复）。
+      await first.setBackgroundEnabled(false);
+
+      final second = ThemeController();
+      await second.load();
+
+      expect(second.backgroundCrop, crop);
+    });
+
+    test('越界构图在写入与读取时都夹到合法范围', () async {
+      final theme = ThemeController();
+      await theme.load();
+      await theme.setBackgroundCrop(
+        const BackgroundCrop(focusX: -1, focusY: 2, zoom: 99),
+      );
+
+      expect(theme.backgroundCrop.focusX, 0.0);
+      expect(theme.backgroundCrop.focusY, 1.0);
+      expect(theme.backgroundCrop.zoom, BackgroundCrop.maxZoom);
+
+      // 模拟手改/旧版本写进 prefs 的越界值：load 同样夹紧而不是原样启用。
+      SharedPreferences.setMockInitialValues({
+        'theme.bg_crop': '{"fx": -3, "fy": 4, "z": 0.2}',
+      });
+      final restored = ThemeController();
+      await restored.load();
+
+      expect(restored.backgroundCrop.focusX, 0.0);
+      expect(restored.backgroundCrop.focusY, 1.0);
+      expect(restored.backgroundCrop.zoom, BackgroundCrop.minZoom);
+    });
+
+    test('非法 JSON / 字段缺失 / 类型不符回落默认构图且不打断 load', () async {
+      // 完全不是 JSON。
+      SharedPreferences.setMockInitialValues({'theme.bg_crop': 'not-json'});
+      var theme = ThemeController();
+      await theme.load();
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+
+      // 缺字段：不能拿解析到的部分值凑合，整体回落。
+      SharedPreferences.setMockInitialValues({
+        'theme.bg_crop': '{"fx": 0.2, "fy": 0.3}',
+      });
+      theme = ThemeController();
+      await theme.load();
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+
+      // 字段类型不对（z 是字符串）。
+      SharedPreferences.setMockInitialValues({
+        'theme.bg_crop': '{"fx": 0.2, "fy": 0.3, "z": "2"}',
+      });
+      theme = ThemeController();
+      await theme.load();
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+
+      // 1e999 这类溢出数值：无论解析成 Infinity 还是被解析器拒绝，都只能
+      // 回落默认，不能把非有限值带进渲染。
+      SharedPreferences.setMockInitialValues({
+        'theme.bg_crop': '{"fx": 1e999, "fy": -1e999, "z": 1e999}',
+      });
+      theme = ThemeController();
+      await theme.load();
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+    });
+
+    test('NaN / Infinity 输入在写入前被兜住，不抛也不落盘脏值', () async {
+      final theme = ThemeController();
+      await theme.load();
+
+      // 手势计算异常可能产出非有限值；jsonEncode 遇到 NaN/Infinity 会抛，
+      // 所以必须在编码前 normalize 掉。
+      expect(
+        await theme.setBackgroundCrop(
+          const BackgroundCrop(
+            focusX: double.nan,
+            focusY: double.infinity,
+            zoom: double.nan,
+          ),
+        ),
+        isTrue,
+      );
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+
+      final prefs = await SharedPreferences.getInstance();
+      final decoded =
+          jsonDecode(prefs.getString('theme.bg_crop')!) as Map<String, dynamic>;
+      expect(decoded['fx'], 0.5);
+      expect(decoded['fy'], 0.5);
+      expect(decoded['z'], 1.0);
+    });
+
+    test('setBackgroundCrop 往返：内存 / prefs / 重启三处一致', () async {
+      final theme = ThemeController();
+      await theme.load();
+      const crop = BackgroundCrop(focusX: 0.25, focusY: 0.75, zoom: 1.5);
+
+      expect(await theme.setBackgroundCrop(crop), isTrue);
+      expect(theme.backgroundCrop, crop);
+
+      final restarted = ThemeController();
+      await restarted.load();
+      expect(restarted.backgroundCrop, crop);
+    });
+
+    test('清除背景图后构图回默认并移除持久化键，无图时也安全', () async {
+      final theme = ThemeController();
+      await theme.load();
+      await theme.installBackgroundImage(
+        await pickedFile('clear_crop.png', _png4x2Bytes),
+        targetDir: docsDir,
+        crop: const BackgroundCrop(focusX: 0.1, focusY: 0.9, zoom: 2),
+      );
+      expect(theme.backgroundCrop, isNot(BackgroundCrop.center));
+
+      await theme.clearBackgroundImage();
+
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+      var prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('theme.bg_crop'), isNull);
+
+      // path 为 null（本就没有背景图）时再次清除也不能抛。
+      await theme.clearBackgroundImage();
+      expect(theme.backgroundCrop, BackgroundCrop.center);
+      prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('theme.bg_crop'), isNull);
     });
   });
 }

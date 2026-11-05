@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/device_info_service.dart';
 import '../ui/adaptive_layout.dart';
+import '../ui/background_crop.dart';
 import '../ui/form_factor.dart';
 
 /// 背景图解码上限（最长边，像素），桌面形态。
@@ -85,6 +87,7 @@ class ThemeController extends ChangeNotifier {
   static const _bgEnabledKey = 'theme.bg_enabled';
   static const _bgImagePathKey = 'theme.bg_image_path';
   static const _bgOpacityKey = 'theme.bg_opacity';
+  static const _bgCropKey = 'theme.bg_crop';
   static const _landscapeEnabledKey = 'theme.landscape_enabled';
   static const _carModeEnabledKey = 'theme.car_mode_enabled';
   static const _fontScaleKey = 'theme.font_scale';
@@ -132,6 +135,7 @@ class ThemeController extends ChangeNotifier {
   bool _backgroundEnabled = false;
   String? _backgroundImagePath;
   double _backgroundOpacity = 0.15;
+  BackgroundCrop _backgroundCrop = BackgroundCrop.center;
   bool _landscapeEnabled = false;
   bool _carModeEnabled = false;
   double _fontScale = 1.0;
@@ -160,6 +164,13 @@ class ThemeController extends ChangeNotifier {
   bool get backgroundEnabled => _backgroundEnabled;
   String? get backgroundImagePath => _backgroundImagePath;
   double get backgroundOpacity => _backgroundOpacity;
+
+  /// 当前背景图构图（焦点 + 相对缩放），默认居中且不放大。
+  ///
+  /// 只存参数不存裁好的图：窗口比例变化时仍能按新比例重新框取，见
+  /// [BackgroundCrop]。
+  BackgroundCrop get backgroundCrop => _backgroundCrop;
+
   bool get landscapeEnabled => _landscapeEnabled;
 
   /// 车机模式开关（仅移动形态生效：桌面恒 false）。
@@ -211,13 +222,23 @@ class ThemeController extends ChangeNotifier {
     } else {
       // 文件已不在（被用户/系统清理、换图被中断、prefs 被并发写回旧值）：
       // 清掉脏设置，避免设置页显示「已选择背景图」却一直是破图，也避免每次
-      // 启动都去解析一个不存在的文件。
+      // 启动都去解析一个不存在的文件。构图参数只服务于那张图，一起清掉。
       _backgroundImagePath = null;
       _backgroundEnabled = false;
+      _backgroundCrop = BackgroundCrop.center;
       try {
         await prefs.remove(_bgImagePathKey);
         await prefs.setBool(_bgEnabledKey, false);
+        await prefs.remove(_bgCropKey);
       } catch (_) {}
+    }
+    // 背景构图：缺省、坏 JSON、类型不符、NaN/Infinity 或越界，读取与解析
+    // 全程兜底。构图只是观感，坏数据绝不能冒泡打断启动。
+    try {
+      _backgroundCrop = _decodeBackgroundCrop(prefs.getString(_bgCropKey));
+    } catch (_) {
+      // prefs 里同名键存了非 String（手改/旧版本残留）时 getString 自身会抛。
+      _backgroundCrop = BackgroundCrop.center;
     }
     _landscapeEnabled = prefs.getBool(_landscapeEnabledKey) ?? false;
     // 首次安装（键不存在）：检测到车机则默认开启车机模式；
@@ -286,12 +307,24 @@ class ThemeController extends ChangeNotifier {
   }
 
   /// 开启/关闭自定义背景图。
+  ///
+  /// 写盘失败不回滚也不抛：开关是「本次会话先按用户选择显示」的弱设置，
+  /// 强行抛异常会把清除/安装链路（它们会删旧文件）拦腰打断。
   Future<void> setBackgroundEnabled(bool enabled) async {
     if (_backgroundEnabled == enabled) return;
     _backgroundEnabled = enabled;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_bgEnabledKey, enabled);
+    await _persistBackgroundEnabled(enabled);
     notifyListeners();
+  }
+
+  /// 只落盘背景开关、不改内存、不发通知；失败（含异常）返回 false。
+  Future<bool> _persistBackgroundEnabled(bool enabled) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return await prefs.setBool(_bgEnabledKey, enabled);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// 开启/关闭横屏模式。
@@ -409,15 +442,7 @@ class ThemeController extends ChangeNotifier {
   Future<bool> setBackgroundImagePath(String? path) async {
     final previous = _backgroundImagePath;
     _backgroundImagePath = path;
-    final prefs = await SharedPreferences.getInstance();
-    var persisted = false;
-    try {
-      persisted = path != null
-          ? await prefs.setString(_bgImagePathKey, path)
-          : await prefs.remove(_bgImagePathKey);
-    } catch (_) {
-      persisted = false;
-    }
+    final persisted = await _persistBackgroundImagePath(path);
     if (!persisted) {
       // 回滚内存态：不要让界面显示一个重启后会消失的状态。
       _backgroundImagePath = previous;
@@ -428,6 +453,86 @@ class ThemeController extends ChangeNotifier {
     return true;
   }
 
+  /// 只落盘路径、不改内存、不发通知；失败（含异常）返回 false。
+  Future<bool> _persistBackgroundImagePath(String? path) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return path != null
+          ? await prefs.setString(_bgImagePathKey, path)
+          : await prefs.remove(_bgImagePathKey);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 设置背景图构图（焦点 + 相对缩放）。
+  ///
+  /// 返回是否已持久化成功。写失败时回滚内存并通知 UI——不能让界面显示一个
+  /// 重启后又会变回旧值、用户却以为已保存的构图。输入先经过
+  /// [BackgroundCrop.normalized]：即使调用方传进越界/NaN 等脏值，内存与
+  /// 落盘的也永远是可直接渲染的合法参数。
+  Future<bool> setBackgroundCrop(BackgroundCrop crop) async {
+    final normalized = crop.normalized();
+    final previous = _backgroundCrop;
+    _backgroundCrop = normalized;
+    final persisted = await _persistBackgroundCrop(normalized);
+    if (!persisted) {
+      _backgroundCrop = previous;
+      notifyListeners();
+      return false;
+    }
+    notifyListeners();
+    return true;
+  }
+
+  /// 只落盘构图、不改内存、不发通知；失败（含异常）返回 false。
+  Future<bool> _persistBackgroundCrop(BackgroundCrop crop) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return await prefs.setString(_bgCropKey, _encodeBackgroundCrop(crop));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 背景构图的持久化形态：单个 JSON 字符串，一次性写入。
+  ///
+  /// 不拆成 fx/fy/z 三个 prefs 键：三键写入不是原子的，进程在中途被杀会留下
+  /// 「新焦点配旧缩放」的半写状态，重启后构图会莫名跳一下。
+  static String _encodeBackgroundCrop(BackgroundCrop crop) {
+    final normalized = crop.normalized();
+    return jsonEncode(<String, double>{
+      'fx': normalized.focusX,
+      'fy': normalized.focusY,
+      'z': normalized.zoom,
+    });
+  }
+
+  /// 解析 [_bgCropKey]；缺省/非法 JSON/类型不符一律回落默认构图。
+  ///
+  /// 越界与非有限值交给 [BackgroundCrop.normalized] 夹紧/回落，因此返回值
+  /// 永远可直接用于渲染；解析失败只丢构图，绝不冒泡打断启动。
+  static BackgroundCrop _decodeBackgroundCrop(String? raw) {
+    if (raw == null) return BackgroundCrop.center;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return BackgroundCrop.center;
+      final fx = decoded['fx'];
+      final fy = decoded['fy'];
+      final zoom = decoded['z'];
+      if (fx is! num || fy is! num || zoom is! num) {
+        return BackgroundCrop.center;
+      }
+      return BackgroundCrop(
+        focusX: fx.toDouble(),
+        focusY: fy.toDouble(),
+        zoom: zoom.toDouble(),
+      ).normalized();
+    } catch (_) {
+      return BackgroundCrop.center;
+    }
+  }
+
   /// 设置背景透明度（0.0 ~ 0.8，值越大背景越明显）。
   Future<void> setBackgroundOpacity(double opacity) async {
     _backgroundOpacity = opacity.clamp(0.0, 0.8);
@@ -436,37 +541,55 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 从相册选择图片并复制到应用永久目录。
+  /// 从相册选一张图，返回本地临时文件；取消选择或文件已不存在时返回 null。
   ///
-  /// 返回是否成功设置。
-  Future<bool> pickAndSetBackgroundImage() async {
+  /// 与安装拆开：设置页要先进裁剪页拿到用户确认的构图，再调用
+  /// [installBackgroundImage] 一步落盘；取消裁剪就什么都不写，旧背景原样
+  /// 保留。只想「选完即装」的旧入口见 [pickAndSetBackgroundImage]。
+  Future<File?> pickBackgroundSourceFile() async {
     // 延迟导入避免非必要平台初始化
     final ImagePicker picker = ImagePicker();
     final xFile = await picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 90,
     );
-    if (xFile == null) return false;
+    if (xFile == null) return null;
 
     final sourceFile = File(xFile.path);
-    if (!await sourceFile.exists()) return false;
+    // 选择器返回后文件可能已被系统清理/移动，交给安装层只会复制失败并弹错，
+    // 与「取消选择」对用户是同一结果，这里直接归一为 null。
+    if (!await sourceFile.exists()) return null;
+
+    return sourceFile;
+  }
+
+  /// 从相册选择图片并复制到应用永久目录（保持「选完即装、默认构图」语义）。
+  ///
+  /// 返回是否成功设置。
+  Future<bool> pickAndSetBackgroundImage() async {
+    final sourceFile = await pickBackgroundSourceFile();
+    if (sourceFile == null) return false;
 
     return installBackgroundImage(sourceFile);
   }
 
   /// 把 [source] 安装为当前背景图：复制进应用文档目录、验证可解码、写入设置。
   ///
-  /// [targetDir] 仅测试用（传临时目录可绕开 path_provider 平台通道）。
+  /// 设置页「选图 → 裁剪 → 安装」在拿到用户确认的构图后调用这里；
+  /// [targetDir] 仅测试用（传临时目录可绕开 path_provider 平台通道），
+  /// [crop] 是新图的初始构图。
   /// 返回是否成功设置；失败时抛 [BackgroundImageException] 且旧背景原样保留。
-  @visibleForTesting
   Future<bool> installBackgroundImage(
     File source, {
     Directory? targetDir,
+    BackgroundCrop crop = BackgroundCrop.center,
   }) async {
     // 复制到应用文档目录，避免临时文件被系统清理
     final docsDir = targetDir ?? await getApplicationDocumentsDirectory();
     final permanentPath = await saveBackgroundImageCopy(source, docsDir);
     final previousPath = _backgroundImagePath;
+    final previousCrop = _backgroundCrop;
+    final normalizedCrop = crop.normalized();
 
     // 先确认能解码再上位：Windows 选择器允许 tif/tiff 等 Flutter 解不了的
     // 格式，损坏文件也会走到这里；直接提交会「提示设置成功但界面一片空白」，
@@ -479,16 +602,29 @@ class ThemeController extends ChangeNotifier {
       throw BackgroundImageException('这张图片无法解码，请换一张');
     }
 
-    if (!await setBackgroundImagePath(permanentPath)) {
-      // 新路径没进 prefs：删掉刚复制的新文件（此刻无人引用），旧图与旧设置
-      // 原样保留。否则重启后 prefs 指向旧路径而旧文件已删除，背景永久丢失。
+    // 图与构图必须成对生效，所以先全部落盘再一次性切内存/通知：
+    // - 不会出现「新图先按上一张图的构图闪一帧」；
+    // - 两次写之间被杀最坏是「旧图 + 新构图」，图片本身不会丢；
+    // - 任一写失败都回滚已写的键并删掉新副本，旧图与旧设置保持原样，
+    //   同时把失败抛给调用方，绝不出现「提示设置成功但构图是错的」。
+    if (!await _persistBackgroundCrop(normalizedCrop)) {
+      await deleteBackgroundImageFile(permanentPath);
+      throw BackgroundImageException('背景图保存失败，请重试');
+    }
+    if (!await _persistBackgroundImagePath(permanentPath)) {
+      await _persistBackgroundCrop(previousCrop);
       await deleteBackgroundImageFile(permanentPath);
       throw BackgroundImageException('背景图保存失败，请重试');
     }
 
+    _backgroundImagePath = permanentPath;
+    _backgroundCrop = normalizedCrop;
     if (!_backgroundEnabled) {
-      await setBackgroundEnabled(true);
+      _backgroundEnabled = true;
+      // 开关写失败不影响本次安装：图与构图已经可用，重启后只是回到关闭态。
+      await _persistBackgroundEnabled(true);
     }
+    notifyListeners();
 
     // 新图已经上位后再清旧文件：顺序反过来，切换瞬间背景层会读到已被删除
     // 的文件，界面先闪一下空白再出新图。
@@ -585,16 +721,34 @@ class ThemeController extends ChangeNotifier {
   }
 
   /// 清除自定义背景图。
-  Future<void> clearBackgroundImage() async {
+  ///
+  /// 返回是否已真正清除（路径持久化成功）。false 时开关、文件、构图全部保持
+  /// 原样，调用方应提示失败让用户重试——不能出现「提示已移除、重启又回来」，
+  /// 也不能出现「路径还在但开关被关、构图被清」的半状态。
+  Future<bool> clearBackgroundImage() async {
     final path = _backgroundImagePath;
     // 先关掉背景层再删文件：反过来背景层会短暂读到不存在的文件。
     final cleared = await setBackgroundImagePath(null);
+    // 路径没清掉就什么都不动：文件与构图仍被这次开机后的 prefs 指向，删了
+    // 就会变成破图；开关也不能先关，否则重启后「图还在、背景却没了」。
+    if (!cleared) return false;
+
     await setBackgroundEnabled(false);
     // 持久化失败时保留文件：宁可下次启动「背景又回来了」，也不能留下一个
     // 指向已删除文件的设置（设置页会变成破图）。
-    if (cleared) {
-      await deleteBackgroundImageFile(path);
+    await deleteBackgroundImageFile(path);
+    // 构图只服务于那张图：清除后回默认，否则下次装图（或重新开启开关）会先
+    // 闪一下上次的构图。键删除是 best-effort：清除本身已经完成，prefs 里
+    // 残留一个没人指向的构图参数不值得把操作报成失败。
+    if (_backgroundCrop != BackgroundCrop.center) {
+      _backgroundCrop = BackgroundCrop.center;
+      notifyListeners();
     }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_bgCropKey);
+    } catch (_) {}
+    return true;
   }
 }
 
