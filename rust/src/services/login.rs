@@ -219,6 +219,46 @@ pub async fn send_sms_code(
     transport::send(client, session, &req).await
 }
 
+/// 登录成功信封：`status=1` 且 `error_code` 缺失或为 0。
+fn is_success_envelope(response: &Value) -> bool {
+    response.get("status").and_then(|v| v.as_i64()) == Some(1)
+        && matches!(
+            response.get("error_code").and_then(|v| v.as_i64()),
+            None | Some(0)
+        )
+}
+
+fn has_login_token(response: &Value) -> bool {
+    response
+        .get("token")
+        .and_then(|v| v.as_str())
+        .is_some_and(|token| !token.is_empty())
+}
+
+fn has_login_userid(response: &Value) -> bool {
+    response.get("userid").is_some_and(|value| {
+        value.as_i64().is_some_and(|id| id != 0)
+            || value.as_str().is_some_and(|id| !id.is_empty() && id != "0")
+    })
+}
+
+/// 成功信封却缺少 token/userid：说明 `secu_params` 没解开或上游响应异常。
+/// 必须降级成失败，否则 Dart 会当成「成功但空凭证」的登录——界面既不进
+/// 主页也不报错，用户只会看到点了没反应。
+fn ensure_login_credentials_or_failure(response: Value) -> Value {
+    if !is_success_envelope(&response) {
+        return response;
+    }
+    if has_login_token(&response) && has_login_userid(&response) {
+        return response;
+    }
+    json!({
+        "status": 0,
+        "error_code": 0,
+        "msg": "登录响应缺少凭证，请重试",
+    })
+}
+
 /// 把多账号二次登录选中的 userid 写入上游 body。
 ///
 /// 与 .NET 参考实现一致以**字符串**下发（酷狗同一字段既接受数字也接受
@@ -294,8 +334,11 @@ pub async fn login_by_mobile(
 
     let resp = transport::send(client, session, &req).await?;
     let resp = try_decrypt_response(resp, Some(&payload_enc.temp_key));
+    // 先归一多账号（34175）信封，再把「成功但空凭证」降级为失败：
+    // 选账号响应的 status 可能是 1，不能被凭证校验误伤。
+    let resp = normalize_multi_account_response(resp);
 
-    Ok(normalize_multi_account_response(resp))
+    Ok(ensure_login_credentials_or_failure(resp))
 }
 
 pub async fn get_qr_key(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
@@ -615,6 +658,66 @@ mod tests {
         assert_eq!(decrypted["token"], json!("tk"));
         assert_eq!(decrypted["t1"], json!("t1"));
         assert_eq!(decrypted["status"], json!(1));
+    }
+
+    #[test]
+    fn success_envelope_without_credentials_is_downgraded_to_failure() {
+        let raw = json!({
+            "status": 1,
+            "error_code": 0,
+            "secu_params": "00".repeat(16)
+        });
+        let out = ensure_login_credentials_or_failure(raw);
+        assert_eq!(out["status"], json!(0));
+        assert!(
+            out["msg"].as_str().unwrap().contains("缺少凭证"),
+            "应给出可读的失败原因，而不是让前端拿到空 session"
+        );
+    }
+
+    #[test]
+    fn undecryptable_success_response_is_downgraded_to_failure() {
+        // 合法长度但填充被破坏：try_aes_decrypt 返回 None，登录不能当成功。
+        let enc = crate::kugou::crypto::aes_encrypt("123456789012345", None, None);
+        let mut raw_bytes = hex::decode(&enc.cipher_text).expect("hex");
+        *raw_bytes.last_mut().expect("non-empty") ^= 0xFF;
+        let tampered = hex::encode(raw_bytes);
+        let promoted = json!({
+            "status": 1,
+            "error_code": 0,
+            "secu_params": tampered
+        });
+
+        let decrypted = try_decrypt_response(promoted, Some(&enc.temp_key));
+        assert!(decrypted.get("token").is_none(), "坏密文不应解出 token");
+
+        let out = ensure_login_credentials_or_failure(decrypted);
+        assert_eq!(out["status"], json!(0));
+    }
+
+    #[test]
+    fn success_envelope_with_credentials_is_untouched() {
+        let raw = json!({
+            "status": 1,
+            "error_code": 0,
+            "userid": 1001,
+            "token": "tk",
+            "t1": "t1"
+        });
+        assert_eq!(ensure_login_credentials_or_failure(raw.clone()), raw);
+    }
+
+    #[test]
+    fn account_selection_envelope_is_not_downgraded_by_credential_guard() {
+        // 选账号信封可能带 status=1，但 error_code=34175；凭证校验不能误伤。
+        let raw = json!({
+            "status": 1,
+            "error_code": 34175,
+            "data": { "info_list": [{ "userid": 1001 }] }
+        });
+        let out = ensure_login_credentials_or_failure(normalize_multi_account_response(raw));
+        assert_eq!(out["requiresUserSelection"], json!(true));
+        assert_eq!(out["accounts"].as_array().unwrap().len(), 1);
     }
 
     #[test]
