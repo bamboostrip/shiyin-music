@@ -33,25 +33,43 @@ fn value_as_i64(value: &Value) -> Option<i64> {
         .or_else(|| value.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
 }
 
-/// 读取上游响应信封的错误码（`error_code`，兼容网关的 `errcode` 别名）。
-fn response_error_code(response: &Value) -> Option<i64> {
-    response
+/// 是否是多账号（34175）响应。
+///
+/// 错误码可能在根上，也可能被代理放进 `data.error_code`。判定对齐
+/// `root_error_code || data.error_code` 语义：根上的非零错误码优先，
+/// 根为 0/缺失时才看 `data`，避免根上的其他错误被误判成多账号。
+fn is_multi_account_response(response: &Value) -> bool {
+    let root = response
         .get("error_code")
         .and_then(value_as_i64)
-        .or_else(|| response.get("errcode").and_then(value_as_i64))
+        .or_else(|| response.get("errcode").and_then(value_as_i64));
+    let nested = response
+        .get("data")
+        .and_then(|data| data.get("error_code").or_else(|| data.get("errcode")))
+        .and_then(value_as_i64);
+    match root {
+        Some(MULTI_ACCOUNT_ERROR_CODE) => true,
+        Some(0) | None => nested == Some(MULTI_ACCOUNT_ERROR_CODE),
+        Some(_) => false,
+    }
 }
 
-/// 取对象里第一个存在且非 null 的字段（`"pic": null` 不应挡住 `avatar`）。
+/// 取对象里第一个存在、非 null 且非空白字符串的字段。
+/// （`"pic": null` 不应挡住 `avatar`，空串同样视为未提供。）
 fn first_non_null<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter()
-        .find_map(|key| obj.get(*key).filter(|value| !value.is_null()))
+    keys.iter().find_map(|key| {
+        obj.get(*key).filter(|value| {
+            !value.is_null() && !value.as_str().is_some_and(|text| text.trim().is_empty())
+        })
+    })
 }
 
 /// 把单个候选账号归一成前端契约的字段（userId/nickname/pic/appId/username）。
 /// 缺少有效 userid 的脏数据直接丢弃。
 fn normalize_account(item: &Value) -> Option<Value> {
     let obj = item.as_object()?;
-    let userid = first_non_null(obj, &["userid", "userId"]).and_then(value_as_i64)?;
+    let userid =
+        first_non_null(obj, &["userid", "userId", "user_id", "id"]).and_then(value_as_i64)?;
     if userid <= 0 {
         return None;
     }
@@ -60,8 +78,10 @@ fn normalize_account(item: &Value) -> Option<Value> {
         .unwrap_or(0);
     Some(json!({
         "userId": userid,
-        "nickname": first_non_null(obj, &["nickname"]).cloned().unwrap_or(Value::Null),
-        "pic": first_non_null(obj, &["pic", "avatar"]).cloned().unwrap_or(Value::Null),
+        "nickname": first_non_null(obj, &["nickname", "name"]).cloned().unwrap_or(Value::Null),
+        "pic": first_non_null(obj, &["pic", "avatar", "headpic", "img", "imgurl"])
+            .cloned()
+            .unwrap_or(Value::Null),
         "appId": appid,
         "username": first_non_null(obj, &["username"]).cloned().unwrap_or(Value::Null),
     }))
@@ -117,7 +137,7 @@ fn multi_account_message(response: &Value) -> String {
 /// `data` 展开成根节点，导致上面的状态字段丢失；即使拿不到候选账号，也要
 /// 返回不带 `data` 的失败信封，让前端能按 34175 给出准确文案。
 fn normalize_multi_account_response(response: Value) -> Value {
-    if response_error_code(&response) != Some(MULTI_ACCOUNT_ERROR_CODE) {
+    if !is_multi_account_response(&response) {
         return response;
     }
     let status = response.get("status").cloned().unwrap_or_else(|| json!(0));
@@ -259,6 +279,14 @@ fn ensure_login_credentials_or_failure(response: Value) -> Value {
     })
 }
 
+/// 登录响应处理流水线（transport 之后）：解密 → 多账号归一 → 凭证守卫。
+/// 抽成纯函数，测试可按真实顺序覆盖各种响应形态，避免遗漏步骤或顺序错误。
+fn process_login_response(response: Value, aes_key: &str) -> Value {
+    let response = try_decrypt_response(response, Some(aes_key));
+    let response = normalize_multi_account_response(response);
+    ensure_login_credentials_or_failure(response)
+}
+
 /// 把多账号二次登录选中的 userid 写入上游 body。
 ///
 /// 与 .NET 参考实现一致以**字符串**下发（酷狗同一字段既接受数字也接受
@@ -333,12 +361,8 @@ pub async fn login_by_mobile(
         .signature_type(SignatureType::Default);
 
     let resp = transport::send(client, session, &req).await?;
-    let resp = try_decrypt_response(resp, Some(&payload_enc.temp_key));
-    // 先归一多账号（34175）信封，再把「成功但空凭证」降级为失败：
-    // 选账号响应的 status 可能是 1，不能被凭证校验误伤。
-    let resp = normalize_multi_account_response(resp);
 
-    Ok(ensure_login_credentials_or_failure(resp))
+    Ok(process_login_response(resp, &payload_enc.temp_key))
 }
 
 pub async fn get_qr_key(client: &reqwest::Client, session: &KgSession) -> AppResult<Value> {
@@ -782,5 +806,127 @@ mod tests {
         });
         let decrypted = try_decrypt_response(raw.clone(), Some("key"));
         assert_eq!(decrypted, raw);
+    }
+
+    #[test]
+    fn account_field_aliases_are_normalized() {
+        // 不同客户端/代理观察到过 user_id/id、name、headpic 等别名。
+        let account = normalize_account(&json!({
+            "user_id": "1003",
+            "name": "丙",
+            "headpic": "https://img.example/3.jpg",
+            "appid": 3116
+        }))
+        .expect("account");
+
+        assert_eq!(account["userId"], json!(1003));
+        assert_eq!(account["nickname"], json!("丙"));
+        assert_eq!(account["pic"], json!("https://img.example/3.jpg"));
+    }
+
+    #[test]
+    fn empty_primary_fields_fall_through_to_aliases() {
+        let account = normalize_account(&json!({
+            "userid": "",
+            "userId": 1004,
+            "nickname": "   ",
+            "name": "丁",
+            "pic": "",
+            "avatar": "https://img.example/4.jpg"
+        }))
+        .expect("account");
+
+        assert_eq!(account["userId"], json!(1004));
+        assert_eq!(account["nickname"], json!("丁"));
+        assert_eq!(account["pic"], json!("https://img.example/4.jpg"));
+    }
+
+    #[test]
+    fn root_nonzero_error_code_wins_over_nested_34175() {
+        // 根上已有其他非零错误码时，data.error_code 的 34175 不应抢占语义。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34174,
+            "data": {
+                "error_code": 34175,
+                "info_list": [{ "userid": 1001 }]
+            }
+        });
+
+        let output = process_login_response(after_transport(raw.clone()), "any-key");
+        assert!(output.get("requiresUserSelection").is_none());
+        assert!(output.get("accounts").is_none());
+        assert_eq!(output, raw);
+    }
+
+    #[test]
+    fn raw_multi_account_pipeline_yields_account_selection() {
+        // 按真实顺序覆盖：transport 信封 → 解密 → 归一 → 凭证守卫。
+        let raw = json!({
+            "status": 0,
+            "error_code": 34175,
+            "data": {
+                "info_list": [
+                    { "userid": 1001, "nickname": "甲" },
+                    { "userid": "1002", "nickname": "乙" }
+                ]
+            }
+        });
+
+        let output = process_login_response(after_transport(raw), "any-key");
+        assert_eq!(output["requiresUserSelection"], json!(true));
+        assert_eq!(output["accounts"].as_array().unwrap().len(), 2);
+        assert!(output.get("data").is_none());
+    }
+
+    #[test]
+    fn nested_data_error_code_pipeline_yields_account_selection() {
+        // 部分代理把错误码放在 data.error_code，且根上可能是 0：两处都要看，
+        // 不能被根上的 0 盖住。
+        let raw = json!({
+            "status": 0,
+            "error_code": 0,
+            "data": {
+                "error_code": 34175,
+                "info_list": [{ "userid": 1001, "nickname": "甲" }]
+            }
+        });
+
+        let output = process_login_response(after_transport(raw), "any-key");
+        assert_eq!(output["requiresUserSelection"], json!(true));
+        assert_eq!(output["accounts"][0]["userId"], json!(1001));
+    }
+
+    #[test]
+    fn raw_encrypted_success_pipeline_yields_credentials() {
+        let secret = json!({ "userid": 1001, "token": "tk", "t1": "t1" });
+        let enc = crate::kugou::crypto::aes_encrypt(&secret.to_string(), None, None);
+        let raw = json!({
+            "status": 1,
+            "error_code": 0,
+            "data": { "secu_params": enc.cipher_text }
+        });
+
+        let output = process_login_response(after_transport(raw), &enc.temp_key);
+        assert_eq!(output["status"], json!(1));
+        assert_eq!(output["userid"], json!(1001));
+        assert_eq!(output["token"], json!("tk"));
+    }
+
+    #[test]
+    fn raw_success_with_broken_ciphertext_pipeline_fails_clearly() {
+        // 成功信封但密文解不开：流水线最后一步必须降级为失败，不能空凭证成功。
+        let enc = crate::kugou::crypto::aes_encrypt("123456789012345", None, None);
+        let mut bytes = hex::decode(&enc.cipher_text).expect("hex");
+        *bytes.last_mut().expect("non-empty") ^= 0xFF;
+        let raw = json!({
+            "status": 1,
+            "error_code": 0,
+            "data": { "secu_params": hex::encode(bytes) }
+        });
+
+        let output = process_login_response(after_transport(raw), &enc.temp_key);
+        assert_eq!(output["status"], json!(0));
+        assert!(output["msg"].as_str().unwrap().contains("缺少凭证"));
     }
 }
