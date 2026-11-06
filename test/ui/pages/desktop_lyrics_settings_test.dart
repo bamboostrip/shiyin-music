@@ -462,20 +462,58 @@ void main() {
     );
 
     testWidgets(
-      'mobile form factor hides PC-only alignment but keeps supported rows',
+      'mobile form factor renders three-way alignment, no split, preview matches',
       (tester) async {
-        // 移动端形态：对齐方式是 PC 桌面悬浮窗专属，隐藏；其余行
-        // （行数/字号/透明度/颜色/锁定/穿透）移动端原生均已支持，保留。
+        // 移动端形态：原生悬浮窗现已支持左/中/右三档对齐（无左右分离），
+        // 设置页不再隐藏对齐项，预览与真实悬浮窗一致。
         debugDesktopFormFactorOverride = false;
         addTearDown(() {
           debugDesktopFormFactorOverride = null;
         });
         await pumpSettingsPage(tester);
 
-        expect(find.text('对齐方式'), findsNothing);
-        expect(find.text('居中'), findsNothing);
-        expect(find.text('左对齐'), findsNothing);
-        expect(find.text('右对齐'), findsNothing);
+        expect(find.text('对齐方式'), findsOneWidget);
+        expect(find.text('居中'), findsOneWidget);
+        expect(find.text('左对齐'), findsOneWidget);
+        expect(find.text('右对齐'), findsOneWidget);
+        expect(find.text('左右分离'), findsNothing);
+
+        // 存量默认 split 在移动端按原生历史行为展示/渲染为左对齐。
+        var alignmentSelector = tester.widget<SegmentedButton<String>>(
+          find.byType(SegmentedButton<String>),
+        );
+        expect(alignmentSelector.selected, {DesktopLyricsAlignment.left});
+        var lines = tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .toList();
+        expect(lines.length, 2);
+        expect(lines.first.alignment, TextAlign.left);
+
+        // 选居中：设置落盘 + 预览同步居中。
+        await tester.tap(find.text('居中'));
+        await tester.pumpAndSettle();
+        expect(
+          player.desktopLyricsSettings.alignment,
+          DesktopLyricsAlignment.center,
+        );
+        lines = tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .toList();
+        expect(lines.first.alignment, TextAlign.center);
+        expect(lines[1].alignment, TextAlign.center);
+
+        // 选右对齐：预览同步右对齐。
+        await tester.tap(find.text('右对齐'));
+        await tester.pumpAndSettle();
+        expect(
+          player.desktopLyricsSettings.alignment,
+          DesktopLyricsAlignment.right,
+        );
+        lines = tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .toList();
+        expect(lines.first.alignment, TextAlign.right);
+        expect(lines[1].alignment, TextAlign.right);
 
         expect(find.text('显示行数'), findsOneWidget);
         expect(find.text('单行显示'), findsOneWidget);
@@ -490,16 +528,6 @@ void main() {
         expect(find.text('锁定位置'), findsOneWidget);
         expect(find.text('触摸穿透'), findsOneWidget);
 
-        // 预览与移动端原生悬浮窗一致：恒为左对齐（即使存量值是 split）。
-        // 桌面默认双行，预览直接渲染两行。
-        final lines = tester
-            .widgetList<LyricsKaraokeLine>(
-              find.byType(LyricsKaraokeLine),
-            )
-            .toList();
-        expect(lines.length, 2);
-        expect(lines.first.alignment, TextAlign.left);
-
         // 行数切换在移动端仍可用：切单行后下一句消失，切回双行恢复。
         await tester.tap(find.text('单行显示'));
         await tester.pumpAndSettle();
@@ -509,6 +537,49 @@ void main() {
         await tester.pumpAndSettle();
         expect(player.desktopLyricsSettings.singleLine, isFalse);
         expect(find.text('让音乐更自由'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'mobile line-count toggle keeps stored split rendered as left (no center jump)',
+      (tester) async {
+        // 回归：桌面语义里 split→单行会回落 center；移动端没有 split，
+        // 存量 split 实际是左对齐。仅切换显示行数不得把对齐改成居中。
+        debugDesktopFormFactorOverride = false;
+        addTearDown(() {
+          debugDesktopFormFactorOverride = null;
+        });
+        await pumpSettingsPage(tester);
+
+        expect(
+          player.desktopLyricsSettings.alignment,
+          DesktopLyricsAlignment.split,
+        );
+
+        await tester.tap(find.text('单行显示'));
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.singleLine, isTrue);
+        expect(
+          player.desktopLyricsSettings.alignment,
+          DesktopLyricsAlignment.split,
+          reason: '移动端切单行不能把存量 split 改写成 center',
+        );
+        var alignmentSelector = tester.widget<SegmentedButton<String>>(
+          find.byType(SegmentedButton<String>),
+        );
+        expect(alignmentSelector.selected, {DesktopLyricsAlignment.left});
+
+        await tester.tap(find.text('双行显示'));
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.singleLine, isFalse);
+        expect(
+          player.desktopLyricsSettings.alignment,
+          DesktopLyricsAlignment.split,
+        );
+        alignmentSelector = tester.widget<SegmentedButton<String>>(
+          find.byType(SegmentedButton<String>),
+        );
+        expect(alignmentSelector.selected, {DesktopLyricsAlignment.left});
       },
     );
   });

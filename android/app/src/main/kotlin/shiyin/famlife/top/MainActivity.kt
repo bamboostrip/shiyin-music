@@ -23,6 +23,7 @@ import android.media.audiofx.Virtualizer
 import android.os.Handler
 import android.util.Log
 import android.os.Looper
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
@@ -43,6 +44,9 @@ class MainActivity : AudioServiceActivity() {
     private var downloadReceiverRegistered = false
     private var lyricsStateReceiverRegistered = false
     private var desktopLyricsChannel: MethodChannel? = null
+    // 车机方向盘媒体键前台兜底（issue #15）：部分车机把方控 KeyEvent 直接
+    // 派发到前台 Activity，audio_service 的 MediaSession 收不到。
+    private var carMediaKeyHandler: CarMediaKeyHandler? = null
     private var superLyricChannel: MethodChannel? = null
     private var superLyricRegistered = false
     // audio_effects channel 引用,供响度分析中途反向 invokeMethod 推进度给 Dart。
@@ -139,6 +143,11 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // 车机方向盘媒体键兜底（issue #15）：前台 Activity 收到标准媒体键时
+        // 经 MethodChannel 转给 Dart 播控；后台仍由 audio_service 的
+        // MediaSession 处理（通知栏/锁屏/蓝牙 AVRCP）。
+        carMediaKeyHandler = CarMediaKeyHandler(this, flutterEngine)
 
         // AI / 外部 DeepLink（shiyin://）：VIEW intent 的 data 交给 Dart 解析
         // 与执行。冷启动链接已在 onCreate 暂存，由 Dart 的 getInitialLink 取走
@@ -553,6 +562,9 @@ class MainActivity : AudioServiceActivity() {
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
                         val singleLine = call.argument<Boolean>("singleLine") ?: false
+                        // 对齐：left/center/right；旧版 Flutter 未发该键时按历史
+                        // 左对齐兜底（收到 split 时服务侧同样归一化为 left）。
+                        val alignment = call.argument<String>("alignment") ?: "left"
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_SETTINGS
                             putExtra(LyricsOverlayService.EXTRA_OPACITY, opacity)
@@ -563,6 +575,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_PLAYED_TEXT_COLOR, playedColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_TEXT_OPACITY, textOpacity)
                             putExtra(LyricsOverlayService.EXTRA_SINGLE_LINE, singleLine)
+                            putExtra(LyricsOverlayService.EXTRA_ALIGNMENT, alignment)
                             putExtra(LyricsOverlayService.EXTRA_BACKGROUND_COLOR, backgroundColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_FONT_SIZE, fontSize)
                         }
@@ -871,6 +884,17 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * 车机方控兜底：先让 [CarMediaKeyHandler] 识别标准媒体键并消费，
+     * 其余按键原样交回 Flutter/系统（返回键、输入法等不受影响）。
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (carMediaKeyHandler?.handleKeyEvent(event.keyCode, event) == true) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun readAudioPermission(): String {

@@ -160,6 +160,52 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
         .toList();
   }
 
+  /// 搜索歌单（`/search?type=special`）。
+  ///
+  /// 注意：`api.json` 里的独立路由 `/search/special` 属于 .NET 版接口，
+  /// 本仓库的 Rust 引擎没有该路由（会返回 `Unknown route`）；实际支持的
+  /// 是通用 `/search` 的 `type=special` 分支，返回 `{lists: [...]}`。
+  /// 网关同类接口还存在 `{info|list: [...]}` / `{data: {info: [...]}}`
+  /// 等包装形态，这里一并兼容，避免上游换包装时整页歌单静默为空。
+  /// id 为空（gid 与 specialid 都缺失）的条目无法打开详情，直接过滤。
+  Future<List<PlaylistSummary>> searchPlaylists(
+    String keywords, {
+    int page = 1,
+  }) async {
+    final raw = await _client.get('/search', {
+      'keywords': keywords,
+      'page': page,
+      'pagesize': 30,
+      'type': 'special',
+    });
+    final List items;
+    if (raw is List) {
+      items = raw;
+    } else {
+      final json = asMap(raw);
+      final data = asMap(json['data']);
+      // `data` 既可能是 `{info: [...]}`，也可能直接是数组（网关实现差异），
+      // 两种都兼容，避免上游换包装时整页歌单静默为空。
+      items = json['data'] is List
+          ? asList(json['data'])
+          : asList(
+              json['info'] ??
+                  json['list'] ??
+                  json['lists'] ??
+                  json['items'] ??
+                  data['info'] ??
+                  data['list'] ??
+                  data['lists'] ??
+                  data['items'],
+            );
+    }
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(PlaylistSummary.fromSearch)
+        .where((playlist) => playlist.id.isNotEmpty)
+        .toList();
+  }
+
   /// 搜索网易云歌曲。
   ///
   /// 使用独立的网易云 API（`wyy.music.api.hoilai.cn`）：

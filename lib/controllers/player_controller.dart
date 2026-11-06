@@ -28,6 +28,7 @@ import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/local_lyrics_service.dart';
 import '../services/lrc_formatter.dart';
+import '../services/media_key_service.dart';
 import '../services/music_api.dart';
 import '../services/music_audio_handler.dart';
 import '../services/network_monitor.dart';
@@ -196,6 +197,11 @@ class PlayerController extends _PlayerControllerBase
   static const equalizerPresets = kEqualizerPresets;
   static const audioEffectProfiles = kAudioEffectProfiles;
 
+  /// 车机方向盘媒体键前台兜底（issue #15）：部分车机把方控 KeyEvent 直接
+  /// 派发到前台 Activity，audio_service 的 MediaSession 收不到。原生侧
+  /// 经 MethodChannel 下发，这里转成播控动作；非 Android 平台内部 no-op。
+  final MediaKeyService _mediaKeyService = MediaKeyService();
+
   PlayerController(super.api, super.audioHandler) {
     unawaited(_restoreSettings());
     unawaited(_restorePlaybackState());
@@ -211,6 +217,23 @@ class PlayerController extends _PlayerControllerBase
       },
     );
     _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
+    // 车机方控前台兜底：原生只发标准媒体键，这里映射到与通知栏/媒体键
+    // 同一套播控。控制器没有独立 play/pause/stop，按当前 isPlaying 走
+    // togglePlay，避免「暂停键在已暂停时反而起播」这类双触发。
+    _mediaKeyService.attach(
+      onTogglePlay: togglePlay,
+      onPlay: () async {
+        if (!isPlaying) await togglePlay();
+      },
+      onPause: () async {
+        if (isPlaying) await togglePlay();
+      },
+      onNext: next,
+      onPrevious: previous,
+      onStop: () async {
+        if (isPlaying) await togglePlay();
+      },
+    );
     _setupDesktopLyricsListeners();
     _positionSub = audioPlayer.positionStream.listen((value) {
       if (_pendingInitialPosition != null) {
@@ -457,6 +480,7 @@ class PlayerController extends _PlayerControllerBase
     unawaited(_loudness.releaseNative());
     unawaited(_superLyric.unregisterPublisher());
     _audioHandler.detachTransportControls();
+    _mediaKeyService.detach();
     unawaited(_audioHandler.close());
     unawaited(_desktopLyrics.hide());
     super.dispose();

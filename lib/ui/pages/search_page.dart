@@ -55,7 +55,7 @@ class SearchPage extends StatefulWidget {
 enum _SearchPlatform { kugou, netease }
 
 /// 酷狗搜索类型。
-enum _SearchType { song, artist, album }
+enum _SearchType { song, artist, album, playlist }
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
@@ -70,6 +70,7 @@ class _SearchPageState extends State<SearchPage> {
   List<Song> _results = const [];
   List<SearchArtistResult> _artistResults = const [];
   List<SearchAlbumResult> _albumResults = const [];
+  List<PlaylistSummary> _playlistResults = const [];
   bool _loading = false;
   bool _searched = false;
   // 搜索失败标记：区分"真无结果"与"网络失败"，失败时展示重试入口。
@@ -136,6 +137,7 @@ class _SearchPageState extends State<SearchPage> {
     _results = const [];
     _artistResults = const [];
     _albumResults = const [];
+    _playlistResults = const [];
     _suggestions = const [];
     _hotCategories = const [];
     _searchHistory = const [];
@@ -192,6 +194,7 @@ class _SearchPageState extends State<SearchPage> {
         if (text.isEmpty) {
           _suggestions = const [];
           _results = const [];
+          _playlistResults = const [];
           _searched = false;
         }
       });
@@ -246,6 +249,11 @@ class _SearchPageState extends State<SearchPage> {
             if (mounted && seq == _searchSeq) {
               setState(() => _albumResults = albums);
             }
+          case _SearchType.playlist:
+            final playlists = await widget.api.searchPlaylists(keywords);
+            if (mounted && seq == _searchSeq) {
+              setState(() => _playlistResults = playlists);
+            }
         }
       }
       // 已被更新的搜索取代：不落结果、不记历史、不动 loading
@@ -259,6 +267,7 @@ class _SearchPageState extends State<SearchPage> {
           _results = const [];
           _artistResults = const [];
           _albumResults = const [];
+          _playlistResults = const [];
           _searchError = error.toString();
         });
       }
@@ -608,7 +617,7 @@ class _SearchPageState extends State<SearchPage> {
               child: AppSearchField(
                 controller: _controller,
                 focusNode: _focusNode,
-                hintText: '搜索歌曲、歌手、专辑',
+                hintText: '搜索歌曲、歌手、专辑、歌单',
                 textInputAction: TextInputAction.search,
                 onSubmitted: (_) => _onSubmitFromKeyboard(),
               ),
@@ -729,6 +738,15 @@ class _SearchPageState extends State<SearchPage> {
               ? _EmptyResults(keyword: text)
               : _AlbumResults(
                   albums: _albumResults,
+                  api: widget.api,
+                  auth: widget.auth,
+                  player: widget.player,
+                );
+        case _SearchType.playlist:
+          return _playlistResults.isEmpty
+              ? _EmptyResults(keyword: text)
+              : _PlaylistResults(
+                  playlists: _playlistResults,
                   api: widget.api,
                   auth: widget.auth,
                   player: widget.player,
@@ -1664,7 +1682,8 @@ class _EmptyResults extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            '没有找到「$keyword」相关歌曲',
+            // 空态由歌曲/歌手/专辑/歌单四类共用，「相关内容」比「歌曲」准确。
+            '没有找到「$keyword」相关内容',
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
@@ -1885,6 +1904,7 @@ class _SearchTypeSelector extends StatelessWidget {
     _SearchType.song: '歌曲',
     _SearchType.artist: '歌手',
     _SearchType.album: '专辑',
+    _SearchType.playlist: '歌单',
   };
 
   @override
@@ -2133,6 +2153,102 @@ class _AlbumResults extends StatelessWidget {
         ),
       );
     },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 歌单搜索结果
+// ---------------------------------------------------------------------------
+
+class _PlaylistResults extends StatelessWidget {
+  const _PlaylistResults({
+    required this.playlists,
+    required this.api,
+    required this.auth,
+    required this.player,
+  });
+
+  final List<PlaylistSummary> playlists;
+  final MusicApi api;
+  final AuthController auth;
+  final PlayerController player;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: playlists.length,
+      itemBuilder: (context, index) {
+        final playlist = playlists[index];
+        final subtitle = [
+          if (playlist.subtitle?.isNotEmpty == true) playlist.subtitle!,
+          if ((playlist.songCount ?? 0) > 0) '${playlist.songCount} 首',
+        ].join(' · ');
+        return MouseRegion(
+          cursor: isDesktopFormFactor
+              ? SystemMouseCursors.click
+              : MouseCursor.defer,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PlaylistDetailPage(
+                    api: api,
+                    auth: auth,
+                    player: player,
+                    playlist: playlist,
+                  ),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Artwork(url: playlist.coverUrl, size: 52, borderRadius: 8),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          playlist.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: .5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

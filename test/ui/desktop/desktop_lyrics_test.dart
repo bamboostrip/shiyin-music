@@ -87,6 +87,32 @@ void main() {
       expect(settings.backgroundColor, 0xFF1A1A2E);
     });
 
+    test('移动端默认左对齐：split 在原生悬浮窗归一化为 left', () {
+      final mobile = DesktopLyricsSettings.platformDefault(isDesktop: false);
+      expect(mobile.alignment, DesktopLyricsAlignment.left);
+      expect(mobile.opacity, DesktopLyricsSettings.defaultMobileOpacity);
+      expect(
+        const DesktopLyricsSettings()
+            .withDefaultMobileAppearance()
+            .alignment,
+        DesktopLyricsAlignment.left,
+      );
+      // 存量 split（旧默认）与合法值在移动端的归一化。
+      expect(
+        DesktopLyricsAlignment.forMobile(DesktopLyricsAlignment.split),
+        DesktopLyricsAlignment.left,
+      );
+      expect(
+        DesktopLyricsAlignment.forMobile(DesktopLyricsAlignment.center),
+        DesktopLyricsAlignment.center,
+      );
+      // 桌面默认仍是左右分离，不受移动端默认影响。
+      expect(
+        DesktopLyricsSettings.platformDefault(isDesktop: true).alignment,
+        DesktopLyricsAlignment.split,
+      );
+    });
+
     test('序列化与反序列化完整保持所有新旧字段', () {
       const original = DesktopLyricsSettings(
         opacity: 0.8,

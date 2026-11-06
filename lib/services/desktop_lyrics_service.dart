@@ -34,6 +34,12 @@ class DesktopLyricsAlignment {
 
   /// 双行排布的左右锚点：交错（split）时上下行分居两侧。
   static bool isSplit(String alignment) => alignment == split;
+
+  /// 取移动端原生悬浮窗实际渲染的锚点：存量 `split`（旧默认）在移动端
+  /// 没有左右两行可分，按与原生历史行为一致的左对齐渲染，避免升级后
+  /// 突然跳到用户没选过的居中。
+  static String forMobile(String alignment) =>
+      alignment == split ? left : alignment;
 }
 
 class DesktopLyricsSettings {
@@ -72,6 +78,10 @@ class DesktopLyricsSettings {
   static const double defaultMobileOpacity = 0.5;
   static const bool defaultMobileSingleLine = false;
 
+  /// 移动端对齐默认值：左对齐（与原生悬浮窗历史行为一致，老用户升级无感）。
+  /// 桌面默认仍是 `split`（上行居左/下行居右），两者语义不同，不能共用。
+  static const String defaultMobileAlignment = DesktopLyricsAlignment.left;
+
   const DesktopLyricsSettings({
     this.opacity = defaultOpacity,
     this.locked = false,
@@ -105,13 +115,14 @@ class DesktopLyricsSettings {
   );
 
   /// 移动端外观恢复出厂默认：与 [withDefaultAppearance] 相同的字段集合，
-  /// 仅行数与背景透明度取移动端默认值（双行 + 50% 背景）。
+  /// 仅行数与背景透明度取移动端默认值（双行 + 50% 背景），对齐取移动端
+  /// 左对齐（原生悬浮窗历史行为）。
   DesktopLyricsSettings withDefaultMobileAppearance() => copyWith(
     opacity: defaultMobileOpacity,
     backgroundColor: defaultBackgroundColor,
     fontSize: defaultFontSize,
     singleLine: defaultMobileSingleLine,
-    alignment: defaultAlignment,
+    alignment: defaultMobileAlignment,
     textOpacity: defaultTextOpacity,
     playedTextColor: defaultPlayedTextColor,
     unplayedTextColor: defaultUnplayedTextColor,
@@ -132,6 +143,7 @@ class DesktopLyricsSettings {
           : const DesktopLyricsSettings(
               opacity: defaultMobileOpacity,
               singleLine: defaultMobileSingleLine,
+              alignment: defaultMobileAlignment,
             );
 
   final double opacity;
@@ -631,8 +643,12 @@ class DesktopLyricsService {
       await _windowsBridge?.updateSettings(settings);
       return;
     }
+    // Android 原生悬浮窗只支持左/中/右；存量 `split` 按左对齐下发，与
+    // 原生历史渲染一致（原生侧另有兜底归一化）。
+    final payload = settings.toMap();
+    payload['alignment'] = DesktopLyricsAlignment.forMobile(settings.alignment);
     try {
-      await _channel.invokeMethod<void>('updateSettings', settings.toMap());
+      await _channel.invokeMethod<void>('updateSettings', payload);
     } on MissingPluginException {
       // ignore
     }

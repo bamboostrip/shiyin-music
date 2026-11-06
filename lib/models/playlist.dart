@@ -196,6 +196,32 @@ class PlaylistSummary {
     );
   }
 
+  /// 搜索歌单结果（实际入口 `/search?type=special`，字段同 api.json 的 `SearchPlaylistItem`）。
+  ///
+  /// 搜索接口同时下发数字 ID（`specialid`）与全局 ID（`gid`）。实测
+  /// `/playlist/detail` 与 `/playlist/track/all` 只接受全局 ID：传
+  /// `specialid` 会返回空响应（status=1、无歌单字段）。因此这里只取
+  /// `gid`；缺失的条目无法打开详情，id 置空由服务层过滤，避免搜出
+  /// 点开是空页面的死条目。
+  ///
+  /// `sourceGlobalId` 与 id 保持一致：搜索结果都是普通歌单而非收藏专辑。
+  /// 标记来源可让 [isCollectedAlbum] / [hasCollectionSource] 按普通歌单
+  /// 判定，避免详情页误走专辑（`/album/songs`）分支。
+  factory PlaylistSummary.fromSearch(Map<String, dynamic> json) {
+    final id = asString(json['gid']) ?? '';
+    final nickname = asString(json['nickname']);
+    return PlaylistSummary(
+      id: id,
+      title: asString(json['specialname']) ?? '未命名歌单',
+      subtitle: nickname,
+      coverUrl: normalizeImageUrl(asString(json['img'])),
+      songCount: asInt(json['song_count']),
+      playCount: asInt(json['total_play_count']),
+      creatorName: nickname,
+      sourceGlobalId: id.isEmpty ? null : id,
+    );
+  }
+
   factory PlaylistSummary.fromSimilar(Map<String, dynamic> json) {
     return PlaylistSummary(
       id: asString(json['global_collection_id']) ?? '',
