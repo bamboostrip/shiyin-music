@@ -28,6 +28,13 @@ class KaraokeTextView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
+    companion object {
+        /** 左对齐：与原实现一致（默认）。 */
+        const val ALIGN_LEFT = 0
+        const val ALIGN_CENTER = 1
+        const val ALIGN_RIGHT = 2
+    }
+
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
@@ -99,6 +106,24 @@ class KaraokeTextView @JvmOverloads constructor(
             }
         }
 
+    /**
+     * 短行（不溢出可用宽度）的横向锚点：左/中/右。
+     *
+     * 长行走跑马灯时锚点无意义，始终从左侧开始滚动；跑马灯逻辑与对齐设置
+     * 互不干扰（见 [onDraw] 的 startX 计算）。
+     */
+    var lyricAlignment: Int = ALIGN_LEFT
+        set(value) {
+            val normalized = when (value) {
+                ALIGN_CENTER, ALIGN_RIGHT -> value
+                else -> ALIGN_LEFT
+            }
+            if (field != normalized) {
+                field = normalized
+                invalidate()
+            }
+        }
+
     // 长行走单行跑马灯，行高固定为一行（原 maxLines=2 只有高度生效，并无换行绘制）
     var maxLines: Int = 1
 
@@ -152,26 +177,36 @@ class KaraokeTextView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (text.isEmpty()) return
 
-        // 长行滚动时整行左移；短行 scrollOffset 恒为 0，绘制与之前一致
-        val x = paddingLeft.toFloat() - scrollOffset
+        val contentWidth = (width - paddingLeft - paddingRight).toFloat()
+        val textWidth = basePaint.measureText(text)
+        // 短行按设置锚点对齐；长行（需要跑马灯）从左侧开始滚动，滚动位移
+        // 与高亮裁剪都以同一个 startX 为基准，进度填充关系不变。
+        val startX = if (textWidth <= contentWidth) {
+            when (lyricAlignment) {
+                ALIGN_CENTER -> paddingLeft + (contentWidth - textWidth) / 2f
+                ALIGN_RIGHT -> width - paddingRight - textWidth
+                else -> paddingLeft.toFloat()
+            }
+        } else {
+            paddingLeft.toFloat() - scrollOffset
+        }
         val y = paddingTop - basePaint.fontMetrics.top
 
         // Draw base (dim) text
-        canvas.drawText(text, x, y, basePaint)
+        canvas.drawText(text, startX, y, basePaint)
 
         // Draw active (bright) text clipped to progress
         if (progress > 0f) {
-            val totalWidth = basePaint.measureText(text)
-            val clipWidth = totalWidth * progress
+            val clipWidth = textWidth * progress
             clipRect.set(
-                x,
+                startX,
                 0f,
-                x + clipWidth,
+                startX + clipWidth,
                 height.toFloat()
             )
             canvas.save()
             canvas.clipRect(clipRect)
-            canvas.drawText(text, x, y, activePaint)
+            canvas.drawText(text, startX, y, activePaint)
             canvas.restore()
         }
     }

@@ -67,6 +67,8 @@ class LyricsOverlayService : Service() {
         const val EXTRA_PLAYED_TEXT_COLOR = "playedTextColor"
         const val EXTRA_TEXT_OPACITY = "textOpacity"
         const val EXTRA_SINGLE_LINE = "singleLine"
+        /** 对齐方式：left / center / right（原生悬浮窗无左右分离语义）。 */
+        const val EXTRA_ALIGNMENT = "alignment"
         const val EXTRA_IS_FOREGROUND = "is_foreground"
         const val EXTRA_LINE_DURATION_MS = "line_duration_ms"
         const val EXTRA_VISIBLE = "visible"
@@ -89,6 +91,12 @@ class LyricsOverlayService : Service() {
         private const val DEFAULT_UNPLAYED_COLOR = 0xFF00BFFF.toInt()
         private const val DEFAULT_FONT_SIZE_SP = 24f
 
+        // 对齐方式取值：与 Flutter 侧 DesktopLyricsAlignment 的 left/center/right
+        // 字符串一致；历史默认 split 在原生侧没有语义，统一归一化为 left。
+        private const val ALIGN_LEFT = "left"
+        private const val ALIGN_CENTER = "center"
+        private const val ALIGN_RIGHT = "right"
+
         private const val PREFS_NAME = "lyrics_overlay_prefs"
         private const val KEY_POS_X = "pos_x"
         private const val KEY_POS_Y = "pos_y"
@@ -103,6 +111,7 @@ class LyricsOverlayService : Service() {
         private const val KEY_PLAYED_TEXT_COLOR = "played_text_color"
         private const val KEY_TEXT_OPACITY = "text_opacity"
         private const val KEY_SINGLE_LINE = "single_line"
+        private const val KEY_ALIGNMENT = "alignment"
 
         // 悬浮窗默认宽度：取屏幕宽度的一定比例并设上限，宽度不随歌词文本长短变化。
         // 上限 320dp 沿用原布局 maxWidth 的意图（车机横屏、手机竖屏都保持紧凑），
@@ -166,6 +175,9 @@ class LyricsOverlayService : Service() {
     private var textOpacity: Float = 1f
     // 单行模式只显示当前句，下一句隐藏；移动端默认双行（false），与 Flutter 侧一致。
     private var isSingleLine: Boolean = false
+    // 对齐方式：left / center / right。原生悬浮窗没有 PC 的「左右分离」，
+    // 收到历史默认 split 时归一化为 left（与旧版恒左对齐的渲染一致）。
+    private var alignment: String = ALIGN_LEFT
     private var backgroundColor: Int = Color.parseColor("#1A1A2E")
     private var fontSizeSp: Float = DEFAULT_FONT_SIZE_SP
 
@@ -381,6 +393,9 @@ class LyricsOverlayService : Service() {
                 textOpacity = intent.getFloatExtra(EXTRA_TEXT_OPACITY, textOpacity)
                     .coerceIn(0f, 1f)
                 isSingleLine = intent.getBooleanExtra(EXTRA_SINGLE_LINE, isSingleLine)
+                alignment = normalizeAlignment(
+                    intent.getStringExtra(EXTRA_ALIGNMENT) ?: alignment
+                )
                 val bgColorInt = intent.getIntExtra(EXTRA_BACKGROUND_COLOR, backgroundColor)
                 val sizeSp = intent.getFloatExtra(EXTRA_FONT_SIZE, fontSizeSp)
                 backgroundColor = bgColorInt
@@ -764,6 +779,19 @@ class LyricsOverlayService : Service() {
             karaokeView?.activeColor = withOpacity(playedColor, textOpacity)
             karaokeView?.baseColor = withOpacity(unplayedColor, textOpacity)
             karaokeView?.textSizeSp = fontSizeSp
+            karaokeView?.lyricAlignment = when (alignment) {
+                ALIGN_CENTER -> KaraokeTextView.ALIGN_CENTER
+                ALIGN_RIGHT -> KaraokeTextView.ALIGN_RIGHT
+                else -> KaraokeTextView.ALIGN_LEFT
+            }
+
+            // 下一句与原句同一锚点：TextView 占满容器宽度后按 gravity 对齐，
+            // 长行超出时仍由 marquee 从起点滚动。
+            tvNextLyric?.gravity = when (alignment) {
+                ALIGN_CENTER -> Gravity.CENTER_HORIZONTAL
+                ALIGN_RIGHT -> Gravity.END
+                else -> Gravity.START
+            }
 
             // 下一句取未播放色再压暗（PC 双行非活动行 0.65 系数），字号跟随主行缩放。
             tvNextLyric?.setTextColor(
@@ -814,10 +842,18 @@ class LyricsOverlayService : Service() {
         sendBroadcast(intent)
     }
 
+    /** 只接受原生支持的 left/center/right；历史 split 与非法值一律回落 left。 */
+    private fun normalizeAlignment(value: String?): String = when (value) {
+        ALIGN_CENTER -> ALIGN_CENTER
+        ALIGN_RIGHT -> ALIGN_RIGHT
+        else -> ALIGN_LEFT
+    }
+
     private fun loadSettings() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         // 新鲜安装默认值与 Flutter 侧 DesktopLyricsSettings 移动端默认对齐
-        //（双行 + 50% 背景、金黄/天蓝、字号 24）；老用户已持久化的选择不受影响。
+        //（双行 + 50% 背景、金黄/天蓝、字号 24、左对齐）；老用户已持久化的
+        // 选择不受影响。
         bgOpacity = prefs.getFloat(KEY_OPACITY, 0.5f)
         isLocked = prefs.getBoolean(KEY_LOCKED, false)
         isPassthrough = prefs.getBoolean(KEY_PASSTHROUGH, false)
@@ -828,6 +864,7 @@ class LyricsOverlayService : Service() {
         textColor = unplayedColor
         textOpacity = prefs.getFloat(KEY_TEXT_OPACITY, 1f).coerceIn(0f, 1f)
         isSingleLine = prefs.getBoolean(KEY_SINGLE_LINE, false)
+        alignment = normalizeAlignment(prefs.getString(KEY_ALIGNMENT, ALIGN_LEFT))
         backgroundColor = prefs.getInt(KEY_BACKGROUND_COLOR, Color.parseColor("#1A1A2E"))
         fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, DEFAULT_FONT_SIZE_SP)
     }
@@ -843,6 +880,7 @@ class LyricsOverlayService : Service() {
             .putInt(KEY_PLAYED_TEXT_COLOR, playedColor)
             .putFloat(KEY_TEXT_OPACITY, textOpacity)
             .putBoolean(KEY_SINGLE_LINE, isSingleLine)
+            .putString(KEY_ALIGNMENT, alignment)
             .putInt(KEY_BACKGROUND_COLOR, backgroundColor)
             .putFloat(KEY_FONT_SIZE, fontSizeSp)
             .apply()

@@ -54,13 +54,20 @@ class _DesktopLyricsSettingsPageState
     widget.player.updateDesktopLyricsSettings(_settings);
   }
 
-  /// 设置页展示用的对齐值。「左右分离」只对双行显示有意义；存量/默认值
-  /// split 在单行下与居中渲染完全一致，显示为居中，避免分段按钮空选中。
-  String get _displayAlignment =>
-      (_settings.singleLine &&
-          _settings.alignment == DesktopLyricsAlignment.split)
-      ? DesktopLyricsAlignment.center
-      : _settings.alignment;
+  /// 设置页展示用的对齐值。
+  ///
+  /// - 移动端没有「左右分离」语义：存量/默认 `split` 按原生实际渲染的左对齐
+  ///   展示，避免分段按钮空选中或与实际悬浮窗不一致。
+  /// - 桌面单行下 `split` 与居中渲染完全一致，显示为居中。
+  String get _displayAlignment {
+    if (!isDesktopFormFactor) {
+      return DesktopLyricsAlignment.forMobile(_settings.alignment);
+    }
+    return (_settings.singleLine &&
+            _settings.alignment == DesktopLyricsAlignment.split)
+        ? DesktopLyricsAlignment.center
+        : _settings.alignment;
+  }
 
   void _resetToDefaults() {
     // 只恢复外观（配色/字号/行数/对齐/透明度）；锁定与触摸穿透保持不变。
@@ -106,48 +113,50 @@ class _DesktopLyricsSettingsPageState
                 ButtonSegment(value: false, label: Text('双行显示')),
               ],
               onChanged: (v) => _update((s) {
-                // 「左右分离」没有单行语义；切回单行时回落为渲染等价的居中。
+                // 桌面上「左右分离」没有单行语义；切回单行时回落为渲染
+                // 等价的居中。移动端没有 split 语义（存量 split 实际渲染
+                // 为左对齐），不能套用桌面回落逻辑，否则仅切换行数就会
+                // 把对齐从「左」意外改成「居中」。
                 final alignment =
-                    (v && s.alignment == DesktopLyricsAlignment.split)
+                    (isDesktopFormFactor &&
+                        v &&
+                        s.alignment == DesktopLyricsAlignment.split)
                     ? DesktopLyricsAlignment.center
                     : s.alignment;
                 return s.copyWith(singleLine: v, alignment: alignment);
               }),
             ),
             _SettingsDivider(),
-            // 对齐方式是 PC 桌面悬浮窗专属：移动端原生悬浮窗恒为左对齐
-            // （KaraokeTextView 定宽左排 + 跑马灯），实现对齐需要重写绘制
-            // 与滚动逻辑，风险高，移动端直接隐藏该行。
-            if (isDesktopFormFactor) ...[
-              _SegmentTile<String>(
-                icon: Icons.format_align_center_rounded,
-                iconColor: colorScheme.primary,
-                title: '对齐方式',
-                selected: _displayAlignment,
-                segments: [
+            // 对齐方式：桌面与移动端原生悬浮窗均已支持。桌面双行多一个
+            // 「左右分离」；移动端只有当前句/下一句统一的左/中/右三档。
+            _SegmentTile<String>(
+              icon: Icons.format_align_center_rounded,
+              iconColor: colorScheme.primary,
+              title: '对齐方式',
+              selected: _displayAlignment,
+              segments: [
+                const ButtonSegment(
+                  value: DesktopLyricsAlignment.center,
+                  label: Text('居中'),
+                ),
+                const ButtonSegment(
+                  value: DesktopLyricsAlignment.left,
+                  label: Text('左对齐'),
+                ),
+                const ButtonSegment(
+                  value: DesktopLyricsAlignment.right,
+                  label: Text('右对齐'),
+                ),
+                // 仅桌面双行显示时可选：上行居左、下行居右。
+                if (isDesktopFormFactor && !_settings.singleLine)
                   const ButtonSegment(
-                    value: DesktopLyricsAlignment.center,
-                    label: Text('居中'),
+                    value: DesktopLyricsAlignment.split,
+                    label: Text('左右分离'),
                   ),
-                  const ButtonSegment(
-                    value: DesktopLyricsAlignment.left,
-                    label: Text('左对齐'),
-                  ),
-                  const ButtonSegment(
-                    value: DesktopLyricsAlignment.right,
-                    label: Text('右对齐'),
-                  ),
-                  // 仅双行显示时可选：上行居左、下行居右。
-                  if (!_settings.singleLine)
-                    const ButtonSegment(
-                      value: DesktopLyricsAlignment.split,
-                      label: Text('左右分离'),
-                    ),
-                ],
-                onChanged: (v) => _update((s) => s.copyWith(alignment: v)),
-              ),
-              _SettingsDivider(),
-            ],
+              ],
+              onChanged: (v) => _update((s) => s.copyWith(alignment: v)),
+            ),
+            _SettingsDivider(),
             _SliderTile(
               key: const Key('slider_font_size'),
               icon: Icons.format_size_rounded,
@@ -343,7 +352,9 @@ class _DesktopLyricsSettingsPageState
                       '另一行换成下一句；对齐可选两行同侧（居中/左/右）或左右分离（上行居左、下行居右）。'
                       '调乱了可点右上角「恢复默认」一键还原外观。'
                   : '歌词悬浮窗支持拖动与右下角手柄缩放。单行只显示当前句，'
-                      '双行会同时显示下一句；锁定后无法拖动，点击悬浮窗锁图标可解锁。'
+                      '双行会同时显示下一句；对齐方式可选居中/左/右，'
+                      '长句超出窗口时自动跑马灯滚动。'
+                      '锁定后无法拖动，点击悬浮窗锁图标可解锁。'
                       '调乱了可点右上角「恢复默认」一键还原外观。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
@@ -948,11 +959,11 @@ class _LyricsPreviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final playedColor = Color(settings.playedTextColor);
     final unplayedColor = Color(settings.unplayedTextColor);
-    // 移动端原生悬浮窗恒为左对齐（设置页已隐藏对齐选项），预览必须与
-    // 真实悬浮窗一致；PC 则按设置值渲染。
+    // 移动端原生悬浮窗只支持左/中/右，存量 split 按左对齐渲染；预览必须
+    // 与真实悬浮窗一致。PC 则按设置值渲染（含左右分离）。
     final effectiveAlignment = isDesktopFormFactor
         ? settings.alignment
-        : DesktopLyricsAlignment.left;
+        : DesktopLyricsAlignment.forMobile(settings.alignment);
     final isSplit = DesktopLyricsAlignment.isSplit(effectiveAlignment);
     final textAlign = switch (effectiveAlignment) {
       DesktopLyricsAlignment.left => TextAlign.left,

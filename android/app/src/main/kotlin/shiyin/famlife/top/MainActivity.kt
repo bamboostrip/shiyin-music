@@ -553,6 +553,9 @@ class MainActivity : AudioServiceActivity() {
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
                         val singleLine = call.argument<Boolean>("singleLine") ?: false
+                        // 对齐：left/center/right；旧版 Flutter 未发该键时按历史
+                        // 左对齐兜底（收到 split 时服务侧同样归一化为 left）。
+                        val alignment = call.argument<String>("alignment") ?: "left"
                         val intent = Intent(this, LyricsOverlayService::class.java).apply {
                             action = LyricsOverlayService.ACTION_UPDATE_SETTINGS
                             putExtra(LyricsOverlayService.EXTRA_OPACITY, opacity)
@@ -563,6 +566,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_PLAYED_TEXT_COLOR, playedColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_TEXT_OPACITY, textOpacity)
                             putExtra(LyricsOverlayService.EXTRA_SINGLE_LINE, singleLine)
+                            putExtra(LyricsOverlayService.EXTRA_ALIGNMENT, alignment)
                             putExtra(LyricsOverlayService.EXTRA_BACKGROUND_COLOR, backgroundColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_FONT_SIZE, fontSize)
                         }
