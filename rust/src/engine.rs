@@ -61,20 +61,15 @@ impl KugouEngine {
             .clone()
     }
 
-    pub async fn request(
-        &self,
-        method: &str,
-        path: &str,
-        query: &str,
-        body: Option<&str>,
-    ) -> AppResult<String> {
+    /// 合并 query 与 body 参数：query 优先，body 只补充 query 里没有的键
+    /// （兼容前端把参数放在 body 里传，例如 /login/cellphone 的 `userId`）。
+    fn merge_request_params(query: &str, body: Option<&str>) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = if query.is_empty() {
             HashMap::new()
         } else {
             serde_json::from_str(query).unwrap_or_default()
         };
 
-        // 将 body 中的字段也合并到 params，兼容前端通过 body 传参的情况
         if let Some(body_str) = body {
             if let Ok(body_map) = serde_json::from_str::<HashMap<String, Value>>(body_str) {
                 for (k, v) in body_map {
@@ -86,6 +81,17 @@ impl KugouEngine {
                 }
             }
         }
+        params
+    }
+
+    pub async fn request(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        body: Option<&str>,
+    ) -> AppResult<String> {
+        let params = Self::merge_request_params(query, body);
 
         let session = self.session_snapshot();
         let result = self
@@ -207,6 +213,16 @@ impl KugouEngine {
         state.session.clone()
     }
 
+    /// 解析 `/login/cellphone` 的 userid 参数。前端按上游 HTTP API 契约传
+    /// camelCase 的 `userId`（多账号登录第二步把选中的账号带回来）；同时
+    /// 兼容小写 `userid` 写法。
+    fn login_userid_param(params: &HashMap<String, String>) -> Option<&str> {
+        params
+            .get("userId")
+            .or_else(|| params.get("userid"))
+            .map(|s| s.as_str())
+    }
+
     async fn dispatch_inner(
         &self,
         session: &KgSession,
@@ -225,7 +241,7 @@ impl KugouEngine {
             ("POST", "/login/cellphone") => {
                 let mobile = params.get("mobile").map(|s| s.as_str()).unwrap_or("");
                 let code = params.get("code").map(|s| s.as_str()).unwrap_or("");
-                let userid = params.get("userid").map(|s| s.as_str());
+                let userid = Self::login_userid_param(params);
                 let resp =
                     login::login_by_mobile(client, "", session, mobile, code, userid).await?;
                 self.persist_login(&resp);
@@ -915,6 +931,58 @@ mod tests {
         assert!(!KugouEngine::is_session_invalid_response(&json!({
             "status": 0, "msg": "服务内部错误"
         })));
+    }
+
+    #[test]
+    fn login_userid_param_accepts_camel_case_and_legacy_lowercase() {
+        // 前端（含多账号二次登录）按上游契约传 camelCase userId。
+        let params = HashMap::from([("userId".to_string(), "1002".to_string())]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1002"));
+
+        // 旧调用方 / 其他端可能仍用小写 userid。
+        let params = HashMap::from([("userid".to_string(), "1003".to_string())]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1003"));
+
+        // 两者同时存在时优先 camelCase。
+        let params = HashMap::from([
+            ("userId".to_string(), "1002".to_string()),
+            ("userid".to_string(), "1003".to_string()),
+        ]);
+        assert_eq!(KugouEngine::login_userid_param(&params), Some("1002"));
+
+        assert_eq!(KugouEngine::login_userid_param(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn merge_request_params_puts_body_values_into_params() {
+        // Dart 的 /login/cellphone 把 userId 放在 body 里，handler 从 params 读。
+        let params = KugouEngine::merge_request_params(
+            "",
+            Some(r#"{"mobile":"13800138000","code":"123456","userId":"1002"}"#),
+        );
+        assert_eq!(params.get("userId").map(String::as_str), Some("1002"));
+        assert_eq!(
+            params.get("mobile").map(String::as_str),
+            Some("13800138000")
+        );
+
+        // query 优先，body 里的同名键不覆盖。
+        let params = KugouEngine::merge_request_params(
+            r#"{"mobile":"query-mobile"}"#,
+            Some(r#"{"mobile":"body-mobile"}"#),
+        );
+        assert_eq!(
+            params.get("mobile").map(String::as_str),
+            Some("query-mobile")
+        );
+
+        // 非字符串 body 值会转成字符串，handler 统一按 &str 读取。
+        let params = KugouEngine::merge_request_params("", Some(r#"{"userid":1002}"#));
+        assert_eq!(params.get("userid").map(String::as_str), Some("1002"));
+
+        // 空 / 非法 body 不应 panic。
+        assert!(KugouEngine::merge_request_params("", Some("not-json")).is_empty());
+        assert!(KugouEngine::merge_request_params("", None).is_empty());
     }
 
     /// 联网探针：实测 /fm/recommend 与 /fm/songs 的真实返回结构。

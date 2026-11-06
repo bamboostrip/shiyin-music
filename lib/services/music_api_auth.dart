@@ -50,12 +50,14 @@ mixin _MusicApiAuth on _MusicApiBase {
         },
       ),
     );
-    if (_requiresUserSelection(json)) {
-      final accounts = asList(json['accounts'])
-          .whereType<Map>()
-          .map((item) => MobileLoginAccount.fromJson(asMap(item)))
-          .where((item) => item.userId.isNotEmpty)
-          .toList();
+    // 先解析候选账号：多账号选择必须真的拿到账号，否则 PhoneLoginResult 的
+    // requiresUserSelection 为 false，调用方会拿 null session 走成功分支。
+    final accounts = asList(json['accounts'])
+        .whereType<Map>()
+        .map((item) => MobileLoginAccount.fromJson(asMap(item)))
+        .where((item) => item.userId.isNotEmpty)
+        .toList();
+    if (_requiresUserSelection(json) && accounts.isNotEmpty) {
       return PhoneLoginResult.accountSelection(
         accounts: accounts,
         message:
@@ -64,6 +66,11 @@ mixin _MusicApiAuth on _MusicApiBase {
       );
     }
     if (!_isSuccess(json)) {
+      // 34175 但没有可用账号：真实原因是账号列表缺失/不可用，
+      // 不能再提示「没有账号请先注册」，否则会误导用户去注册。
+      if (asInt(json['errorCode'] ?? json['error_code']) == 34175) {
+        throw ApiException('该手机号绑定了多个账号，但未能获取账号列表，请稍后重试');
+      }
       throw ApiException('登录失败，$_registerHint${_failureSuffix(json)}');
     }
     final session = LoginSession.fromJson(json);

@@ -270,7 +270,29 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
     if (!mounted || selected == null) {
       return;
     }
-    await widget.auth.login(mobile, code, userId: selected.userId);
+    // 选定账号后的二次登录失败（验证码过期 / 账号不可用等）必须给出反馈，
+    // 否则弹层关闭后用户看不到任何结果。对齐上游行为。
+    try {
+      final result = await widget.auth.login(
+        mobile,
+        code,
+        userId: selected.userId,
+      );
+      if (!mounted) return;
+      final error = widget.auth.errorMessage;
+      if (error != null && error.isNotEmpty) {
+        _showErrorDialog(error);
+        return;
+      }
+      if (result?.requiresUserSelection == true) {
+        // 选了账号仍要求再选：本次验证码多半已失效 / 所选账号不可用。
+        // 不能静默返回，否则用户没有任何反馈。
+        _showErrorDialog('账号选择未生效，请重新获取验证码后再试');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showErrorDialog(e.toString());
+    }
   }
 
   Future<void> _loadQrCode() async {
