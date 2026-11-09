@@ -758,6 +758,11 @@ class MainActivity : AudioServiceActivity() {
                         val artist = call.argument<String>("artist") ?: ""
                         val album = call.argument<String>("album") ?: ""
                         val lyric = call.argument<String>("lyric") ?: ""
+                        // 整首标准 LRC（issue #22）：车机端按 position 自行
+                        // 滚动高亮需要全量时间轴；只有单行文本时车机端既滚
+                        // 不动，也容易把纯文本当 LRC 解析失败而渲染乱码。
+                        // 空串省略该字段，保持与旧车机端 App 的兼容。
+                        val fullLyric = call.argument<String>("fullLyric") ?: ""
                         val positionMs = (call.argument<Number>("positionMs") ?: 0).toLong()
                         val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
                         val playing = call.argument<Boolean>("playing") ?: false
@@ -777,6 +782,14 @@ class MainActivity : AudioServiceActivity() {
                             putString("lyric", lyric)
                             putString("currentLyric", lyric)
                             putString("DISPLAY_NAME", title)
+                            if (fullLyric.isNotEmpty()) {
+                                putString("full_lrc", fullLyric)
+                                putString("fullLyric", fullLyric)
+                                putString(
+                                    "org.akanework.lyricinfo.FULL_LYRICS",
+                                    fullLyric,
+                                )
+                            }
                         }
 
                         sendOrderedBroadcast(Intent("com.android.music.metachanged").apply {
@@ -802,7 +815,7 @@ class MainActivity : AudioServiceActivity() {
 
                         Log.d(
                             TAG_BLUETOOTH_LYRICS,
-                            "metaChanged ok: \"$title\"/\"$artist\", lyric=\"${lyric.take(24)}\", pos=${positionMs}ms"
+                            "metaChanged ok: \"$title\"/\"$artist\", lyric=\"${lyric.take(24)}\", pos=${positionMs}ms, fullLrcLen=${fullLyric.length}"
                         )
                         result.success(true)
                     }.onFailure { error ->

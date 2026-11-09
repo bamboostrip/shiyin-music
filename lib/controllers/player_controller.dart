@@ -148,6 +148,10 @@ const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
 // _applyBluetoothLyricsTitleSyncSetting），默认关闭。
 const _bluetoothLyricsTitleSyncSettingKey =
     'settings.bluetooth_lyrics_title_sync_enabled';
+// 蓝牙歌词行内心跳节流（issue #22）：同一歌词行内按此时长补发一次带
+// position 的 metachanged 广播，供车机端按进度滚动；1s 与 positionStream
+// 的 ~200ms tick 解耦，避免每秒 5 次 × 5 个 action 的广播风暴。
+const _kBluetoothLyricHeartbeat = Duration(seconds: 1);
 // 歌词进度偏移：按歌曲 hash 保存毫秒值（正 = 歌词提前），见 lyricOffset。
 const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
@@ -772,6 +776,18 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _lastSuperLyricPlaying = false;
   int _lastBluetoothLyricIndex = -1;
   bool _lastBluetoothPlaying = false;
+
+  /// 上一条蓝牙 metachanged 广播的发送时刻（行变化广播与行内心跳共用）。
+  ///
+  /// 心跳节流以它为基准：同一歌词行内车机端需要连续 position 才能滚动
+  /// （issue #22），但行变化广播刚发过就直接复用其时间戳，避免背靠背
+  /// 重复发送；null 表示从未发送/切歌后待发。
+  DateTime? _lastBluetoothBroadcastAt;
+
+  /// 心跳节流时钟（[DateTime.now]）。仅测试可覆盖，避免真实等待 1s。
+  @visibleForTesting
+  DateTime Function() bluetoothLyricNow = DateTime.now;
+
   int _lastDesktopLyricIndex = -1;
 
   // 系统媒体会话歌词（LyricInfo/extras）同步状态。与蓝牙广播是两条独立
