@@ -206,9 +206,21 @@ class WindowsDesktopLyricsBridge {
   /// 钳制时至少保留的可见像素（与主窗 kMinVisibleEdge 语义一致）。
   static const double _kMinVisibleEdge = 80;
 
+  /// 快捷菜单面板底边与卡片顶边之间的间隙（悬浮窗侧 `Padding(bottom: 4)`）；
+  /// 判断"菜单能否完整展开"时要把它一起算进去。
+  static const double overlayMenuPanelGap = 4;
+
   WindowController? _window;
   bool _handlerRegistered = false;
   bool _visible = false;
+
+  /// 本会话的显示器可见区（逻辑坐标，screen_retriever 语义），由
+  /// [_initialFrame] 每次 show 时刷新，随 createWindow 参数下发给子窗。
+  ///
+  /// 子窗（歌词悬浮窗）只注册了 window_manager，没有 screen_retriever，
+  /// 无法自行判断显示器布局；但 issue #23 的自定义拖动与「菜单展开让位」
+  /// 都必须知道可见区边界，故由主窗下发。
+  List<Rect> _visibleAreas = const <Rect>[];
 
   /// 子窗消息通道就绪门控：子引擎完成样式/位置设置并注册消息 handler 后
   /// 才会上报 overlayReady（见 lyrics_overlay_window.dart）。在此之前对子窗
@@ -295,6 +307,9 @@ class WindowsDesktopLyricsBridge {
           'activeOnBottom': _activeOnBottom,
           'title': title,
           'artist': artist,
+          // 显示器可见区（逻辑坐标）：子窗据此做拖动落点钳制与菜单展开
+          // 让位。子引擎只有 window_manager 插件，拿不到 screen_retriever。
+          'visibleAreas': encodeVisibleAreas(_visibleAreas),
         }),
       );
       try {
@@ -565,11 +580,18 @@ class WindowsDesktopLyricsBridge {
   /// [windowHeight] 为窗口完整逻辑高度（现行恒为 [overlayFixedWindowHeight]）：
   /// 钳制按窗口完整矩形判定，由调用方传入本会话实际建窗的高度——窗口
   /// 高度若再演进（如菜单带加行），随之传新值即自动兼容。
+  ///
+  /// [cardBandHeight] 为可见卡片带高度（[overlayHeightFor]）：传入时恢复位置
+  /// 以"卡片带完整可见"为下限——issue #23 之后贴顶状态的窗口顶边本来就是
+  /// 负值，旧的 80px 窗口可见语义会把这类位置连同存量迁移位置一起判成
+  /// "卡片被屏幕上沿切掉"，而卡片带高度随字号增长，恢复时按它钳制才能在
+  /// 字号变化后仍保证工具栏与歌词完整。
   @visibleForTesting
   static Future<Offset?> loadStoredOverlayOrigin({
     required List<Rect> visibleAreas,
     required Offset fallback,
     required double windowHeight,
+    double? cardBandHeight,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -582,6 +604,7 @@ class WindowsDesktopLyricsBridge {
           visibleAreas,
           fallback: fallback,
           windowHeight: windowHeight,
+          cardBandHeight: cardBandHeight,
         );
         if (clamped.dx != bottomLeft || clamped.dy != bottomY) {
           await prefs.setDouble(windowBottomLeftPrefKey, clamped.dx);
@@ -631,6 +654,7 @@ class WindowsDesktopLyricsBridge {
         visibleAreas,
         fallback: fallback,
         windowHeight: windowHeight,
+        cardBandHeight: cardBandHeight,
       );
       await prefs.setDouble(windowBottomLeftPrefKey, clamped.dx);
       await prefs.setDouble(windowBottomYPrefKey, clamped.dy);
@@ -685,10 +709,16 @@ class WindowsDesktopLyricsBridge {
       debugPrint('[桌面歌词主窗] 获取显示器信息失败，用固定位置: $e');
       // 拿不到显示器信息时无从钳制/换算，退回固定逻辑位置。
     }
+    // 下发给子窗：自定义拖动与「菜单展开让位」都要用可见区边界（子引擎
+    // 无 screen_retriever 插件）。拿不到显示器信息时为空表，子窗退回
+    // 原生的 DragToMoveArea 拖动 —— 宁可不修贴顶也不让窗口能被拖丢。
+    _visibleAreas = visibleAreas;
     final storedOrigin = await loadStoredOverlayOrigin(
       visibleAreas: visibleAreas,
       fallback: origin,
       windowHeight: windowHeight,
+      // 卡片带高度随字号/单双行变化：恢复位置以"卡片完整可见"为下限。
+      cardBandHeight: overlayHeightFor(_settings),
     );
     if (storedOrigin != null) {
       origin = storedOrigin;
@@ -751,12 +781,19 @@ class WindowsDesktopLyricsBridge {
   /// 从底边反推顶边构建。与任一可见区域有足量交集 → 原样返回；否则钳入
   /// 第一个区域（右/下至少留 80px，窗口比区域宽时贴左/上）。无显示器
   /// 信息时返回 [fallback]。
+  ///
+  /// [cardBandHeight] 为可见卡片带高度（= [overlayHeightFor]）：传入时
+  /// 下沿以"卡片带完整可见"为准（底边 ≥ 区域顶 + 卡片高），因为窗口上方
+  /// 的菜单带是透明死区、可以越过屏幕上沿——issue #23 之后贴顶状态就是
+  /// 窗口顶边为负、卡片带恰好在屏内。不传时沿用历史的"窗口至少 80px 可见"
+  /// 语义（供旧测试与降级路径使用）。
   @visibleForTesting
   static Offset clampOverlayOriginToVisibleAreas(
     Offset origin,
     List<Rect> visibleAreas, {
     required Offset fallback,
     required double windowHeight,
+    double? cardBandHeight,
   }) {
     if (visibleAreas.isEmpty) return fallback;
     // 钳制按常驻窗口（含菜单带）的完整矩形判定可见性；origin 是底边
@@ -767,28 +804,200 @@ class WindowsDesktopLyricsBridge {
       overlayWidth,
       windowHeight,
     );
+    final cardRect = cardBandHeight == null
+        ? null
+        : Rect.fromLTWH(
+            origin.dx,
+            origin.dy - cardBandHeight,
+            overlayWidth,
+            cardBandHeight,
+          );
     for (final area in visibleAreas) {
-      final intersection = area.intersect(windowRect);
-      if (intersection.width >= _kMinVisibleEdge &&
-          intersection.height >= _kMinVisibleEdge) {
-        return origin;
+      if (cardRect != null) {
+        // 卡片带感知：贴顶状态下窗口顶边本就在屏幕上沿之外，不能再按
+        // "整窗 80px 可见"判；只要卡片带纵向完整落在该可见区内、横向仍有
+        // 80px 重叠，就是合法位置（拖动落点钳制用的同一套口径）。
+        final intersection = area.intersect(cardRect);
+        if (cardRect.top >= area.top &&
+            cardRect.bottom <= area.bottom &&
+            intersection.width >= _kMinVisibleEdge) {
+          return origin;
+        }
+      } else {
+        final intersection = area.intersect(windowRect);
+        if (intersection.width >= _kMinVisibleEdge &&
+            intersection.height >= _kMinVisibleEdge) {
+          return origin;
+        }
       }
     }
-    final area = visibleAreas.first;
+    final area = cardRect == null
+        ? visibleAreas.first
+        : _visibleAreaNearest(
+            visibleAreas,
+            Offset(origin.dx + overlayWidth / 2, origin.dy - cardBandHeight! / 2),
+          );
     final clampedLeft = origin.dx
         .clamp(area.left, math.max(area.left, area.right - _kMinVisibleEdge))
         .toDouble();
-    // 底边语义：窗口自底边向上延伸，底边钳入 [区域顶 + 80, 区域底 - 80]
-    // 才保证至少 80px 窗口可见（旧顶边语义钳 [区域顶, 区域底 - 80]）。
+    // 底边语义：窗口自底边向上延伸，底边钳入 [区域顶 + 下限, 区域底 - 80]
+    // 才保证足量可见（旧顶边语义钳 [区域顶, 区域底 - 80]）。
+    final minBottom = area.top + (cardBandHeight ?? _kMinVisibleEdge);
     final clampedBottom = origin.dy
-        .clamp(
-          area.top + _kMinVisibleEdge,
-          math.max(
-            area.top + _kMinVisibleEdge,
-            area.bottom - _kMinVisibleEdge,
-          ),
-        )
+        .clamp(minBottom, math.max(minBottom, area.bottom - _kMinVisibleEdge))
         .toDouble();
     return Offset(clampedLeft, clampedBottom);
+  }
+
+  /// 悬浮窗拖动过程中的落点约束（底边左角语义，纯函数，供单测）。
+  ///
+  /// 与 [clampOverlayOriginToVisibleAreas]（启动恢复时的"别跑丢"钳制）
+  /// 的差别：拖动要求**跟手且有明确边界**，因此
+  /// - 纵向以可见卡片带的完整可见为准：底边不得小于 `区域顶 + 卡片带高`
+  ///   （即卡片带顶边不得高于屏幕顶边），也不能低到超出工作区底边（任务栏
+  ///   上方）；窗口上方 212px 的常驻菜单带则允许越过屏幕上沿（那就是
+  ///   "贴顶"状态）。
+  /// - 横向允许跨屏：卡片带与任一可见区仍有 [_kMinVisibleEdge] 宽的重叠
+  ///   就放行，否则把整卡钳进最近的可见区，避免"跨屏拖到一半被边界弹住"。
+  ///
+  /// 纵向有效性按**可见区上下沿合并后的覆盖**判定，而不是"卡片中心落在
+  /// 哪块屏"：上下排列的多屏交界处，若按单块屏切会让允许区间整体跳变
+  /// （下屏允许底边 ≥124、上屏允许 ≤-80，跨界瞬间窗口被弹几十到上百 px）。
+  /// 合并覆盖只要求"某段的并集罩住卡片带"，跨界时上下屏各贡献一段，天然连续。
+  static Offset clampOverlayDragOrigin(
+    Offset origin,
+    List<Rect> visibleAreas, {
+    required double cardBandHeight,
+  }) {
+    if (visibleAreas.isEmpty) return origin;
+    final cardRect = Rect.fromLTWH(
+      origin.dx,
+      origin.dy - cardBandHeight,
+      overlayWidth,
+      cardBandHeight,
+    );
+    final horizontal = [
+      for (final area in visibleAreas)
+        if (area.intersect(cardRect).width >= _kMinVisibleEdge) area,
+    ];
+    // 1) 纵向被并集完整罩住 → 原样放行（单屏内、跨屏、贴顶贴底都在此）。
+    if (_verticalCoverageContains(horizontal, cardRect)) return origin;
+    // 2) 横向已完全离屏（卡片几乎不在任何显示器上）：整卡钳回最近可见区。
+    if (horizontal.isEmpty) {
+      final area = _visibleAreaNearest(visibleAreas, cardRect.center);
+      return Offset(
+        origin.dx
+            .clamp(area.left, math.max(area.left, area.right - _kMinVisibleEdge))
+            .toDouble(),
+        _clampDragBottom(origin.dy, area, cardBandHeight),
+      );
+    }
+    // 3) 横向还在屏内、纵向溢出的情况：只钳纵向，横向保持跟手。
+    final area = _visibleAreaNearest(horizontal, cardRect.center);
+    return Offset(origin.dx, _clampDragBottom(origin.dy, area, cardBandHeight));
+  }
+
+  /// 拖动纵向钳制：底边 ∈ [区域顶 + 卡片带高, 区域底]，与
+  /// [_verticalCoverageContains] 的边界严格一致——贴合边界处不产生回弹跳变。
+  static double _clampDragBottom(
+    double bottom,
+    Rect area,
+    double cardBandHeight,
+  ) {
+    final minBottom = area.top + cardBandHeight;
+    final maxBottom = math.max(minBottom, area.bottom);
+    return bottom.clamp(minBottom, maxBottom).toDouble();
+  }
+
+  /// 可见区（已按横向重叠筛过）的纵向区间合并后，是否完整罩住 [rect] 的
+  /// 纵向范围。上下排列的多屏各贡献一段，合并后跨屏连续。
+  static bool _verticalCoverageContains(List<Rect> areas, Rect rect) {
+    if (areas.isEmpty) return false;
+    final spans = [for (final area in areas) (top: area.top, bottom: area.bottom)]
+      ..sort((a, b) => a.top.compareTo(b.top));
+    var coveredTop = spans.first.top;
+    var coveredBottom = spans.first.bottom;
+    for (final span in spans.skip(1)) {
+      if (span.top > coveredBottom) {
+        if (coveredTop <= rect.top && coveredBottom >= rect.bottom) return true;
+        coveredTop = span.top;
+        coveredBottom = span.bottom;
+      } else if (span.bottom > coveredBottom) {
+        coveredBottom = span.bottom;
+      }
+    }
+    return coveredTop <= rect.top && coveredBottom >= rect.bottom;
+  }
+
+  /// 卡片贴顶时，为了让快捷菜单面板完整可见，窗口需要临时**下移**的逻辑
+  /// 像素数（纯函数，供单测）。
+  ///
+  /// 菜单面板贴菜单带底边（距卡片顶 [overlayMenuPanelGap]）、高
+  /// [overlayMenuPanelHeight]，而菜单带本身高
+  /// `overlayFixedWindowHeight - cardBandHeight`。窗口贴顶后菜单带整体在
+  /// 屏幕上方，点齿轮会"没反应"——悬浮窗侧据此把窗口临时下移，收起后移回。
+  /// 返回 0 表示当前落点已有足够空间（常见情况，零几何调用）。
+  static double menuNudgeForMenuVisibility({
+    required Offset origin,
+    required List<Rect> visibleAreas,
+    required double cardBandHeight,
+  }) {
+    if (visibleAreas.isEmpty) return 0;
+    final cardTop = origin.dy - cardBandHeight;
+    final area = _visibleAreaNearest(
+      visibleAreas,
+      Offset(origin.dx + overlayWidth / 2, cardTop + cardBandHeight / 2),
+    );
+    final requiredCardTop =
+        area.top + overlayMenuPanelHeight + overlayMenuPanelGap;
+    final nudge = requiredCardTop - cardTop;
+    return nudge > 0 ? nudge : 0;
+  }
+
+  /// 可见区列表 → JSON 友好的扁平数组（随 createWindow 参数下发子窗；
+  /// Rect 不能直接 jsonEncode）。
+  @visibleForTesting
+  static List<List<double>> encodeVisibleAreas(List<Rect> areas) => [
+    for (final area in areas) [area.left, area.top, area.width, area.height],
+  ];
+
+  /// 子窗侧解析 [encodeVisibleAreas] 的载荷；畸形数据跳过、不抛。
+  static List<Rect> decodeVisibleAreas(Object? raw) {
+    if (raw is! List) return const <Rect>[];
+    final areas = <Rect>[];
+    for (final item in raw) {
+      if (item is! List || item.length < 4) continue;
+      final values = [
+        for (final value in item.take(4))
+          value is num ? value.toDouble() : double.nan,
+      ];
+      if (values.any((value) => value.isNaN || value.isInfinite)) continue;
+      // 宽高必须为正：零/负尺寸会让 intersect/contains 语义失真。
+      if (values[2] <= 0 || values[3] <= 0) continue;
+      areas.add(Rect.fromLTWH(values[0], values[1], values[2], values[3]));
+    }
+    return areas;
+  }
+
+  /// 命中 [point] 的可见区；都不命中（跨屏缝隙/多屏上下错位）时取中心
+  /// 距离最近者。列表非空时必有返回值。
+  static Rect _visibleAreaNearest(List<Rect> visibleAreas, Offset point) {
+    Rect? nearest;
+    var nearestDistance = double.infinity;
+    for (final area in visibleAreas) {
+      if (area.contains(point)) return area;
+      final dx = point.dx < area.left
+          ? area.left - point.dx
+          : (point.dx > area.right ? point.dx - area.right : 0.0);
+      final dy = point.dy < area.top
+          ? area.top - point.dy
+          : (point.dy > area.bottom ? point.dy - area.bottom : 0.0);
+      final distance = dx * dx + dy * dy;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = area;
+      }
+    }
+    return nearest ?? visibleAreas.first;
   }
 }
