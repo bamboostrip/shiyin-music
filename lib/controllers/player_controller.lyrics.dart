@@ -346,6 +346,23 @@ mixin _PlayerLyrics on _PlayerControllerBase {
         forcePlayState: playingChanged,
       );
     }
+    // 行内心跳：车机端按 position 自行滚动需要连续的位置流（issue #22）。
+    // 换行广播由上面的 lineChanged 分支负责，这里只补「同一行内」的进度。
+    _maybePushBluetoothPositionHeartbeat();
+  }
+
+  /// 同一歌词行内的周期性位置心跳（节流见 [_kBluetoothLyricHeartbeat]）。
+  ///
+  /// 只在「播放中 + 有歌词 + 距上次广播超过节流窗口」时发送，暂停/停止/
+  /// 无歌词/切歌后均不发送——这些状态下发广播只会让车机端误判进度。
+  void _maybePushBluetoothPositionHeartbeat() {
+    if (!isPlaying || lyrics.isEmpty) return;
+    final now = bluetoothLyricNow();
+    final last = _lastBluetoothBroadcastAt;
+    if (last != null && now.difference(last) < _kBluetoothLyricHeartbeat) {
+      return;
+    }
+    _pushBluetoothLyricForCurrentLine(force: true);
   }
 
   void _pushBluetoothLyricForCurrentLine({
@@ -372,12 +389,19 @@ mixin _PlayerLyrics on _PlayerControllerBase {
 
     final lineChanged = force || prevIndex != _lastBluetoothLyricIndex;
     if (lineChanged) {
+      // 行变化广播与行内心跳共用节流基准：本次发送后 [_kBluetoothLyricHeartbeat]
+      // 窗口内心跳直接跳过，避免同一行内容背靠背重复广播。
+      _lastBluetoothBroadcastAt = bluetoothLyricNow();
       unawaited(
         _bluetoothLyrics.broadcastMetaChanged(
           title: song.title,
           artist: song.artist,
           album: song.albumName,
           lyric: lyricText,
+          // 整首 LRC 与当前行一起下发：车机端按 position 自行滚动高亮
+          // 需要全量时间轴（issue #22）。复用 MediaSession 路径的缓存，
+          // 歌词列表未换新时不重复格式化。
+          fullLyric: _mediaSessionFullLrc,
           position: position,
           duration: song.duration ?? Duration.zero,
           playing: isPlaying,
