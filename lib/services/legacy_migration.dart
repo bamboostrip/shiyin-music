@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import 'prefs_compaction.dart';
 
 /// 旧标识（KA Music / kgka 时代）→ 时音命名的一次性迁移。
 ///
@@ -97,6 +98,10 @@ class LegacyMigration {
       } catch (error, stack) {
         debugPrint('[时音][migration] 平台数据目录迁移异常（已跳过）: $error\n$stack');
       }
+      // prefs 瘦身必须夹在「目录搬移之后、第一次 getInstance() 之前」：
+      // 目录搬移完成才能对当前目录的文件生效；一旦插件读过一次，整张 map
+      // 就进了内存，再改文件会被下一次写盘覆盖回去（详见 PrefsCompaction）。
+      await PrefsCompaction.runIfNeeded();
     }
     SharedPreferences? prefs;
     try {

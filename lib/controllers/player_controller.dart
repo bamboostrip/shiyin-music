@@ -28,6 +28,7 @@ import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
 import '../services/local_lyrics_service.dart';
 import '../services/lrc_formatter.dart';
+import '../services/lyric_cache_service.dart';
 import '../services/media_key_service.dart';
 import '../services/music_api.dart';
 import '../services/music_audio_handler.dart';

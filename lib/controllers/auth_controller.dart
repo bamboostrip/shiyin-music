@@ -10,6 +10,7 @@ import '../models/music_models.dart';
 import '../services/cache_service.dart';
 import '../services/music_api.dart';
 import '../services/network_monitor.dart';
+import '../services/prefs_write.dart';
 import '../services/vip_background_task.dart';
 
 class AuthController extends ChangeNotifier {
@@ -468,9 +469,9 @@ class AuthController extends ChangeNotifier {
         }
         session = refreshed;
         _api.setSession(refreshed);
-        await prefs.setString(_tokenKey, refreshed.token ?? '');
-        await prefs.setString(_t1Key, refreshed.t1 ?? '');
-        await prefs.setString(_userIdKey, refreshed.userId ?? '');
+        await prefs.setStringIfChanged(_tokenKey, refreshed.token ?? '');
+        await prefs.setStringIfChanged(_t1Key, refreshed.t1 ?? '');
+        await prefs.setStringIfChanged(_userIdKey, refreshed.userId ?? '');
       } catch (_) {
         // /login/token failed, continue with stored token
       }
@@ -533,9 +534,9 @@ class AuthController extends ChangeNotifier {
       }
       session = refreshed;
       _api.setSession(refreshed);
-      await prefs.setString(_tokenKey, refreshed.token ?? '');
-      await prefs.setString(_t1Key, refreshed.t1 ?? '');
-      await prefs.setString(_userIdKey, refreshed.userId ?? '');
+      await prefs.setStringIfChanged(_tokenKey, refreshed.token ?? '');
+      await prefs.setStringIfChanged(_t1Key, refreshed.t1 ?? '');
+      await prefs.setStringIfChanged(_userIdKey, refreshed.userId ?? '');
     } catch (_) {
       // Refresh failed, continue with existing session
     }
@@ -551,12 +552,12 @@ class AuthController extends ChangeNotifier {
       _api.setSession(session);
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_tokenKey, session.token ?? '');
-      await prefs.setString(_t1Key, session.t1 ?? '');
+      await prefs.setStringIfChanged(_tokenKey, session.token ?? '');
+      await prefs.setStringIfChanged(_t1Key, session.t1 ?? '');
       // session.sessionId 可能为 null（扫码登录），但 ApiClient 内部
       // 已从登录响应 header 保存了后端的 session key，这里也持久化一份。
-      await prefs.setString(_sessionIdKey, _api.clientSessionId ?? '');
-      await prefs.setString(_userIdKey, session.userId ?? '');
+      await prefs.setStringIfChanged(_sessionIdKey, _api.clientSessionId ?? '');
+      await prefs.setStringIfChanged(_userIdKey, session.userId ?? '');
 
       // 扫码登录返回的 QrLoginStatusResponse 只有 token，缺少 t1。
       // 后续 /user/detail 等接口需要 t1 header 鉴权，否则会失败导致
@@ -576,10 +577,13 @@ class AuthController extends ChangeNotifier {
             );
             this.session = session;
             _api.setSession(session);
-            await prefs.setString(_tokenKey, session.token ?? '');
-            await prefs.setString(_t1Key, session.t1 ?? '');
-            await prefs.setString(_sessionIdKey, _api.clientSessionId ?? '');
-            await prefs.setString(_userIdKey, session.userId ?? '');
+            await prefs.setStringIfChanged(_tokenKey, session.token ?? '');
+            await prefs.setStringIfChanged(_t1Key, session.t1 ?? '');
+            await prefs.setStringIfChanged(
+              _sessionIdKey,
+              _api.clientSessionId ?? '',
+            );
+            await prefs.setStringIfChanged(_userIdKey, session.userId ?? '');
           }
         } catch (_) {
           // 刷新失败，继续用原 token
@@ -621,11 +625,11 @@ class AuthController extends ChangeNotifier {
       _api.setSession(nextSession);
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_tokenKey, nextSession.token ?? '');
-      await prefs.setString(_t1Key, nextSession.t1 ?? '');
+      await prefs.setStringIfChanged(_tokenKey, nextSession.token ?? '');
+      await prefs.setStringIfChanged(_t1Key, nextSession.t1 ?? '');
       // nextSession.sessionId 可能为 null，用 ApiClient 实际持有的 session key
-      await prefs.setString(_sessionIdKey, _api.clientSessionId ?? '');
-      await prefs.setString(_userIdKey, nextSession.userId ?? '');
+      await prefs.setStringIfChanged(_sessionIdKey, _api.clientSessionId ?? '');
+      await prefs.setStringIfChanged(_userIdKey, nextSession.userId ?? '');
 
       await refreshProfile(silent: true);
       _vipBackgroundTask.schedule(session);
@@ -668,14 +672,14 @@ class AuthController extends ChangeNotifier {
         _likedHashes.clear();
         _hashToFileId.clear();
         _api.setSession(null);
-        await prefs.remove(_tokenKey);
-        await prefs.remove(_t1Key);
-        await prefs.remove(_sessionIdKey);
-        await prefs.remove(_userIdKey);
-        await prefs.remove(cacheKey);
-        await prefs.remove(emptyCountKey);
-        await prefs.remove(_likedHashesKey);
-        await prefs.remove(_likedFileIdsKey);
+        await prefs.removeIfExists(_tokenKey);
+        await prefs.removeIfExists(_t1Key);
+        await prefs.removeIfExists(_sessionIdKey);
+        await prefs.removeIfExists(_userIdKey);
+        await prefs.removeIfExists(cacheKey);
+        await prefs.removeIfExists(emptyCountKey);
+        await prefs.removeIfExists(_likedHashesKey);
+        await prefs.removeIfExists(_likedFileIdsKey);
         await _clearSession();
       }
     });
@@ -747,12 +751,15 @@ class AuthController extends ChangeNotifier {
 
   Future<void> _persistLikedHashes() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_likedHashesKey, jsonEncode(_likedHashes.toList()));
+    await prefs.setStringIfChanged(
+      _likedHashesKey,
+      jsonEncode(_likedHashes.toList()),
+    );
     // fileId 映射同样落盘：否则重启后 _hashToFileId 为空，取消收藏时
     // 回退用 song.id（MixSongID，非 fileid）删服务端会静默失败，
     // 本地乐观移除在下次同步时被打回——“取消红心不生效”。
     try {
-      await prefs.setString(
+      await prefs.setStringIfChanged(
         _likedFileIdsKey,
         jsonEncode(_hashToFileId.map((k, v) => MapEntry(k, v))),
       );
@@ -795,13 +802,13 @@ class AuthController extends ChangeNotifier {
     final fetched = await _api.userPlaylists(pageSize: 100);
 
     if (fetched.isNotEmpty) {
-      await prefs.setInt(_playlistEmptyCountKey, 0);
+      await prefs.setIntIfChanged(_playlistEmptyCountKey, 0);
       await _saveCachedPlaylists(fetched);
       return fetched;
     }
 
     final emptyCount = (prefs.getInt(_playlistEmptyCountKey) ?? 0) + 1;
-    await prefs.setInt(_playlistEmptyCountKey, emptyCount);
+    await prefs.setIntIfChanged(_playlistEmptyCountKey, emptyCount);
 
     final cached = await _loadCachedPlaylists();
     if (cached.isNotEmpty && emptyCount < 2) {
@@ -809,7 +816,7 @@ class AuthController extends ChangeNotifier {
     }
 
     // 清理旧 key 与 CacheService 索引
-    await prefs.remove(_playlistCacheKey);
+    await prefs.removeIfExists(_playlistCacheKey);
     await _cacheService.remove(_playlistCacheKeyV2);
     return const [];
   }
@@ -855,7 +862,7 @@ class AuthController extends ChangeNotifier {
       'playlists': playlists.map((p) => p.toCache()).toList(),
     });
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    await prefs.setStringIfChanged(
       _playlistCacheKey,
       jsonEncode(playlists.map((playlist) => playlist.toCache()).toList()),
     );
@@ -882,14 +889,14 @@ class AuthController extends ChangeNotifier {
     _likedHashes.clear();
     _hashToFileId.clear();
     _api.setSession(null);
-    await prefs.remove(_tokenKey);
-    await prefs.remove(_t1Key);
-    await prefs.remove(_sessionIdKey);
-    await prefs.remove(_userIdKey);
-    await prefs.remove(_playlistCacheKey);
-    await prefs.remove(_playlistEmptyCountKey);
-    await prefs.remove(_likedHashesKey);
-    await prefs.remove(_likedFileIdsKey);
+    await prefs.removeIfExists(_tokenKey);
+    await prefs.removeIfExists(_t1Key);
+    await prefs.removeIfExists(_sessionIdKey);
+    await prefs.removeIfExists(_userIdKey);
+    await prefs.removeIfExists(_playlistCacheKey);
+    await prefs.removeIfExists(_playlistEmptyCountKey);
+    await prefs.removeIfExists(_likedHashesKey);
+    await prefs.removeIfExists(_likedFileIdsKey);
     await _cacheService.clearUserCache(null);
     notifyListeners();
   }

@@ -53,8 +53,10 @@ mixin _PlayerLyrics on _PlayerControllerBase {
 
   @override
   Future<void> loadLyrics(Song song) async {
-    final cache = cacheService;
-    final cacheKey = 'cache_lyric_${song.hash}';
+    // 歌词缓存在独立文件里（LyricCacheService）：不再写 SharedPreferences。
+    // 历史上 `cache_lyric_<hash>` 把 prefs 撑到十几 MB，Windows 每次写 prefs
+    // 都要整文件 JSON 编解码，是启动/切歌卡顿的主因（详见 PrefsCompaction）。
+    final lyricCache = LyricCacheService.instance;
 
     if (song.source == SongSource.local) {
       // 本地歌：同名 .lrc → 音频内嵌歌词 → 本地缓存 → 元数据在线匹配缓存。
@@ -70,20 +72,13 @@ mixin _PlayerLyrics on _PlayerControllerBase {
     }
 
     // 1. 先读缓存，命中则立即显示（无感）
-    if (cache != null) {
+    if (lyricCache.enabled) {
       try {
-        final cached = await cache.read<List<LyricLine>>(
-          cacheKey,
-          decode: (json) => (json['lines'] as List? ?? const [])
-              .whereType<Map<String, dynamic>>()
-              .map(LyricLine.fromCache)
-              .toList(),
-          ttl: const Duration(days: 30),
-        );
+        final cached = await lyricCache.read(song.hash);
         if (cached != null &&
-            !listEquals(lyrics, cached.data) &&
+            !listEquals(lyrics, cached) &&
             currentSong?.hash == song.hash) {
-          lyrics = cached.data;
+          lyrics = cached;
           notifyListeners();
           _syncDesktopLyrics();
         }
@@ -97,17 +92,10 @@ mixin _PlayerLyrics on _PlayerControllerBase {
         lyrics = fresh;
         notifyListeners();
       }
-      // 写缓存（空歌词也缓存，避免重复请求）。写失败要吞掉异常：
-      // write 在平台层 setString 返回 false 时会 throw，unawaited 的
-      // async 错误会逃逸成未处理异常（外层同步 try/catch 接不住）。
-      if (cache != null) {
-        unawaited(
-          cache
-              .write(cacheKey, {
-                'lines': fresh.map((l) => l.toCache()).toList(),
-              })
-              .catchError((Object _) {}),
-        );
+      // 写缓存（空歌词也缓存，避免重复请求）。文件缓存写入失败只记日志，
+      // 不能影响歌词展示。
+      if (lyricCache.enabled) {
+        unawaited(lyricCache.write(song.hash, fresh));
       }
     } catch (_) {
       // 拉取失败保持静默：此时 lyrics 若非空必为本歌缓存数据（切歌时

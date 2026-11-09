@@ -5,13 +5,15 @@ import 'dart:math' as math;
 // window_manager 未重新导出 dart:ui 类型，Size/Offset/Color 需自行引入。
 import 'dart:ui' show Color, Offset, Rect, Size;
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../form_factor.dart';
+import '../../services/prefs_write.dart';
 
 /// 桌面窗口初始化与几何记忆。
 ///
@@ -23,7 +25,10 @@ class DesktopWindow {
   static const Size kDefaultSize = Size(1280, 800);
   static const String kWindowTitle = '时音';
 
-  /// 初始化窗口：恢复上次几何 → 应用最小尺寸 → 显示窗口。
+  /// 初始化窗口：恢复上次几何 → 应用最小尺寸 → 设置最大化状态。
+  ///
+  /// 窗口**不在这里显示**：启动流程在 `runApp` 之后调用
+  /// [revealAfterFirstFrame]，首帧渲染完成才让窗口出现（见该方法注释）。
   /// 必须在 runApp 之前 await 调用。
   static Future<void> ensureInitialized() async {
     // 重复调用会重复 addListener，残留旧 saver（几何双写、onWindowClose
@@ -52,6 +57,11 @@ class DesktopWindow {
     }
     await windowManager.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
+    // 最大化记忆必须在挂 [_WindowGeometrySaver] **之前**读取：saver 一挂上，
+    // 初始化阶段的窗口样式/尺寸变化就会触发 onWindowUnmaximize 之类的回调，
+    // 把 `window.maximized` 提前改写成 false，之后读到的就是错的值（这也是
+    // 之前"最大化状态开机丢失"的原因之一）。
+    _maximizedPreferred = DesktopWindow.maximizedPreferred(prefs);
     // 关闭拦截尽早打开：恢复链（读取几何/钳制/最大化）耗时期间用户点 X
     // 也必须走 [_WindowGeometrySaver.onWindowClose]，否则窗口被原生直接
     // 销毁、进程退出，初始化中的服务被拦腰斩断。
@@ -71,26 +81,117 @@ class DesktopWindow {
       title: kWindowTitle,
       titleBarStyle: TitleBarStyle.hidden,
     );
-    await windowManager.waitUntilReadyToShow(options, () async {
-      // window_manager 0.4.x 的 WindowOptions 无 position 参数，
-      // 恢复记忆位置改用 setPosition。
-      if (geometry != null) {
-        // 显示器配置可能自上次会话后变化（拔掉显示器、断开远程桌面等），
-        // 恢复前先把位置钳制到至少与一块显示器可见区域相交。
-        final clamped = await _clampToConnectedDisplays(geometry);
-        await windowManager.setPosition(clamped.offset);
-      }
-      // 最大化记忆：先按标记还原最大化再显示，避免"先小窗后放大"的闪烁。
-      if (DesktopWindow.maximizedPreferred(prefs)) {
-        await windowManager.maximize();
-      }
-      await windowManager.show();
-      await windowManager.focus();
-    });
+    // 不能把恢复逻辑放进 waitUntilReadyToShow 的 callback：那是
+    // VoidCallback，内部 await 链（屏幕枚举 + setPosition）不会被等待，
+    // main 继续 runApp 后 [revealAfterFirstFrame] 可能在赋值前就抢跑
+    // （表现为最大化/位置丢失）。这里直接顺序 await，保证 runApp 前窗口
+    // 位置与最大化标记都已就绪；窗口此刻仍是隐藏的，不会闪现。
+    await windowManager.waitUntilReadyToShow(options, null);
+    // window_manager 0.4.x 的 WindowOptions 无 position 参数，
+    // 恢复记忆位置改用 setPosition。
+    if (geometry != null) {
+      // 显示器配置可能自上次会话后变化（拔掉显示器、断开远程桌面等），
+      // 恢复前先把位置钳制到至少与一块显示器可见区域相交。
+      final clamped = await _clampToConnectedDisplays(geometry);
+      await windowManager.setPosition(clamped.offset);
+    }
+    // 最大化记忆：只记录，等首帧后 [revealAfterFirstFrame] 再真正
+    // maximize——Windows 的 SC_MAXIMIZE 对隐藏窗口是空操作，必须在
+    // 窗口可见后再最大化（见 [_reveal] 注释）。
+    // 这里**不再** show：窗口改为首帧后由 [revealAfterFirstFrame] 显示，
+    // 几何恢复/最大化/钳制与首帧构建期间保持隐藏，用户不会先看到一个
+    // 白板窗口再等内容出来（启动卡顿的观感很大一部分来自这扇空窗）。
     _initialized = true;
   }
 
+  /// 首帧之后再显示主窗（启动流程在 `runApp` 之后调用）。
+  ///
+  /// 与原生 runner 的「首帧回调 Show」互补：这里是显式保证 + 抢焦点，让
+  /// 窗口带着已渲染的内容出现。带 [fallback] 兜底——首帧迟迟不来（构建
+  /// 异常、渲染卡死）时也必须让窗口可见，否则用户看到的是"点了图标什么
+  /// 都没发生"。
+  static void revealAfterFirstFrame({
+    Duration fallback = const Duration(seconds: 2),
+  }) {
+    // 移动端/车机由系统管理窗口可见性，window_manager 在那些平台也未注册。
+    if (!isDesktopFormFactor) return;
+    var revealed = false;
+    void reveal() {
+      if (revealed) return;
+      revealed = true;
+      unawaited(_reveal());
+    }
+
+    SchedulerBinding.instance.addPostFrameCallback((_) => reveal());
+    Timer(fallback, reveal);
+  }
+
+  static Future<void> _reveal() async {
+    try {
+      await revealWithOps(
+        maximized: _maximizedPreferred,
+        isVisible: windowManager.isVisible,
+        isMaximized: windowManager.isMaximized,
+        show: windowManager.show,
+        focus: windowManager.focus,
+        maximize: windowManager.maximize,
+      );
+    } catch (error) {
+      debugPrint('DesktopWindow: 首帧后显示窗口失败（忽略）: $error');
+    }
+  }
+
+  /// 首帧后的「显示 → 抢焦点 →（必要时）最大化」顺序（可注入窗口操作，
+  /// 供单测覆盖）。
+  ///
+  /// 顺序上有两个坑（都是实测出来的）：
+  /// 1. Windows 的 `SC_MAXIMIZE` 对**隐藏**窗口是空操作，必须先等窗口可见
+  ///    再 maximize；提前 maximize 不但无效，还会让 onWindowUnmaximize 把
+  ///    最大化记忆写成 false。
+  /// 2. 原生 runner 在首帧**真正呈现**时才 Show 窗口（`SetNextFrameCallback`），
+  ///    这个时机晚于 Dart 的 post-frame 回调。这里先等它一小会（避免 Dart
+  ///    抢先把还没呈现的空白客户区显示出来），等不到再手动 show 兜底。
+  @visibleForTesting
+  static Future<void> revealWithOps({
+    required bool maximized,
+    required Future<bool> Function() isVisible,
+    required Future<bool> Function() isMaximized,
+    required Future<void> Function() show,
+    required Future<void> Function() focus,
+    required Future<void> Function() maximize,
+    Duration poll = const Duration(milliseconds: 10),
+    int maxPolls = 20,
+  }) async {
+    var visible = await _waitFor(isVisible, poll, maxPolls);
+    if (!visible) {
+      // 原生首帧呈现回调迟迟没到（渲染卡顿/构建异常）：主动 show 兜底，
+      // 绝不能让用户点了图标却看不到窗口。
+      await show();
+      visible = await _waitFor(isVisible, poll, maxPolls);
+    }
+    await focus();
+    if (!maximized || !visible) return;
+    await maximize();
+    await _waitFor(isMaximized, poll, maxPolls);
+  }
+
+  /// 轮询等待 [probe] 为 true，最多 [maxPolls] 次、每次间隔 [poll]。
+  static Future<bool> _waitFor(
+    Future<bool> Function() probe,
+    Duration poll,
+    int maxPolls,
+  ) async {
+    for (var i = 0; i < maxPolls; i++) {
+      if (await probe()) return true;
+      await Future<void>.delayed(poll);
+    }
+    return false;
+  }
+
   static bool _initialized = false;
+
+  /// 上次会话是否最大化（初始化时记录，首帧后由 [_reveal] 真正还原）。
+  static bool _maximizedPreferred = false;
 
   static _WindowGeometrySaver? _saver;
 
@@ -479,10 +580,11 @@ class DesktopWindowGeometry {
   }
 
   Future<void> save(SharedPreferences prefs) async {
-    await prefs.setDouble(_kLeft, left);
-    await prefs.setDouble(_kTop, top);
-    await prefs.setDouble(_kWidth, width);
-    await prefs.setDouble(_kHeight, height);
+    // 值没变就不写：Windows 每次 setX 都会整文件 JSON 编码 + 同步写盘。
+    await prefs.setDoubleIfChanged(_kLeft, left);
+    await prefs.setDoubleIfChanged(_kTop, top);
+    await prefs.setDoubleIfChanged(_kWidth, width);
+    await prefs.setDoubleIfChanged(_kHeight, height);
   }
 
   /// 清空持久化几何（下次启动回落到默认尺寸）。
@@ -511,12 +613,12 @@ class _WindowGeometrySaver extends WindowListener {
   /// 最大化/还原时窗口管理器也会派发 resize，几何本身由 [_scheduleSave] 走防抖。
   @override
   void onWindowMaximize() {
-    unawaited(_prefs.setBool(DesktopWindow.kMaximizedPrefKey, true));
+    unawaited(_prefs.setBoolIfChanged(DesktopWindow.kMaximizedPrefKey, true));
   }
 
   @override
   void onWindowUnmaximize() {
-    unawaited(_prefs.setBool(DesktopWindow.kMaximizedPrefKey, false));
+    unawaited(_prefs.setBoolIfChanged(DesktopWindow.kMaximizedPrefKey, false));
   }
 
   /// 关闭拦截（[DesktopWindow.ensureInitialized] 已 setPreventClose）：

@@ -68,6 +68,57 @@ class AppConfig {
   /// 播放缓存大小上限（超过则按 LRU 清理），下载不设上限（用户主动管理）
   static const playCacheMaxBytes = 300 * 1024 * 1024; // 300MB
 
+  // ===== 歌词磁盘缓存（每首歌一个文件，不进 SharedPreferences）=====
+  /// 歌词缓存目录名（挂在应用支持目录下，见 services/lyric_cache_service.dart）。
+  ///
+  /// 历史实现把每首歌的歌词存进 SharedPreferences（`cache_lyric_<hash>`），
+  /// Windows 上每次写都要整文件 JSON 编解码（十几 MB 时单次数百毫秒），
+  /// 是冷启动/切歌卡顿的主因；现改为按 hash 独立文件 + 容量上限。
+  static const lyricCacheDirName = 'lyric_cache';
+
+  /// 歌词缓存总容量上限（超出按最后访问时间淘汰到 80%）。
+  static const lyricCacheMaxBytes = 32 * 1024 * 1024; // 32MB ≈ 1200 首
+
+  /// 歌词缓存 TTL：超过该时长且未再访问的条目在启动裁剪时清理。
+  static const lyricCacheTtl = Duration(days: 30);
+
+  // ===== SharedPreferences 数据缓存治理 =====
+  /// 仍存在 SharedPreferences 里的数据缓存（首页/歌单/专辑/歌手/用户/本地
+  /// 歌词匹配）单前缀最多保留的条数：超出按 `savedAt` 从旧到新淘汰。
+  ///
+  /// 这些 key 是"可重建的缓存"，不设上限会在长期使用后把 prefs 撑到几 MB，
+  /// 进而放大 Windows 每次写盘的整文件编解码开销（见 services/
+  /// prefs_compaction.dart）。
+  static const Map<String, int> dataCachePrefixCaps = <String, int>{
+    'cache_playlist_collection_': 30,
+    'cache_playlist_': 30,
+    'cache_album_': 30,
+    'cache_artist_': 30,
+    'cache_local_lyric_v1_': 200,
+  };
+
+  /// 单条缓存的最大字符数：超过直接不缓存（如超长歌单的"全量歌曲表"），
+  /// 避免一个 key 就把 prefs 撑到需要整文件重编码的体量。
+  static const int dataCacheMaxEntryChars = 2 * 1024 * 1024; // ~2MB
+
+  /// 每次缓存写入最多淘汰的条数：历史积压不能一次性触发几十次整文件重写
+  /// （那正是本issue要消灭的卡顿来源），让积压随多次写入逐步收敛。
+  static const int dataCacheEvictionsPerWrite = 3;
+
+  /// 所有 `cache_*` 值合计字符数预算（≈字节，JSON 以 ASCII 为主）。
+  ///
+  /// 条数上限管不住"条数没超但单条很大"（如超长歌单全量歌曲表、本地歌词
+  /// 匹配缓存），prefs 仍可能被撑回十几 MB；瘦身逻辑在启动时按此预算从最旧
+  /// 开始淘汰。
+  static const int dataCacheMaxChars = 4 * 1024 * 1024;
+
+  /// 缓存内容未变时，`savedAt` 至少间隔多久才重写一次。
+  ///
+  /// 去重能省掉大量整文件重写，但若永远不刷新 savedAt，"内容未变但已过期"
+  /// 的条目会被一直判为过期（如歌单详情每次都全量重拉所有分页）。定期把
+  /// savedAt 推进一次即可：一次写盘 / 10 分钟 / 活跃 key，成本可忽略。
+  static const Duration cacheSavedAtRefreshAfter = Duration(minutes: 10);
+
   // ===== 图片（封面）缓存配置 =====
   /// 内存 ImageCache 上限。
   ///
