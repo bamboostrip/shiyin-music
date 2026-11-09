@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:shiyin_music/services/desktop_lyrics_service.dart';
 import 'package:shiyin_music/services/windows_desktop_lyrics_bridge.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_karaoke_line.dart';
 import 'package:shiyin_music/ui/desktop/lyrics_overlay_window.dart';
+import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 
 /// 快捷菜单测试假具：窗口 780x408 画布（恒定窗口高）、窗口原点 (0,0)，
 /// hover 由光标轮询 mock 驱动（未锁定态命中测试不再走 MouseRegion）。
@@ -2696,6 +2698,579 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 180));
       expect(tester.widget<AnimatedOpacity>(opacityFinder).opacity, 0.0);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // issue #23：桌面歌词拖不到屏幕顶部（"会弹下来不少、无法固定在屏幕顶部"）
+  //
+  // 根因：拖动走 window_manager 的原生 SC_MOVE 模态移动循环，Windows 会把
+  // 窗口**顶边**钳在显示器顶边；而可见卡片贴窗口底边，上方压着 212px 常驻
+  // 菜单带 + 36px 工具栏带，于是卡片最高只能到屏幕顶下方近 300px。
+  // 修复：Flutter 侧自定义拖动（窗口顶边可越过屏幕上沿）+ 卡片带完整可见
+  // 的落点钳制 + 贴顶后展开快捷菜单的临时让位。
+  // ---------------------------------------------------------------------
+  group('clampOverlayDragOrigin（拖动落点：卡片带可贴屏幕上沿）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+    // 默认设置（双行 24 号）卡片带 = 工具栏 36 + 歌词带 88。
+    const cardBandHeight = WindowsDesktopLyricsBridge.overlayHeight;
+
+    Offset clamp(
+      Offset origin, {
+      List<Rect> areas = const [primary],
+      double card = cardBandHeight,
+    }) => WindowsDesktopLyricsBridge.clampOverlayDragOrigin(
+      origin,
+      areas,
+      cardBandHeight: card,
+    );
+
+    test('屏内正常位置原样返回', () {
+      // 底边 (500, 900)：窗口顶边 = 900 - 408 = 492，整窗在屏内。
+      expect(clamp(const Offset(500, 900)), const Offset(500, 900));
+    });
+
+    test('往上拖可以贴到屏幕顶：窗口顶边为负，卡片带顶边恰在屏幕顶端', () {
+      // 卡片带顶边 = 底边 - 卡片高；贴顶时底边 = 区域顶 + 卡片高 = 124，
+      // 窗口顶边 = 124 - 408 = -284（原生拖动永远到不了这个位置）。
+      const bottomLeft = Offset(500, cardBandHeight);
+      final clamped = clamp(bottomLeft);
+
+      expect(clamped, bottomLeft);
+      expect(
+        clamped.dy - WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+        -284,
+      );
+      // 卡片带顶边（= 歌词可见区域的上沿）正好落在屏幕顶边。
+      expect(clamped.dy - cardBandHeight, primary.top);
+    });
+
+    test('贴顶后再往上拖会被钳住，卡片带不会被屏幕上沿切掉', () {
+      // 底边只剩 80px：卡片带顶边 = -44（会被切掉工具栏带 + 一点歌词）。
+      final clamped = clamp(const Offset(500, 80));
+      expect(clamped.dy, primary.top + cardBandHeight);
+      expect(clamped.dy - cardBandHeight, primary.top);
+    });
+
+    test('往下拖不越出工作区：底边最多贴到可见区底边（任务栏上沿）', () {
+      final clamped = clamp(Offset(500, primary.bottom + 200));
+      expect(clamped.dy, primary.bottom);
+    });
+
+    test('水平方向保留 80px 可见：拖出屏幕右侧会被钳回', () {
+      final clamped = clamp(const Offset(1900, 500));
+      expect(clamped.dx, primary.right - 80);
+      expect(clamped.dy, 500);
+    });
+
+    test('跨屏拖动不被边界弹住：与任一可见区仍有 80px 重叠即放行', () {
+      const secondary = Rect.fromLTWH(1920, 0, 1920, 1080);
+      // 左沿 1900：与主屏仅 20px 重叠，但与副屏重叠 760px → 放行。
+      final clamped = clamp(
+        const Offset(1900, 500),
+        areas: const [primary, secondary],
+      );
+      expect(clamped.dx, 1900);
+      expect(clamped.dy, 500);
+    });
+
+    test('多屏上下排列：顶屏上沿照样能贴（负坐标可见区）', () {
+      const upper = Rect.fromLTWH(0, -1080, 1920, 1080);
+      const lower = Rect.fromLTWH(0, 0, 1920, 1080);
+      final clamped = clamp(
+        const Offset(500, -1080 + cardBandHeight),
+        areas: const [lower, upper],
+      );
+      expect(clamped.dy, upper.top + cardBandHeight);
+      expect(clamped.dy - cardBandHeight, upper.top);
+    });
+
+    test('多屏上下排列：跨屏拖动连续，交界处不被单屏边界弹住', () {
+      const upper = Rect.fromLTWH(0, -1080, 1920, 1080);
+      const lower = Rect.fromLTWH(0, 0, 1920, 1080);
+      const areas = <Rect>[lower, upper];
+      // 恰好跨在两屏交界：卡片带一半在顶屏一半在下屏。按"卡片中心归属单屏"
+      // 钳制会把底边从 -60 弹到 -80（往上）或从 60 弹到 124（往下）。
+      expect(clamp(const Offset(500, -60), areas: areas), const Offset(500, -60));
+      expect(clamp(const Offset(500, 60), areas: areas), const Offset(500, 60));
+      // 越过顶屏上沿才钳住；越过底屏下沿才钳住。
+      expect(
+        clamp(const Offset(500, -1080), areas: areas),
+        Offset(500, upper.top + cardBandHeight),
+      );
+      expect(
+        clamp(Offset(500, lower.bottom + 50), areas: areas),
+        Offset(500, lower.bottom),
+      );
+    });
+
+    test('无显示器信息时原样返回（不钳制，由调用方退回原生拖动）', () {
+      expect(
+        clamp(const Offset(-5000, -5000), areas: const <Rect>[]),
+        const Offset(-5000, -5000),
+      );
+    });
+  });
+
+  group('menuNudgeForMenuVisibility（贴顶后展开快捷菜单的临时让位）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+    const cardBandHeight = WindowsDesktopLyricsBridge.overlayHeight;
+    // 菜单面板高 212、底边距卡片顶 4 → 卡片顶需在区域顶下方 216px。
+    const requiredCardTop =
+        WindowsDesktopLyricsBridge.overlayMenuPanelHeight +
+        WindowsDesktopLyricsBridge.overlayMenuPanelGap;
+
+    double nudge(Offset bottomLeft) =>
+        WindowsDesktopLyricsBridge.menuNudgeForMenuVisibility(
+          origin: bottomLeft,
+          visibleAreas: const [primary],
+          cardBandHeight: cardBandHeight,
+        );
+
+    test('卡片贴顶：菜单带整条在屏幕外 → 需要下移 216px 才能完整展开', () {
+      expect(requiredCardTop, 216);
+      expect(nudge(const Offset(500, cardBandHeight)), 216);
+    });
+
+    test('卡片顶边已在上沿下方 216px 以内：只补差额', () {
+      // 卡片顶边在 100 → 还差 116。
+      expect(nudge(const Offset(500, 100 + cardBandHeight)), 116);
+    });
+
+    test('空间充足（屏幕中部/底部）：不移动窗口（零几何调用）', () {
+      expect(nudge(const Offset(500, 900)), 0);
+      expect(nudge(const Offset(500, requiredCardTop + cardBandHeight)), 0);
+    });
+
+    test('无显示器信息时不移动', () {
+      expect(
+        WindowsDesktopLyricsBridge.menuNudgeForMenuVisibility(
+          origin: const Offset(500, cardBandHeight),
+          visibleAreas: const <Rect>[],
+          cardBandHeight: cardBandHeight,
+        ),
+        0,
+      );
+    });
+  });
+
+  group('可见区载荷编解码（主窗 → 子窗）', () {
+    test('encode/decode 往返保持逻辑坐标', () {
+      const areas = [
+        Rect.fromLTWH(0, 0, 1920, 1040),
+        Rect.fromLTWH(1920, -100, 2560, 1440),
+      ];
+      final encoded = WindowsDesktopLyricsBridge.encodeVisibleAreas(areas);
+      expect(encoded, [
+        [0.0, 0.0, 1920.0, 1040.0],
+        [1920.0, -100.0, 2560.0, 1440.0],
+      ]);
+      expect(WindowsDesktopLyricsBridge.decodeVisibleAreas(encoded), areas);
+    });
+
+    test('畸形载荷跳过而不抛（缺字段 / 非数字 / 非列表 / 宽高非正）', () {
+      expect(WindowsDesktopLyricsBridge.decodeVisibleAreas(null), isEmpty);
+      expect(WindowsDesktopLyricsBridge.decodeVisibleAreas('nope'), isEmpty);
+      expect(
+        WindowsDesktopLyricsBridge.decodeVisibleAreas(<Object>[
+          [0, 0, 1920, 1040],
+          [0, 0, 100], // 字段不足
+          ['a', 0, 1, 2], // 非数字
+          [0, 0, double.nan, 10],
+          [0, 0, 0, 1040], // 零宽
+          [0, 0, 1920, -1], // 负高
+        ]),
+        const [Rect.fromLTWH(0, 0, 1920, 1040)],
+      );
+    });
+  });
+
+  group('clampOverlayOriginToVisibleAreas 卡片带感知（恢复位置）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+
+    test('存量贴顶位置（底边 88）按卡片高 124 回抬，工具栏不再被切在屏外', () {
+      // 不传卡片高：沿用历史的"窗口至少 80px 可见"→ 原样保留。
+      expect(
+        WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+          const Offset(500, 88),
+          const [primary],
+          fallback: const Offset(100, 100),
+          windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+        ),
+        const Offset(500, 88),
+      );
+      // 传卡片高：卡片带必须完整可见 → 底边抬到 124。
+      expect(
+        WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+          const Offset(500, 88),
+          const [primary],
+          fallback: const Offset(100, 100),
+          windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+          cardBandHeight: WindowsDesktopLyricsBridge.overlayHeight,
+        ),
+        const Offset(500, WindowsDesktopLyricsBridge.overlayHeight),
+      );
+    });
+
+    test('已贴顶的活坐标（底边 124）在卡片高不变时零改动', () {
+      expect(
+        WindowsDesktopLyricsBridge.clampOverlayOriginToVisibleAreas(
+          const Offset(500, 124),
+          const [primary],
+          fallback: const Offset(100, 100),
+          windowHeight: WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+          cardBandHeight: 124,
+        ),
+        const Offset(500, 124),
+      );
+    });
+  });
+
+  group('桌面歌词卡片自定义拖动（issue #23）', () {
+    const primary = Rect.fromLTWH(0, 0, 1920, 1080);
+    const windowSize = Size(
+      WindowsDesktopLyricsBridge.overlayWidth,
+      WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+    );
+
+    /// 组装一个可拖动悬浮窗：窗口位置由 [position] 与 [writes] 模拟，
+    /// 光标的屏幕坐标由 [cursor] 决定（须与按下点 + 窗口位置自洽）。
+    Future<void> pumpDraggable(
+      WidgetTester tester, {
+      required Offset startTopLeft,
+      required List<Offset> writes,
+      required Offset Function() cursor,
+      List<Rect> visibleAreas = const [primary],
+      DesktopLyricsSettings settings = const DesktopLyricsSettings(),
+    }) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      tester.view.physicalSize = windowSize;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(() => debugSetOverlayMenuNudge(Offset.zero));
+
+      var position = startTopLeft;
+      // 落盘走真实的 persistOverlayWindowPosition（window_manager.getBounds），
+      // 这里让它读到模拟窗口位置。
+      const channel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'getBounds' || call.method == 'getPosition') {
+              return <String, dynamic>{
+                'x': position.dx,
+                'y': position.dy,
+                'width': WindowsDesktopLyricsBridge.overlayWidth,
+                'height': WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: DesktopLyricsOverlayContent(
+              settings: settings,
+              current: '测试歌词',
+              next: '下一句',
+              isPlaying: true,
+              visibleAreas: visibleAreas,
+              onControlPlayback: (_) {},
+              onToggleLock: (_) {},
+              onClose: () {},
+              cursorPositionProvider: () async => cursor(),
+              windowPositionProvider: () async => position,
+              windowPositionSetter: (next) async {
+                position = next;
+                writes.add(next);
+              },
+              ignoreMouseEventsSetter: (ignore) async {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    /// 起手一小步越过鼠标 pan slop（此时 `_beginDrag` 以当前光标/窗口算
+    /// 抓取偏移），返回后可再改光标模拟真实拖动。
+    Future<TestGesture> startOverlayDrag(WidgetTester tester) async {
+      final gesture = await tester.startGesture(
+        const Offset(390, 340),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      return gesture;
+    }
+
+    testWidgets('卡片上方未留可见区时退回原生 DragToMoveArea（防拖丢窗口）', (tester) async {
+      final writes = <Offset>[];
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, 200),
+        writes: writes,
+        cursor: () => const Offset(890, 340),
+        visibleAreas: const <Rect>[],
+      );
+
+      expect(find.byType(DragToMoveArea), findsOneWidget);
+    });
+
+    testWidgets('往上拖到屏幕顶：窗口顶边被设成负值（原生拖动做不到）', (tester) async {
+      final writes = <Offset>[];
+      // 窗口顶边 200；按下点 (390,340) 在卡片带内（窗口 y 284~408），
+      // 对应的光标屏幕坐标为 (890,540)。
+      var cursor = const Offset(890, 540);
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, 200),
+        writes: writes,
+        cursor: () => cursor,
+      );
+      expect(find.byType(DragToMoveArea), findsNothing);
+
+      final gesture = await startOverlayDrag(tester);
+      // 真实光标上移到屏幕外的方向：落点会被"卡片带完整可见"钳在屏幕顶。
+      cursor = const Offset(890, -469);
+      await gesture.moveBy(const Offset(0, -1009));
+      await tester.pump();
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      // 卡片带顶边 = 窗口顶边 + 408 - 124 恰好落在屏幕顶边。
+      expect(
+        writes.last.dy + WindowsDesktopLyricsBridge.overlayFixedWindowHeight -
+            WindowsDesktopLyricsBridge.overlayHeight,
+        primary.top,
+      );
+      expect(writes.last.dy, lessThan(0));
+      expect(writes.last.dx, 500);
+    });
+
+    testWidgets('屏内拖动与光标 1:1：不被窗口自身位移与边界干扰', (tester) async {
+      final writes = <Offset>[];
+      // 按下点 (390,340) + 窗口 (500,500) → 光标屏幕坐标 (890,840)。
+      var cursor = const Offset(890, 840);
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, 500),
+        writes: writes,
+        cursor: () => cursor,
+      );
+
+      final gesture = await startOverlayDrag(tester);
+      // 光标移动 (-40,-60)：窗口应严格跟随到 (460,440)，与"窗口自己在动"
+      // 无关（这正是不能用 DragUpdateDetails.delta 的原因）。
+      cursor = const Offset(850, 780);
+      await gesture.moveBy(const Offset(-40, -60));
+      await tester.pump();
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(writes.last, const Offset(460, 440));
+    });
+
+    testWidgets('贴顶展开菜单时单击卡片：菜单收起并还原位置，不改写落盘坐标', (tester) async {
+      final writes = <Offset>[];
+      // 贴顶：窗口顶边 -284（底边 124），光标在卡片带内（屏幕 y 0~124）。
+      var cursor = const Offset(890, 60);
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, -284),
+        writes: writes,
+        cursor: () => cursor,
+      );
+
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(writes, [const Offset(500, -68)]);
+
+      // 在歌词卡片上单击（不移动）：菜单收起 → 临时下移还原；单击不算拖动，
+      // 不得落盘（否则贴顶坐标会被临时位移覆盖）。
+      await tester.tapAt(const Offset(390, 340));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(writes, [const Offset(500, -68), const Offset(500, -284)]);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
+        isNull,
+        reason: '单击不得触发位置落盘',
+      );
+    });
+
+    testWidgets('贴顶展开菜单时拖动卡片：先还原临时位移，落盘为还原后的位置', (tester) async {
+      final writes = <Offset>[];
+      // 贴顶态：窗口顶边 -284（底边 124），光标在卡片带内（屏幕 y 0~124）。
+      var cursor = const Offset(890, 60);
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, -284),
+        writes: writes,
+        cursor: () => cursor,
+      );
+
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(writes, [const Offset(500, -68)]);
+
+      // 菜单展开后把光标移到卡片带（屏幕 y 216~340，窗口顶边 -68），
+      // 按下并轻微移动：窗口先还原（-284），再以还原后的位置起算。
+      cursor = const Offset(890, 272);
+      final gesture = await startOverlayDrag(tester);
+      cursor = const Offset(890, 271);
+      await gesture.moveBy(const Offset(0, -1));
+      await tester.pump();
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(writes.take(2), [const Offset(500, -68), const Offset(500, -284)]);
+      // 落盘必须是还原后的贴顶坐标（底边 124），不是让位时的 340。
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
+        WindowsDesktopLyricsBridge.overlayHeight,
+      );
+    });
+
+    testWidgets('贴顶后展开快捷菜单：窗口临时下移让菜单带完整可见，收起后移回', (tester) async {
+      final writes = <Offset>[];
+      // 贴顶状态：窗口顶边 -284（底边 124），光标在卡片带内（屏幕 y 0~124）。
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, -284),
+        writes: writes,
+        cursor: () => const Offset(890, 60),
+      );
+
+      // 悬停卡片带 → 工具栏淡入（首个轮询拍 80ms + 淡入 180ms）。
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 菜单面板高 212 + 间隙 4：窗口需下移 216 才有完整展示空间。
+      expect(writes, [const Offset(500, -68)]);
+
+      // 点菜单带空白收起 → 原路移回。
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(writes, [const Offset(500, -68), const Offset(500, -284)]);
+    });
+
+    testWidgets('空间充足时展开菜单零窗口几何调用（不打扰现有行为）', (tester) async {
+      final writes = <Offset>[];
+      await pumpDraggable(
+        tester,
+        startTopLeft: const Offset(500, 100),
+        writes: writes,
+        cursor: () => const Offset(890, 440),
+      );
+
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(writes, isEmpty);
+    });
+
+    testWidgets('贴顶展开菜单时切到锁定：销毁子树前先还原临时位移（位置不被写丢）', (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      tester.view.physicalSize = windowSize;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(() => debugSetOverlayMenuNudge(Offset.zero));
+
+      final writes = <Offset>[];
+      var position = const Offset(500, -284); // 贴顶：底边 124
+      Widget build({required bool locked}) => MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: DesktopLyricsOverlayContent(
+            settings: DesktopLyricsSettings(locked: locked),
+            current: '测试歌词',
+            next: '下一句',
+            isPlaying: true,
+            visibleAreas: const [primary],
+            onControlPlayback: (_) {},
+            onToggleLock: (_) {},
+            onClose: () {},
+            cursorPositionProvider: () async => const Offset(890, 60),
+            windowPositionProvider: () async => position,
+            windowPositionSetter: (next) async {
+              position = next;
+              writes.add(next);
+            },
+            ignoreMouseEventsSetter: (ignore) async {},
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(build(locked: false));
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(find.byIcon(Icons.settings_rounded));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(writes, [const Offset(500, -68)]);
+
+      // 锁定：未锁定子树整体销毁 → dispose 里先还原窗口位置。
+      await tester.pumpWidget(build(locked: true));
+      await tester.pump();
+      expect(writes, [const Offset(500, -68), const Offset(500, -284)]);
+    });
+  });
+
+  group('菜单临时位移不污染落盘位置', () {
+    test('关窗时扣掉让位下移量：下次启动歌词位置不矮 216px', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      debugSetOverlayMenuNudge(const Offset(0, 216));
+      addTearDown(() => debugSetOverlayMenuNudge(Offset.zero));
+
+      const channel = MethodChannel('window_manager');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'getBounds') {
+              // 让位展开态：底边 340 = 贴顶底边 124 + 216。
+              return <String, dynamic>{
+                'x': 500.0,
+                'y': -68.0,
+                'width': WindowsDesktopLyricsBridge.overlayWidth,
+                'height': WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      await persistOverlayWindowPosition();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomLeftPrefKey),
+        500.0,
+      );
+      expect(
+        prefs.getDouble(WindowsDesktopLyricsBridge.windowBottomYPrefKey),
+        124.0,
+      );
     });
   });
 }

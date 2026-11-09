@@ -40,6 +40,16 @@ const Duration _kPersistDebounce = Duration(milliseconds: 500);
 /// preventClose 拦截后转入漏斗）并发触发，只执行一次。
 bool _overlayCloseInFlight = false;
 
+/// 快捷菜单展开时为让菜单带可见而对窗口做的临时下移量（逻辑 px，
+/// 收起态恒为 [Offset.zero]）。
+///
+/// 卡片贴屏幕顶时，窗口顶边本就在屏幕上沿之外（见 issue #23），窗口顶部
+/// 的常驻菜单带整体在屏外，点齿轮会"没反应"。此时把窗口临时下移
+/// （[WindowsDesktopLyricsBridge.menuNudgeForMenuVisibility]），菜单收起后
+/// 原路移回。落盘位置必须扣掉这笔临时位移——用户记忆的是"菜单收起时的
+/// 歌词位置"，否则每次展开菜单后关窗，下次启动歌词就矮了一截。
+Offset _overlayMenuNudge = Offset.zero;
+
 /// 立即持久化当前窗口位置（防抖取消失效时与关闭前补存共用）。
 ///
 /// 落盘**窗口底边左角**（逻辑坐标）。窗口高度现恒定
@@ -58,20 +68,27 @@ Future<void> persistOverlayWindowPosition() async {
     // 单次 getBounds 取全量几何：getPosition/getSize 底层各自再发一次
     // getBounds 原生调用，拆开是两次往返，读数间窗口若在移动可能撕裂。
     final bounds = await windowManager.getBounds();
+    // 临时菜单位移同步捕获（await 之后可能已被收起清零）。
+    final nudge = _overlayMenuNudge;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(
       WindowsDesktopLyricsBridge.windowBottomLeftPrefKey,
-      bounds.left,
+      bounds.left - nudge.dx,
     );
     await prefs.setDouble(
       WindowsDesktopLyricsBridge.windowBottomYPrefKey,
-      bounds.bottom,
+      bounds.bottom - nudge.dy,
     );
     await WindowsDesktopLyricsBridge.markOverlayPositionSemanticsCurrent(prefs);
   } on Exception {
     // 位置持久化失败不影响展示。
   }
 }
+
+/// 仅供单测固定"菜单临时位移"状态（生产路径由 `_HoverableOverlayState`
+/// 的快捷菜单收展维护，见 [_overlayMenuNudge]）。
+@visibleForTesting
+void debugSetOverlayMenuNudge(Offset nudge) => _overlayMenuNudge = nudge;
 
 /// desktop_multi_window 子窗口参数判定（约定见包源码：
 /// args = ['multi_window', windowId, argumentsJson]）。
@@ -112,6 +129,9 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
   var isPlaying = false;
   var progress = 0.0;
   var activeOnBottom = false;
+  // 显示器可见区（主窗下发，逻辑坐标）：自定义拖动与菜单展开让位用。
+  // 为空（主窗拿不到显示器信息）时退回原生 DragToMoveArea 拖动。
+  var visibleAreas = const <Rect>[];
   if (args.length > 2 && args[2].isNotEmpty) {
     try {
       // 包 0.2.1 的 WindowController 无 arguments getter，
@@ -126,6 +146,9 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
       isPlaying = initialArgs['isPlaying'] as bool? ?? false;
       progress = (initialArgs['progress'] as num?)?.toDouble() ?? 0.0;
       activeOnBottom = initialArgs['activeOnBottom'] as bool? ?? false;
+      visibleAreas = WindowsDesktopLyricsBridge.decodeVisibleAreas(
+        initialArgs['visibleAreas'],
+      );
     } catch (e) {
       debugPrint('[桌面歌词悬浮窗] 解析初始参数失败，使用默认值: $e');
     }
@@ -249,6 +272,7 @@ Future<void> runLyricsOverlayWindow(List<String> args) async {
     isPlaying: isPlaying,
     progress: progress,
     activeOnBottom: activeOnBottom,
+    visibleAreas: visibleAreas,
   );
 
   // 尽早注册消息处理，缩短主窗早期消息的丢失窗口期
@@ -462,12 +486,14 @@ class _OverlayModel extends ChangeNotifier {
     required bool isPlaying,
     double progress = 0.0,
     bool activeOnBottom = false,
+    List<Rect> visibleAreas = const <Rect>[],
   }) : _settings = settings,
        _current = current,
        _next = next,
        _isPlaying = isPlaying,
        _progress = progress,
-       _activeOnBottom = activeOnBottom;
+       _activeOnBottom = activeOnBottom,
+       visibleAreas = List<Rect>.unmodifiable(visibleAreas);
 
   DesktopLyricsSettings _settings;
   String _current;
@@ -475,6 +501,10 @@ class _OverlayModel extends ChangeNotifier {
   bool _isPlaying;
   double _progress;
   bool _activeOnBottom;
+
+  /// 显示器可见区（主窗随 createWindow 下发，逻辑坐标）：自定义拖动与
+  /// 快捷菜单展开让位共用。会话内不刷新（显示器热插拔后需重开窗口）。
+  final List<Rect> visibleAreas;
 
   DesktopLyricsSettings get settings => _settings;
   String get current => _current;
@@ -643,6 +673,7 @@ class _LyricsOverlayHomeState extends State<_LyricsOverlayHome>
           isPlaying: model.isPlaying,
           progress: model.progress,
           activeOnBottom: model.activeOnBottom,
+          visibleAreas: model.visibleAreas,
           onControlPlayback: (action) => unawaited(_controlPlayback(action)),
           onToggleLock: (locked) => unawaited(_setLocked(locked)),
           onClose: () => unawaited(closeLyricsOverlayWindow()),
@@ -674,8 +705,10 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
     required this.onClose,
     this.onUpdateSettings,
     this.onOpenDetailedSettings,
+    this.visibleAreas = const <Rect>[],
     this.cursorPositionProvider,
     this.windowPositionProvider,
+    this.windowPositionSetter,
     this.ignoreMouseEventsSetter,
     this.appFocusedProvider,
   });
@@ -695,8 +728,15 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
   final VoidCallback onClose;
   final ValueChanged<DesktopLyricsSettings>? onUpdateSettings;
   final VoidCallback? onOpenDetailedSettings;
+
+  /// 显示器可见区（逻辑坐标，主窗下发）：为空时拖动退回原生
+  /// `DragToMoveArea`（拿不到屏边界时不做自定义拖动，避免把窗口拖丢）。
+  final List<Rect> visibleAreas;
   final Future<Offset?> Function()? cursorPositionProvider;
   final Future<Offset?> Function()? windowPositionProvider;
+
+  /// 设置窗口逻辑坐标（默认 windowManager.setPosition；拖动与菜单让位用）。
+  final Future<void> Function(Offset position)? windowPositionSetter;
   final Future<void> Function(bool ignore)? ignoreMouseEventsSetter;
   final Future<bool> Function()? appFocusedProvider;
 
@@ -726,8 +766,10 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
             onClose: onClose,
             onUpdateSettings: onUpdateSettings,
             onOpenDetailedSettings: onOpenDetailedSettings,
+            visibleAreas: visibleAreas,
             cursorPositionProvider: cursorPositionProvider,
             windowPositionProvider: windowPositionProvider,
+            windowPositionSetter: windowPositionSetter,
             ignoreMouseEventsSetter: ignoreMouseEventsSetter,
             appFocusedProvider: appFocusedProvider,
           );
@@ -1016,8 +1058,10 @@ class _HoverableOverlay extends StatefulWidget {
     required this.onClose,
     this.onUpdateSettings,
     this.onOpenDetailedSettings,
+    this.visibleAreas = const <Rect>[],
     this.cursorPositionProvider,
     this.windowPositionProvider,
+    this.windowPositionSetter,
     this.ignoreMouseEventsSetter,
     this.appFocusedProvider,
   });
@@ -1034,11 +1078,18 @@ class _HoverableOverlay extends StatefulWidget {
   final ValueChanged<DesktopLyricsSettings>? onUpdateSettings;
   final VoidCallback? onOpenDetailedSettings;
 
+  /// 显示器可见区（逻辑坐标，主窗下发）：非空时卡片自定义拖动，可越过
+  /// 屏幕上沿把卡片带贴到屏幕顶（issue #23）；为空时退回原生拖动。
+  final List<Rect> visibleAreas;
+
   /// 光标屏幕坐标（默认 windowManager.getCursorScreenPoint）。
   final Future<Offset?> Function()? cursorPositionProvider;
 
   /// 窗口逻辑坐标（默认 windowManager.getPosition）。
   final Future<Offset?> Function()? windowPositionProvider;
+
+  /// 设置窗口逻辑坐标（默认 windowManager.setPosition）。
+  final Future<void> Function(Offset position)? windowPositionSetter;
 
   /// 设置整窗穿透（默认 windowManager.setIgnoreMouseEvents）。
   final Future<void> Function(bool ignore)? ignoreMouseEventsSetter;
@@ -1050,7 +1101,7 @@ class _HoverableOverlay extends StatefulWidget {
   State<_HoverableOverlay> createState() => _HoverableOverlayState();
 }
 
-class _HoverableOverlayState extends State<_HoverableOverlay> {
+class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListener {
   /// 光标位于卡片带内（驱动卡片背景与工具栏淡入）。
   bool _hovering = false;
 
@@ -1081,9 +1132,63 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
   /// 快捷菜单淡入/滑出时长：纯 Flutter 隐式动画（窗口几何不动）。
   static const Duration _kMenuTransition = Duration(milliseconds: 160);
 
+  // ---- 卡片自定义拖动状态（issue #23） ----
+  // 原生 SC_MOVE 拖动（DragToMoveArea）会把窗口顶边钳在显示器顶边，而可见
+  // 卡片贴窗口底边，卡片因此永远停在下方的菜单带 + 工具栏带之下；改为
+  // Flutter 侧驱动：按光标绝对屏幕坐标逐帧 setPosition，窗口顶边可越过
+  // 屏幕上沿。
+  /// 指针已按下、但还没真正移动：**只预备、不动窗口**。
+  ///
+  /// 卡片上只有一个 pan 识别器，单成员手势竞技场在按下瞬间就会把它判胜
+  /// （`gestureArena.close` → `_resolveByDefault`），`onPanStart` 因此会在
+  /// 鼠标按下（一次单击）时就触发。若不区分"按下"和"移动中"，单击歌词
+  /// 也会改写窗口位置、清掉菜单临时让位、并把让位后的坐标落盘。
+  bool _dragArmed = false;
+
+  /// 已发生移动、窗口正在跟随光标：抑制光标轮询的穿透切换（拖动中途把
+  /// 窗口改成整窗穿透会丢指针事件 / 卡片 hover 态闪断）。
+  bool _dragging = false;
+
+  /// 拖动起手时固定的「光标逻辑屏幕坐标 − 窗口顶边逻辑坐标」偏移。
+  ///
+  /// 不能用 `DragUpdateDetails.delta` 累加：Flutter 指针坐标是**客户区**
+  /// 坐标，窗口跟着指针移动后，下一帧 delta 已把窗口位移扣掉，累加会变成
+  /// "追不上指针 / 半速 / 抖动"（window_manager#513 同款）。这里每帧读
+  /// 光标绝对坐标，落点 = 光标 − 起手偏移，与窗口自身移动无关。
+  Offset? _dragGrabOffset;
+
+  /// 最近一次下发的窗口写入：拖动结束时先等它落地再落盘位置。
+  Future<void>? _lastDragWrite;
+
+  /// 拖动落点计算的合并锁：一帧内可能来多个 pointer move，只保留最新
+  /// 光标位置驱动写入，避免平台通道被 setPosition 灌满。
+  bool _dragTickInFlight = false;
+  bool _dragTickPending = false;
+
+  /// 窗口所在显示器的 devicePixelRatio（拖动中用于跨混合缩放屏重锚抓取
+  /// 偏移，见 [didChangeDependencies]）。
+  double? _dragDevicePixelRatio;
+
+  /// 菜单让位竞态代次：展开/收起/开始拖动都会 +1，异步取位置后据此丢弃
+  /// 过期动作（避免"快速开合菜单导致移错方向"）。
+  int _menuNudgeGeneration = 0;
+
+  /// 菜单让位动作串行队列：展开、收起、拖动开始都可能并发改写窗口位置，
+  /// 交错执行会把窗口移到错误的位置（快速连点齿轮时菜单直接看不见）。
+  Future<void> _menuNudgeQueue = Future.value();
+
+  Future<void> _enqueueMenuAction(Future<void> Function() action) {
+    final next = _menuNudgeQueue
+        .then((_) => action())
+        .catchError((Object _) {});
+    _menuNudgeQueue = next;
+    return next;
+  }
+
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
     // 只用周期轮询、不做 initState 首拍：子窗启动路径上窗口尚未 show()，
     // 隐藏期施加 setIgnoreMouseEvents(true) 会给窗口加 WS_EX_LAYERED，
     // 导致 DComp 内容面永久空白（见 OverlayPassthroughScheduler 注释）。
@@ -1094,11 +1199,38 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     });
   }
 
+  /// 失焦兜底：拖动是左键按住不放的模态交互，若中途 Alt+Tab 等操作让窗口
+  /// 丢掉鼠标捕获，Flutter 可能收不到 pointer up（onPanEnd 不触发），
+  /// `_dragging` 会一直为真、光标轮询被永久冻结。失焦即结束拖动。
+  @override
+  void onWindowBlur() {
+    _handleDragEnd();
+  }
+
   @override
   void dispose() {
+    windowManager.removeListener(this);
     _stopMenuDismissWatch();
     _pollTimer?.cancel();
+    _releaseMenuNudgeOnDispose();
     super.dispose();
+  }
+
+  /// 锁定切换会用 [LockedLyricsBody] 整棵替换未锁定子树（本 State 随之
+  /// dispose）。若此刻窗口正为展开快捷菜单而临时下移，必须先把位置还原
+  /// 再交棒：否则锁定态歌词凭空矮 216px，且下一次落盘会把临时位置当成
+  /// 用户位置写进 prefs，贴顶设置被永久改掉。
+  void _releaseMenuNudgeOnDispose() {
+    final nudge = _overlayMenuNudge;
+    if (nudge == Offset.zero) return;
+    _overlayMenuNudge = Offset.zero;
+    unawaited(_restoreWindowAfterNudge(nudge));
+  }
+
+  Future<void> _restoreWindowAfterNudge(Offset nudge) async {
+    final position = await _getWindowPosition();
+    if (position == null) return;
+    await _setWindowPosition(position - nudge);
   }
 
   Future<Offset?> _getCursorPosition() async {
@@ -1119,6 +1251,199 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     } on Exception {
       return null;
     }
+  }
+
+  Future<void> _setWindowPosition(Offset position) async {
+    try {
+      final setter = widget.windowPositionSetter;
+      if (setter != null) {
+        await setter(position);
+      } else {
+        await windowManager.setPosition(position);
+      }
+    } on Exception {
+      // 位置设置失败不影响歌词展示（下一次拖动会再次校准）。
+    }
+  }
+
+  // ---- 卡片拖动（issue #23） ----
+  //
+  // 不用 window_manager 的 DragToMoveArea：它走原生 SC_MOVE 模态移动循环，
+  // Windows 会把窗口顶边钳在显示器顶边（WPF DragMove 同款行为），而本
+  // 悬浮窗可见卡片贴窗口底边、上方还压着 212px 常驻菜单带 + 36px 工具栏带，
+  // 卡片最高只能到屏幕顶下方近 300px；存量位置迁移出来的负顶边窗口还会在
+  // 下一次拖动时被原生循环瞬间拽回 0 —— 即 issue #23 的"拖到顶部会弹下来
+  // 不少、无法固定在屏幕顶部"。
+  //
+  // 这里按**光标绝对屏幕坐标**驱动（不是指针 delta）：起手记录
+  // 「光标 − 窗口顶边」偏移，之后每帧读光标落点 → setPosition，落点用
+  // [WindowsDesktopLyricsBridge.clampOverlayDragOrigin] 约束（卡片带完整
+  // 可见；窗口顶边允许为负）。拖动时窗口跟着指针走，指针始终停在卡片带内，
+  // 加上 Flutter 在左键按下时会 SetCapture，不会因为移出窗口丢事件。
+  void _handleDragStart(DragStartDetails details) {
+    // 按下即触发（单成员竞技场默认判胜），这里只"预备"：真正开始拖动要等
+    // 第一次 onPanUpdate。同时收起快捷菜单——按在卡片上属于"点别处"，
+    // 菜单收起会把贴顶时的临时让位移回原位（[_clearMenuNudge]）。
+    final nudge = _overlayMenuNudge;
+    if (_showSettingsMenu) {
+      _setSettingsMenuVisible(false);
+    }
+    // 允许"重启"：若上一次拖动因为丢指针事件（如拖动中 Alt+Tab 丢捕获）
+    // 没收到 onPanEnd，这里以新一轮拖动为准恢复，而不是永久卡死。
+    _dragging = false;
+    _dragArmed = true;
+    // 抓取偏移 = 按下瞬间光标相对窗口左上角的偏移。details.globalPosition
+    // 是客户区坐标（无边框窗即窗口坐标），直接用就与窗口是否移动无关；
+    // 若菜单让位还在生效，等它移回原位后同一光标的相对偏移会再加上 nudge。
+    _dragGrabOffset = details.globalPosition + nudge;
+  }
+
+  Future<void> _beginDrag() async {
+    // 先等菜单让位/复位的异步写入落地（含上面收起菜单触发的移回），
+    // 否则拖动会从"让位后的临时位置"起算。
+    await _menuNudgeQueue;
+    final position = await _getWindowPosition();
+    if (!mounted || !_dragging) return;
+    if (position == null || _dragGrabOffset == null) {
+      setState(() {
+        _dragging = false;
+        _dragArmed = false;
+      });
+      return;
+    }
+    unawaited(_dragToCursor());
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details) {
+    // details.delta 不可用（客户区坐标，见 [_dragGrabOffset] 注释）。
+    if (_dragging) {
+      unawaited(_dragToCursor());
+      return;
+    }
+    if (!_dragArmed) return;
+    // 第一次真正移动：此刻才开始拖动（见 [_dragArmed]）。
+    _dragArmed = false;
+    setState(() => _dragging = true);
+    unawaited(_beginDrag());
+  }
+
+  /// 读光标绝对坐标 → 钳制 → 下发窗口位置；同一时刻只跑一轮，期间到达的
+  /// 新移动合并到下一拍。
+  Future<void> _dragToCursor() async {
+    if (_dragTickInFlight) {
+      _dragTickPending = true;
+      return;
+    }
+    _dragTickInFlight = true;
+    try {
+      do {
+        _dragTickPending = false;
+        final grabOffset = _dragGrabOffset;
+        if (grabOffset == null) return;
+        final cursor = await _getCursorPosition();
+        if (!mounted || !_dragging) return;
+        if (cursor == null) continue;
+        const windowHeight = WindowsDesktopLyricsBridge.overlayFixedWindowHeight;
+        final desiredTopLeft = cursor - grabOffset;
+        final desiredOrigin = desiredTopLeft + const Offset(0, windowHeight);
+        final clampedOrigin = WindowsDesktopLyricsBridge.clampOverlayDragOrigin(
+          desiredOrigin,
+          widget.visibleAreas,
+          cardBandHeight: WindowsDesktopLyricsBridge.overlayHeightFor(
+            widget.settings,
+          ),
+        );
+        final targetTopLeft = clampedOrigin - const Offset(0, windowHeight);
+        if (clampedOrigin != desiredOrigin) {
+          // 被边界拦下：把抓取偏移锚回实际落点，反向拖动立即跟手，
+          // 否则要先"抵消"越界的那段位移窗口才动。
+          _dragGrabOffset = cursor - targetTopLeft;
+        }
+        final write = _setWindowPosition(targetTopLeft);
+        _lastDragWrite = write;
+        await write;
+      } while (_dragTickPending && mounted && _dragging);
+    } finally {
+      _dragTickInFlight = false;
+    }
+  }
+
+  void _handleDragEnd() {
+    final wasDragging = _dragging;
+    _dragArmed = false;
+    if (!wasDragging) return; // 只是单击：不改窗口、不落盘。
+    setState(() => _dragging = false);
+    _dragGrabOffset = null;
+    unawaited(_persistAfterDrag());
+    // 拖动结束后立即校准 hover/穿透（拖动期间被抑制）。
+    unawaited(_pollCursor());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 跨"混合缩放"多屏拖动：抓取偏移是**窗口逻辑坐标**，窗口 DPR 一变
+    // （拖到另一块缩放不同的屏），同一段物理偏移对应的逻辑值要按比例缩放，
+    // 否则跨屏瞬间窗口会按 grabOffset×(sB/sA−1) 跳一下（100%→150% 且抓取
+    // 偏移 390px 时约 195px）。物理抓取点不变 → 逻辑偏移按 DPR 反比换算。
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final previous = _dragDevicePixelRatio;
+    _dragDevicePixelRatio = dpr;
+    if (previous == null || previous == dpr || previous <= 0 || dpr <= 0) {
+      return;
+    }
+    final grabOffset = _dragGrabOffset;
+    if ((_dragging || _dragArmed) && grabOffset != null) {
+      _dragGrabOffset = grabOffset * (previous / dpr);
+    }
+  }
+
+  Future<void> _persistAfterDrag() async {
+    final write = _lastDragWrite;
+    _lastDragWrite = null;
+    if (write != null) await write;
+    await persistOverlayWindowPosition();
+  }
+
+  // ---- 快捷菜单展开让位（issue #23 的贴顶连带问题） ----
+  //
+  // 卡片贴顶后窗口顶边在屏幕上沿之外，窗口顶部的常驻菜单带整体在屏外，
+  // 点齿轮等于点了个寂寞。展开前把窗口临时下移
+  // [WindowsDesktopLyricsBridge.menuNudgeForMenuVisibility] 算出的距离，
+  // 收起（或开始拖动、组件销毁）时原路移回；落盘位置始终按位移前算。
+  Future<void> _nudgeForMenu() async {
+    if (_dragging) return;
+    final generation = ++_menuNudgeGeneration;
+    if (widget.visibleAreas.isEmpty || _overlayMenuNudge != Offset.zero) {
+      return;
+    }
+    final position = await _getWindowPosition();
+    if (!mounted || _dragging || generation != _menuNudgeGeneration) return;
+    if (position == null) return;
+    final nudge = WindowsDesktopLyricsBridge.menuNudgeForMenuVisibility(
+      origin: Offset(
+        position.dx,
+        position.dy + WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+      ),
+      visibleAreas: widget.visibleAreas,
+      cardBandHeight: WindowsDesktopLyricsBridge.overlayHeightFor(
+        widget.settings,
+      ),
+    );
+    if (nudge <= 0) return;
+    _overlayMenuNudge = Offset(0, nudge);
+    await _setWindowPosition(position + Offset(0, nudge));
+  }
+
+  Future<void> _clearMenuNudge() async {
+    final generation = ++_menuNudgeGeneration;
+    final nudge = _overlayMenuNudge;
+    if (nudge == Offset.zero) return;
+    _overlayMenuNudge = Offset.zero;
+    final position = await _getWindowPosition();
+    if (!mounted || generation != _menuNudgeGeneration) return;
+    if (position == null) return;
+    await _setWindowPosition(position - nudge);
   }
 
   Future<void> _setIgnoreMouseEvents(bool ignore) async {
@@ -1144,6 +1469,10 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
   ///   项/点空白收起）；收起态穿透，不挡下层应用点击。
   Future<void> _pollCursor() async {
     if (_polling) return;
+    // 拖动期间冻结命中判定：窗口正跟着指针移动，此刻若把整窗切成穿透
+    // （WS_EX_TRANSPARENT）会立刻丢指针事件、卡片 hover 也闪断；拖动结束
+    // 后会补一拍校准（见 [_handleDragEnd]）。
+    if (_dragging) return;
     _polling = true;
     try {
       final cursorPos = await _getCursorPosition();
@@ -1202,8 +1531,13 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
     setState(() => _showSettingsMenu = visible);
     if (visible) {
       _startMenuDismissWatch();
+      // 卡片贴屏幕顶时菜单带整体在屏外：临时下移窗口让菜单完整可见。
+      unawaited(_enqueueMenuAction(_nudgeForMenu));
     } else {
       _stopMenuDismissWatch();
+      // 收起即复位；期间若用户拖动过卡片（[_handleDragStart] 已清位移），
+      // 这里不会再多移一次。
+      unawaited(_enqueueMenuAction(_clearMenuNudge));
     }
     // 菜单收展改变命中区域（整窗 ↔ 仅卡片带）：立即轮询一拍，不等下个
     // 周期，收起瞬间菜单带即刻恢复穿透。
@@ -1335,7 +1669,14 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
                       child: Align(
                         alignment: Alignment.bottomRight,
                         child: Padding(
-                          padding: const EdgeInsets.only(bottom: 4, right: 8),
+                          // 底边间隙必须与
+                          // [WindowsDesktopLyricsBridge.overlayMenuPanelGap]
+                          // 一致：贴顶让位量按它算菜单能否完整展开。
+                          padding: const EdgeInsets.only(
+                            bottom:
+                                WindowsDesktopLyricsBridge.overlayMenuPanelGap,
+                            right: 8,
+                          ),
                           child: _OverlayQuickSettingsMenu(
                             settings: settings,
                             onControlPlayback: widget.onControlPlayback,
@@ -1373,8 +1714,8 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: DragToMoveArea(
-                    child: Container(
+                  child: _buildDragSurface(
+                    Container(
                       color: Colors.transparent,
                       child: buildOverlayLyricsBody(
                         settings: settings,
@@ -1415,6 +1756,30 @@ class _HoverableOverlayState extends State<_HoverableOverlay> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 卡片拖动区（issue #23）。
+  ///
+  /// 有显示器可见区时用 Flutter 侧自定义拖动（见 [_handleDragStart] 的
+  /// 注释：窗口顶边可以越过屏幕上沿，卡片带才能贴到屏幕顶）；可见区为空
+  /// （主窗拿不到显示器信息）时退回原生 [DragToMoveArea]——没有屏边界就
+  /// 无法钳制落点，宁可保持旧的"拖不到最顶"，也不能让窗口被拖出屏幕后
+  /// 找不回来（锁定态全穿透，没有入口找回）。
+  Widget _buildDragSurface(Widget child) {
+    if (widget.visibleAreas.isEmpty) {
+      return DragToMoveArea(child: child);
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: _handleDragStart,
+      onPanUpdate: _handleDragUpdate,
+      onPanEnd: (_) => _handleDragEnd(),
+      onPanCancel: _handleDragEnd,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.move,
+        child: child,
       ),
     );
   }
