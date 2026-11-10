@@ -16,6 +16,7 @@ import '../widgets/app_song_row.dart';
 import '../widgets/app_section.dart';
 import '../widgets/artwork.dart';
 import '../widgets/desktop_song_table_row.dart';
+import '../widgets/expandable_intro.dart';
 import '../widgets/import_playlist_sheet.dart';
 import '../widgets/locate_current_song_button.dart';
 import '../widgets/mini_player.dart';
@@ -108,6 +109,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   final _cache = CacheService();
 
   PlaylistSummary? _info;
+  /// 专辑详情（/album/detail）：仅专辑详情页使用，补封面/发行日期/简介；
+  /// 失败不影响曲目列表，因此与歌曲加载解耦、独立请求。
+  ArtistAlbum? _albumDetail;
   var _nextPage = 1;
   var _hasMore = true;
   var _isInitialLoading = true;
@@ -683,6 +687,33 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return _songs.where((s) => s.hash.isNotEmpty).toList();
   }
 
+  /// 拉取专辑详情（封面 / 发行日期 / 简介）。
+  ///
+  /// 与曲目列表解耦：接口慢或失败只影响简介卡，不影响歌曲展示（上游 ada2bd2
+  /// 的「专辑介绍独立加载」）。成功后顺带用更完整的封面补 header。
+  Future<void> _loadAlbumDetail() async {
+    if (!_isAlbum) return;
+    final albumId = widget.playlist.albumId ?? widget.playlist.id;
+    if (albumId.isEmpty) return;
+    try {
+      final detail = await widget.api.albumDetail(albumId);
+      if (!mounted || detail == null) return;
+      setState(() {
+        _albumDetail = detail;
+        final info = _info ?? widget.playlist;
+        final cover = detail.coverUrl ?? '';
+        final currentCover = info.coverUrl ?? '';
+        // 入口没带封面时用详情补全；已有封面不覆盖（避免首屏闪图）。
+        if (currentCover.isEmpty && cover.isNotEmpty) {
+          _info = info.copyWith(coverUrl: cover);
+        }
+      });
+    } catch (error) {
+      // 简介/封面属于增强信息，失败静默（不影响曲目与播放）。
+      debugPrint('[playlist] 专辑详情加载失败（忽略）: $error');
+    }
+  }
+
   /// 后台静默补全剩余分页，并在仍播放本列表时扩展队列（无 Toast）。
   void _expandQueueInBackgroundIfNeeded({required Song startedWith}) {
     if (_searchQuery.isNotEmpty) return;
@@ -735,6 +766,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _nextPage = 1;
       _hasMore = true;
       _info = null;
+      _albumDetail = null;
       _unavailableSongCount = 0;
       _resetSongsFrom(const <Song>[]);
     });
@@ -817,6 +849,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
     try {
       if (_isAlbum) {
+        // 简介/封面走独立请求，失败只丢这块，不阻塞曲目列表（上游 ada2bd2）。
+        unawaited(_loadAlbumDetail());
         final songPage = await widget.api.albumSongPage(
           widget.playlist.albumId ?? widget.playlist.id,
           page: 1,
@@ -1965,6 +1999,20 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                         ),
                       )
                     else ...[
+                      // 专辑简介：独立请求，失败或无简介时不占位（不影响曲目）。
+                      // 搜索态隐藏，避免占掉结果区首屏。
+                      if (!_isSearching &&
+                          _isAlbum &&
+                          (_albumDetail?.intro?.trim().isNotEmpty ?? false))
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                            child: ExpandableIntro(
+                              title: '专辑简介',
+                              text: _albumDetail!.intro!.trim(),
+                            ),
+                          ),
+                        ),
                       // 参考图4：圆角列表面板的粘性头，置顶后依然可播/可搜/可排。
                       SliverPersistentHeader(
                         pinned: true,
