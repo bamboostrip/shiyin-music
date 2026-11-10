@@ -122,6 +122,17 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // R8 代码裁剪 + 资源裁剪：release 包体积/启动的主要优化项。
+            // keep 规则见 proguard-rules.pro（含 XML 反射实例化的自定义 View、
+            // SuperLyricApi、audio_service/just_audio 等）。两者必须成对开启，
+            // 否则 AGP 会报 "Removing unused resources requires unused code
+            // shrinking to be turned on"。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -182,3 +193,5 @@ tasks.configureEach {
         if (rustAbis.contains("armeabi-v7a")) dependsOn("cargoBuildArm32")
     }
 }
+
+
