@@ -5,6 +5,7 @@ import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../services/cache_service.dart';
 import '../../services/image_disk_cache.dart';
+import '../../services/lyric_cache_service.dart';
 import '../widgets/toast.dart';
 
 /// 缓存管理 BottomSheet。
@@ -46,7 +47,11 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
       () async {
         if (widget.cache == null) return {'data': null};
         try {
-          return {'data': await widget.cache!.getCacheSize()};
+          // 数据缓存 = prefs 里的 JSON 缓存 + 歌词文件缓存（后者已迁出
+          // prefs，见 LyricCacheService）：两处都算"数据缓存"口径。
+          final prefsBytes = await widget.cache!.getCacheSize();
+          final lyricBytes = await LyricCacheService.instance.totalBytes();
+          return {'data': prefsBytes + lyricBytes};
         } catch (_) {
           return {'data': null};
         }
@@ -221,6 +226,8 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
                   setState(() => _clearing = true);
                   try {
                     await widget.cache!.clearAllCache();
+                    // 歌词缓存已迁到独立文件，同样属于"数据缓存"。
+                    await LyricCacheService.instance.clear();
                     await _loadSizes();
                     if (mounted) {
                       Toast.success('数据缓存已清理');

@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../config/app_config.dart';
 
 /// 缓存读取结果。
 class CacheResult<T> {
@@ -76,16 +79,120 @@ class CacheService {
   /// 平台层写失败时 [SharedPreferences.setString] 返回 false 而不抛异常，
   /// 这里转为抛出，让调用方的 try/catch（及 swr 的「写失败不降级」分支）
   /// 能感知到，而不是静默丢写。
+  ///
+  /// 两个降低写盘开销的优化（Windows 上每次写 prefs 都会整文件 JSON
+  /// 编码 + 同步写盘，文件大时单次数百毫秒）：
+  /// - **payload 未变则不写**：启动时 SWR 刷新回来的数据常常和缓存一致，
+  ///   跳过可省掉整次重写。但 `savedAt` 太久没刷新会让条目永远被判过期
+  ///   （如歌单详情每次打开都全量重拉），因此超过
+  ///   [AppConfig.cacheSavedAtRefreshAfter] 时仍写一次、只刷新 savedAt；
+  /// - **按前缀限制条数**：超过 [AppConfig.dataCachePrefixCaps] 时从最旧
+  ///   的条目开始淘汰，避免长期使用后 prefs 重新膨胀（每次最多淘汰几条，
+  ///   避免历史积压一次性触发几十次整文件重写）。
   Future<void> write(String key, Map<String, dynamic> payload) async {
     final prefs = await SharedPreferences.getInstance();
+    final existingRaw = prefs.getString(key);
+    if (existingRaw != null && _hasSamePayload(existingRaw, payload)) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final savedAt = _savedAtOf(existingRaw);
+      final validatedRecently =
+          now - savedAt < AppConfig.cacheSavedAtRefreshAfter.inMilliseconds;
+      if (validatedRecently) return; // 内容一致且刚校验过：整次写盘都可以省掉
+    }
     final wrapper = jsonEncode({
       _savedAtKey: DateTime.now().millisecondsSinceEpoch,
       _payloadKey: payload,
     });
+    if (wrapper.length > AppConfig.dataCacheMaxEntryChars) {
+      // 单条过大（如超长歌单的全量歌曲表）：宁可不缓存，也不让一个 key
+      // 把 prefs 撑到需要整文件重编码的体量。
+      debugPrint(
+        'CacheService: 跳过超大缓存 key=$key（${wrapper.length} 字符，'
+        '上限 ${AppConfig.dataCacheMaxEntryChars}）',
+      );
+      return;
+    }
     final ok = await prefs.setString(key, wrapper);
     if (!ok) {
       throw Exception('CacheService: 写入缓存 $key 失败（平台层 setString 返回 false）');
     }
+    await _enforcePrefixCap(prefs, key);
+  }
+
+  /// 已有缓存与待写 payload 是否完全一致（JSON 编码比较，键序稳定）。
+  static bool _hasSamePayload(String raw, Map<String, dynamic> payload) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return false;
+      final existing = decoded[_payloadKey];
+      if (existing is! Map<String, dynamic>) return false;
+      return jsonEncode(existing) == jsonEncode(payload);
+    } catch (_) {
+      // 损坏缓存按"不一致"处理，正常覆盖修复。
+      return false;
+    }
+  }
+
+  /// 对按条缓存的 key 做「保留最新 N 条」淘汰（N 见
+  /// [AppConfig.dataCachePrefixCaps]，取最长匹配前缀）。
+  ///
+  /// 每次最多淘汰 [AppConfig.dataCacheEvictionsPerWrite] 条：历史积压
+  /// （升级前条目远超新上限）不能一次性触发几十次整文件重写，那正是本次
+  /// 要消灭的卡顿来源。积压会随多次缓存写入逐步收敛。
+  Future<void> _enforcePrefixCap(
+    SharedPreferences prefs,
+    String key,
+  ) async {
+    final matchedPrefix = _capPrefixFor(key);
+    if (matchedPrefix == null) return;
+    final cap = AppConfig.dataCachePrefixCaps[matchedPrefix]!;
+    if (cap <= 0) return;
+
+    // 候选只算「同属这个前缀组」的 key：cache_playlist_ 与
+    // cache_playlist_collection_ 是两组独立上限，不能互相挤占。
+    final candidates = <String, int>{};
+    for (final other in prefs.getKeys()) {
+      if (other == key) continue;
+      if (_capPrefixFor(other) != matchedPrefix) continue;
+      final raw = prefs.getString(other);
+      candidates[other] = raw == null ? 0 : _savedAtOf(raw);
+    }
+    // 新写入的这条算最新（savedAt = now），只需淘汰溢出的旧条目。
+    final overflow = candidates.length + 1 - cap;
+    if (overflow <= 0) return;
+    final sorted = candidates.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final limit = math.min(
+      overflow,
+      AppConfig.dataCacheEvictionsPerWrite,
+    );
+    for (var i = 0; i < limit && i < sorted.length; i++) {
+      await prefs.remove(sorted[i].key);
+    }
+  }
+
+  /// key 命中的最长上限前缀（[AppConfig.dataCachePrefixCaps]）。
+  static String? _capPrefixFor(String key) {
+    String? matched;
+    for (final prefix in AppConfig.dataCachePrefixCaps.keys) {
+      if (!key.startsWith(prefix)) continue;
+      if (matched == null || prefix.length > matched.length) {
+        matched = prefix;
+      }
+    }
+    return matched;
+  }
+
+  /// 解析缓存条目的 savedAt；解析不出来按 0（最旧）处理。
+  static int _savedAtOf(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final savedAt = decoded[_savedAtKey];
+        if (savedAt is num) return savedAt.toInt();
+      }
+    } catch (_) {}
+    return 0;
   }
 
   /// 移除单条缓存。

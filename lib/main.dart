@@ -26,6 +26,7 @@ import 'services/device_info_service.dart';
 import 'services/download_service.dart';
 import 'services/image_disk_cache.dart';
 import 'services/legacy_migration.dart';
+import 'services/lyric_cache_service.dart';
 import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
 import 'services/network_monitor.dart';
@@ -96,6 +97,9 @@ Future<void> main(List<String> args) async {
         ? AppConfig.desktopImageDiskCacheMaxBytes
         : AppConfig.imageDiskCacheMaxBytes,
   );
+  // 歌词缓存：按歌曲 hash 独立文件（不再进 SharedPreferences）。同样只登记
+  // 上限，目录/裁剪都推迟到首帧之后。
+  LyricCacheService.instance.configure(AppConfig.lyricCacheMaxBytes);
   // 旧标识（ka_music_* 键与目录、Windows com.example / Linux 旧 app id
   // 数据目录）→ 时音命名的一次性迁移。必须先于 RustApiClient.getInstance()
   // 与首次 SharedPreferences 访问：支持目录路径取决于 CompanyName/app id，
@@ -174,6 +178,10 @@ Future<void> main(List<String> args) async {
         themeController: themeController,
       ),
     );
+    // 窗口改为「首帧之后才显示」：窗口初始化（几何恢复/最大化/显示器钳制）
+    // 与首帧构建期间保持隐藏，用户不会先看到一个空白窗口。带 2s 兜底，
+    // 构建异常时窗口也一定会出现。
+    DesktopWindow.revealAfterFirstFrame();
   } catch (error, stack) {
     // 启动初始化失败（最常见：Rust 引擎 dll/so 加载失败——被杀软隔离、
     // cargo 产物缺失、架构不符；其次窗口/音频服务初始化异常）。此前直接
@@ -229,6 +237,9 @@ void _runStartupFailureApp(Object error) {
       ),
     ),
   );
+  // 启动失败时窗口同样要出现：ensureInitialized 已不再直接 show，否则
+  // 用户看到的只是"点了图标没反应"。
+  DesktopWindow.revealAfterFirstFrame();
 }
 
 class ShiyinApp extends StatefulWidget {
@@ -396,6 +407,8 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
       // 封面磁盘缓存的裁剪放到首帧之后：全量扫目录要读大量 stat，放在启动前
       // 会拖慢冷启动（车机 eMMC 尤其明显），首帧后再跑用户无感。
       unawaited(ImageDiskCache.instance.prune());
+      // 歌词缓存同理：全量扫目录 + 按容量淘汰推迟到首帧之后。
+      unawaited(LyricCacheService.instance.prune());
     });
     // Windows 桌面：托盘常驻（左键恒恢复并置前，右键菜单、退出）。
     if (isDesktopFormFactor) {
