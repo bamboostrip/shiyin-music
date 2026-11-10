@@ -10,16 +10,52 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
         .toList();
   }
 
+  /// 搜索联想词。
+  ///
+  /// `/search/suggest` 的响应经 transport 把 `data` 提升为根后是「分组数组」：
+  /// `[{RecordDatas:[{HintInfo:"..."}]}, ...]`，主分组在前。历史上还出现过
+  /// `{data: [...]}` 与更早的平铺 `{music: [{keyword: ...}]}` 两种形态，
+  /// 三种都兼容——只认其中一种会在后端调整时静默变空（上游 c113193 的坑）。
   Future<List<String>> searchSuggest(String keywords) async {
-    final json = asMap(
-      await _client.get('/search/suggest', {'keywords': keywords}),
-    );
-    final items = asList(json['music']);
-    return items
-        .whereType<Map<String, dynamic>>()
-        .map((item) => asString(item['keyword']) ?? '')
-        .where((k) => k.isNotEmpty)
+    final raw = await _client.get('/search/suggest', {'keywords': keywords});
+
+    final List<dynamic> groups;
+    if (raw is List) {
+      groups = raw;
+    } else {
+      final json = asMap(raw);
+      if (json['data'] is List) {
+        // 未解包 data 的形态。
+        groups = asList(json['data']);
+      } else {
+        // 更早的平铺结构：{music: [{keyword: '...'}]}。
+        return asList(json['music'])
+            .whereType<Map<String, dynamic>>()
+            .map((item) => asString(item['keyword']) ?? '')
+            .where((keyword) => keyword.isNotEmpty)
+            .toList();
+      }
+    }
+    if (groups.isEmpty) return const [];
+
+    List<String> readGroup(Object? group) => asList(asMap(group)['RecordDatas'])
+        .whereType<Map>()
+        .map((item) => asString(asMap(item)['HintInfo']) ?? '')
+        .where((hint) => hint.isNotEmpty)
         .toList();
+
+    // 主分组通常是最相关的「歌曲」联想；为空时再退到其余分组。
+    final primary = readGroup(groups.first);
+    final source = primary.isNotEmpty
+        ? primary
+        : groups.skip(1).expand(readGroup).toList();
+
+    final result = <String>[];
+    final seen = <String>{};
+    for (final hint in source) {
+      if (seen.add(hint)) result.add(hint);
+    }
+    return result;
   }
 
   static bool _isPlayableSearchSong(Map<String, dynamic> json) {
