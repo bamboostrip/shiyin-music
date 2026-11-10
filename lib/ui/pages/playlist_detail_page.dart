@@ -691,6 +691,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         ? startedWith.hash
         : startedWith.id;
     unawaited(() async {
+      // 补全可能耗时数秒，期间用户会用「下一首播放」插入歌曲：记录起点
+      // 队列长度，完成时长度有变即放弃整队替换——replaceQueue 会吞掉用户
+      // 的插入，宁可这次不扩队（与榜单页 _expandRankQueue 的守卫一致）。
+      final queueLengthAtStart = widget.player.queue.length;
       // 静默补全：不弹全屏 loading、不重置滚动位置。
       await _loadAllSongs(silent: true);
       if (!mounted || _disposed || startedKey.isEmpty) return;
@@ -703,6 +707,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       });
       // 用户已切到其它来源则不改队列
       if (currentKey != startedKey && !queueStillOurs) return;
+      // 用户补全期间插入过歌（队列长度变了）：放弃本次整队替换。
+      if (widget.player.queue.length != queueLengthAtStart) return;
       // 判据等价性（对齐上游 10ac04d replaceQueueIfMatches 的保护意图）：
       // 该检查与 replaceQueue 之间没有 await——expanded 是同步快照，而
       // replaceQueue 在首个 await 前就已完成 queue 赋值。因此不存在
