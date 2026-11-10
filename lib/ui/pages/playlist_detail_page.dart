@@ -721,11 +721,14 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final startedKey = startedWith.hash.isNotEmpty
         ? startedWith.hash
         : startedWith.id;
+    // 基线取「本页此刻应作为播放队列的曲目数」，而不是 player.queue 的
+    // 实时长度：起播是异步的，补全常在 playSong 完成前就发起，等它完成时
+    // 队列长度会从旧值变成页面列表长度，用实时长度会被误判成「用户插入」。
+    final expectedQueueLength = _playbackQueueNow().length;
     unawaited(() async {
-      // 补全可能耗时数秒，期间用户会用「下一首播放」插入歌曲：记录起点
-      // 队列长度，完成时长度有变即放弃整队替换——replaceQueue 会吞掉用户
-      // 的插入，宁可这次不扩队（与榜单页 _expandRankQueue 的守卫一致）。
-      final queueLengthAtStart = widget.player.queue.length;
+      // 补全可能耗时数秒，期间用户会用「下一首播放」插入歌曲：完成时队列
+      // 长度偏离页面预期即放弃整队替换——replaceQueue 会吞掉用户的插入，
+      // 宁可这次不扩队（下次播放全部会直接用全量列表，与榜单页守卫一致）。
       // 静默补全：不弹全屏 loading、不重置滚动位置。
       await _loadAllSongs(silent: true);
       if (!mounted || _disposed || startedKey.isEmpty) return;
@@ -738,8 +741,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       });
       // 用户已切到其它来源则不改队列
       if (currentKey != startedKey && !queueStillOurs) return;
-      // 用户补全期间插入过歌（队列长度变了）：放弃本次整队替换。
-      if (widget.player.queue.length != queueLengthAtStart) return;
+      // 用户补全期间插入过歌（队列长度偏离预期）：放弃本次整队替换。
+      if (widget.player.queue.length != expectedQueueLength) return;
       // 判据等价性（对齐上游 10ac04d replaceQueueIfMatches 的保护意图）：
       // 该检查与 replaceQueue 之间没有 await——expanded 是同步快照，而
       // replaceQueue 在首个 await 前就已完成 queue 赋值。因此不存在

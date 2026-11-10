@@ -684,6 +684,31 @@ void main() {
       expect(player.replacedQueues.single, hasLength(120));
     });
 
+    testWidgets('补全期间用户插入「下一首播放」：放弃整队替换，插入不丢', (tester) async {
+      final player = _FakePlayerController();
+      final api = await pumpPaginatedPlaylist(tester, player: player);
+      api.expandGate = Completer<void>();
+      await startPlayAllUntilExpansion(tester, api);
+
+      // 模拟用户在补全窗口内「下一首播放」：队列长度 +1。
+      final inserted = _makeSongs(1, prefix: 'insert_').single;
+      player.queue = [...player.queue, inserted];
+
+      api.expandGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(
+        player.replacedQueues,
+        isEmpty,
+        reason: '用户插入过歌时不得整队替换，否则插入会被吞掉',
+      );
+      expect(
+        player.queue.any((song) => song.id == inserted.id),
+        isTrue,
+        reason: '用户插入的歌必须仍在队列里',
+      );
+    });
+
     testWidgets('补队列在 playSong 完成前已触发，完成后按全量结果替换队列', (tester) async {
       final player = _FakePlayerController();
       final playGate = Completer<void>();
