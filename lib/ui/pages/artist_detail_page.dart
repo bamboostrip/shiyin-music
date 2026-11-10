@@ -10,6 +10,7 @@ import '../widgets/song_action_sheets.dart';
 import '../widgets/album_grid.dart';
 import '../widgets/app_song_row.dart';
 import '../widgets/desktop_song_table_row.dart';
+import '../widgets/expandable_intro.dart';
 import '../adaptive_layout.dart';
 import '../form_factor.dart';
 import '../player/song_tap_handler.dart';
@@ -510,6 +511,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       ),
                     )
                   else ...[
+                    // 歌手简介：数据来自首屏同一个 /artist/detail（long_intro
+                    // 优先、intro 兜底），放在头部大图与 tab 之间，默认收起。
+                    if (_detail?.introText.isNotEmpty == true)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: ExpandableIntro(
+                            title: '歌手简介',
+                            text: _detail!.introText,
+                          ),
+                        ),
+                      ),
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _ArtistTabHeaderDelegate(

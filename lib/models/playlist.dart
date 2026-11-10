@@ -368,18 +368,57 @@ class SongPage {
       rawItemCount > songs.length ? rawItemCount - songs.length : 0;
 }
 
+/// 歌手简介的分段（`/artist/detail` 的 long_intro 数组）。
+///
+/// 上游 e55e8db：long_intro 是 `[{title, content}]`，title 可能是「简介」
+/// 「基本信息」这类小标题，content 才是正文。
+class ArtistIntroSection {
+  const ArtistIntroSection({required this.title, required this.content});
+
+  final String title;
+  final String content;
+
+  factory ArtistIntroSection.fromJson(Map<String, dynamic> json) {
+    return ArtistIntroSection(
+      title: asString(json['title']) ?? '',
+      content: asString(json['content']) ?? '',
+    );
+  }
+}
+
 class ArtistDetail {
   const ArtistDetail({
     required this.id,
     required this.name,
     this.avatarUrl,
     this.birthday,
+    this.intro,
+    this.introSections = const [],
   });
 
   final String id;
   final String name;
   final String? avatarUrl;
   final String? birthday;
+
+  /// 简介短文本（`intro` 字段）。
+  final String? intro;
+
+  /// 简介分段（`long_intro` 字段），通常比 [intro] 完整。
+  final List<ArtistIntroSection> introSections;
+
+  /// 完整简介：优先用 long_intro 分段拼接，缺失时退回 intro。
+  String get introText {
+    final fromSections = introSections
+        .map((section) => [
+          if (section.title.isNotEmpty) section.title,
+          if (section.content.isNotEmpty) section.content,
+        ].join('\n'))
+        .where((text) => text.isNotEmpty)
+        .join('\n\n');
+    if (fromSections.isNotEmpty) return fromSections;
+    return intro?.trim() ?? '';
+  }
 
   factory ArtistDetail.fromJson(
     Map<String, dynamic> json, {
@@ -392,6 +431,11 @@ class ArtistDetail {
         asString(json['sizable_avatar']) ?? asString(json['avatar']),
       ),
       birthday: asString(json['birthday']),
+      intro: asString(json['intro']),
+      introSections: asList(json['long_intro'])
+          .whereType<Map<String, dynamic>>()
+          .map(ArtistIntroSection.fromJson)
+          .toList(),
     );
   }
 }
