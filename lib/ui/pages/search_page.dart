@@ -78,6 +78,9 @@ class _SearchPageState extends State<SearchPage> {
   // 搜索代际守卫：提交/点热门词/切平台/切类型都能并发触发 _search，
   // 慢的旧响应若不识别代际会覆盖新结果（输入框已是 B、列表却是 A 的）。
   int _searchSeq = 0;
+  // 上次真正提交搜索的关键词：输入框改成别的词但未提交时，不再把上一轮
+  // 结果当成当前结果展示（否则「输入框写着 B、列表还是 A」）。
+  String _lastSearchedKeyword = '';
   // 上次输入框文本是否为空：清除按钮/右内边距只依赖"有无文字"，
   // 仅在跨越空/非空边界时才需要整页 setState（见 _onTextChanged）。
   bool _lastTextWasEmpty = true;
@@ -227,6 +230,7 @@ class _SearchPageState extends State<SearchPage> {
       _loading = true;
       _suggestions = const [];
       _searched = true;
+      _lastSearchedKeyword = keywords.trim();
       _searchError = null;
     });
     var searchSucceeded = false;
@@ -625,10 +629,14 @@ class _SearchPageState extends State<SearchPage> {
           ],
         ),
         actions: [
+          // 有输入时是「搜索」，清空后变回「取消」（跨空/非空边界时
+          // _onTextChanged 会 setState，标签随之切换）。
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: _controller.text.trim().isEmpty
+                ? () => Navigator.of(context).pop()
+                : _onSubmit,
             child: Text(
-              '取消',
+              _controller.text.trim().isEmpty ? '取消' : '搜索',
               style: TextStyle(
                 color: colorScheme.primary,
                 fontWeight: FontWeight.w700,
@@ -686,7 +694,9 @@ class _SearchPageState extends State<SearchPage> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_searched && text.isNotEmpty) {
+    // 只有「输入框内容仍是上次提交的词」才展示结果；改词未提交时回到联想
+    // 视图，避免停留在上一轮结果（上游 c113193）。
+    if (_searched && text.isNotEmpty && text == _lastSearchedKeyword) {
       // 搜索失败：与"真无结果"区分，展示错误提示与重试（catch 已清空结果列表）。
       if (_searchError != null) {
         return _SearchErrorView(
@@ -1028,7 +1038,11 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     if (_suggestions.isNotEmpty) {
-      return _SuggestionList(suggestions: _suggestions, onTap: _onKeywordTap);
+      return _SuggestionList(
+        suggestions: _suggestions,
+        keyword: text,
+        onTap: _onKeywordTap,
+      );
     }
 
     return const SizedBox.shrink();
@@ -1592,9 +1606,14 @@ class _CategoryKeywordList extends StatelessWidget {
 }
 
 class _SuggestionList extends StatelessWidget {
-  const _SuggestionList({required this.suggestions, required this.onTap});
+  const _SuggestionList({
+    required this.suggestions,
+    required this.keyword,
+    required this.onTap,
+  });
 
   final List<String> suggestions;
+  final String keyword;
   final ValueChanged<String> onTap;
 
   @override
@@ -1602,6 +1621,7 @@ class _SuggestionList extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? Colors.white.withValues(alpha: .06) : Colors.white;
+    final query = keyword.trim();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Container(
@@ -1626,14 +1646,49 @@ class _SuggestionList extends StatelessWidget {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 6),
             shrinkWrap: true,
-            itemCount: suggestions.length,
+            itemCount: suggestions.length + 1,
             separatorBuilder: (_, _) => Divider(
               height: 1,
               indent: 52,
               color: colorScheme.outlineVariant.withValues(alpha: .35),
             ),
             itemBuilder: (context, index) {
-              final keyword = suggestions[index];
+              // 首行固定「搜索 <关键词>」，点击等价于点搜索。
+              if (index == 0) {
+                return ListTile(
+                  mouseCursor:
+                      isDesktopFormFactor ? SystemMouseCursors.click : null,
+                  dense: true,
+                  leading: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.search_rounded, size: 16, color: colorScheme.primary),
+                  ),
+                  title: Text.rich(
+                    TextSpan(
+                      children: [
+                        const TextSpan(text: '搜索 '),
+                        TextSpan(
+                          text: query,
+                          style: TextStyle(
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  onTap: query.isEmpty ? null : () => onTap(query),
+                );
+              }
+              final suggestion = suggestions[index - 1];
               return ListTile(
                 mouseCursor:
                     isDesktopFormFactor ? SystemMouseCursors.click : null,
@@ -1647,18 +1702,61 @@ class _SuggestionList extends StatelessWidget {
                   ),
                   child: Icon(Icons.search_rounded, size: 16, color: colorScheme.primary),
                 ),
-                title: Text(
-                  keyword,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, fontSize: 14),
-          ),
-          onTap: () => onTap(keyword),
-        );
-      },
+                title: _highlighted(context, suggestion, query),
+                onTap: () => onTap(suggestion),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  /// 把联想词里命中输入的部分染成主题色加粗。
+  Widget _highlighted(BuildContext context, String text, String query) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      fontSize: 14,
+    );
+    if (query.isEmpty) {
+      return Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final spans = <TextSpan>[];
+    var start = 0;
+    while (start < text.length) {
+      final hit = lowerText.indexOf(lowerQuery, start);
+      if (hit < 0) {
+        spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
+      if (hit > start) {
+        spans.add(TextSpan(text: text.substring(start, hit)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(hit, hit + query.length),
+          style: TextStyle(
+            color: colorScheme.primary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+      start = hit + query.length;
+    }
+    if (spans.isEmpty) spans.add(TextSpan(text: text));
+    return Text.rich(
+      TextSpan(children: spans),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
     );
   }
 }
