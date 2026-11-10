@@ -52,13 +52,22 @@ mixin _MusicApiSong on _MusicApiBase {
     AudioQuality quality = AudioQuality.standard,
     bool hashOnly = false,
   }) async {
+    // album_audio_id 必须是数字 ID：历史数据/部分入口可能把 hash 塞进来，
+    // 传给 /v5/url 会让 CDN 令牌（mx）错误（上游 165eb46）。album_id 为空
+    // 时不下发，交给引擎的默认值 0。
+    final albumAudioId = song.albumAudioId;
+    final numericAlbumAudioId =
+        albumAudioId != null && RegExp(r'^\d+$').hasMatch(albumAudioId)
+        ? albumAudioId
+        : null;
+    final albumId = song.albumId;
     final json = asMap(
       await _client.get('/song/url', {
         'hash': song.hash,
         'quality': quality.apiValue,
         if (!hashOnly) ...{
-          'album_id': song.albumId,
-          'album_audio_id': song.albumAudioId,
+          if (albumId != null && albumId.isNotEmpty) 'album_id': albumId,
+          'album_audio_id': ?numericAlbumAudioId,
         },
         'free_part': false,
       }),

@@ -515,7 +515,11 @@ class Song {
       artist: resolvedArtist,
       hash: asString(audioInfo['hash']) ?? '',
       albumId: asString(base['album_id']),
-      albumAudioId: asString(audioInfo['hash']) ?? asString(json['id']),
+      // /album/songs 的 base.album_audio_id 才是数字音频 ID；旧实现用
+      // audio_info.hash 冒充，会让 /song/url 的 CDN 令牌（mx）错误。
+      // 缺失时保持 null，由 songUrl 决定是否下发（上游 165eb46）。
+      albumAudioId:
+          asString(base['album_audio_id']) ?? asString(json['album_audio_id']),
       albumName: asString(albumInfo['album_name']),
       coverUrl: normalizeImageUrl(asString(albumInfo['cover'])),
       artists: artists,
