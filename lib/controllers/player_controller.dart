@@ -575,6 +575,9 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Timer? _playCacheTimer;
   DateTime? _listenTimeStartedAt;
   Duration _pendingListenTime = Duration.zero;
+  /// 上次把听歌时长写入本地统计的锚点：每 15s 增量累计一次，彻底与服务端
+  /// 上报解耦（未登录/上报失败也照常统计，上游 c113193）。
+  DateTime? _statsListenAnchor;
   bool _isReportingListenTime = false;
   int _seekSerial = 0;
   bool _isSeeking = false;

@@ -246,7 +246,7 @@ void main() {
     );
   });
 
-  test('上报成功：同步 5min、本地统计累加、剩余余量落盘', () async {
+  test('上报成功：同步 5min、剩余余量落盘（本地统计不再依赖上报）', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
       _pendingKey: 10 * 60 * 1000,
     });
@@ -261,8 +261,8 @@ void main() {
     final stats = await PlaybackStatsService().getStats();
     expect(
       stats.totalListenTime,
-      const Duration(minutes: 5),
-      reason: '一次上报只把 5 分钟计入本地统计（与上报周期一致）',
+      Duration.zero,
+      reason: '本地统计只由真实播放时长累计，不再按上报次数补记',
     );
 
     final remainder = c.pendingListenTimeForTest;
@@ -342,5 +342,34 @@ void main() {
 
     expect(api!.addListeningTimeCalls, 0, reason: '未满 5min 不应触发上报');
     expect(c.pendingListenTimeForTest, const Duration(minutes: 4));
+  });
+
+  test('本地统计与上报解耦：上报失败时暂停仍累计真实播放时长', () async {
+    final c = create();
+    await settle();
+    api!.addListeningTimeError = Exception('network down');
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+    expect(c.isPlaying, isTrue);
+
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    engine!.playing = false;
+    engine!.emit();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      greaterThan(Duration.zero),
+      reason: '未登录/上报失败时，本地统计也要按真实播放时长累计',
+    );
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 2)),
+      reason: '只应累计这段真实播放时长，不能按整 5 分钟补记',
+    );
   });
 }

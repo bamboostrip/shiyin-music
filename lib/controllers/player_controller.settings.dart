@@ -610,11 +610,13 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final shouldTrack =
         addListeningTimeEnabled && isPlaying && currentSong != null;
     if (shouldTrack) {
-      _listenTimeStartedAt ??= DateTime.now();
-      _listenTimeTimer ??= Timer.periodic(
-        _listenTimeCheckInterval,
-        (_) => unawaited(_maybeReportListeningTime()),
-      );
+      final startedAt = _listenTimeStartedAt ??= DateTime.now();
+      _statsListenAnchor ??= startedAt;
+      _listenTimeTimer ??= Timer.periodic(_listenTimeCheckInterval, (_) {
+        // 本地统计按 15s 增量落盘，不依赖服务端上报是否成功。
+        _flushListenTimeToStats();
+        unawaited(_maybeReportListeningTime());
+      });
       return;
     }
 
@@ -630,12 +632,29 @@ mixin _PlayerSettings on _PlayerControllerBase {
       // 否则进程被杀时这段时长直接丢失（上游 3.3.0 #151）。
       unawaited(_savePendingListenTime());
     }
+    _flushListenTimeToStats();
+    _statsListenAnchor = null;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
   }
 
+  /// 把距上次锚点的听歌时长增量写入本地统计。
+  ///
+  /// 与服务端上报完全解耦：未登录、接口失败时统计照常增长（此前只在
+  /// `addListeningTime` 成功后才按整 5 分钟累加，导致统计恒为 0）。
+  void _flushListenTimeToStats() {
+    final anchor = _statsListenAnchor;
+    if (anchor == null) return;
+    final now = DateTime.now();
+    final delta = now.difference(anchor);
+    if (delta <= Duration.zero) return;
+    _statsListenAnchor = now;
+    unawaited(_statsService.addListenTime(delta));
+  }
+
   void _resetListeningTimeTracker() {
     _listenTimeStartedAt = null;
+    _statsListenAnchor = null;
     _pendingListenTime = Duration.zero;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
@@ -663,8 +682,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     _isReportingListenTime = true;
     try {
       await _api.addListeningTime();
-      // 上报成功，同步记录本地统计的听歌时长
-      unawaited(_statsService.addListenTime(_listenTimeReportInterval));
+      // 本地统计已在 15s tick / 暂停时独立累计，这里不再按整 5 分钟补记
+      // （否则未登录或上报失败时统计恒为 0）。
       final stillPlaying = isPlaying && currentSong != null;
       final remainder = _trackedListeningTime() - _listenTimeReportInterval;
       _pendingListenTime = remainder > Duration.zero
@@ -672,6 +691,10 @@ mixin _PlayerSettings on _PlayerControllerBase {
           : Duration.zero;
       _listenTimeStartedAt = stillPlaying ? DateTime.now() : null;
       if (!stillPlaying) {
+        // 上报期间刚好暂停/播完：把最后一段写进统计并结束锚点，避免下次
+        // 起播时用旧锚点算出超长增量。
+        _flushListenTimeToStats();
+        _statsListenAnchor = null;
         _listenTimeTimer?.cancel();
         _listenTimeTimer = null;
       }
