@@ -263,7 +263,7 @@ void main() {
     expect(show.arguments['lyricPayload'], true);
   });
 
-  test('用户在桌面点关闭：置开关为 false 并补一次显式 hide（不回发会留下僵尸窗口）', () async {
+  test('移动端点关闭：只临时隐藏，不写死开关；回前台后恢复自启动', () async {
     controller.setAppForeground(false);
     await settle();
     calls.clear();
@@ -283,11 +283,51 @@ void main() {
     );
     await settle();
 
-    expect(controller.desktopLyricsEnabled, isFalse);
+    // 移动端不再写死开关（上游 166e84b / issue #160）。
+    expect(controller.desktopLyricsEnabled, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.desktop_lyrics_enabled'), isNull);
     expect(
       lastCall('hide').arguments,
       {'transient': false},
-      reason: '关闭后必须显式 hide：清掉在途推送写回的缓存与"应展示"意图',
+      reason: '临时隐藏也要显式 hide：清掉在途推送写回的缓存与"应展示"意图',
     );
+
+    // 回前台结束临时隐藏，再退后台应重新弹出悬浮窗。
+    controller.setAppForeground(true);
+    await settle();
+    calls.clear();
+    controller.setAppForeground(false);
+    await settle();
+    expect(
+      calls.map((c) => c.method),
+      contains('show'),
+      reason: '回前台后再次退后台，悬浮窗应自动恢复',
+    );
+  });
+
+  test('桌面形态点关闭：仍按既有语义关闭功能并写盘（PC 不受移动端改动影响）', () async {
+    debugDesktopFormFactorOverride = true;
+    controller.setAppForeground(false);
+    await settle();
+    calls.clear();
+
+    const codec = StandardMethodCodec();
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+      channel.name,
+      codec.encodeMethodCall(
+        const MethodCall('onVisibilityChanged', {
+          'visible': false,
+          'userClosed': true,
+        }),
+      ),
+      (ByteData? data) {},
+    );
+    await settle();
+
+    expect(controller.desktopLyricsEnabled, isFalse);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings.desktop_lyrics_enabled'), isFalse);
   });
 }

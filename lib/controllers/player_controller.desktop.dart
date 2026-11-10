@@ -139,6 +139,8 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   Future<void> setDesktopLyricsEnabled(bool enabled) async {
     if (desktopLyricsEnabled == enabled) return;
     desktopLyricsEnabled = enabled;
+    // 显式开启/关闭都结束“临时隐藏”，避免开关打开了却仍因旧标记不显示。
+    _desktopLyricsUserDismissed = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_desktopLyricsEnabledSettingKey, enabled);
     notifyListeners();
@@ -168,7 +170,13 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   /// 原生 Toast 引导用户先在应用内开启一次；授权后此按钮即可长期使用。
   Future<void> toggleDesktopLyricsFromNotification() async {
     debugPrint('[SYNOTIF] 通知卡片词按钮触发：当前 desktopLyricsEnabled='
-        '$desktopLyricsEnabled');
+        '$desktopLyricsEnabled dismissed=$_desktopLyricsUserDismissed');
+    // 临时隐藏期间点「词」按钮 = 恢复显示，而不是把功能真关掉。
+    if (_desktopLyricsUserDismissed) {
+      _desktopLyricsUserDismissed = false;
+      await _syncDesktopLyricsVisibility();
+      return;
+    }
     if (desktopLyricsEnabled) {
       await setDesktopLyricsEnabled(false);
       return;
@@ -188,17 +196,23 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     // AppLifecycleState 在桌面基本恒为 resumed，沿用移动端的
     // “后台才悬浮”判断会导致前台点开启毫无反应（图4问题）。
     if (isDesktopFormFactor) return true;
-    return !_isAppForeground || _desktopLyricsPreviewVisible;
+    // 设置页预览优先：用户可能刚点过「关闭」，预览仍应可见。
+    if (_desktopLyricsPreviewVisible) return true;
+    // 移动端：本次会话里点过悬浮窗关闭 → 保持隐藏，直到回前台/重新开启。
+    if (_desktopLyricsUserDismissed) return false;
+    return !_isAppForeground;
   }
 
   @override
   Future<void> _syncDesktopLyricsVisibility() async {
     if (!_shouldShowDesktopLyrics) {
       // transient=true 仅当“本会展示、只因 App 在前台而隐藏”：原生保留
-      // 自愈标记与缓存歌词，回桌面可即时重建；关开关/无歌是显式关闭，
-      // 原生清除标记与缓存，不复活。
+      // 自愈标记与缓存歌词，回桌面可即时重建；关开关/无歌/用户点过关闭
+      // 是显式隐藏，原生清除标记与缓存，不复活。
       await _desktopLyrics.hide(
-        transient: desktopLyricsEnabled && currentSong != null,
+        transient: desktopLyricsEnabled &&
+            currentSong != null &&
+            !_desktopLyricsUserDismissed,
       );
       return;
     }
@@ -363,6 +377,10 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   bool get isDesktopLyricsSupported => DesktopLyricsService.isSupportedPlatform;
 
   void setAppForeground(bool isForeground) {
+    // 回到前台即结束「临时关闭」：下次退到桌面/锁屏，悬浮窗自动恢复，
+    // 不需要用户再去设置里重新打开（上游 166e84b）。
+    // 必须在首行同值早退之前重置，否则 resumed→resumed 的重复通知会漏掉。
+    if (isForeground) _desktopLyricsUserDismissed = false;
     if (_isAppForeground == isForeground) return;
     _isAppForeground = isForeground;
     if (desktopLyricsEnabled) {
@@ -372,6 +390,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   }
 
   Future<void> setDesktopLyricsPreviewVisible(bool visible) async {
+    if (visible) _desktopLyricsUserDismissed = false;
     if (_desktopLyricsPreviewVisible == visible) return;
     _desktopLyricsPreviewVisible = visible;
     await _syncDesktopLyricsVisibility();
@@ -384,10 +403,17 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     if (!userClosed || !desktopLyricsEnabled) {
       return;
     }
-    desktopLyricsEnabled = false;
     _desktopLyricsPreviewVisible = false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_desktopLyricsEnabledSettingKey, false);
+    if (isDesktopFormFactor) {
+      // PC：关闭悬浮窗 = 关闭功能（既有语义，保持不变）。
+      desktopLyricsEnabled = false;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_desktopLyricsEnabledSettingKey, false);
+    } else {
+      // 移动端：仅本次后台会话临时隐藏，不写死持久化开关；回前台后
+      // 下次退桌面/锁屏自动恢复自启动（上游 166e84b / issue #160）。
+      _desktopLyricsUserDismissed = true;
+    }
     notifyListeners();
     // 原生已自行关窗停服，这里再补一次显式关闭：既是幂等兜底，也能清掉
     // "用户点关闭那一刻正好在途的换句推送"刚写回原生的歌词缓存 —— 否则那份

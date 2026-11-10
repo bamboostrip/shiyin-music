@@ -594,6 +594,9 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _isPrecaching = false;
   bool _isAppForeground = true;
   bool _desktopLyricsPreviewVisible = false;
+  /// 本次运行中用户在悬浮窗点了「关闭」：只在移动端临时隐藏，不写死持久化
+  /// 开关；回前台或重新开启功能后恢复（上游 166e84b / issue #160）。
+  bool _desktopLyricsUserDismissed = false;
   Duration? _pendingIdlePosition;
   Duration? _pendingInitialPosition;
   bool _disposed = false;
