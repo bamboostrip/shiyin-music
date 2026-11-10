@@ -350,12 +350,25 @@ mixin _PlayerSettings on _PlayerControllerBase {
 
   Future<void> _savePlaybackState() async {
     final prefs = await SharedPreferences.getInstance();
+    final total = queue.length;
+    final index = currentIndex;
+    // 长队列只存前 N 首会导致「播到第 250 首、重启回到第 200 首」：改为以
+    // 当前歌为中心取窗口，并额外记下基准偏移与当前歌 hash，恢复时按 hash
+    // 精确找回原曲（旧数据没有这两个字段时按原语义退化）。
+    final base = total <= _playbackStateMaxQueueSize
+        ? 0
+        : index < 0
+        ? 0
+        : (index - _playbackStateMaxQueueSize ~/ 2).clamp(
+            0,
+            total - _playbackStateMaxQueueSize,
+          );
+    final end = (base + _playbackStateMaxQueueSize).clamp(0, total);
     final state = {
-      'queue': queue
-          .take(_playbackStateMaxQueueSize)
-          .map((s) => s.toCache())
-          .toList(),
-      'currentIndex': currentIndex,
+      'queueBaseIndex': base,
+      'currentSongHash': currentSong?.hash ?? '',
+      'queue': queue.sublist(base, end).map((s) => s.toCache()).toList(),
+      'currentIndex': index < 0 ? -1 : index - base,
       'playbackMode': playbackMode.name,
     };
     await prefs.setString(_playbackStateKey, jsonEncode(state));
@@ -541,10 +554,18 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (queueList.isEmpty) return;
 
       queue = queueList;
-      final index = (state['currentIndex'] as int? ?? 0).clamp(
-        0,
-        queueList.length - 1,
-      );
+      final base = state['queueBaseIndex'] as int? ?? 0;
+      final savedIndex = state['currentIndex'] as int? ?? 0;
+      final savedHash = state['currentSongHash'] as String? ?? '';
+      // 优先按 hash 找回当前歌（窗口保存后相对下标不再等于原始下标）；
+      // 旧数据没有 hash/baseIndex，退化为「绝对下标 = 0 + currentIndex」。
+      var index = savedHash.isEmpty
+          ? -1
+          : queueList.indexWhere((song) => song.hash == savedHash);
+      if (index < 0) {
+        final absolute = base + (savedIndex >= 0 ? savedIndex : 0);
+        index = absolute.clamp(0, queueList.length - 1);
+      }
       currentSong = queueList[index];
 
       final modeName = state['playbackMode'] as String?;
