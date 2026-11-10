@@ -172,7 +172,7 @@ void main() {
           artist: 'a',
           hash: 'HASH_X',
           albumId: 'ALB_X',
-          albumAudioId: 'AUDIO_X',
+          albumAudioId: '8008',
         ),
         hashOnly: true,
       );
@@ -194,12 +194,12 @@ void main() {
           artist: 'a',
           hash: 'HASH_X',
           albumId: 'ALB_X',
-          albumAudioId: 'AUDIO_X',
+          albumAudioId: '8008',
         ),
       );
 
       expect(captured['album_id'], 'ALB_X');
-      expect(captured['album_audio_id'], 'AUDIO_X');
+      expect(captured['album_audio_id'], '8008');
     });
   });
 }

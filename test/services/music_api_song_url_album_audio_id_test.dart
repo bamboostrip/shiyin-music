@@ -55,7 +55,7 @@ void main() {
         'hash': 'HASH_001',
         'songid': 1001,
         'mixsongid': '2002',
-        'album_audio_id': 'AAID_9',
+        'album_audio_id': 9009,
         'album_id': 'ALB_1',
       });
 
@@ -64,7 +64,7 @@ void main() {
       expect(playUrl.url, 'https://example.com/audio.mp3');
       expect(client.lastSongUrlQuery?['hash'], 'HASH_001');
       expect(client.lastSongUrlQuery?['album_id'], 'ALB_1');
-      expect(client.lastSongUrlQuery?['album_audio_id'], 'AAID_9');
+      expect(client.lastSongUrlQuery?['album_audio_id'], '9009');
     },
   );
 
