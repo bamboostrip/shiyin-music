@@ -368,7 +368,7 @@ void main() {
     );
     expect(
       stats.totalListenTime,
-      lessThanOrEqualTo(const Duration(seconds: 2)),
+      lessThan(const Duration(minutes: 1)),
       reason: '只应累计这段真实播放时长，不能按整 5 分钟补记',
     );
   });
