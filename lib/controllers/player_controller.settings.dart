@@ -10,6 +10,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_listenTimeSettingKey, enabled);
     if (!enabled) {
+      // 关闭前把最后一段真实播放时长结进统计，否则最多丢 15s。
+      _flushListenTimeToStats();
       _resetListeningTimeTracker();
     } else {
       _syncListeningTimeTracker();
@@ -355,15 +357,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
     // 长队列只存前 N 首会导致「播到第 250 首、重启回到第 200 首」：改为以
     // 当前歌为中心取窗口，并额外记下基准偏移与当前歌 hash，恢复时按 hash
     // 精确找回原曲（旧数据没有这两个字段时按原语义退化）。
-    final base = total <= _playbackStateMaxQueueSize
+    const max = _playbackStateMaxQueueSize;
+    final base = total <= max || index < 0
         ? 0
-        : index < 0
-        ? 0
-        : (index - _playbackStateMaxQueueSize ~/ 2).clamp(
-            0,
-            total - _playbackStateMaxQueueSize,
-          );
-    final end = (base + _playbackStateMaxQueueSize).clamp(0, total);
+        : (index - max ~/ 2).clamp(0, total - max);
+    final end = (base + max).clamp(0, total);
     final state = {
       'queueBaseIndex': base,
       'currentSongHash': currentSong?.hash ?? '',
