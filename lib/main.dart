@@ -559,6 +559,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         break;
       case AppLifecycleState.paused:
         _player.setAppForeground(false);
+        // 退后台立即刷写播放状态：移动端被杀进程时不会走 dispose，500ms
+        // 防抖窗口内的切歌/队列变化会丢失（桌面端另有退出前钩子）。
+        unawaited(_player.flushPlaybackState());
         // 图片缓存内存保护（后台驻留时不长期占用大量解码位图）：
         // - 缓存量较小时保留，切后台再回前台不重新下载，避免反复加载；
         // - 缓存量较大（>24MB）才整体释放，兼顾车机有限内存与加载体感。
