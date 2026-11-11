@@ -171,6 +171,9 @@ const _playbackStateMaxQueueSize = 200;
 // [_pendingListenTimeMsKey] 与 _PlayerSettings._savePendingListenTime。
 const _listenTimeReportInterval = Duration(minutes: 5);
 const _listenTimeCheckInterval = Duration(seconds: 15);
+/// 本地听歌统计写盘节流：15s tick 只做内存累计，累计满该间隔才落一次
+/// SharedPreferences（Windows 端整体重写，频次过高会周期性卡顿）。
+const _statsListenFlushInterval = Duration(seconds: 60);
 const _defaultEqualizerLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// 歌词进度调节步进（一次点按的调整量，主流播放器惯例 0.5 秒）。
@@ -575,8 +578,11 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Timer? _playCacheTimer;
   DateTime? _listenTimeStartedAt;
   Duration _pendingListenTime = Duration.zero;
-  /// 上次把听歌时长写入本地统计的锚点：每 15s 增量累计一次，彻底与服务端
-  /// 上报解耦（未登录/上报失败也照常统计，上游 c113193）。
+  /// 上次把听歌时长写入本地统计的锚点：按 [_statsListenFlushInterval] 节流
+  /// 增量累计，彻底与服务端上报解耦（未登录/上报失败也照常统计，上游 c113193）。
+  ///
+  /// 不做节流的话，15s 检查间隔会变成「每 15s 重写一次 SharedPreferences」；
+  /// Windows 端每次写都要整文件重编码，长会话下会造成周期性卡顿。
   DateTime? _statsListenAnchor;
   bool _isReportingListenTime = false;
   int _seekSerial = 0;

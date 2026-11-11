@@ -10,8 +10,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_listenTimeSettingKey, enabled);
     if (!enabled) {
-      // 关闭前把最后一段真实播放时长结进统计，否则最多丢 15s。
-      _flushListenTimeToStats();
+      // 关闭前把最后一段真实播放时长结进统计，否则最多丢一个节流周期。
+      _flushListenTimeToStats(force: true);
       _resetListeningTimeTracker();
     } else {
       _syncListeningTimeTracker();
@@ -611,7 +611,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
       final startedAt = _listenTimeStartedAt ??= DateTime.now();
       _statsListenAnchor ??= startedAt;
       _listenTimeTimer ??= Timer.periodic(_listenTimeCheckInterval, (_) {
-        // 本地统计按 15s 增量落盘，不依赖服务端上报是否成功。
+        // 本地统计按增量累计；写盘按 _statsListenFlushInterval 节流，
+        // 不依赖服务端上报是否成功。
         _flushListenTimeToStats();
         unawaited(_maybeReportListeningTime());
       });
@@ -630,7 +631,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
       // 否则进程被杀时这段时长直接丢失（上游 3.3.0 #151）。
       unawaited(_savePendingListenTime());
     }
-    _flushListenTimeToStats();
+    // 暂停/切歌/dispose：立即结清（force），不因节流丢掉最后一段。
+    _flushListenTimeToStats(force: true);
     _statsListenAnchor = null;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
@@ -640,12 +642,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
   ///
   /// 与服务端上报完全解耦：未登录、接口失败时统计照常增长（此前只在
   /// `addListeningTime` 成功后才按整 5 分钟累加，导致统计恒为 0）。
-  void _flushListenTimeToStats() {
+  ///
+  /// 周期 tick 走节流（[force] = false，满 [_statsListenFlushInterval] 才写）；
+  /// 暂停/切歌/关闭开关/上报结束等需要立即结清的场景传 [force] = true。
+  void _flushListenTimeToStats({bool force = false}) {
     final anchor = _statsListenAnchor;
     if (anchor == null) return;
     final now = DateTime.now();
     final delta = now.difference(anchor);
     if (delta <= Duration.zero) return;
+    if (!force && delta < _statsListenFlushInterval) return;
     _statsListenAnchor = now;
     unawaited(_statsService.addListenTime(delta));
   }
@@ -691,7 +697,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (!stillPlaying) {
         // 上报期间刚好暂停/播完：把最后一段写进统计并结束锚点，避免下次
         // 起播时用旧锚点算出超长增量。
-        _flushListenTimeToStats();
+        _flushListenTimeToStats(force: true);
         _statsListenAnchor = null;
         _listenTimeTimer?.cancel();
         _listenTimeTimer = null;
