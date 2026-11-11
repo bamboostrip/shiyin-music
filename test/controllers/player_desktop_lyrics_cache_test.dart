@@ -306,6 +306,49 @@ void main() {
     );
   });
 
+  test('临时隐藏期间换句不再推原生缓存，回前台再回桌面可恢复', () async {
+    // 先在后台展示，确认 show 带当前句。
+    controller.setAppForeground(false);
+    await settle();
+    expect(lastCall('show').arguments['current'], '第一句');
+
+    // 用户点悬浮窗 X：移动端只临时隐藏。
+    calls.clear();
+    const codec = StandardMethodCodec();
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+      channel.name,
+      codec.encodeMethodCall(
+        const MethodCall('onVisibilityChanged', {
+          'visible': false,
+          'userClosed': true,
+        }),
+      ),
+      (ByteData? data) {},
+    );
+    await settle();
+    expect(controller.desktopLyricsEnabled, isTrue);
+    expect(lastCall('hide').arguments, {'transient': false});
+
+    // 换句：不应再有任何平台调用（否则逐句 startService 拉起歌词服务）。
+    calls.clear();
+    fakeAudioPlayer.emitPosition(const Duration(seconds: 12));
+    await settle();
+    expect(
+      calls,
+      isEmpty,
+      reason: '临时隐藏期间逐句推原生缓存会反复拉起歌词服务，纯属白耗电',
+    );
+
+    // 回前台结束临时隐藏，再退后台：show 必须带当前句（本地缓存没丢）。
+    controller.setAppForeground(true);
+    await settle();
+    calls.clear();
+    controller.setAppForeground(false);
+    await settle();
+    expect(lastCall('show').arguments['current'], '第三句');
+  });
+
   test('桌面形态点关闭：仍按既有语义关闭功能并写盘（PC 不受移动端改动影响）', () async {
     debugDesktopFormFactorOverride = true;
     controller.setAppForeground(false);

@@ -255,7 +255,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
           next: '',
           activeOnBottom: false,
         );
-      } else if (desktopLyricsEnabled) {
+      } else if (desktopLyricsEnabled && !_desktopLyricsUserDismissed) {
         unawaited(
           _desktopLyrics.cacheNativeLyrics(
             current: '',
@@ -285,8 +285,11 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       // 跟随播放。回桌面时原生用这份缓存即刻重建 —— 伴奏（间奏）期间没有
       // 换句推送，只有缓存里存着"最后一次唱到的句子"，窗口才不会空到下一句。
       // 歌词开着时同步推给原生（原生只缓存、不建窗）；关开关时不推，避免
-      // 无谓地把服务拉起来。
-      if (desktopLyricsEnabled) {
+      // 无谓地把服务拉起来。用户点过关闭（临时隐藏）同样不推：此时开关
+      // 仍是开的，逐句 cacheNativeLyrics 会反复 startService 把歌词服务
+      // 拉起（每条歌词一次），长会话下是白耗电；下次真正展示前
+      // _syncDesktopLyricsVisibility 会先 seeding 再 show，内容不会丢。
+      if (desktopLyricsEnabled && !_desktopLyricsUserDismissed) {
         unawaited(
           _desktopLyrics.cacheNativeLyrics(
             current: current,
