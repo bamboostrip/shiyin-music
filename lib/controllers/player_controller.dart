@@ -172,8 +172,12 @@ const _playbackStateMaxQueueSize = 200;
 const _listenTimeReportInterval = Duration(minutes: 5);
 const _listenTimeCheckInterval = Duration(seconds: 15);
 /// 本地听歌统计写盘节流：15s tick 只做内存累计，累计满该间隔才落一次
-/// SharedPreferences（Windows 端整体重写，频次过高会周期性卡顿）。
+/// SharedPreferences（移动端 prefs 由平台异步写，60s 足够）。
 const _statsListenFlushInterval = Duration(seconds: 60);
+/// 桌面端 SharedPreferences 是纯 Dart 实现：每次 setX 都要整张 map 重编码
+/// 并同步写盘（本项目实测文件约 1.5MB），因此比移动端更保守，沿用旧的
+/// 5 分钟节奏；暂停/切歌/关闭开关仍会立即结清。
+const _statsListenFlushIntervalDesktop = Duration(minutes: 5);
 const _defaultEqualizerLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// 歌词进度调节步进（一次点按的调整量，主流播放器惯例 0.5 秒）。
@@ -578,8 +582,9 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Timer? _playCacheTimer;
   DateTime? _listenTimeStartedAt;
   Duration _pendingListenTime = Duration.zero;
-  /// 上次把听歌时长写入本地统计的锚点：按 [_statsListenFlushInterval] 节流
-  /// 增量累计，彻底与服务端上报解耦（未登录/上报失败也照常统计，上游 c113193）。
+  /// 上次把听歌时长写入本地统计的锚点：按平台节流后增量累计（移动端
+  /// [_statsListenFlushInterval]、桌面 [_statsListenFlushIntervalDesktop]），
+  /// 彻底与服务端上报解耦（未登录/上报失败也照常统计，上游 c113193）。
   ///
   /// 不做节流的话，15s 检查间隔会变成「每 15s 重写一次 SharedPreferences」；
   /// Windows 端每次写都要整文件重编码，长会话下会造成周期性卡顿。

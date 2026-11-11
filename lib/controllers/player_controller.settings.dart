@@ -651,7 +651,13 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final now = DateTime.now();
     final delta = now.difference(anchor);
     if (delta <= Duration.zero) return;
-    if (!force && delta < _statsListenFlushInterval) return;
+    if (!force) {
+      // 桌面端 prefs 是纯 Dart 实现（整文件重编码+同步写盘），频率要更保守。
+      final interval = isDesktopFormFactor
+          ? _statsListenFlushIntervalDesktop
+          : _statsListenFlushInterval;
+      if (delta < interval) return;
+    }
     _statsListenAnchor = now;
     unawaited(_statsService.addListenTime(delta));
   }
