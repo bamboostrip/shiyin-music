@@ -1737,19 +1737,26 @@ class _SuggestionList extends StatelessWidget {
         spans.add(TextSpan(text: text.substring(start)));
         break;
       }
+      // 某些字符的大小写映射会改变长度（如 İ → i̇），按 query.length 取
+      // 子串可能越界；越界时按原样收口，不让高亮把整条联想崩掉。
+      final end = hit + query.length;
+      if (hit < start || end > text.length) {
+        spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
       if (hit > start) {
         spans.add(TextSpan(text: text.substring(start, hit)));
       }
       spans.add(
         TextSpan(
-          text: text.substring(hit, hit + query.length),
+          text: text.substring(hit, end),
           style: TextStyle(
             color: colorScheme.primary,
             fontWeight: FontWeight.w800,
           ),
         ),
       );
-      start = hit + query.length;
+      start = end;
     }
     if (spans.isEmpty) spans.add(TextSpan(text: text));
     return Text.rich(

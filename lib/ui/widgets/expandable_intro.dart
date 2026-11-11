@@ -68,6 +68,7 @@ class _ExpandableIntroState extends State<ExpandableIntro> {
             textDirection: Directionality.of(context),
           )..layout(maxWidth: constraints.maxWidth);
           final overflows = painter.didExceedMaxLines;
+          painter.dispose();
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,

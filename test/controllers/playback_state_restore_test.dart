@@ -212,4 +212,50 @@ void main() {
     await settle();
     expect(second.currentSong?.hash, 'hash10');
   });
+
+  test('洗牌模式 + 长队列：窗口恢复后仍是当前歌且模式保留', () async {
+    final first = buildController();
+    await settle();
+    first.queue = List<Song>.generate(260, _song);
+    first.currentSong = first.queue[200];
+    first.playbackMode = PlaybackMode.shuffle;
+    await first.flushPlaybackState();
+
+    controllers.remove(first);
+    first.dispose();
+
+    final second = buildController();
+    await settle();
+    expect(second.playbackMode, PlaybackMode.shuffle);
+    expect(second.currentSong?.hash, 'hash200');
+    expect(second.queue.length, lessThanOrEqualTo(200));
+  });
+
+  test('当前歌不在队列里（currentIndex=-1）：恢复退化到队列首，不抛异常', () async {
+    final first = buildController();
+    await settle();
+    first.queue = List<Song>.generate(250, _song);
+    // 当前歌不在队列中（例如从搜索点歌但队列仍是旧歌单）。
+    first.currentSong = Song(
+      id: 'outsider',
+      title: '队列外',
+      artist: 'x',
+      hash: 'hash-outsider',
+    );
+    await first.flushPlaybackState();
+
+    final prefs = await SharedPreferences.getInstance();
+    final state =
+        jsonDecode(prefs.getString(_playbackStateKey)!) as Map<String, dynamic>;
+    expect(state['currentIndex'], -1);
+
+    controllers.remove(first);
+    first.dispose();
+
+    final second = buildController();
+    await settle();
+    // 旧语义：越界/找不到时收敛到队首。
+    expect(second.currentSong?.hash, 'hash0');
+    expect(second.queue.length, lessThanOrEqualTo(200));
+  });
 }

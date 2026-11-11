@@ -372,4 +372,37 @@ void main() {
       reason: '只应累计这段真实播放时长，不能按整 5 分钟补记',
     );
   });
+
+  test('暂停→继续→再暂停：统计只累加真实时长，不重复计算', () async {
+    final c = create();
+    await settle();
+    c.currentSong = _song(1);
+
+    Future<void> playFor80ms() async {
+      engine!.playing = true;
+      engine!.emit();
+      await settle();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      engine!.playing = false;
+      engine!.emit();
+      await settle();
+    }
+
+    await playFor80ms();
+    final first = (await PlaybackStatsService().getStats()).totalListenTime;
+    expect(first, greaterThan(Duration.zero));
+
+    await playFor80ms();
+    final second = (await PlaybackStatsService().getStats()).totalListenTime;
+    expect(
+      second,
+      greaterThan(first),
+      reason: '第二段播放应继续累加，而不是因锚点重置而停止',
+    );
+    expect(
+      second - first,
+      lessThan(const Duration(minutes: 1)),
+      reason: '每段只累计真实时长，不能把上一段重复计入',
+    );
+  });
 }
