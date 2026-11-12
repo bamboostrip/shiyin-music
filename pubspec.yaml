@@ -113,6 +113,16 @@ dependency_overrides:
   # 3) real.dart: af 属性统一组装（scaletempo + 音效链），新增 setExtraAudioFilters 公开 API。
   media_kit:
     path: packages/media_kit
+  # 本地 vendored 副本（packages/desktop_multi_window），勿直接换回 pub.dev 版本：
+  # windows/base_flutter_window.cc 的 Show() 由 SW_SHOW 改为 SW_SHOWNOACTIVATE。
+  # 悬浮窗与主窗共享同一 UI 线程/TSF 线程管理器，SW_SHOW 的显式激活会把
+  # TSF 焦点文档从主窗抢走：主窗在托盘时关闭/隐藏歌词悬浮窗会让线程的
+  # 输入法开/关 compartment 永久丢失，主窗恢复后中文输入法不能组词
+  # （拼音直接上屏、无候选框，换任何输入法都一样，只能重启进程）。
+  # 悬浮窗无键盘输入需求，显示但不激活即可。升级 desktop_multi_window 时
+  # 必须把这一处补丁重新移植。
+  desktop_multi_window:
+    path: packages/desktop_multi_window
 
 flutter:
   uses-material-design: true

@@ -7,6 +7,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "overlay_focus_guard.h"
 
 namespace {
 
@@ -89,6 +90,7 @@ bool FlutterWindow::OnCreate() {
 
   // FLUTTERVIEW 子窗口擦底子类化（仅主窗视图一次）。
   HWND flutter_view = flutter_controller_->view()->GetNativeWindow();
+  shiyin::MainFlutterView() = flutter_view;
   if (flutter_view != nullptr && g_flutter_view_original_proc == nullptr) {
     g_flutter_view_original_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
         flutter_view, GWLP_WNDPROC,
