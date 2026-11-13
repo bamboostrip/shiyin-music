@@ -375,6 +375,17 @@ void WindowManagerPlugin::HandleMethodCall(
   } else if (method_name.compare("isFocused") == 0) {
     bool value = window_manager->IsFocused();
     result->Success(flutter::EncodableValue(value));
+  } else if (method_name.compare("isMouseCaptured") == 0) {
+    // LOCAL PATCH (shiyin): 本线程当前是否仍持有鼠标捕获。
+    //
+    // 供悬浮窗自定义拖动收尾：引擎在左键按下时 SetCapture(FLUTTERVIEW)，
+    // 捕获被系统或其它窗口抢走后，引擎会丢弃后续 mouse move 且**不补发**
+    // pointer up（flutter_window.cc 里的 GetCapture() 守卫，
+    // flutter/flutter#189583），Dart 侧的 onPanEnd 永远不来。悬浮窗是
+    // WS_EX_NOACTIVATE，收不到 WM_NCACTIVATE，原有失焦兜底失效，只能直接
+    // 查这个线程级的捕获状态。GetCapture() 与引擎判据同源，不注入输入、
+    // 不依赖窗口激活。
+    result->Success(flutter::EncodableValue(::GetCapture() != nullptr));
   } else if (method_name.compare("show") == 0) {
     window_manager->Show();
     result->Success(flutter::EncodableValue(true));

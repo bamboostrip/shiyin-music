@@ -195,6 +195,17 @@ class WindowManager {
     return await _channel.invokeMethod('isFocused');
   }
 
+  /// Returns `bool` - Whether this thread still holds the mouse capture.
+  ///
+  /// LOCAL PATCH (shiyin): Windows only. 悬浮窗自定义拖动用它判断拖动是否
+  /// 还有效：引擎在左键按下时 `SetCapture`，捕获被系统或其它窗口抢走后，
+  /// 引擎会丢弃后续鼠标移动且不补发 pointer up（flutter/flutter#189583），
+  /// Dart 侧 `onPanEnd` 不会触发。其它平台没有该原生实现，调用会抛
+  /// `MissingPluginException`，调用方需自行兜住。
+  Future<bool> isMouseCaptured() async {
+    return await _channel.invokeMethod('isMouseCaptured') == true;
+  }
+
   /// Shows and gives focus to the window.
   Future<void> show({bool inactive = false}) async {
     bool isMinimized = await this.isMinimized();

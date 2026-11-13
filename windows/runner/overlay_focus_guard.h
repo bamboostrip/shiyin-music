@@ -27,6 +27,19 @@
 //   desktop_multi_window 把 Show() 改成 SW_SHOWNOACTIVATE；
 // - 悬浮窗 FLUTTERVIEW 一旦收到 WM_SETFOCUS，立刻把焦点还给主窗视图
 //   （[MainFlutterView]）——这是兜底也是最终生效的一层。
+//
+// 注意（改 desktop_multi_window 子窗前必读）：
+// 上面这套「禁止激活 + 焦点劫回主窗」挂在 DesktopMultiWindowSetWindowCreatedCallback
+// 上，对**所有**子窗无条件生效，因为目前唯一的子窗就是歌词悬浮窗（无任何
+// 文本输入/键盘交互）。将来若新增需要输入文字或键盘快捷键的子窗，必须在
+// main.cpp 的回调里按窗口参数（子窗 args / 标题）过滤，只对歌词窗生效——
+// 否则该子窗会永远拿不到键盘焦点，表现为「输入法打不出字、快捷键全无效」，
+// 而且不会报任何错误，排查成本极高。
+//
+// 另：g_overlay_*_original_procs 只在 WM_NCDESTROY 清理；若某个窗口销毁路径
+// 没经过我们的子类过程，map 会留下陈旧 HWND。极端情况下该句柄值被新窗口复用
+// 时，subclass 前的 find() 判据会跳过安装（静默失效）。概率极低，改动涉及
+// 原生消息循环，暂按现状记录在此。
 namespace shiyin {
 
 // 主窗 Flutter 子窗口（FLUTTERVIEW）HWND，由 FlutterWindow::OnCreate 登记。

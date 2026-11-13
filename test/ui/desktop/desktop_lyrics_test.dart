@@ -3273,4 +3273,194 @@ void main() {
       );
     });
   });
+
+  // ── 卡片自定义拖动的"丢鼠标捕获"收尾（flutter/flutter#189583）──────────
+  // 悬浮窗是 WS_EX_NOACTIVATE，永远收不到 WM_NCACTIVATE（window_manager 的
+  // blur 事件源），原来靠失焦结束拖动的兜底已失效；改为轮询线程级鼠标捕获。
+  group('卡片拖动：鼠标捕获丢失后自动收尾', () {
+    Future<_DragHarness> pumpAndStartDrag(
+      WidgetTester tester, {
+      required Future<bool> Function() captured,
+      required bool mouse,
+    }) async {
+      tester.view.physicalSize = const Size(
+        WindowsDesktopLyricsBridge.overlayWidth,
+        WindowsDesktopLyricsBridge.overlayFixedWindowHeight,
+      );
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final writes = <Offset>[];
+      var cursor = const Offset(200, 900);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DesktopLyricsOverlayContent(
+            settings: const DesktopLyricsSettings(
+              locked: false,
+              singleLine: false,
+            ),
+            current: '第一句歌词',
+            next: '第二句歌词',
+            isPlaying: true,
+            onControlPlayback: (_) {},
+            onToggleLock: (_) {},
+            onClose: () {},
+            // 非空才走 Flutter 侧自定义拖动（否则退回原生 DragToMoveArea）。
+            visibleAreas: const [Rect.fromLTWH(0, 0, 1920, 1080)],
+            cursorPositionProvider: () async => cursor,
+            windowPositionProvider: () async => const Offset(0, 700),
+            windowPositionSetter: (position) async => writes.add(position),
+            ignoreMouseEventsSetter: (_) async {},
+            mouseCapturedProvider: captured,
+          ),
+        ),
+      );
+      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+      await tester.pump();
+
+      final dragSurface = find.byWidgetPredicate(
+        (w) => w is MouseRegion && w.cursor == SystemMouseCursors.move,
+      );
+      expect(dragSurface, findsOneWidget, reason: '卡片拖动区应已挂载');
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(dragSurface),
+        kind: mouse ? PointerDeviceKind.mouse : PointerDeviceKind.touch,
+      );
+      addTearDown(gesture.cancel);
+
+      Future<void> move(Offset delta) async {
+        cursor += delta;
+        await gesture.moveBy(delta);
+        await tester.pump();
+        await tester.pump();
+      }
+
+      await move(const Offset(0, -20));
+      return _DragHarness(writes, move);
+    }
+
+    testWidgets('鼠标拖动中丢失捕获：停止跟随光标，看门狗只收尾一次', (tester) async {
+      var captured = true;
+      final h = await pumpAndStartDrag(
+        tester,
+        captured: () async => captured,
+        mouse: true,
+      );
+      expect(h.writes, isNotEmpty, reason: '拖动开始后应下发过窗口位置');
+
+      // 捕获被抢走：引擎不再补 pointer up，只能由看门狗收尾。
+      captured = false;
+      await tester.pump(const Duration(milliseconds: 450));
+      await tester.pump();
+
+      final before = h.writes.length;
+      // 收尾后再移动：手势已被丢弃，不得再改写窗口位置。
+      await h.move(const Offset(0, -40));
+      expect(
+        h.writes.length,
+        before,
+        reason: '丢失捕获后拖动应立即结束，不再跟随光标',
+      );
+
+      // 再等几拍：看门狗必须只收尾一次，不能反复写入。
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pump();
+      expect(h.writes.length, before, reason: '看门狗不得重复收尾/抖动');
+    });
+
+    testWidgets('鼠标拖动中仍持有捕获：看门狗不得误结束拖动', (tester) async {
+      final h = await pumpAndStartDrag(
+        tester,
+        captured: () async => true,
+        mouse: true,
+      );
+      expect(h.writes, isNotEmpty);
+
+      // 连过三拍看门狗（每拍都查询到"仍持有捕获"）。
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+
+      final before = h.writes.length;
+      await h.move(const Offset(0, -40));
+      expect(
+        h.writes.length,
+        greaterThan(before),
+        reason: '仍持有捕获时拖动必须继续跟随光标（不得误收尾）',
+      );
+    });
+
+    testWidgets('捕获状态恒为不可用：看门狗必须沉默，不得打断正常拖动', (tester) async {
+      // 插件未移植 / 线程不符 / 永远取不到"持有"时的失败模式：
+      // 若把"未持有"直接当丢失，每一次鼠标拖动都会在 400ms 后被掐断。
+      final h = await pumpAndStartDrag(
+        tester,
+        captured: () async => false,
+        mouse: true,
+      );
+      expect(h.writes, isNotEmpty);
+
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+
+      final before = h.writes.length;
+      await h.move(const Offset(0, -40));
+      expect(
+        h.writes.length,
+        greaterThan(before),
+        reason: '从未观测到"持有"说明该环境查不到，看门狗必须退化为不作用',
+      );
+    });
+
+    testWidgets('捕获查询抛异常：跳过兜底、不打断拖动', (tester) async {
+      final h = await pumpAndStartDrag(
+        tester,
+        captured: () async => throw Exception('MissingPluginException(模拟)'),
+        mouse: true,
+      );
+      expect(h.writes, isNotEmpty);
+
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+
+      final before = h.writes.length;
+      await h.move(const Offset(0, -40));
+      expect(
+        h.writes.length,
+        greaterThan(before),
+        reason: '查询异常只关闭兜底，不能影响拖动本身',
+      );
+    });
+
+    testWidgets('触摸拖动不装看门狗（触摸不依赖引擎 SetCapture）', (tester) async {
+      final h = await pumpAndStartDrag(
+        tester,
+        captured: () async => false,
+        mouse: false,
+      );
+      expect(h.writes, isNotEmpty, reason: '触摸拖动同样应驱动窗口位置');
+
+      // 触摸场景"未捕获"是常态：过几拍后仍必须能继续拖动。
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pump();
+
+      final before = h.writes.length;
+      await h.move(const Offset(0, -40));
+      expect(
+        h.writes.length,
+        greaterThan(before),
+        reason: '触摸拖动不应被鼠标捕获看门狗打断',
+      );
+    });
+  });
+}
+
+/// 拖动测试脚手架：窗口位置写入记录 + 继续拖动（同时推进假光标）。
+class _DragHarness {
+  _DragHarness(this.writes, this.move);
+
+  final List<Offset> writes;
+  final Future<void> Function(Offset delta) move;
 }

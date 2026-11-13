@@ -17,6 +17,7 @@
 //   直改，由主窗落盘并经 updateSettings 回推后统一重建 + 重设穿透）
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -711,6 +712,7 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
     this.windowPositionSetter,
     this.ignoreMouseEventsSetter,
     this.appFocusedProvider,
+    this.mouseCapturedProvider,
   });
 
   final DesktopLyricsSettings settings;
@@ -739,6 +741,11 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
   final Future<void> Function(Offset position)? windowPositionSetter;
   final Future<void> Function(bool ignore)? ignoreMouseEventsSetter;
   final Future<bool> Function()? appFocusedProvider;
+
+  /// 本线程是否仍持有鼠标捕获（默认 `windowManager.isMouseCaptured`）。
+  ///
+  /// 拖动看门狗用：捕获丢失后引擎不再补发 pointer up，只能靠它收尾。
+  final Future<bool> Function()? mouseCapturedProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -772,6 +779,7 @@ class DesktopLyricsOverlayContent extends StatelessWidget {
             windowPositionSetter: windowPositionSetter,
             ignoreMouseEventsSetter: ignoreMouseEventsSetter,
             appFocusedProvider: appFocusedProvider,
+            mouseCapturedProvider: mouseCapturedProvider,
           );
     return Material(type: MaterialType.transparency, child: child);
   }
@@ -1064,6 +1072,7 @@ class _HoverableOverlay extends StatefulWidget {
     this.windowPositionSetter,
     this.ignoreMouseEventsSetter,
     this.appFocusedProvider,
+    this.mouseCapturedProvider,
   });
 
   final DesktopLyricsSettings settings;
@@ -1096,6 +1105,13 @@ class _HoverableOverlay extends StatefulWidget {
 
   /// 本窗口是否为系统前台窗口（默认 windowManager.isFocused()）。
   final Future<bool> Function()? appFocusedProvider;
+
+  /// 本线程是否仍持有鼠标捕获（默认 windowManager.isMouseCaptured）。
+  ///
+  /// 拖动看门狗用：悬浮窗是 WS_EX_NOACTIVATE，收不到 WM_NCACTIVATE，
+  /// 捕获丢失后引擎既不补发 pointer up 也会丢弃后续 move
+  /// （flutter/flutter#189583），只能靠这个信号结束拖动。
+  final Future<bool> Function()? mouseCapturedProvider;
 
   @override
   State<_HoverableOverlay> createState() => _HoverableOverlayState();
@@ -1149,6 +1165,23 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
   /// 窗口改成整窗穿透会丢指针事件 / 卡片 hover 态闪断）。
   bool _dragging = false;
 
+  /// 本次拖动由哪种指针发起：只有鼠标拖动才需要捕获看门狗（触摸/笔不依赖
+  /// 引擎的 `SetCapture`）。
+  PointerDeviceKind? _dragPointerKind;
+
+  /// 拖动期间的捕获看门狗（仅鼠标）。
+  Timer? _dragCaptureTimer;
+
+  /// 本次拖动里是否**观测到过**"本线程持有鼠标捕获"。
+  ///
+  /// 只有观测到过，"未持有"才能判定为丢失；否则说明这个环境查不到该状态，
+  /// 看门狗必须保持沉默，不能反过来打断正常拖动。
+  bool _dragCaptureSeenHeld = false;
+
+  /// 捕获状态的轮询间隔：丢失捕获后最多卡这么久，代价是拖动期间每拍一次
+  /// 只读方法通道调用。
+  static const Duration _kDragCaptureCheckInterval = Duration(milliseconds: 400);
+
   /// 拖动起手时固定的「光标逻辑屏幕坐标 − 窗口顶边逻辑坐标」偏移。
   ///
   /// 不能用 `DragUpdateDetails.delta` 累加：Flutter 指针坐标是**客户区**
@@ -1200,8 +1233,14 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
   }
 
   /// 失焦兜底：拖动是左键按住不放的模态交互，若中途 Alt+Tab 等操作让窗口
-  /// 丢掉鼠标捕获，Flutter 可能收不到 pointer up（onPanEnd 不触发），
+  /// 丢掉鼠标捕获，Flutter 收不到 pointer up（onPanEnd 不触发），
   /// `_dragging` 会一直为真、光标轮询被永久冻结。失焦即结束拖动。
+  ///
+  /// 注意：Windows 悬浮窗是 `WS_EX_NOACTIVATE`，永远不会被激活，也就永远
+  /// 收不到 `WM_NCACTIVATE`（window_manager 的 focus/blur 事件源），这条
+  /// 兜底在 Windows 上实际不会触发——那里由 [_startDragCaptureGuard] 用
+  /// 线程级鼠标捕获状态判定。保留本回调是为了其它平台（若将来启用）仍能
+  /// 按激活态收尾。
   @override
   void onWindowBlur() {
     _handleDragEnd();
@@ -1212,6 +1251,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
     windowManager.removeListener(this);
     _stopMenuDismissWatch();
     _pollTimer?.cancel();
+    _stopDragCaptureGuard();
     _releaseMenuNudgeOnDispose();
     super.dispose();
   }
@@ -1292,6 +1332,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
     // 没收到 onPanEnd，这里以新一轮拖动为准恢复，而不是永久卡死。
     _dragging = false;
     _dragArmed = true;
+    _dragPointerKind = details.kind;
     // 抓取偏移 = 按下瞬间光标相对窗口左上角的偏移。details.globalPosition
     // 是客户区坐标（无边框窗即窗口坐标），直接用就与窗口是否移动无关；
     // 若菜单让位还在生效，等它移回原位后同一光标的相对偏移会再加上 nudge。
@@ -1305,6 +1346,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
     final position = await _getWindowPosition();
     if (!mounted || !_dragging) return;
     if (position == null || _dragGrabOffset == null) {
+      _stopDragCaptureGuard();
       setState(() {
         _dragging = false;
         _dragArmed = false;
@@ -1324,6 +1366,7 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
     // 第一次真正移动：此刻才开始拖动（见 [_dragArmed]）。
     _dragArmed = false;
     setState(() => _dragging = true);
+    _startDragCaptureGuard();
     unawaited(_beginDrag());
   }
 
@@ -1371,12 +1414,83 @@ class _HoverableOverlayState extends State<_HoverableOverlay> with WindowListene
   void _handleDragEnd() {
     final wasDragging = _dragging;
     _dragArmed = false;
+    _stopDragCaptureGuard();
     if (!wasDragging) return; // 只是单击：不改窗口、不落盘。
     setState(() => _dragging = false);
     _dragGrabOffset = null;
     unawaited(_persistAfterDrag());
     // 拖动结束后立即校准 hover/穿透（拖动期间被抑制）。
     unawaited(_pollCursor());
+  }
+
+  /// 拖动期间的捕获看门狗（仅鼠标拖动）。
+  ///
+  /// 左键拖动是模态交互，引擎在按下时 `SetCapture(FLUTTERVIEW)`。一旦捕获
+  /// 被系统或其它窗口抢走（Alt+Tab、弹出其它捕获窗口等），引擎会**丢弃**
+  /// 后续 mouse move 且不补发 pointer up（flutter_window.cc 的
+  /// `GetCapture()` 守卫，flutter/flutter#189583）——`onPanEnd` 永远不来，
+  /// `_dragging` 卡真 → [_pollCursor] 被门禁冻结（hover/穿透/解锁胶囊全部
+  /// 失灵）、位置也不落盘。
+  ///
+  /// 原实现的兜底是 [onWindowBlur]，但悬浮窗改成 `WS_EX_NOACTIVATE` 后永不
+  /// 激活，收不到 `WM_NCACTIVATE`，这条兜底在 Windows 上已经不可能触发。
+  /// 这里改为只读查询"本线程是否仍持有捕获"（与引擎判据同源），丢失即收尾；
+  /// 不注入任何合成输入，也不依赖窗口激活。
+  ///
+  /// 防误伤：只有**观测到过**"持有捕获"之后，才把"未持有"当成丢失
+  /// （[_dragCaptureSeenHeld]）。若查询本身取不到值（插件未移植/线程不符），
+  /// 永远看不到"持有"，看门狗自动退化为不作用——最坏情况等同修改前，
+  /// 不会反过来打断正常拖动。
+  void _startDragCaptureGuard() {
+    _stopDragCaptureGuard();
+    // 触摸/笔不依赖引擎的 SetCapture，查询真值也会是"未捕获"，
+    // 直接跳过，避免把触摸拖动误判成丢捕获。
+    if (_dragPointerKind != PointerDeviceKind.mouse) return;
+    _dragCaptureSeenHeld = false;
+    // 起手先查一次：既建立"这台机器查得到"的基线，也让 400ms 内的丢失
+    // 能在第一拍就被识别。
+    unawaited(_checkDragCapture());
+    _dragCaptureTimer = Timer.periodic(_kDragCaptureCheckInterval, (_) {
+      unawaited(_checkDragCapture());
+    });
+  }
+
+  void _stopDragCaptureGuard() {
+    _dragCaptureTimer?.cancel();
+    _dragCaptureTimer = null;
+  }
+
+  Future<void> _checkDragCapture() async {
+    if (!mounted || !_dragging) {
+      _stopDragCaptureGuard();
+      return;
+    }
+    bool captured;
+    try {
+      captured = await _mouseCaptured();
+    } catch (e) {
+      // 查询失败（插件未移植/非 Windows）：这条兜底不可用，停掉看门狗，
+      // 既不每拍刷日志，也绝不误结束用户正在进行的拖动。
+      debugPrint('[桌面歌词悬浮窗] 鼠标捕获状态查询失败，本次拖动不启用捕获兜底: $e');
+      _stopDragCaptureGuard();
+      return;
+    }
+    if (!mounted || !_dragging) return;
+    if (captured) {
+      _dragCaptureSeenHeld = true;
+      return;
+    }
+    // 从未观测到"持有"：无法区分"真丢了捕获"和"这个环境根本查不到"，
+    // 保守按后者处理（退化为修改前的行为）。
+    if (!_dragCaptureSeenHeld) return;
+    debugPrint('[桌面歌词悬浮窗] 拖动中丢失鼠标捕获，结束拖动');
+    _handleDragEnd();
+  }
+
+  Future<bool> _mouseCaptured() async {
+    final provider = widget.mouseCapturedProvider;
+    if (provider != null) return await provider();
+    return await windowManager.isMouseCaptured();
   }
 
   @override
