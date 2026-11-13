@@ -178,6 +178,11 @@ const _statsListenFlushInterval = Duration(seconds: 60);
 /// 并同步写盘（本项目实测文件约 1.5MB），因此比移动端更保守，沿用旧的
 /// 5 分钟节奏；暂停/切歌/关闭开关仍会立即结清。
 const _statsListenFlushIntervalDesktop = Duration(minutes: 5);
+/// 两次听歌心跳之间允许的最大间隔：超过即认为这段时间进程根本没被调度
+/// （合盖休眠、UI 线程长卡顿、调试断点、系统时钟跳变）。听歌时长靠 15s
+/// 心跳采样墙钟差，休眠期间定时器不跑、恢复后墙钟却前进了数十分钟，
+/// 一次结算就会把整段空档算成听歌时长（本地统计能多出小时级）。
+const _listenTimeStallThreshold = Duration(minutes: 2);
 const _defaultEqualizerLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// 歌词进度调节步进（一次点按的调整量，主流播放器惯例 0.5 秒）。
@@ -589,6 +594,16 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 不做节流的话，15s 检查间隔会变成「每 15s 重写一次 SharedPreferences」；
   /// Windows 端每次写都要整文件重编码，长会话下会造成周期性卡顿。
   DateTime? _statsListenAnchor;
+  /// 最后一次心跳时刻：定时器每 15s 刷新，用来识别「两个采样点之间隔了
+  /// 数倍心跳周期」的未观测空档（见 _PlayerSettings._absorbListenTimeStall）。
+  DateTime? _listenTimeHeartbeat;
+  /// 最后一次心跳时的播放位置：用来区分「进程没被调度，音频也停了」和
+  /// 「进程没被调度，但音频一直在放」（后台长播时 Dart 侧被系统冻结、UI
+  /// 线程被断点卡住）。只有后者才该把整段空档算成听歌时长。
+  Duration? _listenTimeHeartbeatPosition;
+  /// 听歌时长的时间源：默认墙钟；测试注入假时钟来模拟休眠/时钟跳变
+  /// （sleep 30 分钟无法真实等待，见 `setListenClockForTest`）。
+  DateTime Function() _listenClock = DateTime.now;
   bool _isReportingListenTime = false;
   int _seekSerial = 0;
   bool _isSeeking = false;

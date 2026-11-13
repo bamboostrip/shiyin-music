@@ -32,6 +32,9 @@ const _pendingKey = 'settings.pending_listen_time_ms';
 class _Engine {
   bool playing = false;
   ProcessingState state = ProcessingState.idle;
+  /// 当前播放位置：休眠/冻结场景下由用例手动推进，用来给"空档是否真实
+  /// 播放"提供位置证据。
+  Duration position = Duration.zero;
   final stateCtrl = StreamController<PlayerState>.broadcast();
   final processingCtrl = StreamController<ProcessingState>.broadcast();
   final positionCtrl = StreamController<Duration>.broadcast();
@@ -86,7 +89,7 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   Future<void> setSpeed(double speed) async {}
 
   @override
-  Duration get position => Duration.zero;
+  Duration get position => engine.position;
 
   @override
   bool get playing => engine.playing;
@@ -404,5 +407,222 @@ void main() {
       lessThan(const Duration(minutes: 1)),
       reason: '每段只累计真实时长，不能把上一段重复计入',
     );
+  });
+
+  // ── 休眠 / 时钟跳变（墙钟差 ≠ 听歌时长）────────────────────────────────
+  // 听歌时长只能靠 15s 心跳采样墙钟差。合盖休眠期间定时器不跑、恢复后墙钟
+  // 却前进了数十分钟，若直接结算就会把整段休眠记成听歌时长。真实等待不可能，
+  // 这里注入假时钟 + 手动心跳来复现。
+
+  test('休眠 30 分钟：未观测空档不计入本地统计', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+    expect(c.isPlaying, isTrue);
+
+    // 正常播放两次心跳（各 15s）。
+    for (var i = 0; i < 2; i++) {
+      now = now.add(const Duration(seconds: 15));
+      c.tickListeningTimeForTest();
+      await settle();
+    }
+
+    // 合盖休眠 30 分钟：定时器一次没跑，墙钟直接前进。
+    now = now.add(const Duration(minutes: 30));
+    c.tickListeningTimeForTest();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      greaterThan(Duration.zero),
+      reason: '休眠前的真实播放时长仍应结算',
+    );
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 31)),
+      reason: '休眠的 30 分钟不是听歌时长，一次结算不得整段计入',
+    );
+  });
+
+  test('休眠后直接暂停（等不到下一个心跳）：同样不计入空档', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+
+    now = now.add(const Duration(seconds: 15));
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 休眠 20 分钟后引擎报暂停：暂停路径的 force 结清最容易把整段算进去。
+    now = now.add(const Duration(minutes: 20));
+    engine!.playing = false;
+    engine!.emit();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 16)),
+      reason: '暂停结清也要先吸收休眠空档',
+    );
+  });
+
+  test('休眠后关闭听歌时长开关：结清不把空档算进统计', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+
+    now = now.add(const Duration(seconds: 15));
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 休眠 30 分钟后用户在设置里关掉开关：这里同样走 force 结清。
+    now = now.add(const Duration(minutes: 30));
+    await c.setAddListeningTimeEnabled(false);
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 16)),
+      reason: '关开关的 force 结清也要先吸收休眠空档',
+    );
+  });
+
+  test('系统时钟回拨：统计不被冻结（负增量后仍能继续累计）', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+
+    now = now.add(const Duration(seconds: 15));
+    c.tickListeningTimeForTest();
+    await settle();
+    now = now.add(const Duration(seconds: 15));
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 墙钟回拨 10 分钟：旧锚点落在"未来"，delta 恒为负。
+    now = now.subtract(const Duration(minutes: 10));
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 回拨后继续播 15s 再暂停（force 结清）。
+    now = now.add(const Duration(seconds: 15));
+    engine!.playing = false;
+    engine!.emit();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 46)),
+      reason: '回拨前后的真实播放时长照常累计，不能把空档算进去',
+    );
+    expect(
+      stats.totalListenTime,
+      greaterThanOrEqualTo(const Duration(seconds: 15)),
+      reason: '回拨后若锚点不纠正，负增量会让统计永久冻结',
+    );
+  });
+
+  // ── 位置证据：空档到底是不是"真的在放" ──────────────────────────────────
+  // 2 分钟阈值本身分不清两种情况：进程被冻住但音频一直在放（移动端后台长播、
+  // 断点卡住 UI 线程）vs 系统休眠把音频一起停了。前者丢掉会让统计少算整夜，
+  // 后者照单全收会多算整夜——用播放位置是否同步前进区分。
+
+  test('冻结期间音频继续播放（位置同步前进）：整段照常计入，不丢数', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+
+    // 正常一跳。
+    now = now.add(const Duration(seconds: 15));
+    engine!.position = const Duration(seconds: 15);
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 后台被冻结 10 分钟，但音频在放：墙钟与播放位置同步前进。
+    now = now.add(const Duration(minutes: 10));
+    engine!.position += const Duration(minutes: 10);
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 暂停结清（force flush）。
+    engine!.playing = false;
+    engine!.emit();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      greaterThanOrEqualTo(const Duration(minutes: 10)),
+      reason: '位置坐实的空档是真实听歌时长，不能被当成休眠丢掉',
+    );
+  });
+
+  test('休眠期间音频停住（位置几乎不动）：仍按空档吸收，不虚增', () async {
+    var now = DateTime(2026, 1, 1, 9);
+    final c = create();
+    c.setListenClockForTest(() => now);
+    await settle();
+
+    c.currentSong = _song(1);
+    engine!.playing = true;
+    engine!.emit();
+    await settle();
+
+    now = now.add(const Duration(seconds: 15));
+    engine!.position = const Duration(seconds: 15);
+    c.tickListeningTimeForTest();
+    await settle();
+
+    // 合盖休眠 30 分钟：墙钟前进，位置只多走了休眠前那几十毫秒。
+    now = now.add(const Duration(minutes: 30));
+    engine!.position += const Duration(milliseconds: 80);
+    c.tickListeningTimeForTest();
+    await settle();
+
+    engine!.playing = false;
+    engine!.emit();
+    await settle();
+
+    final stats = await PlaybackStatsService().getStats();
+    expect(
+      stats.totalListenTime,
+      lessThanOrEqualTo(const Duration(seconds: 31)),
+      reason: '位置没动说明音频也停了，30 分钟休眠不得计入',
+    );
+    expect(stats.totalListenTime, greaterThan(Duration.zero));
   });
 }

@@ -11,6 +11,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     await prefs.setBool(_listenTimeSettingKey, enabled);
     if (!enabled) {
       // 关闭前把最后一段真实播放时长结进统计，否则最多丢一个节流周期。
+      // 先吸收休眠空档：这条路径同样是 force 结清，隔一次休眠后再关开关
+      // 会把整段休眠算进统计。
+      _absorbListenTimeStall();
       _flushListenTimeToStats(force: true);
       _resetListeningTimeTracker();
     } else {
@@ -335,19 +338,34 @@ mixin _PlayerSettings on _PlayerControllerBase {
   void _scheduleSavePlaybackState() {
     _saveStateTimer?.cancel();
     _saveStateTimer = Timer(const Duration(milliseconds: 500), () {
-      unawaited(_savePlaybackState());
+      unawaited(_savePlaybackStateGuarded());
     });
+  }
+
+  /// 落盘失败不得外溢：防抖是 unawaited 定时器、生命周期刷写也在 unawaited
+  /// 回调里，异常会变成未处理的异步错误（prefs/平台通道故障时每次切歌刷一条），
+  /// 反而掩盖真正的业务问题。返回值供 [flushPlaybackState] 决定要不要重排。
+  Future<bool> _savePlaybackStateGuarded() async {
+    try {
+      await _savePlaybackState();
+      return true;
+    } catch (error) {
+      debugPrint('[时音][player] 播放状态写盘失败（忽略本次）: $error');
+      return false;
+    }
   }
 
   /// 立即落盘播放状态（取消防抖）。
   ///
-  /// 供桌面退出路径（DesktopWindow.quitGracefully 注册的退出前钩子）
-  /// 调用：硬终止进程不做任何异步收尾，防抖窗口内的切歌必须先刷写，
-  /// 否则下次启动恢复到上一首歌。
+  /// 供桌面退出路径（DesktopWindow.quitGracefully 注册的退出前钩子）与移动端
+  /// 退后台（main.dart AppLifecycleState.paused）调用：硬终止进程不做任何异步
+  /// 收尾，防抖窗口内的切歌必须先刷写，否则下次启动恢复到上一首歌。
   Future<void> flushPlaybackState() async {
     _saveStateTimer?.cancel();
     _saveStateTimer = null;
-    await _savePlaybackState();
+    // 防抖已被取消：这次写失败就等于把窗口内本该落盘的切歌一起丢了，
+    // 所以失败后重排一次，交给后续切歌/下一次生命周期兜住。
+    if (!await _savePlaybackStateGuarded()) _scheduleSavePlaybackState();
   }
 
   Future<void> _savePlaybackState() async {
@@ -552,17 +570,26 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (queueList.isEmpty) return;
 
       queue = queueList;
-      final base = state['queueBaseIndex'] as int? ?? 0;
       final savedIndex = state['currentIndex'] as int? ?? 0;
       final savedHash = state['currentSongHash'] as String? ?? '';
       // 优先按 hash 找回当前歌（窗口保存后相对下标不再等于原始下标）；
-      // 旧数据没有 hash/baseIndex，退化为「绝对下标 = 0 + currentIndex」。
+      // 旧数据没有 hash/baseIndex，退化为下标 clamp。
       var index = savedHash.isEmpty
           ? -1
           : queueList.indexWhere((song) => song.hash == savedHash);
       if (index < 0) {
-        final absolute = base + (savedIndex >= 0 ? savedIndex : 0);
-        index = absolute.clamp(0, queueList.length - 1);
+        // 回退只能用**窗口内**的相对下标：queueList 是「以当前歌为中心」的
+        // 窗口（长度 ≤ _playbackStateMaxQueueSize），而 currentIndex 存的就是
+        // 相对下标（见 _savePlaybackState 的 index - base）。
+        // 曾误写成 base + savedIndex，把原队列的绝对下标当窗口下标用——
+        // base>0 且 hash 找不回（当前歌 hash 为空，如云盘来源）时会 clamp 到
+        // 窗口末尾，恢复成完全另一首歌，且下次保存把错位置固化。
+        // 旧快照（无 queueBaseIndex，存的是绝对下标）在本式下语义不变：
+        // 越界同样 clamp 到窗口末尾。
+        index = (savedIndex >= 0 ? savedIndex : 0).clamp(
+          0,
+          queueList.length - 1,
+        );
       }
       currentSong = queueList[index];
 
@@ -608,24 +635,35 @@ mixin _PlayerSettings on _PlayerControllerBase {
     final shouldTrack =
         addListeningTimeEnabled && isPlaying && currentSong != null;
     if (shouldTrack) {
-      final startedAt = _listenTimeStartedAt ??= DateTime.now();
+      final startedAt = _listenTimeStartedAt ??= _listenClock();
       _statsListenAnchor ??= startedAt;
-      _listenTimeTimer ??= Timer.periodic(_listenTimeCheckInterval, (_) {
-        // 本地统计按增量累计；写盘按 _statsListenFlushInterval 节流，
-        // 不依赖服务端上报是否成功。
-        _flushListenTimeToStats();
-        unawaited(_maybeReportListeningTime());
-      });
+      _listenTimeHeartbeat ??= startedAt;
+      _listenTimeTimer ??= Timer.periodic(
+        _listenTimeCheckInterval,
+        (_) => _tickListeningTime(),
+      );
       return;
     }
 
     _pauseListeningTimeTracker();
   }
 
+  /// 15s 心跳一次：先吸收未观测空档，再结算本地统计与服务端上报。
+  void _tickListeningTime() {
+    _absorbListenTimeStall();
+    // 本地统计按增量累计；写盘按 _statsListenFlushInterval 节流，
+    // 不依赖服务端上报是否成功。
+    _flushListenTimeToStats();
+    unawaited(_maybeReportListeningTime());
+  }
+
   void _pauseListeningTimeTracker() {
+    // 暂停/切歌/dispose 可能紧跟在一次休眠之后：先吸收空档，否则下面
+    // 这段墙钟差会把休眠时长整段算进余量与统计。
+    _absorbListenTimeStall();
     final startedAt = _listenTimeStartedAt;
     if (startedAt != null) {
-      _pendingListenTime += DateTime.now().difference(startedAt);
+      _pendingListenTime += _listenClock().difference(startedAt);
       _listenTimeStartedAt = null;
       // 暂停/切歌/dispose 都会走到这里：把本段新增时长并入余量后落盘，
       // 否则进程被杀时这段时长直接丢失（上游 3.3.0 #151）。
@@ -634,8 +672,95 @@ mixin _PlayerSettings on _PlayerControllerBase {
     // 暂停/切歌/dispose：立即结清（force），不因节流丢掉最后一段。
     _flushListenTimeToStats(force: true);
     _statsListenAnchor = null;
+    _listenTimeHeartbeat = null;
+    _listenTimeHeartbeatPosition = null;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
+  }
+
+  /// 吸收「进程没被调度」造成的未观测空档。
+  ///
+  /// 听歌时长是「播放期间的真实耗时」，只能靠 15s 心跳采样：两次心跳之间
+  /// 隔了数倍心跳周期，就说明这段时间 Dart 侧没被调度（合盖休眠、UI 线程长
+  /// 卡顿、调试断点暂停）。此时墙钟已经前进，直接结算会把整段空档记成听歌
+  /// 时长——本地统计一次性多出几十分钟到几小时，服务端余量也会跟着虚增。
+  ///
+  /// 处理方式：先看**播放位置证据**。位置也同步前进了就说明音频一直在放
+  /// （移动端后台长播被系统冻结 Dart 侧、断点卡住 UI 线程时都是这种），整段
+  /// 照常计入；位置基本没动（系统休眠时音频同时停住）才只结算到最后一次心跳
+  /// 为止（那是最后确证「还在播放」的时刻），空档按 0 计，锚点推到 now。
+  ///
+  /// 时钟回拨（负间隔）不采信位置证据，一律走吸收：否则 `now - anchor` 恒为
+  /// 负，`_flushListenTimeToStats` 会一直早退，统计冻结到墙钟追回旧锚点为止。
+  void _absorbListenTimeStall() {
+    final heartbeat = _listenTimeHeartbeat;
+    // 未在跟踪时不建立心跳：心跳只由 `_syncListeningTimeTracker` 起播时
+    // 初始化，避免非播放期间的一次调用把"上次心跳"挪到现在。
+    if (heartbeat == null) return;
+    final now = _listenClock();
+    _listenTimeHeartbeat = now;
+    // 每拍都刷新位置基线：空档判定要和"上一次心跳那一刻"的位置比，
+    // 只在与空档时更新会把基线越放越旧，正常播放也会被误判成"位置前进"。
+    final position = _readPlaybackPosition();
+    final previousPosition = _listenTimeHeartbeatPosition;
+    _listenTimeHeartbeatPosition = position;
+    final gap = now.difference(heartbeat);
+    if (gap.abs() <= _listenTimeStallThreshold) return;
+
+    if (gap > Duration.zero &&
+        _listenGapBackedByProgress(previousPosition, position, gap)) {
+      // 位置证据成立：这段是真实播放（不丢数），锚点/余量都不用动，
+      // 下一次 flush 会把整段正常结算。
+      debugPrint(
+        '[时音][listen-time] 空档有播放位置证据，照常计入 ${gap.inSeconds}s',
+      );
+      return;
+    }
+
+    final anchor = _statsListenAnchor;
+    if (anchor != null) {
+      final observed = heartbeat.difference(anchor);
+      if (observed > Duration.zero) {
+        unawaited(_statsService.addListenTime(observed));
+      }
+      _statsListenAnchor = now;
+    }
+    final startedAt = _listenTimeStartedAt;
+    if (startedAt != null) {
+      final observed = heartbeat.difference(startedAt);
+      if (observed > Duration.zero) _pendingListenTime += observed;
+      _listenTimeStartedAt = now;
+    }
+    debugPrint(
+      '[时音][listen-time] 跳过未观测空档 ${gap.inSeconds}s'
+      '（休眠/长卡顿/时钟跳变）',
+    );
+  }
+
+  /// 读当前播放位置；引擎未就绪或平台不提供时返回 null（视为「无证据」，
+  /// 退化成旧行为：按空档吸收）。位置读取绝不能影响结算本身。
+  Duration? _readPlaybackPosition() {
+    try {
+      return audioPlayer.position;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 未观测空档是否被播放位置推进坐实。
+  ///
+  /// 门槛取「前进 ≥ 空档一半」而不是接近 1:1：解码缓冲/暂停切换会让位置略
+  /// 滞后于墙钟。这个门槛同时能排除两类必须丢弃的情况：
+  /// - 系统休眠：音频同时停住，位置只剩休眠前那几十毫秒，远不到一半；
+  /// - 回拨/切歌后位置归零（advanced 为负）：交给调用方按空档吸收。
+  bool _listenGapBackedByProgress(
+    Duration? before,
+    Duration? after,
+    Duration gap,
+  ) {
+    if (before == null || after == null) return false;
+    final advanced = after - before;
+    return advanced >= gap ~/ 2;
   }
 
   /// 把距上次锚点的听歌时长增量写入本地统计。
@@ -648,7 +773,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
   void _flushListenTimeToStats({bool force = false}) {
     final anchor = _statsListenAnchor;
     if (anchor == null) return;
-    final now = DateTime.now();
+    final now = _listenClock();
     final delta = now.difference(anchor);
     if (delta <= Duration.zero) return;
     if (!force) {
@@ -665,6 +790,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
   void _resetListeningTimeTracker() {
     _listenTimeStartedAt = null;
     _statsListenAnchor = null;
+    _listenTimeHeartbeat = null;
+    _listenTimeHeartbeatPosition = null;
     _pendingListenTime = Duration.zero;
     _listenTimeTimer?.cancel();
     _listenTimeTimer = null;
@@ -678,13 +805,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
     if (startedAt == null) {
       return _pendingListenTime;
     }
-    return _pendingListenTime + DateTime.now().difference(startedAt);
+    return _pendingListenTime + _listenClock().difference(startedAt);
   }
 
   Future<void> _maybeReportListeningTime() async {
     if (_isReportingListenTime || !addListeningTimeEnabled) {
       return;
     }
+    // 上报判定同样基于墙钟差：先吸收空档，否则休眠后第一次判定会把整段
+    // 休眠顶成"已满 5 分钟"，余量虚增后还会按 15s 一次连续补报。
+    _absorbListenTimeStall();
     if (_trackedListeningTime() < _listenTimeReportInterval) {
       return;
     }
@@ -692,6 +822,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     _isReportingListenTime = true;
     try {
       await _api.addListeningTime();
+      // 请求在途期间可能经历休眠：结清余量前再吸收一次空档，否则休眠
+      // 时长会被算进余量并触发连续补报。
+      _absorbListenTimeStall();
       // 本地统计已在 15s tick / 暂停时独立累计，这里不再按整 5 分钟补记
       // （否则未登录或上报失败时统计恒为 0）。
       final stillPlaying = isPlaying && currentSong != null;
@@ -699,12 +832,14 @@ mixin _PlayerSettings on _PlayerControllerBase {
       _pendingListenTime = remainder > Duration.zero
           ? remainder
           : Duration.zero;
-      _listenTimeStartedAt = stillPlaying ? DateTime.now() : null;
+      _listenTimeStartedAt = stillPlaying ? _listenClock() : null;
       if (!stillPlaying) {
         // 上报期间刚好暂停/播完：把最后一段写进统计并结束锚点，避免下次
         // 起播时用旧锚点算出超长增量。
         _flushListenTimeToStats(force: true);
         _statsListenAnchor = null;
+        _listenTimeHeartbeat = null;
+        _listenTimeHeartbeatPosition = null;
         _listenTimeTimer?.cancel();
         _listenTimeTimer = null;
       }
@@ -740,4 +875,16 @@ mixin _PlayerSettings on _PlayerControllerBase {
 
   @visibleForTesting
   Future<void> reportListeningTimeForTest() => _maybeReportListeningTime();
+
+  /// 单次心跳（等价于 15s 定时器触发一次），配合 [setListenClockForTest]
+  /// 可用假时钟逐跳推进，确定性验证休眠/时钟跳变下的累计。
+  @visibleForTesting
+  void tickListeningTimeForTest() => _tickListeningTime();
+
+  /// 注入听歌时长的时间源（默认墙钟）。测试用它模拟系统休眠/时钟回拨：
+  /// 真实等待数十分钟既不现实也不该出现在单测里。
+  @visibleForTesting
+  void setListenClockForTest(DateTime Function() clock) {
+    _listenClock = clock;
+  }
 }

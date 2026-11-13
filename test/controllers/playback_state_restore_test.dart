@@ -192,6 +192,49 @@ void main() {
     expect(controller.currentIndex, 199);
   });
 
+  test('窗口快照 + 当前歌 hash 为空：按窗口相对下标恢复，不得漂到窗口末尾', () async {
+    // 复现修复前的索引 bug：base>0 的快照里 currentIndex 已经是「相对窗口」
+    // 的下标，回退分支却把它当绝对下标再加一次 base（200+100=300），而队列
+    // 只有 200 首 → clamp 到 199 → 恢复成原队列第 399 首，且下次保存把错位置
+    // 固化。触发条件是 hash 找回失败（当前歌 hash 为空，如云盘来源）。
+    final window = <Song>[
+      for (var i = 200; i < 400; i++)
+        i == 300
+            ? Song(
+                id: '300',
+                title: '歌曲$i',
+                artist: '歌手',
+                hash: '',
+                duration: const Duration(seconds: 100),
+              )
+            : _song(i),
+    ];
+    final snapshot = {
+      'queueBaseIndex': 200,
+      'currentSongHash': '',
+      'queue': window.map((s) => s.toCache()).toList(),
+      'currentIndex': 100,
+      'playbackMode': PlaybackMode.playlistLoop.name,
+    };
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      _playbackStateKey: jsonEncode(snapshot),
+    });
+
+    final controller = buildController();
+    await settle();
+    expect(controller.queue.length, 200);
+    expect(
+      controller.currentIndex,
+      100,
+      reason: '相对下标必须原样落回窗口内第 100 项，而不是被 base 再加一次',
+    );
+    expect(
+      controller.currentSong?.title,
+      '歌曲300',
+      reason: '恢复的应是窗口第 100 项（原队列第 300 首），不是窗口末尾第 399 首',
+    );
+  });
+
   test('短队列（<=200）不受窗口逻辑影响', () async {
     final first = buildController();
     await settle();
