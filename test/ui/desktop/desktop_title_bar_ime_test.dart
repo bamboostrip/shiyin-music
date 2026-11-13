@@ -9,11 +9,16 @@
 //   2. 逐键组词（n→ni→nih→nihao）是否每一步都保留 composing；
 //   3. 组词期间发生父级重建（悬停 setState）时 composing 是否幸存；
 //   4. 提交（composing 清空 + 上屏中文）是否落到 controller；
-//   5. 特征化用例：组词期间 Enter 目前会直接触发 onSubmitted，
-//      把**拼音原文**交出去——顶栏没有 isImeComposingActive 守卫。
+//   5. 组词中的 Enter 是否被守卫吞掉（不把拼音当查询提交、不打断组词）；
+//      非组词 Enter 是否照常提交并失焦。
+//
+// 注意 framework 语义：没有自定义 onEditingComplete 时，`_finalizeEditing`
+// 会先 clearComposing + unfocus 再调 onSubmitted，所以「在 onSubmitted 里
+// 读 composing」恒为空。组词守卫必须挂在 onEditingComplete 上，本文件第 5 组
+// 用例即锁定这一点。
 //
 // 若本文件全绿而线上仍打不出中文，说明缺陷不在 Dart widget 层
-// （嫌疑点排序见 .tmp-ime/ime-repo-audit.md）。
+// （本次修复的根因在 Windows runner 的 TSF 焦点，见 windows/runner/main.cpp）。
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -242,8 +247,8 @@ void main() {
     );
   });
 
-  // ── 特征化用例（记录缺陷，修好后请翻转断言）───────────────────────────
-  testWidgets('组词期间 Enter：onSubmitted 收到拼音原文，且 composing 已被 framework 清空',
+  // ── 提交路径的 IME 守卫（回归）─────────────────────────────────────────
+  testWidgets('组词期间 Enter：不提交拼音、composing 与焦点都保留',
       (WidgetTester tester) async {
     final harness = await _pumpTitleBar(tester);
     await _focusSearchField(tester);
@@ -258,36 +263,85 @@ void main() {
     await tester.pump();
     expect(harness.submitted, isEmpty, reason: 'Enter 前的组词不应已提交');
 
-    // TextField(textInputAction: search) 收到 performAction(search) 后走
-    // EditableText._finalizeEditing → onSubmitted(_value.text)。
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pump();
 
-    // 当前行为：把**拼音原文**当查询交出去。修好后此处应为 isEmpty。
+    // 组词中的 Enter 是"选词"：拼音原文不得作为查询交出去。
     expect(
       harness.submitted,
-      <String>['nihao'],
-      reason: '顶栏提交路径没有 IME 守卫，组词中的 Enter 会把拼音当查询提交',
+      isEmpty,
+      reason: '组词中的回车不能把拼音当关键词提交（守卫在 onEditingComplete 取样）',
     );
+    expect(
+      harness.controller.value.composing,
+      const TextRange(start: 0, end: 5),
+      reason: '守卫必须保住 composing，否则候选框被打断',
+    );
+    expect(
+      harness.focusNode.hasFocus,
+      isTrue,
+      reason: '组词中不得失焦：失焦会打断选字',
+    );
+  });
 
-    // ★ framework 语义（editable_text.dart _finalizeEditing，本用例实测确认）：
-    //   controller.clearComposing() 与 focusNode.unfocus() 都发生在
-    //   onSubmitted 之前。所以 onSubmitted 里读 controller.value.composing
-    //   永远是空的 —— 任何「在 onSubmitted 里判 composing」的守卫都是死代码
-    //   （search_page.dart:305 的 isImeComposingActive 即属此类）。
+  testWidgets('非组词 Enter：照常提交、清空 composing 并失焦（既有行为）',
+      (WidgetTester tester) async {
+    final harness = await _pumpTitleBar(tester);
+    await _focusSearchField(tester);
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '周杰伦',
+        selection: TextSelection.collapsed(offset: 3),
+      ),
+    );
+    await tester.pump();
+
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+
+    expect(harness.submitted, <String>['周杰伦']);
     expect(
       harness.composingAtSubmit.single,
       isNull,
-      reason: 'onSubmitted 触发时 composing 已被 framework 清空（守卫必须更早）',
+      reason: '非组词提交语义不变',
     );
-
-    // 默认 onEditingComplete 在 search action 后主动 unfocus，与 shell 的
-    // _closeSearchPanel(unfocus: true) 叠加成焦点抖动。
     expect(
       harness.focusNode.hasFocus,
       isFalse,
-      reason: '提交后默认 unfocus（焦点抖动来源之一）',
+      reason: '自定义 onEditingComplete 会跳过 framework 默认失焦，需自行补回',
     );
+  });
+
+  testWidgets('组词上屏后再 Enter：提交的是中文而非拼音', (WidgetTester tester) async {
+    final harness = await _pumpTitleBar(tester);
+    await _focusSearchField(tester);
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihao',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+    // 组词中的 Enter：被守卫吞掉。
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    expect(harness.submitted, isEmpty);
+
+    // IME 上屏后 composing 清空，再 Enter 才正常提交。
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '你好',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+
+    expect(harness.submitted, <String>['你好']);
   });
 
   testWidgets('onEditingComplete 取代 clearComposing：IME 守卫的可行挂点（framework 行为验证）',

@@ -709,6 +709,34 @@ void main() {
       );
     });
 
+    testWidgets('补全期间队列被重排（净长度不变）：同样放弃整队替换', (tester) async {
+      final player = _FakePlayerController();
+      final api = await pumpPaginatedPlaylist(tester, player: player);
+      api.expandGate = Completer<void>();
+      await startPlayAllUntilExpansion(tester, api);
+
+      // 模拟用户在队列面板里换位：「下一首播放」的目标歌若本来就在队列里，
+      // addSongsToQueue 是"先 removeAt 再 insert"，净长度不变；只比长度会漏判，
+      // 用户的重排会被 replaceQueue 静默复原。
+      final before = List<Song>.of(player.queue);
+      expect(before.length, greaterThan(2));
+      player.queue = <Song>[
+        before[0],
+        before[2],
+        before[1],
+        ...before.skip(3),
+      ];
+
+      api.expandGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(
+        player.replacedQueues,
+        isEmpty,
+        reason: '队列被重排时必须放弃整队替换，否则用户的重排会被静默复原',
+      );
+    });
+
     testWidgets('补队列在 playSong 完成前已触发，完成后按全量结果替换队列', (tester) async {
       final player = _FakePlayerController();
       final playGate = Completer<void>();

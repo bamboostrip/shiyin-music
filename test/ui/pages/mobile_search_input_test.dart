@@ -16,6 +16,31 @@ class _FakeMusicApi implements MusicApi {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// 记录真正发出的搜索请求（默认曲目搜索），用来确认 IME 守卫没有误发搜索。
+class _RecordingMusicApi extends _FakeMusicApi {
+  final List<String> searchCalls = <String>[];
+
+  @override
+  Future<List<Song>> searchSongs(
+    String keywords, {
+    int page = 1,
+    int pageSize = 30,
+  }) async {
+    searchCalls.add(keywords);
+    return const <Song>[];
+  }
+}
+
+/// 固定返回一组联想词，用来验证首行与联想词的去重。
+class _SuggestingMusicApi extends _RecordingMusicApi {
+  _SuggestingMusicApi(this.suggestions);
+
+  final List<String> suggestions;
+
+  @override
+  Future<List<String>> searchSuggest(String keywords) async => suggestions;
+}
+
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   bool isPersonalFmActive = false;
@@ -157,5 +182,207 @@ void main() {
     await tester.enterText(textFieldFinder, '这是一段非常长非常长的搜索测试文字用于验证字体底部不被截断gyjp');
     await tester.pumpAndSettle();
     expect(renderEditable!.size.height, greaterThanOrEqualTo(renderEditable!.preferredLineHeight));
+  });
+
+  testWidgets('组词中的 Enter 不误发搜索；上屏后 Enter 才搜索', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    debugDesktopFormFactorOverride = false;
+    addTearDown(() => debugDesktopFormFactorOverride = null);
+
+    final api = _RecordingMusicApi();
+    final theme = ThemeController();
+    await theme.setCarModeEnabled(false);
+
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: SearchPage(
+          api: api,
+          auth: _FakeAuthController(),
+          player: _FakePlayerController(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(field.focusNode!.hasFocus, isTrue);
+
+    // 组词中：拼音进入 composing 区间。
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'nihao',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      ),
+    );
+    await tester.pump();
+
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+
+    // 守卫必须拦在 onSubmitted 之前（composing 在 framework 里先被清空）。
+    expect(
+      api.searchCalls,
+      isEmpty,
+      reason: '组词中的回车是选词，不能把拼音当关键词搜出去',
+    );
+    expect(
+      field.controller!.value.composing,
+      const TextRange(start: 0, end: 5),
+      reason: '守卫不得打断组词',
+    );
+    expect(field.focusNode!.hasFocus, isTrue, reason: '组词中不得失焦');
+
+    // IME 上屏后再回车：正常搜索。
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '你好',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    expect(api.searchCalls, <String>['你好']);
+  });
+
+  Future<void> pumpSearchPage(WidgetTester tester, MusicApi api) async {
+    SharedPreferences.setMockInitialValues({});
+    debugDesktopFormFactorOverride = false;
+    addTearDown(() => debugDesktopFormFactorOverride = null);
+    final theme = ThemeController();
+    await theme.setCarModeEnabled(false);
+
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: SearchPage(
+          api: api,
+          auth: _FakeAuthController(),
+          player: _FakePlayerController(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('联想请求失败/为空：首行「搜索 <词>」入口仍在，正文不空白', (tester) async {
+    // _FakeMusicApi 的 searchSuggest 直接抛 NoSuchMethodError，等价于接口失败。
+    final api = _RecordingMusicApi();
+    await pumpSearchPage(tester, api);
+
+    await tester.enterText(find.byType(TextField), '周杰伦');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byType(ListView),
+      findsOneWidget,
+      reason: '联想失败也必须保留联想视图（首行搜索词），不能整块空白',
+    );
+    expect(find.byType(ListTile), findsOneWidget, reason: '只有首行「搜索 周杰伦」');
+    expect(find.textContaining('周杰伦'), findsWidgets);
+  });
+
+  testWidgets('组词中点右上角「搜索」不误发；上屏后再点才搜索', (tester) async {
+    final api = _RecordingMusicApi();
+    await pumpSearchPage(tester, api);
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'zhoujielun',
+        selection: TextSelection.collapsed(offset: 10),
+        composing: TextRange(start: 0, end: 10),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(TextButton, '搜索'));
+    await tester.pump();
+    expect(
+      api.searchCalls,
+      isEmpty,
+      reason: '组词中 controller.text 还是拼音原文，点按钮不得把拼音当关键词',
+    );
+    expect(field.focusNode!.hasFocus, isTrue, reason: '组词中不得失焦打断选字');
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '周杰伦',
+        selection: TextSelection.collapsed(offset: 3),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, '搜索'));
+    await tester.pumpAndSettle();
+    expect(api.searchCalls, <String>['周杰伦']);
+  });
+
+  testWidgets('联想里与输入词相同的项不与首行重复', (tester) async {
+    final api = _SuggestingMusicApi(<String>['周杰伦', '周杰伦 告白气球']);
+    await pumpSearchPage(tester, api);
+
+    await tester.enterText(find.byType(TextField), '周杰伦');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byType(ListTile),
+      findsNWidgets(2),
+      reason: '首行「搜索 周杰伦」+ 一条联想；与输入词重复的联想不再占一行',
+    );
+    expect(find.text('周杰伦 告白气球'), findsOneWidget);
+  });
+
+  testWidgets('组词期间改词触发页面重建（回落联想）：composing 与焦点都不丢', (tester) async {
+    final api = _RecordingMusicApi();
+    await pumpSearchPage(tester, api);
+
+    // 先搜一次，让 _searched 成立：之后改词会走「不再展示上一轮结果 → 回落
+    // 联想」的重建路径，覆盖新增的每次改词 setState 与 IME 组词的冲突面。
+    await tester.enterText(find.byType(TextField), '周杰伦');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'zhoujielun',
+        selection: TextSelection.collapsed(offset: 10),
+        composing: TextRange(start: 0, end: 10),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      field.controller!.value.composing,
+      const TextRange(start: 0, end: 10),
+      reason: '页面重建不得清掉 composing（否则候选框被打断）',
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
   });
 }

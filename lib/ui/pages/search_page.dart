@@ -185,18 +185,27 @@ class _SearchPageState extends State<SearchPage> {
     _debounce?.cancel();
     final text = _controller.text.trim();
     // 只在 UI 依赖文本状态的时刻重建整页：跨越空/非空边界（清除按钮、
-    // 无文字时的右内边距显隐）或残留搜索错误需要清除时。连续输入
-    // （非空→非空）不重建，避免每个按键重排热搜/结果区；建议词由
-    // 防抖后的 _fetchSuggestions 自行 setState 刷新。
+    // 无文字时的右内边距显隐）、残留搜索错误需要清除，或「改词后不再展示
+    // 上一轮结果」（正文要从结果列表回落联想视图）。连续输入（结果区已回落
+    // 后）不重建，避免每个按键重排热搜/结果区；建议词由防抖后的
+    // _fetchSuggestions 自行 setState 刷新。
     final crossedEmptyBoundary = text.isEmpty != _lastTextWasEmpty;
     _lastTextWasEmpty = text.isEmpty;
-    if (crossedEmptyBoundary || _searchError != null) {
+    final showingStaleResults =
+        _searched && text.isNotEmpty && text != _lastSearchedKeyword;
+    if (crossedEmptyBoundary || _searchError != null || showingStaleResults) {
       setState(() {
         // 文本变化后旧搜索错误不再适用，清除以免对未搜过的词展示"搜索失败"。
         _searchError = null;
         if (text.isEmpty) {
+          // 清空输入即取消在途搜索：否则它回来时 seq 仍匹配，会把结果/loading
+          // 重新落回 UI（历史上表现为清空后一直转圈或闪回上一轮结果）。
+          _searchSeq++;
+          _loading = false;
           _suggestions = const [];
           _results = const [];
+          _artistResults = const [];
+          _albumResults = const [];
           _playlistResults = const [];
           _searched = false;
         }
@@ -214,7 +223,14 @@ class _SearchPageState extends State<SearchPage> {
       if (mounted && _controller.text.trim() == keywords) {
         setState(() => _suggestions = suggestions);
       }
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('[search] 联想词请求失败（忽略）: $error');
+      // 失败也要收口：改词后（非空→非空）只有这里会触发重建，不 setState 的话
+      // 正文会一直停在上一轮的搜索结果/旧联想上，看起来像"输入框 B、列表 A"。
+      if (mounted && _controller.text.trim() == keywords) {
+        setState(() => _suggestions = const []);
+      }
+    }
   }
 
   Future<void> _search(String keywords) async {
@@ -291,9 +307,34 @@ class _SearchPageState extends State<SearchPage> {
 
   void _onSubmit() {
     final text = _controller.text.trim();
-    if (text.isNotEmpty) {
+    if (text.isEmpty) return;
+    // 组词中的提交（右上角「搜索」按钮 / 桌面搜索胶囊的按钮 / 键盘 Enter 的
+    // 兜底）读到的 controller.text 仍是**拼音原文**，直接搜等于把拼音当关键词，
+    // 还会被写进搜索历史。键盘 Enter 已在 onEditingComplete 取样裁决，这里再
+    // 兜住所有 tap 路径；保持焦点不打断选字，上屏后再点一次即可。
+    if (isImeComposingActive(_controller.value)) return;
+    _focusNode.unfocus();
+    _search(text);
+  }
+
+  /// 提交动作发生时输入法是否仍在组词。
+  ///
+  /// framework 在没有自定义 `onEditingComplete` 时会先 `clearComposing()` +
+  /// `unfocus()` 再调 `onSubmitted`，所以「在 onSubmitted 里读 composing」
+  /// 恒为空（死守卫）。组词态只能在 `onEditingComplete` 取样。
+  var _imeComposingAtEditingComplete = false;
+
+  void _handleEditingComplete() {
+    final composing = isImeComposingActive(_controller.value);
+    _imeComposingAtEditingComplete = composing;
+    // 自定义 onEditingComplete 会跳过 framework 默认的 clearComposing +
+    // unfocus：非组词时补回失焦（收起键盘），组词中保留焦点继续选字。
+    if (!composing) {
+      // 顺带补回 framework 的 clearComposing：合法但折叠的 composing（(0,0)/
+      // (n,n)）不算组词，可如果不清理就会永久留在 controller 上（framework
+      // 以前会清），下次聚焦时把这段陈旧区间重新发给输入法。
+      _controller.clearComposing();
       _focusNode.unfocus();
-      _search(text);
     }
   }
 
@@ -302,7 +343,10 @@ class _SearchPageState extends State<SearchPage> {
   /// 组词中的 Enter 是"选词"而非"确认"，照常提交会误发搜索
   /// （见 keyboard_focus_guard.dart 的 IME 守卫；纯防御，触屏无风险）。
   void _onSubmitFromKeyboard() {
-    if (isImeComposingActive(_controller.value)) return;
+    if (_imeComposingAtEditingComplete) {
+      _imeComposingAtEditingComplete = false;
+      return;
+    }
     _onSubmit();
   }
 
@@ -449,6 +493,7 @@ class _SearchPageState extends State<SearchPage> {
               controller: _controller,
               focusNode: _focusNode,
               textInputAction: TextInputAction.search,
+              onEditingComplete: _handleEditingComplete,
               onSubmitted: (_) => _onSubmitFromKeyboard(),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: isDark
@@ -623,6 +668,7 @@ class _SearchPageState extends State<SearchPage> {
                 focusNode: _focusNode,
                 hintText: '搜索歌曲、歌手、专辑、歌单',
                 textInputAction: TextInputAction.search,
+                onEditingComplete: _handleEditingComplete,
                 onSubmitted: (_) => _onSubmitFromKeyboard(),
               ),
             ),
@@ -1037,15 +1083,15 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
 
-    if (_suggestions.isNotEmpty) {
-      return _SuggestionList(
-        suggestions: _suggestions,
-        keyword: text,
-        onTap: _onKeywordTap,
-      );
-    }
-
-    return const SizedBox.shrink();
+    // 联想未返回/为空/请求失败时也渲染这个视图：首行「搜索 <词>」是改词未
+    // 提交时的固定入口（上游 c113193）。旧实现只在 _suggestions 非空时渲染，
+    // 于是联想为空或失败就落到 SizedBox.shrink()，正文整块空白——用户既
+    // 看不到入口也看不到反馈（只能靠键盘回车）。
+    return _SuggestionList(
+      suggestions: _suggestions,
+      keyword: text,
+      onTap: _onKeywordTap,
+    );
   }
 }
 
@@ -1622,6 +1668,15 @@ class _SuggestionList extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? Colors.white.withValues(alpha: .06) : Colors.white;
     final query = keyword.trim();
+    // 真实 /search/suggest 的 RecordDatas 第一条往往就是输入词本身
+    // （{"HintInfo":"周杰伦"}），不去重会和首行「搜索 周杰伦」重复成两行。
+    final items = <String>[];
+    final seen = <String>{query};
+    for (final suggestion in suggestions) {
+      final trimmed = suggestion.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+      items.add(suggestion);
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Container(
@@ -1646,7 +1701,7 @@ class _SuggestionList extends StatelessWidget {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 6),
             shrinkWrap: true,
-            itemCount: suggestions.length + 1,
+            itemCount: items.length + 1,
             separatorBuilder: (_, _) => Divider(
               height: 1,
               indent: 52,
@@ -1688,7 +1743,7 @@ class _SuggestionList extends StatelessWidget {
                   onTap: query.isEmpty ? null : () => onTap(query),
                 );
               }
-              final suggestion = suggestions[index - 1];
+              final suggestion = items[index - 1];
               return ListTile(
                 mouseCursor:
                     isDesktopFormFactor ? SystemMouseCursors.click : null,

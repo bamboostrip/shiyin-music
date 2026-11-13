@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../keyboard_focus_guard.dart';
 import 'desktop_window_controls.dart';
 
 /// 顶栏（自定义标题栏）总高。QQ 音乐 PC 同量级：40px 细条 + 30px 搜索胶囊。
@@ -302,6 +303,15 @@ class _TitleBarSearchFieldState extends State<_TitleBarSearchField> {
   var _hovering = false;
   var _focused = false;
 
+  /// 本次编辑动作发生时输入法是否仍在组词。
+  ///
+  /// framework 的 `_finalizeEditing` 在**没有**自定义 `onEditingComplete` 时
+  /// 会先 `clearComposing()` + `unfocus()`，然后才调 `onSubmitted`；所以
+  /// 「在 onSubmitted 里读 controller.value.composing」永远是空的（死守卫，
+  /// 见 keyboard_focus_guard.dart 的说明）。唯一能拿到组词态的挂点是
+  /// `onEditingComplete`：组词中的 Enter 是"选词"而非"确认提交"。
+  var _imeComposingAtEditingComplete = false;
+
   bool get _interactive => widget.controller != null;
 
   @override
@@ -331,6 +341,36 @@ class _TitleBarSearchFieldState extends State<_TitleBarSearchField> {
       setState(() => _focused = focused);
       widget.onFocusChanged?.call(focused);
     }
+  }
+
+  /// 提交前的组词取样点（framework 保证它先于 onSubmitted，且此时
+  /// composing 尚未被清空）。
+  ///
+  /// 提供自定义 `onEditingComplete` 会顺带跳过 framework 默认的
+  /// `clearComposing() + unfocus()`，所以非组词时在这里补回，保持「回车提交
+  /// 后失焦、composing 被清空」的既有行为。
+  void _handleEditingComplete() {
+    final composing = isImeComposingActive(
+      widget.controller?.value ?? TextEditingValue.empty,
+    );
+    _imeComposingAtEditingComplete = composing;
+    if (!composing) {
+      // 合法但折叠的 composing（(0,0)/(n,n)）不算组词，可框架以前会顺手清掉；
+      // 不清会永久留在 controller 上，下次聚焦时把陈旧区间重新发给输入法。
+      widget.controller?.clearComposing();
+      widget.focusNode?.unfocus();
+    }
+  }
+
+  void _handleSubmitted(String value) {
+    // 组词中的 Enter 是「选词」：既不能把拼音当关键词搜出去，也不能失焦
+    // （失焦会打断候选框/组词）。裁决在 onSubmitted 里做，因为组词态只能在
+    // 上一个挂点取样。
+    if (_imeComposingAtEditingComplete) {
+      _imeComposingAtEditingComplete = false;
+      return;
+    }
+    widget.onSubmitted?.call(value);
   }
 
   @override
@@ -395,7 +435,8 @@ class _TitleBarSearchFieldState extends State<_TitleBarSearchField> {
                       focusNode: widget.focusNode,
                       textInputAction: TextInputAction.search,
                       onChanged: widget.onQueryChanged,
-                      onSubmitted: widget.onSubmitted,
+                      onEditingComplete: _handleEditingComplete,
+                      onSubmitted: _handleSubmitted,
                       style: TextStyle(
                         fontSize: 13.5,
                         color: colorScheme.onSurface,

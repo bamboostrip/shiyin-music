@@ -80,10 +80,24 @@ bool scrollFocusedRegionByPage({required bool forward}) {
 
 /// 输入法是否处于组词（composing）状态（IME 守卫）。
 ///
-/// 纯防御：组词期间的 Enter 是"选词"而非"确认"，搜索框
-/// onSubmitted 若照常提交会误发搜索。三端生效，触屏端无行为风险。
-bool isImeComposingActive(TextEditingValue value) =>
-    value.composing != TextRange.empty;
+/// 纯防御：组词期间的 Enter 是"选词"而非"确认"，搜索框若照常提交会把
+/// 拼音原文当关键词发出去。三端生效，触屏端无行为风险。
+///
+/// **取样时机必须挂在 `onEditingComplete` 上**：framework 的
+/// `EditableText._finalizeEditing` 在没有自定义 `onEditingComplete` 时，
+/// 会先 `controller.clearComposing()` + `focusNode.unfocus()` 再调
+/// `onSubmitted`，所以在 `onSubmitted` 里读 composing 恒为空（死守卫）。
+/// 已有调用方：`_TitleBarSearchField`（桌面顶栏）与 `_SearchPageState`
+/// （移动端搜索页），两处都是"onEditingComplete 取样 → onSubmitted 裁决"。
+bool isImeComposingActive(TextEditingValue value) {
+  final composing = value.composing;
+  // 必须是「合法且非空」的区间才算真的在组词：
+  // - [TextRange.empty]（-1,-1）是 framework 约定的"无组词"；
+  // - `(0,0)` / `(n,n)` 这类合法但为空的区间没有任何可选的组词文本，
+  //   部分 IME 在"无组词"时就是这样上报的。若把它们也按组词处理，
+  //   守卫会反向生效——把用户每一次回车都吞掉（搜索框彻底不能提交）。
+  return composing.isValid && !composing.isCollapsed;
+}
 
 /// 带守卫的回调动作：[guard] 命中时跳过 [onInvoke]。
 ///

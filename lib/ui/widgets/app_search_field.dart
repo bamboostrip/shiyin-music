@@ -27,6 +27,7 @@ class AppSearchField extends StatefulWidget {
     this.textInputAction = TextInputAction.search,
     this.onChanged,
     this.onSubmitted,
+    this.onEditingComplete,
     this.enabled = true,
     this.height = 36.0,
   }) : onTap = null;
@@ -42,6 +43,7 @@ class AppSearchField extends StatefulWidget {
         textInputAction = TextInputAction.search,
         onChanged = null,
         onSubmitted = null,
+        onEditingComplete = null,
         enabled = true;
 
   final TextEditingController? controller;
@@ -52,6 +54,11 @@ class AppSearchField extends StatefulWidget {
   final TextInputAction textInputAction;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
+
+  /// 提交动作的第一挂点：`onSubmitted` 之前、framework 清 composing 之前
+  /// 触发。需要 IME 组词守卫的调用方在这里取样组词态。
+  final VoidCallback? onEditingComplete;
+
   final bool enabled;
   final double height;
 
@@ -240,6 +247,7 @@ class _AppSearchFieldState extends State<AppSearchField> {
                   enabled: widget.enabled,
                   textInputAction: widget.textInputAction,
                   onChanged: widget.onChanged,
+                  onEditingComplete: widget.onEditingComplete,
                   onSubmitted: widget.onSubmitted,
                   textAlignVertical: TextAlignVertical.center,
                   // 失焦且有文字时把原生文字置为透明，交由下方 MarqueeText

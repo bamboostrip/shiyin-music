@@ -25,6 +25,30 @@ void main() {
       expect(isImeComposingActive(value), isFalse);
     });
 
+    test('合法但为空的 composing（(0,0)/(n,n)）不算组词：不得吞掉回车', () {
+      // 部分 IME 用 (0,0) 表示"没有组词"，若按组词处理，搜索框会彻底
+      // 提交不了（守卫反噬）。只有覆盖了真实文本的区间才算组词。
+      expect(
+        isImeComposingActive(
+          const TextEditingValue(
+            text: '音乐',
+            composing: TextRange(start: 0, end: 0),
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        isImeComposingActive(
+          const TextEditingValue(
+            text: '音乐',
+            selection: TextSelection.collapsed(offset: 2),
+            composing: TextRange(start: 2, end: 2),
+          ),
+        ),
+        isFalse,
+      );
+    });
+
     test('空文本同样安全', () {
       expect(isImeComposingActive(const TextEditingValue()), isFalse);
     });

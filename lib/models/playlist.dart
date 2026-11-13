@@ -404,20 +404,30 @@ class ArtistDetail {
   /// 简介短文本（`intro` 字段）。
   final String? intro;
 
-  /// 简介分段（`long_intro` 字段），通常比 [intro] 完整。
+  /// 简介分段（`long_intro` 字段），是 [intro] 的补充分段（可能只有标题或
+  /// 全文重复，见 [introText]）。
   final List<ArtistIntroSection> introSections;
 
-  /// 完整简介：优先用 long_intro 分段拼接，缺失时退回 intro。
+  /// 完整简介：`intro`（实测是长文本正文）+ `long_intro` 的非空分段。
+  ///
+  /// 只取分段会丢掉正文：实测 `/artist/detail` 的 `intro` 本身就是长文本，
+  /// `long_intro` 是补充分段（见 docs/upstream-sync/2026-11-10-upstream-nov5-triage.md）；
+  /// 分段里还有只有标题、没有正文的项（如 `{title:'荣誉记录', content:''}`），
+  /// 拼进去会输出一个孤零零的标题，并且把正文一起顶掉。
   String get introText {
-    final fromSections = introSections
-        .map((section) => [
-          if (section.title.isNotEmpty) section.title,
-          if (section.content.isNotEmpty) section.content,
-        ].join('\n'))
-        .where((text) => text.isNotEmpty)
-        .join('\n\n');
-    if (fromSections.isNotEmpty) return fromSections;
-    return intro?.trim() ?? '';
+    final buffer = <String>[];
+    final introBody = intro?.trim() ?? '';
+    if (introBody.isNotEmpty) buffer.add(introBody);
+    for (final section in introSections) {
+      final title = section.title.trim();
+      final content = section.content.trim();
+      // 无正文的分段整段跳过：只留标题没有信息量。
+      if (content.isEmpty) continue;
+      // 正文与 intro 重复（实测有「简介」分段就是同一段文本）：不重复输出。
+      if (content == introBody) continue;
+      buffer.add(title.isEmpty ? content : '$title\n$content');
+    }
+    return buffer.join('\n\n');
   }
 
   factory ArtistDetail.fromJson(

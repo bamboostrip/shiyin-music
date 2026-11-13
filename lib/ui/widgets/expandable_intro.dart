@@ -66,6 +66,13 @@ class _ExpandableIntroState extends State<ExpandableIntro> {
             text: TextSpan(text: text, style: bodyStyle),
             maxLines: widget.collapsedMaxLines,
             textDirection: Directionality.of(context),
+            // 必须与真正的 Text 用同一套字体缩放/语言环境：车机大字体经
+            // MediaQuery.textScaler 放大后，正文可能已超行被省略号截断，
+            // 测量却按 1.0 尺度判"未溢出" → "详细"按钮永不出现，全文看不到
+            // （反之缩小字体会挂出无意义的按钮）。同款约定见
+            // desktop_song_table_row.dart 的行高测量。
+            textScaler: MediaQuery.textScalerOf(context),
+            locale: Localizations.maybeLocaleOf(context),
           )..layout(maxWidth: constraints.maxWidth);
           final overflows = painter.didExceedMaxLines;
           painter.dispose();
