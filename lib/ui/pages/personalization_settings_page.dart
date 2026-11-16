@@ -194,7 +194,14 @@ class _PersonalizationSettingsPageState
                       subtitle: '横屏时使用左侧播放面板布局并放大文字',
                       value: tc.carModeEnabled,
                       onChanged: (value) async {
-                        await tc.setCarModeEnabled(value);
+                        // 返回值 = 是否已成功落盘。写失败时本次会话仍按用户
+                        // 选择生效，但重启会回退，必须明确告诉用户，别再让
+                        // 「车机模式自己又变回关闭」变成一个无解谜案（#24）。
+                        final persisted = await tc.setCarModeEnabled(value);
+                        if (!persisted) {
+                          Toast.error('车机模式设置未能保存，重启后可能恢复原状');
+                          return;
+                        }
                         // 通知渠道在启动时按车机模式定向，切换后需完全重启
                         // 进程才生效；原生车机设备始终走静默渠道，无需提示。
                         if (!tc.isAutomotiveDevice) {

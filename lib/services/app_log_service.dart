@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:path_provider/path_provider.dart';
 
 import '../config/app_config.dart';
@@ -393,7 +394,11 @@ class AppLogService {
         'App Version : ${AppConfig.appVersion} (${AppConfig.appVersionCode})',
       )
       ..writeln('Renderer    : ${AppConfig.rendererLabel} / ${AppConfig.abi}')
-      ..writeln('OS Platform : ${_platformLabel()}');
+      ..writeln('OS Platform : ${_platformLabel()}')
+      // 屏幕信息是车机适配的第一手证据：车机模式布局、面板宽度、字号大小
+      // 都按逻辑宽高判定，只有物理分辨率 + dpr 才能还原用户实际看到的尺寸
+      // （issue #24 排查时正是缺这一行，只能靠用户另拍设备信息页）。
+      ..writeln('Screen      : ${_screenLabel()}');
     if (forExport) {
       buffer.writeln(
         'Exported At : ${LogEntry.formatTimestamp(DateTime.now())}',
@@ -411,6 +416,27 @@ class AppLogService {
       final os = Platform.operatingSystem;
       final version = Platform.operatingSystemVersion;
       return version.isEmpty ? os : '$os $version';
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /// 屏幕信息：物理像素 + dpr + 折算后的逻辑像素。
+  ///
+  /// 取首视图（手机/车机/桌面主窗一致）；读不到时回落 unknown，绝不抛。
+  String _screenLabel() {
+    try {
+      final views = WidgetsBinding.instance.platformDispatcher.views;
+      if (views.isEmpty) return 'unknown';
+      final view = views.first;
+      final physical = view.physicalSize;
+      if (physical.isEmpty) return 'unknown';
+      final dpr = view.devicePixelRatio;
+      if (dpr <= 0) return 'unknown';
+      final logicalWidth = (physical.width / dpr).round();
+      final logicalHeight = (physical.height / dpr).round();
+      return '${physical.width.toInt()}x${physical.height.toInt()} '
+          '@${dpr.toStringAsFixed(2)}x → ${logicalWidth}x$logicalHeight dp';
     } catch (_) {
       return 'unknown';
     }
