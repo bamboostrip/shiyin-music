@@ -763,6 +763,9 @@ class MainActivity : AudioServiceActivity() {
                         // 不动，也容易把纯文本当 LRC 解析失败而渲染乱码。
                         // 空串省略该字段，保持与旧车机端 App 的兼容。
                         val fullLyric = call.argument<String>("fullLyric") ?: ""
+                        // 整首歌词去掉时间标签后的纯文本（issue #22）：部分车机
+                        // 歌词槽只认纯文本，见到 `[00:12.34]` 会原样显示成乱码。
+                        val plainLyric = call.argument<String>("plainLyric") ?: ""
                         val positionMs = (call.argument<Number>("positionMs") ?: 0).toLong()
                         val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
                         val playing = call.argument<Boolean>("playing") ?: false
@@ -790,6 +793,10 @@ class MainActivity : AudioServiceActivity() {
                                     fullLyric,
                                 )
                             }
+                            if (plainLyric.isNotEmpty()) {
+                                putString("lyrics", plainLyric)
+                                putString("plainLyric", plainLyric)
+                            }
                         }
 
                         sendOrderedBroadcast(Intent("com.android.music.metachanged").apply {
@@ -815,7 +822,7 @@ class MainActivity : AudioServiceActivity() {
 
                         Log.d(
                             TAG_BLUETOOTH_LYRICS,
-                            "metaChanged ok: \"$title\"/\"$artist\", lyric=\"${lyric.take(24)}\", pos=${positionMs}ms, fullLrcLen=${fullLyric.length}"
+                            "metaChanged ok: \"$title\"/\"$artist\", lyric=\"${lyric.take(24)}\", pos=${positionMs}ms, fullLrcLen=${fullLyric.length}, plainLyricLen=${plainLyric.length}"
                         )
                         result.success(true)
                     }.onFailure { error ->

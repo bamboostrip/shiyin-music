@@ -88,6 +88,9 @@ typedef _LyricMetadataCall = ({
   String? translationText,
   String? romanizationText,
   String? fullLyricLrc,
+  int? positionMs,
+  int? durationMs,
+  bool? playing,
 });
 
 class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
@@ -124,12 +127,18 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
     String? translationText,
     String? romanizationText,
     String? fullLyricLrc,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {
     lyricCalls.add((
       lyricText: lyricText,
       translationText: translationText,
       romanizationText: romanizationText,
       fullLyricLrc: fullLyricLrc,
+      positionMs: positionMs,
+      durationMs: durationMs,
+      playing: playing,
     ));
   }
 
@@ -411,6 +420,34 @@ void main() {
       await emitPosition(Duration.zero);
 
       expect(handler.lyricCalls, isEmpty);
+    });
+
+    test('行推送携带 position/duration/playing 快照（车机按它滚动高亮）', () async {
+      preparePlayingSong();
+      await emitPosition(const Duration(seconds: 5, milliseconds: 200));
+
+      final call = handler.lyricCalls.last;
+      expect(call.lyricText, '第二句');
+      expect(call.positionMs, 5200, reason: '位置随行推送一起下发');
+      expect(call.durationMs, 30000);
+      expect(call.playing, isTrue);
+    });
+
+    test('行内不按秒重推元数据（audio_service 每次 add 都会重建通知）', () async {
+      preparePlayingSong();
+      await controller.setBluetoothLyricsEnabled(true);
+      await emitPosition(Duration.zero);
+      final afterLine = handler.lyricCalls.length;
+
+      for (var ms = 500; ms <= 4000; ms += 500) {
+        await emitPosition(Duration(milliseconds: ms));
+      }
+
+      expect(
+        handler.lyricCalls,
+        hasLength(afterLine),
+        reason: '同一行内的高频 tick 必须直接返回，否则车机每秒重建一次通知',
+      );
     });
   });
 }

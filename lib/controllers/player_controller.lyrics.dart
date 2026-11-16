@@ -477,6 +477,9 @@ mixin _PlayerLyrics on _PlayerControllerBase {
     final index = lyrics.isEmpty ? -1 : activeLyricIndex;
     final lineChanged = index != _mediaSessionLyricIndex;
     final resumed = !wasPlaying;
+    // 行未变化直接返回：媒体元数据每次 add 都会让 audio_service 重建一次通知
+    // （AudioService.setMetadata → updateNotification），行内高频重推只会拖慢
+    // 弱车机，且消费方本来就能用 PlaybackState 的 updateTime 自己插值进度。
     if (!lineChanged && !resumed && !lyricsChanged) return;
     _mediaSessionLyricIndex = index;
     if (index < 0) {
@@ -492,6 +495,9 @@ mixin _PlayerLyrics on _PlayerControllerBase {
       translationText: _nonEmptyLyricText(line.translation),
       romanizationText: _nonEmptyLyricText(line.romanization),
       fullLyricLrc: _mediaSessionFullLrc,
+      positionMs: position.inMilliseconds,
+      durationMs: duration.inMilliseconds,
+      playing: isPlaying,
     );
   }
 

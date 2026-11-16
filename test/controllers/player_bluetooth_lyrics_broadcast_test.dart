@@ -8,6 +8,7 @@
 // 测试用 Fake AudioPlayer + Fake MusicAudioHandler + Mock MethodChannel，
 // 禁止创建真实 AudioPlayer（参照 player_media_session_lyric_test.dart）。
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -109,6 +110,9 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
     String? translationText,
     String? romanizationText,
     String? fullLyricLrc,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {}
 
   @override
@@ -421,6 +425,15 @@ void main() {
       await send(null);
 
       expect(calls.single.arguments['fullLyric'], '');
+    });
+
+    test('诊断日志截断不切断代理对（emoji 歌词不会让日志编码抛错）', () {
+      // 日志落盘走 UTF-8：孤立的高位代理会直接抛错，必须按整字符截断。
+      final clipped = BluetoothLyricsService.clip('😀' * 20, 5);
+      expect(clipped, '😀😀');
+      expect(() => utf8.encode(clipped), returnsNormally);
+
+      expect(BluetoothLyricsService.clip('短句', 24), '短句');
     });
   });
 }

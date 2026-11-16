@@ -39,6 +39,9 @@ Map<String, dynamic> _extras({
   String? translationText,
   String? romanizationText,
   String? fullLyricLrc,
+  int? positionMs,
+  int? durationMs,
+  bool? playing,
 }) {
   return MusicAudioHandler.buildLyricMediaExtras(
     song: song ?? _song(),
@@ -46,6 +49,9 @@ Map<String, dynamic> _extras({
     translationText: translationText,
     romanizationText: romanizationText,
     fullLyricLrc: fullLyricLrc,
+    positionMs: positionMs,
+    durationMs: durationMs,
+    playing: playing,
   );
 }
 
@@ -90,6 +96,11 @@ void main() {
       expect(info['lyric'], fullLrc, reason: 'LyricInfo 的 lyric 优先整首 LRC');
       expect(info['translation'], 'first line');
       expect(info['roma'], 'dai yi ju');
+      expect(
+        info.keys.last,
+        'lyric',
+        reason: 'lyric 必须是末位字段：车机傻瓜解析只会多带出固定长度的 "}"',
+      );
     });
 
     test('lyricInfo JSON：album 为空不带，songId 回退 hash，无翻译/音译不带键', () {
@@ -149,6 +160,41 @@ void main() {
         isFalse,
       );
       expect(extras['lyricInfo'], isNotNull);
+    });
+
+    // issue #22 二次排查：车机歌词槽只认纯文本、且要自己按进度滚动，
+    // 因此 extras 需要「去时间标签的整首纯文本」+ 播放进度快照。
+    test('整首 LRC 同时派发纯文本 lyrics（车机只认纯文本时不显示标签乱码）', () {
+      const fullLrc = '[00:00.00]第一句\n[00:05.00]\n[00:10.00]第三句';
+      final extras = _extras(lyricText: '第一句', fullLyricLrc: fullLrc);
+
+      expect(extras['full_lrc'], fullLrc, reason: '带标签的整首 LRC 仍保留');
+      expect(
+        extras['lyrics'],
+        '第一句\n\n第三句',
+        reason: '纯文本版保留间奏空行，行序与 LRC 对齐',
+      );
+    });
+
+    test('播放进度快照写进 extras：position/duration/playing', () {
+      final extras = _extras(
+        lyricText: '第一句',
+        fullLyricLrc: '[00:00.00]第一句',
+        positionMs: 12345,
+        durationMs: 269000,
+        playing: true,
+      );
+
+      expect(extras['position'], 12345);
+      expect(extras['duration'], 269000);
+      expect(extras['playing'], isTrue);
+    });
+
+    test('未提供进度快照时不写进度字段（清空/暂停不残留旧位置）', () {
+      final extras = _extras(lyricText: '第一句');
+      expect(extras.containsKey('position'), isFalse);
+      expect(extras.containsKey('duration'), isFalse);
+      expect(extras.containsKey('playing'), isFalse);
     });
   });
 

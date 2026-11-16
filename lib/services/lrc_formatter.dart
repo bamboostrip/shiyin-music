@@ -51,4 +51,32 @@ abstract final class LrcFormatter {
     }
     return buffer.toString();
   }
+
+  /// 时间标签：`[mm:ss]`、`[mm:ss.xx]`（毫秒 1~3 位也吃掉，兼容第三方 LRC）。
+  static final RegExp _timestampTag = RegExp(
+    r'\[[0-9]+:[0-9]{2}(?:[.:][0-9]{1,3})?\]',
+  );
+
+  /// 整首 LRC 去掉时间标签后的纯文本歌词（行结构保持不变）。
+  ///
+  /// 用途：部分车机/车机歌词 App 的歌词槽只接受**纯文本**，见到 `[00:12.34]`
+  /// 会原样显示成"乱码"（issue #22 的实拍截图）；这类消费方拿到逐行纯文本至
+  /// 少能按行显示。**空行（间奏占位）保留**——删空行会让按行号对齐 LRC 的
+  /// 消费方整体错位。
+  ///
+  /// 返回 `null` 表示没有可用文本（null/空串/全是时间标签）。
+  static String? toPlainText(String? lrc) {
+    if (lrc == null || lrc.isEmpty) return null;
+    final plain = lrc.split('\n').map((line) {
+      // 行首可能叠了多个标签（`[00:01.00][00:02.00]正文`），全部剥掉。
+      var text = line;
+      while (true) {
+        final match = _timestampTag.matchAsPrefix(text);
+        if (match == null) break;
+        text = text.substring(match.end);
+      }
+      return text.trimRight();
+    }).join('\n');
+    return plain.trim().isEmpty ? null : plain;
+  }
 }
