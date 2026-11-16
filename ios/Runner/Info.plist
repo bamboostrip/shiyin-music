@@ -72,5 +72,26 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- 本机播放代理的 ATS 例外：iOS 上所有音源都经
+	     http://127.0.0.1:<port>/play/<seq>[.<ext>] 交给 AVPlayer
+	     （见 lib/services/music_audio_handler.dart 的 _loadViaProxy）。
+	     iOS 17 起 ATS 默认不再放行到 IP 字面量的明文连接；just_audio 文档也
+	     要求「使用 headers/缓存/stream 这类依赖代理的特性时必须声明 ATS
+	     例外」。缺这两个键时 AVPlayer 连本机都打不开，表现为加载即失败。
+	     NSAllowsLocalNetworking 覆盖 10+ 的本地资源语义，IP 例外兜底 17+
+	     要求的「逐个 IP 加白名单」。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

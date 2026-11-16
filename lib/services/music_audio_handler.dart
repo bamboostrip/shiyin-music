@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -367,7 +368,8 @@ class MusicAudioHandler extends BaseAudioHandler
   void _onProxyRequest(HttpRequest req) async {
     // 按 URL 里的 seq 取本请求自己的路由；过期请求（旧 load 的迟到
     // Range 补发）直接 410，让后端重新走当前源。
-    final seq = int.tryParse(req.uri.path.split('/').last);
+    // 路径可能带音频后缀（`/play/7.flac`，见 [proxyPathFor]），解析时忽略。
+    final seq = proxySeqFromPath(req.uri.path);
     final route = seq == null ? null : _proxyRoutes[seq];
     if (route == null) {
       req.response.statusCode = HttpStatus.gone;
@@ -412,9 +414,9 @@ class MusicAudioHandler extends BaseAudioHandler
         final lower = name.toLowerCase();
         if (lower == HttpHeaders.contentTypeHeader ||
             lower == HttpHeaders.transferEncodingHeader) {
-          // content-type 单独记录：上游有则透传（flac 等直链会带正确
-          // 类型），没有再兜底 audio/mpeg——写死 mpeg 会把 flac 误标，
-          // 遇到按 Content-Type 选解码器的路径会解码失败。
+          // content-type 单独记录：iOS/macOS 的 AVPlayer 对 URL 只认这个
+          // 头判断音频类型（扩展名只在本地文件场景生效），照抄 CDN 的
+          // `application/octet-stream` 会让它直接判成打不开。
           if (lower == HttpHeaders.contentTypeHeader && values.isNotEmpty) {
             upstreamContentType = values.first;
           }
@@ -422,26 +424,85 @@ class MusicAudioHandler extends BaseAudioHandler
         }
         req.response.headers.set(name, values);
       });
+      final resolvedContentType = resolveProxyContentType(
+        extension: audioExtensionOf(target),
+        upstream: upstreamContentType,
+      );
+      // 只在“纠正过”时留痕：真机排查 iOS 起播失败时，这一行能直接看出
+      // CDN 到底把 flac 标成了什么。
+      final upstreamTrimmed = upstreamContentType?.trim();
+      final upstreamBase = upstreamTrimmed?.split(';').first.trim().toLowerCase();
+      if (upstreamBase == null ||
+          upstreamBase.isEmpty ||
+          upstreamBase != resolvedContentType) {
+        debugPrint('[AudioHandler] 代理纠正 Content-Type: '
+            '${upstreamTrimmed ?? '<none>'} → $resolvedContentType');
+      }
       req.response.headers.set(
         HttpHeaders.contentTypeHeader,
-        upstreamContentType ?? 'audio/mpeg',
+        resolvedContentType,
       );
       req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
 
       // 空闲超时注入错误结束响应：此时响应头多半已发出（502 写不进去，
       // 外层 catch 里的写状态码会被吞掉），连接被关闭后引擎侧表现为流
       // 截断错误——正是我们想要的「响亮失败」。
-      await resp
-          .timeout(
-            _upstreamIdleTimeout,
-            onTimeout: (sink) {
-              sink.addError(
-                StateError('上游数据流停滞超 $_upstreamIdleTimeout'),
-              );
-              sink.close();
-            },
-          )
-          .pipe(req.response);
+      final timedBody = resp.timeout(
+        _upstreamIdleTimeout,
+        onTimeout: (sink) {
+          sink.addError(
+            StateError('上游数据流停滞超 $_upstreamIdleTimeout'),
+          );
+          sink.close();
+        },
+      );
+
+      // iOS/macOS 的 AVPlayer 起播前先发 `Range: bytes=0-1` 探测，并要求
+      // 服务端真的按范围回 206；安卓 ExoPlayer / 桌面 mpv 对 200 是宽容的。
+      // 酷狗 CDN 有节点会忽略 Range 直接回 200 全量（下载续传那边已踩过，
+      // 见 DownloadService.resolveResumeOffset），所以不能把这条契约外包给
+      // 上游：长度已知时在代理侧自己切出 206 片段。
+      final requestedRange = parseByteRange(range);
+      final totalLength = resp.headers.contentLength;
+      final mustSlice = req.method == 'GET' &&
+          range != null &&
+          requestedRange != null &&
+          resp.statusCode == HttpStatus.ok &&
+          totalLength >= 0;
+      if (mustSlice) {
+        if (requestedRange.start >= totalLength) {
+          req.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+          req.response.headers
+              .set(HttpHeaders.contentRangeHeader, 'bytes */$totalLength');
+          req.response.headers.contentLength = 0;
+          await req.response.close();
+          return;
+        }
+        final end = requestedRange.end == null
+            ? totalLength - 1
+            : math.min(requestedRange.end!, totalLength - 1);
+        final length = end - requestedRange.start + 1;
+        req.response.statusCode = HttpStatus.partialContent;
+        req.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes ${requestedRange.start}-$end/$totalLength',
+        );
+        req.response.headers.contentLength = length;
+        debugPrint('[AudioHandler] 上游忽略 Range（$range → 200），'
+            '本地切片 206: bytes ${requestedRange.start}-$end/$totalLength');
+        await sliceByteStream(
+          timedBody,
+          skip: requestedRange.start,
+          count: length,
+        ).pipe(req.response);
+        return;
+      }
+      if (range != null && resp.statusCode != HttpStatus.partialContent) {
+        debugPrint('[AudioHandler][WARN] 上游未按 Range 返回且无法本地切片: '
+            'range=$range status=${resp.statusCode} len=$totalLength '
+            'ct=$upstreamContentType');
+      }
+      await timedBody.pipe(req.response);
     } catch (e) {
       try {
         req.response.statusCode = HttpStatus.badGateway;
@@ -454,16 +515,166 @@ class MusicAudioHandler extends BaseAudioHandler
     }
   }
 
+  /// 代理路径：`/play/<seq>[.<ext>]`。
+  ///
+  /// 后缀有三个用处：① 给 mpv / ExoPlayer 这类会按扩展名挑 demuxer 的后端
+  /// 一个明确提示；② 本地文件分支本来就按扩展名推断类型，远端与本地统一
+  /// 后路径和 Content-Type 天然一致；③ 真机日志里一眼看出本次加载的容器。
+  ///
+  /// 注意 iOS 的真实机制：AVPlayer 对**远端 URL** 判音频类型只认响应头
+  /// `Content-Type`（路径扩展名只在本地文件场景生效，见 just_audio 作者在
+  /// SO 66292875 的答复），所以真正治病的是 [resolveProxyContentType] 对
+  /// MIME 的纠正；这里带后缀是配套提示，不能只靠它。just_audio 自带的
+  /// headers/缓存代理同样保留原始 path，理由相同。
+  ///
+  /// 只透传已知音频后缀，避免把 `.php`/`.json` 之类塞进路径。
+  @visibleForTesting
+  static String proxyPathFor(int seq, String location) {
+    final ext = audioExtensionOf(location);
+    return ext == null ? '/play/$seq' : '/play/$seq.$ext';
+  }
+
+  /// 从代理路径里取路由序号：`/play/7` 与 `/play/7.flac` 都是 7，其余 null。
+  @visibleForTesting
+  static int? proxySeqFromPath(String path) {
+    final last = path.split('/').last;
+    final dot = last.indexOf('.');
+    return int.tryParse(dot < 0 ? last : last.substring(0, dot));
+  }
+
+  /// 认作音频文件的后缀白名单（小写、无点）。
+  ///
+  /// 只认这些，避免把路径/查询串里的其它点号误当文件后缀（如 `...&v=1.2`）。
+  static const Set<String> _audioExtensions = {
+    'mp3',
+    'flac',
+    'm4a',
+    'm4b',
+    'mp4',
+    'aac',
+    'wav',
+    'ogg',
+    'oga',
+    'opus',
+    'ape',
+    'wma',
+    'caf',
+  };
+
+  /// 从远端 URL 的 path 或本地文件路径里取音频后缀（小写、无点）；未知返回 null。
+  ///
+  /// 远端 URL **只看 path**：网易云外链把 `.mp3` 写在查询串里
+  /// （`.../outer/url?id=123.mp3`），那不是文件后缀，不能拿来标记容器。
+  @visibleForTesting
+  static String? audioExtensionOf(String location) {
+    var path = location;
+    if (location.contains('://')) {
+      path = Uri.tryParse(location)?.path ?? '';
+    }
+    final name = path.split(RegExp(r'[/\\]')).last;
+    final dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot == name.length - 1) return null;
+    final ext = name.substring(dot + 1).toLowerCase();
+    return _audioExtensions.contains(ext) ? ext : null;
+  }
+
+  /// 音频后缀 → Content-Type；未知返回 null。
+  @visibleForTesting
+  static String? contentTypeForExtension(String? extension) {
+    return switch (extension?.toLowerCase()) {
+      'flac' => 'audio/flac',
+      'mp3' => 'audio/mpeg',
+      'm4a' || 'm4b' || 'mp4' || 'caf' => 'audio/mp4',
+      'aac' => 'audio/aac',
+      'wav' => 'audio/wav',
+      'ogg' || 'oga' || 'opus' => 'audio/ogg',
+      'ape' => 'audio/x-ape',
+      'wma' => 'audio/x-ms-wma',
+      _ => null,
+    };
+  }
+
+  /// 代理响应的 Content-Type：**后缀优先**，其次上游，最后兜底 audio/mpeg。
+  ///
+  /// 后缀优先的原因：酷狗 tracker CDN 的 flac 直链常回
+  /// `application/octet-stream`，个别节点甚至把 flac 标成 `audio/mpeg`；
+  /// 前者让 AVFoundation 认不出容器，后者会诱导它按 MP3 解析，最终都是
+  /// `(-11828) Cannot Open`。后缀取自我们自己的目标 URL，比 CDN 的声明可信；
+  /// 上游类型仅在拿不到后缀（如重定向型外链）时使用。
+  @visibleForTesting
+  static String resolveProxyContentType({
+    String? extension,
+    String? upstream,
+  }) {
+    final byExtension = contentTypeForExtension(extension);
+    if (byExtension != null) return byExtension;
+    final trimmed = upstream?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+    return 'audio/mpeg';
+  }
+
   /// 本地文件路径推断音频 Content-Type（默认 audio/mpeg）。
   @visibleForTesting
   static String contentTypeForPath(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.flac')) return 'audio/flac';
-    if (lower.endsWith('.wav')) return 'audio/wav';
-    if (lower.endsWith('.ogg')) return 'audio/ogg';
-    if (lower.endsWith('.m4a') || lower.endsWith('.mp4')) return 'audio/mp4';
-    if (lower.endsWith('.aac')) return 'audio/aac';
-    return 'audio/mpeg';
+    return contentTypeForExtension(audioExtensionOf(path)) ?? 'audio/mpeg';
+  }
+
+  /// 单段字节范围的解析结果：`bytes=start-end` / `bytes=start-`。
+  static final RegExp _byteRangePattern = RegExp(r'^bytes=(\d+)-(\d*)$');
+
+  /// 解析 `Range: bytes=start[-end]`。
+  ///
+  /// 只认单段且格式严格的形态；畸形、多段、后缀式（`bytes=-500`）一律返回
+  /// null，调用方按「上游自己处理」透传，不在代理侧猜测语义。
+  @visibleForTesting
+  static ({int start, int? end})? parseByteRange(String? header) {
+    if (header == null) return null;
+    final match = _byteRangePattern.firstMatch(header.trim());
+    if (match == null) return null;
+    final start = int.tryParse(match.group(1)!);
+    if (start == null) return null;
+    final endText = match.group(2) ?? '';
+    if (endText.isEmpty) return (start: start, end: null);
+    final end = int.tryParse(endText);
+    if (end == null || end < start) return null;
+    return (start: start, end: end);
+  }
+
+  /// 从字节流里切出 `[skip, skip + count)`；count 为 null 表示切到末尾。
+  ///
+  /// 只用于「上游忽略 Range 返回 200」的兜底：把全量流转成符合 206 语义的
+  /// 片段。拿够 count 字节后 `return` 会取消上游订阅——AVPlayer 探测
+  /// `bytes=0-1` 时只取前 2 字节，不会把整首歌拉完。
+  @visibleForTesting
+  static Stream<List<int>> sliceByteStream(
+    Stream<List<int>> source, {
+    required int skip,
+    int? count,
+  }) async* {
+    var toSkip = skip;
+    var remaining = count;
+    await for (final chunk in source) {
+      var data = chunk;
+      if (toSkip > 0) {
+        if (data.length <= toSkip) {
+          toSkip -= data.length;
+          continue;
+        }
+        data = data.sublist(toSkip);
+        toSkip = 0;
+      }
+      if (remaining == null) {
+        yield data;
+        continue;
+      }
+      if (remaining <= 0) return;
+      if (data.length >= remaining) {
+        yield data.sublist(0, remaining);
+        return;
+      }
+      remaining -= data.length;
+      yield data;
+    }
   }
 
   Future<void> _serveLocalFile(HttpRequest req, String path) async {
@@ -542,7 +753,8 @@ class MusicAudioHandler extends BaseAudioHandler
   Future<void> _loadViaProxy(String url) async {
     await _ensureProxy();
     final seq = ++_loadSeq;
-    _proxyRoutes[seq] = url.startsWith('http://') || url.startsWith('https://')
+    final isRemote = url.startsWith('http://') || url.startsWith('https://');
+    _proxyRoutes[seq] = isRemote
         ? _ProxyRoute(url: url)
         : _ProxyRoute(localPath: url);
     // 只保留最近几个路由：后端换源后的旧请求应尽快失效，
@@ -550,10 +762,23 @@ class MusicAudioHandler extends BaseAudioHandler
     while (_proxyRoutes.length > 3) {
       _proxyRoutes.remove(_proxyRoutes.keys.first);
     }
-    final proxyUrl = 'http://127.0.0.1:${_proxy!.port}/play/$seq';
+    // 代理路径带上目标的音频后缀：iOS/macOS 的 AVPlayer 靠它（或
+    // Content-Type）判容器，纯数字路径会被判成无法识别的媒体。
+    final ext = audioExtensionOf(url);
+    final proxyUrl =
+        'http://127.0.0.1:${_proxy!.port}${proxyPathFor(seq, url)}';
+    // 真机排查用：代理路径（无令牌）与目标类型，iOS 上可直接确认后缀已带上。
+    debugPrint('[AudioHandler] 代理加载 seq=$seq ext=${ext ?? '<none>'} '
+        'target=${isRemote ? 'remote' : 'local'}');
     try {
       await _enqueueEngineLoad(seq, proxyUrl);
     } on PlayerException catch (e) {
+      // 诊断：code 是平台错误码（iOS = NSError.code：-11828 容器识别失败、
+      // -11800/-1022 网络/ATS、-11850 会话被停）。此前只抛 message 把 code
+      // 丢了，线上只能看到「Cannot Open」这种无信息文案。
+      debugPrint('[AudioHandler] 引擎加载失败 code=${e.code} '
+          'message=${e.message} ext=${ext ?? '<none>'} '
+          'target=${isRemote ? 'remote' : 'local'}');
       throw Exception('播放失败: ${e.message}');
     }
   }
@@ -844,6 +1069,18 @@ class MusicAudioHandler extends BaseAudioHandler
         await audioPlayer.seek(Duration.zero);
       } catch (e) {
         debugPrint('[AudioHandler][ERROR] 曲末重播复位失败: $e');
+      }
+    }
+    // iOS：音频会话激活由 just_audio 在起播时触发，但实测晚于 play() 一拍
+    // ——playing 先变 true 再回落到 false（界面显示在播、实际没声音，用户
+    // 再点一次才正常，与上游 a3a855b 同源）。起播前显式激活一次；失败不
+    // 阻断，正常路径仍由 just_audio 自己兜底。
+    if (!kIsWeb && Platform.isIOS) {
+      try {
+        final session = await AudioSession.instance;
+        await session.setActive(true);
+      } catch (e) {
+        debugPrint('[AudioHandler] iOS 音频会话激活失败: $e');
       }
     }
     await audioPlayer.play();
