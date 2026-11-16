@@ -89,7 +89,17 @@ class ThemeController extends ChangeNotifier {
   static const _bgOpacityKey = 'theme.bg_opacity';
   static const _bgCropKey = 'theme.bg_crop';
   static const _landscapeEnabledKey = 'theme.landscape_enabled';
+
+  /// 用户**显式**选择的车机模式（设置页开关写入；键不存在 = 用户从未选择）。
   static const _carModeEnabledKey = 'theme.car_mode_enabled';
+
+  /// 自动判定出来的车机模式（车机检测成功后写入；用户显式选择优先）。
+  ///
+  /// 必须落盘：车机检测依赖 `shiyin_music/device` 通道，而该通道可能晚于
+  /// Dart 入口就绪（见 [DeviceInfoService] 注释）。过去判定结果只存内存、
+  /// 从不回写，于是每次冷启动都重新猜一次，猜错就把车机模式判成关闭
+  /// （issue #24）。
+  static const _carModeAutoKey = 'theme.car_mode_auto_resolved';
   static const _fontScaleKey = 'theme.font_scale';
   static const _themeModeKey = 'theme.mode';
   static const _carDisplayScaleKey = 'theme.car_display_scale';
@@ -137,13 +147,27 @@ class ThemeController extends ChangeNotifier {
   double _backgroundOpacity = 0.15;
   BackgroundCrop _backgroundCrop = BackgroundCrop.center;
   bool _landscapeEnabled = false;
-  bool _carModeEnabled = false;
+
+  /// 用户显式选择的车机模式；null 表示从未手动选择过（走自动判定）。
+  bool? _carModeExplicit;
+
+  /// 自动判定的车机模式结果；null 表示尚未成功判定过。
+  bool? _carModeAutoResolved;
   double _fontScale = 1.0;
   double _carDisplayScale = 1.0;
   double _carMarginTop = 0;
   double _carMarginBottom = 0;
   // 车机检测结果缓存（设备不变，启动时检测一次）。
   bool _isAutomotiveDevice = false;
+
+  /// 本次启动的车机检测还没问出结果（通道未就绪等），需在首帧后 / 回前台重试。
+  bool _automotiveDetectionPending = false;
+
+  /// 补判链是否正在跑（防止首帧与回前台同时触发、并发打通道）。
+  bool _recheckInFlight = false;
+
+  /// 检测所用的服务；[detectAutomotive] 注入，供 [recheckAutomotiveIfPending] 重试。
+  DeviceInfoService? _deviceInfo;
 
   bool? _lastAppliedIsTablet;
   bool? _lastAppliedLandscapeEnabled;
@@ -175,11 +199,30 @@ class ThemeController extends ChangeNotifier {
 
   /// 车机模式开关（仅移动形态生效：桌面恒 false）。
   ///
+  /// 取值顺序：用户显式选择 > 自动判定结果 > 关闭。
+  ///
   /// PC 窗口恒横屏，若把移动端残留的开关值当真，全项目约 18 处
   /// `横屏 && carModeEnabled` 的车机分支会把车机/移动布局整套套到桌面
   /// （AppShell 早已桌面先行返回，页面层缺同款护栏）；与该契约收敛到
   /// 本唯一判定入口。开关 UI 本就只在移动端展示，桌面读到的必为残留值。
-  bool get carModeEnabled => _carModeEnabled && !isDesktopFormFactor;
+  bool get carModeEnabled => _rawCarModeEnabled && !isDesktopFormFactor;
+
+  /// 未经桌面门控的原始车机模式（供旋转锁定等原生侧逻辑使用）。
+  bool get _rawCarModeEnabled =>
+      _carModeExplicit ?? _carModeAutoResolved ?? false;
+
+  /// 用户是否显式选择过车机模式（设置页开关写过值）。
+  ///
+  /// 用于区分「用户主动关掉」与「从没选过、只是自动判定没跑出来」——
+  /// 二者在 UI 上都表现为关闭，但后者需要自动补判。
+  bool get hasExplicitCarModeChoice => _carModeExplicit != null;
+
+  /// 自动判定的车机模式结果（null = 还没成功判定过）。
+  bool? get resolvedCarMode => _carModeAutoResolved;
+
+  /// 本次启动的车机检测是否仍待重试（原生通道晚于 Dart 入口就绪时会发生）。
+  bool get automotiveDetectionPending => _automotiveDetectionPending;
+
   double get fontScale => _fontScale;
   bool get isAutomotiveDevice => _isAutomotiveDevice;
 
@@ -202,8 +245,99 @@ class ThemeController extends ChangeNotifier {
   /// 检测是否为 Android Automotive 车机并缓存结果。
   /// 设备类型不变，启动时调用一次即可。须在 [load] 之前调用，
   /// 以便首次安装时据检测结果决定车机模式默认值。
+  ///
+  /// 通道未就绪时只把 [automotiveDetectionPending] 置位，不落盘、不判死；
+  /// 由 `main()` 在首帧后调用 [recheckAutomotiveIfPending] 补判。
   Future<void> detectAutomotive(DeviceInfoService deviceInfo) async {
-    _isAutomotiveDevice = await deviceInfo.isAutomotive();
+    _deviceInfo = deviceInfo;
+    final result = await deviceInfo.isAutomotive();
+    _applyAutomotiveResult(result);
+  }
+
+  /// 把检测结果落到内存（null = 未知，保持待重试状态）。
+  void _applyAutomotiveResult(bool? result) {
+    if (result == null) {
+      _automotiveDetectionPending = true;
+      return;
+    }
+    _automotiveDetectionPending = false;
+    _isAutomotiveDevice = result;
+    // 用户显式选择优先：自动结果只作为「从未选择过」时的默认值。
+    if (_carModeExplicit == null) {
+      _carModeAutoResolved = result;
+    }
+  }
+
+  /// 车机检测待重试时补判（首帧后 / 回前台调用，幂等且不会并发叠加）。
+  ///
+  /// **为什么用递增间隔而不是固定短重试**：原生通道就绪分两种情形——
+  /// 1. 同一进程里 Activity 正常 attach：通道几百毫秒内就绪，首帧后的头两次
+  ///    重试即可命中；
+  /// 2. 引擎由音频服务在**没有 Activity** 的情况下先跑起来（车机开机自启、
+  ///    后台续播），此时通道要等用户真正打开界面才注册，可能滞后数秒甚至
+  ///    更久；而这种情形下 `resumed` 未必会再回调（引擎启动时生命周期状态
+  ///    已经是 resumed，状态没变就不会通知 observer）。
+  ///
+  /// 所以默认按 0 / 0.4 / 0.8 / 1.6 / 3.2 / 6.4 秒递增重试，覆盖「界面晚
+  /// 挂上来」的情况；一旦判定成功立即落盘并通知 UI 切换布局。
+  ///
+  /// [attempts] / [delay] 供单测指定固定节奏（`delay` 为间隔基数，按 2 的
+  /// 幂次递增）；[delays] 显式给出时优先。
+  Future<void> recheckAutomotiveIfPending({
+    int attempts = 6,
+    Duration delay = const Duration(milliseconds: 400),
+    List<Duration>? delays,
+  }) async {
+    if (!_automotiveDetectionPending || _recheckInFlight) return;
+    final info = _deviceInfo;
+    if (info == null) return;
+
+    final schedule =
+        delays ??
+        <Duration>[
+          Duration.zero,
+          for (var i = 1; i < attempts; i++) delay * (1 << (i - 1)),
+        ];
+    _recheckInFlight = true;
+    try {
+      for (var i = 0; i < schedule.length; i++) {
+        if (!_automotiveDetectionPending) return;
+        if (schedule[i] > Duration.zero) {
+          await Future<void>.delayed(schedule[i]);
+          if (!_automotiveDetectionPending) return;
+        }
+        final result = await info.isAutomotive();
+        if (result == null) continue;
+
+        final beforeAutomotive = _isAutomotiveDevice;
+        final beforeMode = _rawCarModeEnabled;
+        _applyAutomotiveResult(result);
+        await _persistAutoCarMode(result);
+        final changed =
+            beforeAutomotive != _isAutomotiveDevice ||
+            beforeMode != _rawCarModeEnabled;
+        debugPrint(
+          '[CAR] 车机检测补判成功: automotive=$result '
+          'carMode=$carModeEnabled explicit=$_carModeExplicit changed=$changed',
+        );
+        if (changed) {
+          applyOrientations(AdaptiveLayout.isTabletByPlatform());
+          notifyListeners();
+        }
+        return;
+      }
+      debugPrint('[CAR] 车机检测补判失败：通道始终未就绪，本次按非车机处理');
+    } finally {
+      _recheckInFlight = false;
+    }
+  }
+
+  /// 落盘自动判定结果（失败静默：只影响下次启动的默认值）。
+  Future<void> _persistAutoCarMode(bool automotive) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_carModeAutoKey, automotive);
+    } catch (_) {}
   }
 
   /// 加载持久化设置。
@@ -241,16 +375,33 @@ class ThemeController extends ChangeNotifier {
       _backgroundCrop = BackgroundCrop.center;
     }
     _landscapeEnabled = prefs.getBool(_landscapeEnabledKey) ?? false;
-    // 首次安装（键不存在）：检测到车机则默认开启车机模式；
-    // 否则默认关闭。用户手动开关过后键一定存在，永不覆盖用户选择。
-    if (prefs.containsKey(_carModeEnabledKey)) {
-      _carModeEnabled = prefs.getBool(_carModeEnabledKey) ?? false;
-    } else {
-      _carModeEnabled = _isAutomotiveDevice;
+    // 车机模式：显式选择优先，其次自动判定。
+    //
+    // 老键 `theme.car_mode_enabled` 存在 = 用户手动开关过，语义不变；
+    // 新键 `theme.car_mode_auto_resolved` 记录自动判定结果。
+    //
+    // 关键修复（issue #24）：过去键不存在时直接取本次检测结果、且从不回写，
+    // 而检测通道可能晚于 Dart 入口就绪（返回 false），于是车机首次安装 /
+    // 清数据后被判成手机，车机模式默认关闭，每次冷启动又重新赌一次。
+    // 现在：明确检测到结果就落盘；检测「没问出来」时保持未知，等补判。
+    _carModeExplicit = prefs.containsKey(_carModeEnabledKey)
+        ? (prefs.getBool(_carModeEnabledKey) ?? false)
+        : null;
+    _carModeAutoResolved = prefs.getBool(_carModeAutoKey);
+    if (!_automotiveDetectionPending) {
+      // 已拿到确定结果：以本次为准并落盘（设备检测结果稳定，重复写幂等）。
+      final automotive = _isAutomotiveDevice;
+      if (_carModeAutoResolved != automotive) {
+        _carModeAutoResolved = automotive;
+        try {
+          await prefs.setBool(_carModeAutoKey, automotive);
+        } catch (_) {}
+      }
     }
     final storedFontScale = prefs.getDouble(_fontScaleKey) ?? 1.0;
-    _fontScale =
-        fontScaleOptions.contains(storedFontScale) ? storedFontScale : 1.0;
+    _fontScale = fontScaleOptions.contains(storedFontScale)
+        ? storedFontScale
+        : 1.0;
     // 车机显示微调：默认中性值（缩放 1.0 / 留白 0），老用户升级无感；
     // 手改 prefs 或旧版本残留的非法值一律回落。
     final storedCarScale = prefs.getDouble(_carDisplayScaleKey) ?? 1.0;
@@ -399,27 +550,50 @@ class ThemeController extends ChangeNotifier {
 
   /// 开启/关闭车机模式：横屏时启用左侧播放面板 + 顶栏布局，并放大文字。
   /// 关闭时回到普通横屏（NavigationRail），竖屏始终不受影响。
-  Future<void> setCarModeEnabled(bool enabled) async {
-    if (_carModeEnabled == enabled) return;
-    _carModeEnabled = enabled;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_carModeEnabledKey, enabled);
-    applyOrientations(AdaptiveLayout.isTabletByPlatform());
-    notifyListeners();
+  ///
+  /// 返回是否已成功落盘。写失败时本次会话仍按用户选择生效（避免"点了没反应"），
+  /// 但重启后会回退，调用方必须提示用户——此前返回值被丢弃，用户只看到
+  /// "车机模式又自己变回关闭"却没有任何提示（issue #24）。
+  Future<bool> setCarModeEnabled(bool enabled) async {
+    final beforeMode = _rawCarModeEnabled;
+    _carModeExplicit = enabled;
+    var persisted = await _persistBool(_carModeEnabledKey, enabled);
+    if (!persisted) {
+      // 车机存储偶发繁忙（写入排队/空间紧张），重试一次通常就能过。
+      persisted = await _persistBool(_carModeEnabledKey, enabled);
+    }
+    if (!persisted) {
+      debugPrint('[CAR] 车机模式写盘失败: enabled=$enabled（本次会话生效，重启后可能回退）');
+    }
+    if (beforeMode != _rawCarModeEnabled) {
+      applyOrientations(AdaptiveLayout.isTabletByPlatform());
+      notifyListeners();
+    }
+    return persisted;
+  }
+
+  /// 写一个布尔设置，失败（含异常）返回 false。
+  Future<bool> _persistBool(String key, bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return await prefs.setBool(key, value);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// 动态应用屏幕方向锁定/解锁。
   void applyOrientations(bool isTablet) {
     if (_lastAppliedIsTablet == isTablet &&
         _lastAppliedLandscapeEnabled == _landscapeEnabled &&
-        _lastAppliedCarModeEnabled == _carModeEnabled) {
+        _lastAppliedCarModeEnabled == _rawCarModeEnabled) {
       return;
     }
     _lastAppliedIsTablet = isTablet;
     _lastAppliedLandscapeEnabled = _landscapeEnabled;
-    _lastAppliedCarModeEnabled = _carModeEnabled;
+    _lastAppliedCarModeEnabled = _rawCarModeEnabled;
 
-    if (isTablet || _landscapeEnabled || _carModeEnabled) {
+    if (isTablet || _landscapeEnabled || _rawCarModeEnabled) {
       SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,

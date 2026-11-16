@@ -617,7 +617,7 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   Future<void> setLandscapeEnabled(bool enabled, bool isTablet) async {}
 
   @override
-  Future<void> setCarModeEnabled(bool enabled) async {}
+  Future<bool> setCarModeEnabled(bool enabled) async => true;
 
   @override
   Future<void> setFontScale(double scale) async {}

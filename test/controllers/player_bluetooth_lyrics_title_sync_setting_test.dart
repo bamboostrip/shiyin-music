@@ -107,6 +107,9 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
     String? translationText,
     String? romanizationText,
     String? fullLyricLrc,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {}
 
   @override

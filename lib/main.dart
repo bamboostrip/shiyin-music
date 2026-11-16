@@ -124,6 +124,13 @@ Future<void> main(List<String> args) async {
     debugPrint('[SYNOTIF] 通知渠道定向：channelId=${channelConfig.channelId} '
         'carModeEnabled=${themeController.carModeEnabled} '
         'isAutomotiveDevice=${themeController.isAutomotiveDevice}');
+    // 车机判定现场：显式选择 / 自动判定 / 待补判 三者分开打，用户导出的日志
+    // 一眼就能看出车机模式这次为什么是开或关（issue #24 的复现取证入口）。
+    debugPrint('[CAR] 车机模式启动判定：carMode=${themeController.carModeEnabled} '
+        'explicit=${themeController.hasExplicitCarModeChoice} '
+        'auto=${themeController.resolvedCarMode} '
+        'automotive=${themeController.isAutomotiveDevice} '
+        'pending=${themeController.automotiveDetectionPending}');
 
     // Windows：libmpv 解复用（demux）缓存 32MB→8MB，省 24MB/播放器常驻。
     // 音频码率 128~320kbps、FLAC 约 1Mbps，8MB 足够缓冲 60s 以上音频，
@@ -182,6 +189,10 @@ Future<void> main(List<String> args) async {
     // 与首帧构建期间保持隐藏，用户不会先看到一个空白窗口。带 2s 兜底，
     // 构建异常时窗口也一定会出现。
     DesktopWindow.revealAfterFirstFrame();
+    // 车机检测补判：音频服务先于 Activity 启动 Dart 入口时，自定义通道尚未
+    // 注册，首次检测只能判「未知」。不阻塞启动，首帧后异步重试，判定为车机
+    // 就自动切车机布局（用户无需再手动去设置里打开，issue #24）。
+    unawaited(themeController.recheckAutomotiveIfPending());
   } catch (error, stack) {
     // 启动初始化失败（最常见：Rust 引擎 dll/so 加载失败——被杀软隔离、
     // cargo 产物缺失、架构不符；其次窗口/音频服务初始化异常）。此前直接
@@ -551,6 +562,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         if (deepLink != null) {
           unawaited(deepLink.requestInitialLink());
         }
+        // 车机检测补判：从后台回前台时 Activity 一定已经 attach、自定义通道
+        // 就绪，是最可靠的补判时机；已在补判中/已完成时为空操作。
+        unawaited(_theme.recheckAutomotiveIfPending());
       // inactive/hidden 是瞬时失焦（下拉通知栏、权限弹窗、分屏失焦等，
       // 应用仍可见），不能当"回桌面"处理——否则悬浮窗会弹到应用之上。
       // 真正退后台（Home/切其他应用/锁屏）必经 paused，在这里统一触发。

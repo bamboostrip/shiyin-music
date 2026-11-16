@@ -110,4 +110,26 @@ void main() {
       expect(lrc.endsWith('[00:19.00]第19句'), isTrue);
     });
   });
+
+  // 车机歌词槽只认纯文本（issue #22 实拍截图里 `[00:12.34]` 被原样显示成
+  // 乱码），因此整首 LRC 还要能派生出「去时间标签」的纯文本版本。
+  group('LrcFormatter.toPlainText', () {
+    test('剥掉每行时间标签，行结构与空行（间奏占位）保持不变', () {
+      const lrc = '[00:00.00]第一句\n[00:05.00]\n[00:10.00]第三句';
+      expect(LrcFormatter.toPlainText(lrc), '第一句\n\n第三句');
+    });
+
+    test('兼容 1~3 位毫秒与行首叠加的多个标签', () {
+      expect(
+        LrcFormatter.toPlainText('[00:01.00][00:02.5]重复行\n[102:03.456]尾行'),
+        '重复行\n尾行',
+      );
+    });
+
+    test('null/空串/只有标签时返回 null（清空语义）', () {
+      expect(LrcFormatter.toPlainText(null), isNull);
+      expect(LrcFormatter.toPlainText(''), isNull);
+      expect(LrcFormatter.toPlainText('[00:01.00]\n[00:02.00]'), isNull);
+    });
+  });
 }

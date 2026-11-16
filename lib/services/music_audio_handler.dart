@@ -11,6 +11,7 @@ import 'package:just_audio/just_audio.dart';
 import '../config/app_config.dart';
 import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
+import 'lrc_formatter.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
 
@@ -188,6 +189,16 @@ class MusicAudioHandler extends BaseAudioHandler
   String? _lastTranslationText;
   String? _lastRomanizationText;
   String? _lastFullLyricLrc;
+
+  /// 最近一次下发的播放进度快照（issue #22 二次排查）。
+  ///
+  /// 车机/锁屏歌词组件要自己滚动高亮时，除了整首 LRC 还必须有**连续的位置**；
+  /// 它们不一定读 PlaybackState，因此把进度一并写进 metadata extras。队列
+  /// 刷新/标题开关重建 MediaItem 时同样要复用这份快照，否则 position 会退回
+  /// null、车机端高亮瞬间停在上一句。
+  int? _lastPositionMs;
+  int? _lastDurationMs;
+  bool? _lastPlaying;
 
   HttpServer? _proxy;
   /// 进行中的代理端口绑定：并发首载共享同一次 bind，避免各自绑定一个
@@ -858,15 +869,46 @@ class MusicAudioHandler extends BaseAudioHandler
   void _pushCurrentMediaItem() {
     final song = _currentSong;
     if (song == null) return;
-    mediaItem.add(
-      buildLyricMediaItem(
-        song: song,
-        lyricText: _lastLyricText,
-        translationText: _lastTranslationText,
-        romanizationText: _lastRomanizationText,
-        fullLyricLrc: _lastFullLyricLrc,
-        bluetoothLyricsTitleSync: _bluetoothLyricsTitleSync,
-      ),
+    final item = buildLyricMediaItem(
+      song: song,
+      lyricText: _lastLyricText,
+      translationText: _lastTranslationText,
+      romanizationText: _lastRomanizationText,
+      fullLyricLrc: _lastFullLyricLrc,
+      bluetoothLyricsTitleSync: _bluetoothLyricsTitleSync,
+      positionMs: _lastPositionMs,
+      durationMs: _lastDurationMs,
+      playing: _lastPlaying,
+    );
+    mediaItem.add(item);
+    _logPublishedLyricMeta(song, item.extras ?? const <String, dynamic>{});
+  }
+
+  /// 上一次落日志的元数据签名（每首歌最多两行：当前行首发、整首 LRC 就绪）。
+  String? _lastLyricMetaLogSignature;
+
+  /// 把「实际下发的媒体会话歌词字段」记一行诊断。
+  ///
+  /// 车机/锁屏歌词只认 MediaSession，而这条通道此前在车主导出的应用日志里
+  /// 没有任何痕迹（原生 `Log.d` 不进导出日志），排查只能靠 `adb logcat`。
+  /// 记下真正下发的 key 列表与长度，才能和车机端声称读取的字段对照——issue
+  /// #22 的 `"}` 乱码就是靠「车机到底读了哪个字段」这一步卡住的。
+  ///
+  /// 按 `歌曲 + 是否已带整首 LRC` 去重，日志量恒定，不会挤掉环形缓存里的
+  /// 其它关键行；清空态（暂停/切歌触发的空元数据）不记。
+  void _logPublishedLyricMeta(Song song, Map<String, dynamic> extras) {
+    final fullLrc = extras['full_lrc'] as String?;
+    final hasLrc = fullLrc != null && fullLrc.isNotEmpty;
+    if (!hasLrc && extras['lyric'] == null) return;
+    final signature = '${song.hash}|$hasLrc';
+    if (signature == _lastLyricMetaLogSignature) return;
+    _lastLyricMetaLogSignature = signature;
+    final plainLen = (extras['lyrics'] as String?)?.length ?? 0;
+    debugPrint(
+      '[LyricMeta] 系统歌词元数据下发: song="${song.title}" '
+      'fullLrcLen=${fullLrc?.length ?? 0} plainLen=$plainLen '
+      'pos=${extras['position']}ms playing=${extras['playing']} '
+      'keys=[${extras.keys.join(',')}]',
     );
   }
 
@@ -876,6 +918,9 @@ class MusicAudioHandler extends BaseAudioHandler
     _lastTranslationText = null;
     _lastRomanizationText = null;
     _lastFullLyricLrc = null;
+    _lastPositionMs = null;
+    _lastDurationMs = null;
+    _lastPlaying = null;
   }
 
   // ---- 系统媒体会话歌词（LyricInfo 协议，上游 3.3.0 #134/#151）----------
@@ -894,6 +939,11 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 行/歌词列表变化时由控制器传入（控制器侧按歌词列表 identity 缓存，
   /// 不会每个位置 tick 重新格式化）。
   ///
+  /// [positionMs]/[durationMs]/[playing] 为播放进度快照：车机/锁屏歌词组件
+  /// 按整首 LRC 自己滚动高亮时需要连续位置，而它们不一定读 PlaybackState
+  /// （issue #22 二次排查）。同一行内的心跳只更新这三个字段，当前行/整首
+  /// LRC 复用调用方传入的快照，不会重复格式化。
+  ///
   /// 无当前歌曲（系统会话尚未 loadSong）时静默忽略：此时 mediaItem 还不存在，
   /// 凭空 add 会让 audio_service 贴出无内容的媒体通知。
   void updateLyricMetadata({
@@ -901,6 +951,9 @@ class MusicAudioHandler extends BaseAudioHandler
     String? translationText,
     String? romanizationText,
     String? fullLyricLrc,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {
     final song = _currentSong;
     if (song == null) return;
@@ -908,6 +961,9 @@ class MusicAudioHandler extends BaseAudioHandler
     _lastTranslationText = translationText;
     _lastRomanizationText = romanizationText;
     _lastFullLyricLrc = fullLyricLrc;
+    _lastPositionMs = positionMs;
+    _lastDurationMs = durationMs;
+    _lastPlaying = playing;
     _pushCurrentMediaItem();
   }
 
@@ -920,6 +976,9 @@ class MusicAudioHandler extends BaseAudioHandler
     String? romanizationText,
     String? fullLyricLrc,
     bool bluetoothLyricsTitleSync = false,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {
     return MediaItem(
       id: song.hash.isEmpty ? song.id : song.hash,
@@ -938,6 +997,9 @@ class MusicAudioHandler extends BaseAudioHandler
         translationText: translationText,
         romanizationText: romanizationText,
         fullLyricLrc: fullLyricLrc,
+        positionMs: positionMs,
+        durationMs: durationMs,
+        playing: playing,
       ),
     );
   }
@@ -965,6 +1027,11 @@ class MusicAudioHandler extends BaseAudioHandler
   /// - `translationLyric/romanLyric`：当前行翻译/音译；
   /// - `full_lrc`：整首标准 LRC；`org.akanework.lyricinfo.FULL_LYRICS`：同值
   ///   协议别名；`org.akanework.lyricinfo.CURRENT_LYRIC`：当前行协议别名；
+  /// - `lyrics`：整首 LRC 去掉时间标签后的纯文本（车机歌词槽只认纯文本，
+  ///   见 issue #22；带标签的整首 LRC 在这类消费方上会原样显示成乱码）；
+  /// - `position/duration/playing`：当前播放进度快照。车机/锁屏歌词组件要
+  ///   自己按进度推进高亮就必须拿到连续的位置，而它们不一定读 PlaybackState
+  ///   （issue #22 二次排查）；
   /// - `lyricInfo`：LyricInfo JSON（见 [buildLyricInfoJson]）。
   ///
   /// 值为空（null 或空串）的字段整体省略（不是写空串）：系统侧不区分
@@ -977,11 +1044,15 @@ class MusicAudioHandler extends BaseAudioHandler
     String? translationText,
     String? romanizationText,
     String? fullLyricLrc,
+    int? positionMs,
+    int? durationMs,
+    bool? playing,
   }) {
     final line = _nonEmptyOrNull(lyricText);
     final translation = _nonEmptyOrNull(translationText);
     final romanization = _nonEmptyOrNull(romanizationText);
     final fullLrc = _nonEmptyOrNull(fullLyricLrc);
+    final plainLyrics = LrcFormatter.toPlainText(fullLrc);
     final lyricInfoJson = buildLyricInfoJson(
       song: song,
       lyricText: line,
@@ -998,8 +1069,12 @@ class MusicAudioHandler extends BaseAudioHandler
       'translationLyric': ?translation,
       'romanLyric': ?romanization,
       'full_lrc': ?fullLrc,
+      'lyrics': ?plainLyrics,
       'org.akanework.lyricinfo.FULL_LYRICS': ?fullLrc,
       'org.akanework.lyricinfo.CURRENT_LYRIC': ?line,
+      'position': ?positionMs,
+      'duration': ?durationMs,
+      'playing': ?playing,
       'lyricInfo': ?lyricInfoJson,
     };
   }
@@ -1036,11 +1111,15 @@ class MusicAudioHandler extends BaseAudioHandler
       if (song.albumName != null && song.albumName!.isNotEmpty)
         'album': song.albumName,
       'songId': song.id.isNotEmpty ? song.id : song.hash,
-      'lyric': hasFullLrc ? fullLyricLrc : lyricText,
       if (translationText != null && translationText.isNotEmpty)
         'translation': translationText,
       if (romanizationText != null && romanizationText.isNotEmpty)
         'roma': romanizationText,
+      // `lyric` 必须是最后一个字段（issue #22）：车机端存在「取 `"lyric":"` 之后
+      // 全部内容」的傻瓜解析器，JSON 收尾结构会一起被显示出来。放在末位时这段
+      // 垃圾固定只有 `"}`，比后面还跟着 songId/translation 之类字段要好得多。
+      // JSON 字段顺序对规范解析器无影响，所以这条只是「减少对方的错」。
+      'lyric': hasFullLrc ? fullLyricLrc : lyricText,
     };
     return jsonEncode(map);
   }

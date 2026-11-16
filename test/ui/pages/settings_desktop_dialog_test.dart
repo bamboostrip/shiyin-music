@@ -354,7 +354,7 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   @override
   Future<void> setLandscapeEnabled(bool enabled, bool isTablet) async {}
   @override
-  Future<void> setCarModeEnabled(bool enabled) async {}
+  Future<bool> setCarModeEnabled(bool enabled) async => true;
 
   // 车机显示微调（桌面形态下分节不会构建，仅补全接口契约）。
   @override
