@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/music_models.dart';
 import '../services/desktop_system_integration.dart';
+import '../services/download_metadata_writer.dart';
 import '../services/download_service.dart';
 import '../services/music_api.dart';
 import '../ui/widgets/toast.dart';
@@ -108,6 +109,12 @@ class DownloadController extends ChangeNotifier {
   static const _playCacheIndexKey = 'shiyin_play_cache_index';
   static const _playCacheLimitKey = 'settings.play_cache_limit';
 
+  /// 下载时是否额外留一份同名 `.lrc`（默认关）。
+  ///
+  /// 关着也会在「标签写不进去」（不支持的编码/文件被占用）时兜底落 `.lrc`；
+  /// 开着则无条件落一份，方便拷到车机/U 盘给第三方播放器用。
+  static const _saveLyricsFileKey = 'settings.download_save_lyrics_file';
+
   /// 下载音质覆盖值：缺失或 `'follow'` = 跟随播放音质。
   ///
   /// 值取 [AudioQuality.apiValue]（`128` / `320` / `flac`）。脏值一律按
@@ -166,6 +173,49 @@ class DownloadController extends ChangeNotifier {
   int _playCacheLimit = 300 * 1024 * 1024; // 默认 300MB
   int get playCacheLimit => _playCacheLimit;
 
+  bool _saveLyricsFile = false;
+  bool get saveLyricsFile => _saveLyricsFile;
+
+  /// 设「同时保存 LRC 歌词」。
+  ///
+  /// 内嵌写入始终会尝试；本开关只决定「内嵌成功之后」是否再留一份可移植副本
+  /// （上游 3.3.0 `d688884` 的同名设置）。
+  Future<void> setSaveLyricsFile(bool enabled) async {
+    if (_saveLyricsFile == enabled) return;
+    _saveLyricsFile = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_saveLyricsFileKey, enabled);
+    notifyListeners();
+  }
+
+  /// 元数据收尾的并发上限。
+  ///
+  /// 批量下载时地址解析几乎瞬时完成，几十首歌会同时进入「拉歌词 + 写标签」，
+  /// 每个任务都要读整份音频再重写（无损动辄 30~80MB），并发铺开会把磁盘和
+  /// 内存打满、并让 UI 掉帧。上限 3 与上游一致。
+  static const int _metadataConcurrency = 3;
+  int _metadataRunning = 0;
+  final List<Completer<void>> _metadataWaiters = [];
+
+  Future<void> _acquireMetadataSlot() async {
+    if (_metadataRunning < _metadataConcurrency) {
+      _metadataRunning++;
+      return;
+    }
+    final ready = Completer<void>();
+    _metadataWaiters.add(ready);
+    await ready.future;
+  }
+
+  void _releaseMetadataSlot() {
+    if (_metadataWaiters.isNotEmpty) {
+      // 直接把槽位转交给下一个等待者，避免计数在交接瞬间被第三个任务抢走。
+      _metadataWaiters.removeAt(0).complete();
+    } else {
+      _metadataRunning--;
+    }
+  }
+
   /// 下载音质覆盖值；null = 跟随播放音质（默认行为，等同加设置前的版本）。
   AudioQuality? _downloadQualityOverride;
   AudioQuality? get downloadQualityOverride => _downloadQualityOverride;
@@ -219,6 +269,7 @@ class DownloadController extends ChangeNotifier {
     _downloadQualityOverride = _parseDownloadQuality(
       prefs.getString(downloadQualityKey),
     );
+    _saveLyricsFile = prefs.getBool(_saveLyricsFileKey) ?? false;
     await _loadDownloads();
     // 磁盘对账：历史目录迁移（桌面）+ 外部删除同步，随加载一次完成
     await reconcileDownloads();
@@ -751,12 +802,21 @@ class DownloadController extends ChangeNotifier {
         debugPrint('[时音][download] 代际过期，丢弃传输结果: ${song.title}');
         return;
       }
+      // 元数据与歌词写进音频文件（MP3 → ID3v2，FLAC → Vorbis comment），
+      // 并负责扩展名纠正后的最终路径。必须在「标记已下载」之前完成：
+      // 索引里记录的路径要是最终文件，否则会出现「已入库但播放器读不到标签」
+      // 的窗口，第三方扫描也会把半成品当成品。
+      final enrichedPath = await _enrichDownload(path, song);
+      if (gen != _generation || _disposed) {
+        debugPrint('[时音][download] 元数据期间代际过期，丢弃结果: ${song.title}');
+        return;
+      }
       _downloads[downloadKey] = DownloadEntry(
         song: song,
         quality: quality,
         status: DownloadStatus.downloaded,
         progress: 1,
-        filePath: path,
+        filePath: enrichedPath,
         downloadedAt: DateTime.now(),
       );
       notifyListeners();
@@ -787,6 +847,43 @@ class DownloadController extends ChangeNotifier {
         succeeded: succeeded,
         batchTracker: batchTracker,
       );
+    }
+  }
+
+  /// 写标签与歌词，返回入库用的最终路径。
+  ///
+  /// 只服务用户主动下载（播放缓存不进这里）：缓存文件不写标签、不拉歌词，
+  /// 免得为「听过一次」的歌白花一次联网与一次整文件重写。
+  ///
+  /// 全程吞错——标签/歌词只是锦上添花，任何失败都不能把已下载成功的歌
+  /// 判为失败（用户失去的是封面，不是音频）。
+  Future<String> _enrichDownload(String path, Song song) async {
+    await _acquireMetadataSlot();
+    try {
+      String? lyricsText;
+      try {
+        // 8s 上限：弱网下宁可没歌词，也不能让「已下载」卡在收尾态。
+        final lines = await _api
+            .lyrics(song)
+            .timeout(const Duration(seconds: 8));
+        final text = downloadLyricsText(lines);
+        if (text.isNotEmpty) lyricsText = text;
+      } catch (error) {
+        debugPrint('[时音][download] 拉取歌词失败（已忽略）: ${song.title} $error');
+      }
+      if (_disposed) return path;
+      await _service.writeDownloadMetadata(
+        filePath: path,
+        song: song,
+        lyricsText: lyricsText,
+        saveLyricsFile: _saveLyricsFile,
+      );
+      return path;
+    } catch (error) {
+      debugPrint('[时音][download] 写入元数据失败（已忽略）: ${song.title} $error');
+      return path;
+    } finally {
+      _releaseMetadataSlot();
     }
   }
 
