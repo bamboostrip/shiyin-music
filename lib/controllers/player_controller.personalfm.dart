@@ -43,6 +43,15 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
       return false;
     }
 
+    // 用户点按「私人 FM」是显式播放意图，意图要在**网络拉取之前**登记
+    // （上游 3.3.0 `9426621` 对 startPersonalFm 的处理）：拉取期间断开
+    // 蓝牙/来电打断会推进企图代次并建立保护，拉取完成后的起播不得再以
+    // 「用户意图」自居把保护解掉——否则断开瞬间之后 FM 拉取完成会直接
+    // 从扬声器外放。
+    _handleManualPlay();
+    final intentSerial = _playbackIntentSerial;
+    _pendingPlaybackIntent = intentSerial;
+
     _isLoadingPersonalFm = true;
     final requestSerial = ++_personalFmRequestSerial;
     errorMessage = null;
@@ -64,6 +73,9 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
         songs.first,
         queue: songs,
         preservePersonalFmSession: true,
+        // 意图已在方法入口声明过；这里再声明一次会解掉拉取期间建立的
+        // 断连/打断保护（与 _loadNextPersonalFmBatch 的口径一致）。
+        userInitiated: false,
       );
       return errorMessage == null;
     } catch (error) {
@@ -73,6 +85,11 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
       return false;
     } finally {
       if (requestSerial == _personalFmRequestSerial) {
+        // 拉取失败/为空时入口登记的企图不得残留（会被打断开始的
+        // 「本来就要播」采样误读）。
+        if (_pendingPlaybackIntent == intentSerial) {
+          _pendingPlaybackIntent = null;
+        }
         _isLoadingPersonalFm = false;
         if (!_disposed) {
           notifyListeners();

@@ -144,6 +144,9 @@ class _MockMusicApi extends Fake implements MusicApi {
   /// 非空时 `songUrl` 挂起，直到测试自己 complete（模拟弱网解析）。
   Completer<void>? gate;
 
+  /// 非空时 `personalFm` 挂起（模拟 FM 首批还在拉取）。
+  Completer<void>? fmGate;
+
   @override
   Future<PlayUrl> songUrl(
     Song song, {
@@ -157,6 +160,18 @@ class _MockMusicApi extends Fake implements MusicApi {
 
   @override
   Future<List<LyricLine>> lyrics(Song song) async => const [];
+
+  @override
+  Future<List<Song>> personalFm({
+    String? hash,
+    String? songId,
+    int? playtime,
+    bool isOverplay = false,
+  }) async {
+    final pending = fmGate;
+    if (pending != null) await pending.future;
+    return [_song(9)];
+  }
 }
 
 Song _song(int index) => Song(
@@ -234,6 +249,37 @@ void main() {
       await controller.togglePlay();
       await tester.pump();
       expect(controller.isPlaying, isTrue, reason: '用户点播放应能正常起播');
+
+      finish();
+    });
+
+    testWidgets('私人 FM 启动拉取期间断开：拉取完成后不得外放起播', (tester) async {
+      // 弱网下 FM 首批可能拉几秒：期间拔耳机建立的保护，不得被拉取完成后
+      // 的起播以「用户意图」自居解掉（上游 3.3.0 `9426621` 的 FM 入口处理）。
+      api.fmGate = Completer<void>();
+      final started = controller.startPersonalFm();
+      await tester.pump();
+
+      controller.handleBecomingNoisy();
+      await tester.pump();
+
+      api.fmGate!.complete();
+      await started;
+      await tester.pump();
+
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '断连保护必须拦下拉取后才完成的起播，否则从扬声器外放',
+      );
+      expect(controller.isPlaying, isFalse);
+      // 被保护拦下不是播放失败，不得弹错误态。
+      expect(controller.errorMessage, isNull);
+
+      // 用户随后显式点播放仍能正常起播（保护出口不受影响）。
+      await controller.togglePlay();
+      await tester.pump();
+      expect(controller.isPlaying, isTrue, reason: '显式播放应解除保护正常起播');
 
       finish();
     });
