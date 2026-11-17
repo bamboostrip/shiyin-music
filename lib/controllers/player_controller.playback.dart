@@ -367,6 +367,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       if (confirm == PlayConfirm.blocked) {
         // 加载期间用户已暂停/切歌/断开蓝牙（或仍在打断中）：不出声、不记账。
         // 不计失败是刻意的——这不是播放失败，是「本来就不该播」。
+        // 音源已经归属且定位完成，把此刻位置落一次盘；否则「选歌后立即
+        // 暂停」时磁盘还留着这首歌上一次的旧进度，重启会跳回旧位置。
+        unawaited(_saveCurrentPosition());
         _nextLog('playSong 起播被状态机拒绝: ${song.title}');
         return;
       }
@@ -975,7 +978,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _cancelAutomaticResume();
       await _audioHandler.pause(userInitiated: false);
       // 暂停瞬间落盘一次进度：用户经常暂停后直接退出，周期任务可能还没轮到。
-      _saveCurrentPosition();
+      // 这里不 await —— prefs 写盘不该挡住 UI 的播放/暂停图标切换；退出路径
+      // 另有 flushPlaybackState() 会 await 同一份进度。
+      unawaited(_saveCurrentPosition());
       return;
     }
     // 用户主动播放：解除断连保护（断连只能由显式播放解除）。

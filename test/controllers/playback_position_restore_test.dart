@@ -3,7 +3,8 @@
 // 移植上游 3.3.0 `c113193` + `165eb46` 的语义：
 //   1. 恢复进度必须与歌曲 hash 匹配，不能串到别的歌；
 //   2. 尾 3 秒内不恢复（否则一开播就撞曲末跳歌）；
-//   3. 归属守卫：音源没换成当前歌时不写、读到 0ms 不写（不覆盖真实进度）；
+//   3. 归属守卫：音源没换成当前歌 / 还在加载定位时不写；归属成立后合法的 0
+//      也要写（否则暂停在开头会残留上一次的旧进度）；
 //   4. resumePlayback 只在第一首带进度，失败换下一首不带。
 import 'dart:async';
 import 'dart:convert';
@@ -29,6 +30,7 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   final _androidAudioSessionIdController =
       StreamController<int?>.broadcast();
 
+  @override
   bool playing = false;
   Duration currentPosition = Duration.zero;
 
@@ -144,13 +146,19 @@ class _FakeAudioHandler extends Fake implements MusicAudioHandler {
 }
 
 class _MockMusicApi extends Fake implements MusicApi {
+  /// 非空时挂起地址解析，用于构造「加载中被暂停」的时序。
+  Completer<void>? gate;
+
   @override
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
     bool hashOnly = false,
-  }) async =>
-      PlayUrl(url: 'https://example.com/${song.hash}.mp3', hash: song.hash);
+  }) async {
+    final pending = gate;
+    if (pending != null) await pending.future;
+    return PlayUrl(url: 'https://example.com/${song.hash}.mp3', hash: song.hash);
+  }
 
   @override
   Future<List<LyricLine>> lyrics(Song song) async => const [];
@@ -182,10 +190,11 @@ void main() {
 
   late _FakeAudioPlayer fakeAudioPlayer;
   late _FakeAudioHandler handler;
+  late _MockMusicApi api;
   late List<PlayerController> controllers;
 
   PlayerController buildController() {
-    final controller = PlayerController(_MockMusicApi(), handler);
+    final controller = PlayerController(api, handler);
     controllers.add(controller);
     return controller;
   }
@@ -201,6 +210,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     fakeAudioPlayer = _FakeAudioPlayer();
     handler = _FakeAudioHandler(fakeAudioPlayer);
+    api = _MockMusicApi();
     controllers = <PlayerController>[];
   });
 
@@ -321,6 +331,48 @@ void main() {
           jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
       expect(record['hash'], song.hash);
       expect(record['ms'], const Duration(seconds: 42).inMilliseconds);
+    });
+
+    test('恢复到开头后暂停：合法的 0 要落盘，不能残留上次的 90s', () async {
+      final song = _song(1);
+      seedSnapshot(song);
+      final controller = buildController();
+      await settle();
+
+      controller.queue = [song];
+      fakeAudioPlayer.currentPosition = Duration.zero;
+      await controller.playSong(song);
+      await settle();
+      await controller.togglePlay(); // 用户暂停在 0:00
+      await settle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final record =
+          jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
+      expect(record['ms'], 0, reason: '用户主动回到开头必须覆盖旧记录');
+    });
+
+    test('加载中被暂停：落盘 0，不残留这首歌上一次的进度', () async {
+      final song = _song(1);
+      seedSnapshot(song); // 磁盘上已有 90s
+      final controller = buildController();
+      await settle();
+
+      await controller.playSong(song); // 先进入在播态，用户才有「暂停」可点
+      await settle();
+
+      api.gate = Completer<void>();
+      final pending = controller.playSong(song); // 再次选歌，解析挂起
+      await settle();
+      await controller.togglePlay(); // 解析还没回来就暂停
+      api.gate!.complete();
+      await pending;
+      await settle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final record =
+          jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
+      expect(record['ms'], 0, reason: '这次选歌从未出声，不能恢复到上次的 90s');
     });
 
     test('还没起播过（音源不属于当前歌）时绝不用 0 覆盖已有记录', () async {

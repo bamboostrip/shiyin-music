@@ -211,9 +211,9 @@ const _playbackStateMaxQueueSize = 200;
 const _currentPositionKey = 'playback.current_position';
 
 /// 进度落盘节奏。移动端（尤其车机）熄火即断电，5 秒一存；
-/// 桌面端有退出钩子 + 暂停落盘兜底，20 秒足够且省 IO。
+/// 桌面不建周期定时器，靠暂停落盘 + 退出/退后台 flush 兜住（见
+/// [_startPositionSaving] 注释：PC 的 prefs 是整文件同步写盘）。
 const _positionSaveIntervalMobile = Duration(seconds: 5);
-const _positionSaveIntervalDesktop = Duration(seconds: 20);
 // 听歌时长上报周期/检查周期：对齐上游 3.3.0（e9dde17 #151）由 30min/1min
 // 收紧为 5min/15s，缩短服务端同步延迟；未满周期的余量跨会话持久化见
 // [_pendingListenTimeMsKey] 与 _PlayerSettings._savePendingListenTime。
@@ -1127,15 +1127,17 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     int? expectedIntent,
     bool allowDuringInterruption = false,
   }) async {
-    if (expectedIntent != null &&
-        (expectedIntent != _playbackIntentSerial ||
-            _resumeBlockedByDisconnect ||
-            (_interruptionRequiresPause &&
-                audioInterruptionEnabled &&
-                !allowDuringInterruption))) {
+    // 断连保护与打断闩锁是全局闸门：即使调用方没传 expectedIntent（旧入口
+    // 如切音质重载）也不得绕过。只有 allowDuringInterruption（「阻止打断」
+    // 模式的主动对抗恢复）能越过打断闩锁；断连保护只认用户显式播放。
+    if (_resumeBlockedByDisconnect ||
+        (expectedIntent != null && expectedIntent != _playbackIntentSerial) ||
+        (_interruptionRequiresPause &&
+            audioInterruptionEnabled &&
+            !allowDuringInterruption)) {
       _nextLog(
         '起播被拒绝: '
-        '${expectedIntent != _playbackIntentSerial ? '企图已过期' : ''}'
+        '${expectedIntent != null && expectedIntent != _playbackIntentSerial ? '企图已过期' : ''}'
         '${_resumeBlockedByDisconnect ? ' 断连保护' : ''}'
         '${_interruptionRequiresPause && !allowDuringInterruption ? ' 打断待恢复' : ''}',
       );
@@ -1228,39 +1230,54 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 三道闸，缺一条就会写脏数据：
   /// 1. **归属**：[currentSong] 已换成新歌、音源却还在解析时，
   ///    `audioPlayer.position` 仍是上一首的——必须等 [_positionOwnerHash] 对上；
-  /// 2. **非零**：加载/暂停瞬间可能读到 0ms，直接写等于把真实进度抹掉；
-  /// 3. **不阻塞**：fire-and-forget，失败只记日志（进度不是关键路径）。
+  /// 2. **加载态**：归属刚建立、初始 seek 未完成时 position 可能还是 0，
+  ///    此时写盘会抹掉刚恢复的进度；过了这一拍，合法的 0（用户拖回开头/
+  ///    刚起播就暂停）必须如实写，否则还会恢复到上一次的旧位置；
+  /// 3. **不抛错**：写盘失败只记日志（进度不是关键路径）。
+  ///
+  /// 返回 [Future] 是为了让 `flushPlaybackState()` **await**：桌面
+  /// `quitGracefully` 在 await 完钩子后直接 `TerminateProcess`，fire-and-forget
+  /// 的 prefs 写可能还没落地就被硬杀，等于退出钩子白刷。
   ///
   /// 放在基类：播放分片要调它（暂停/起播），设置分片也要（退出钩子）。
-  void _saveCurrentPosition() {
+  Future<void> _saveCurrentPosition() async {
     final song = currentSong;
     if (song == null || song.hash.isEmpty) return;
     if (_positionOwnerHash != song.hash) return;
+    // 音源已归属但还在加载/定位：此刻的 0 是中间态，不是用户要的位置。
+    if (isPreparing || _pendingInitialPosition != null) return;
     final ms = audioPlayer.position.inMilliseconds;
-    if (ms <= 0) return;
+    if (ms < 0) return;
     final payload = jsonEncode({'hash': song.hash, 'ms': ms});
-    SharedPreferences.getInstance()
-        .then((prefs) => prefs.setString(_currentPositionKey, payload))
-        .catchError((Object error) {
-          debugPrint('[时音][player] 播放进度写盘失败（忽略）: $error');
-          return false;
-        });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_currentPositionKey, payload);
+    } catch (error) {
+      debugPrint('[时音][player] 播放进度写盘失败（忽略）: $error');
+    }
   }
 
   /// 起一个周期任务，播放中每隔一段时间存一次进度。
   ///
-  /// 为什么需要周期而不是只靠暂停/退出：车机熄火是**直接断电**，没有任何
-  /// 生命周期回调；桌面崩溃/强杀同理。周期任务把「最多丢一段」压到可接受。
+  /// **只在移动端（Android/iOS）启用。** 它要解决的只有一件事：车机熄火是
+  /// **直接断电**，没有任何生命周期回调，只能靠周期把「最多丢一段」压小。
+  ///
+  /// 桌面刻意不建周期定时器：
+  /// - PC 的 `shared_preferences` 每次 `set` 都要把整张 map 重编码并**同步写盘**
+  ///   （这正是启动/切歌卡顿的来源，见 `PrefsCompaction`），周期写等于给自己
+  ///   加一条每 20 秒一次的磁盘抖动；
+  /// - 桌面已有 `DesktopWindow.quitGracefully → flushPlaybackState` 退出钩子
+  ///   和暂停落盘兜底，主流桌面播放器（foobar2000）同样是「关闭时保存」，
+  ///   崩溃/强杀丢进度是与之一致的既定语义，不值得为此常驻一个定时器。
   void _startPositionSaving() {
-    final interval =
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS)
-        ? _positionSaveIntervalMobile
-        : _positionSaveIntervalDesktop;
-    _positionSaveTimer ??= Timer.periodic(interval, (_) {
+    final isMobile =
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    if (!isMobile) return;
+    _positionSaveTimer ??= Timer.periodic(_positionSaveIntervalMobile, (_) {
       // 暂停时位置不变，没必要写盘（暂停那一刻已单独存过）。
       if (!isPlaying) return;
-      _saveCurrentPosition();
+      unawaited(_saveCurrentPosition());
     });
   }
 

@@ -391,6 +391,55 @@ void main() {
     });
   });
 
+  group('切音质重载的起播守卫', () {
+    testWidgets('重载期间断开连接：解析完成后不得把声音放回扬声器', (tester) async {
+      await startPlaying(tester);
+      api.gate = Completer<void>();
+
+      final pending = controller.setAudioQuality(
+        AudioQuality.high,
+        reloadCurrent: true,
+      );
+      await tester.pump();
+      // 重载还在解析时拔耳机/蓝牙断开。
+      controller.handleBecomingNoisy();
+      await tester.pump();
+      handler.playCallCount = 0;
+
+      api.gate!.complete();
+      await pending;
+      await tester.pump();
+
+      expect(handler.playCallCount, 0, reason: '切音质不得绕过断连保护');
+      expect(controller.isPlaying, isFalse);
+
+      finish();
+    });
+
+    testWidgets('重载期间用户主动暂停：解析完成后不得擅自恢复', (tester) async {
+      await startPlaying(tester);
+      api.gate = Completer<void>();
+
+      final pending = controller.setAudioQuality(
+        AudioQuality.high,
+        reloadCurrent: true,
+      );
+      await tester.pump();
+      await controller.togglePlay();
+      await tester.pump();
+      handler.playCallCount = 0;
+
+      api.gate!.complete();
+      await pending;
+      await tester.pump();
+
+      expect(handler.playCallCount, 0, reason: '用户暂停必须作废在途的切音质起播');
+      expect(controller.isPlaying, isFalse);
+
+      finish();
+    });
+  });
+
   group('设置项默认值', () {
     test('断开停止播放默认开启，自动恢复默认关闭', () {
       expect(controller.autoPauseOnDeviceDisconnect, isTrue);
