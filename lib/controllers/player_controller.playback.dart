@@ -915,6 +915,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
           isRetry: true,
+          // 领取成功后的重试是流程续跑，不是新的用户意图：等待领取期间
+          // 若已断连/进入打断，这次重试不能把它们解除。
+          userInitiated: false,
         ),
       );
       return VipRetryOutcome.resumed;

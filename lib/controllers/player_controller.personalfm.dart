@@ -139,6 +139,9 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
         additions.first,
         queue: queue,
         preservePersonalFmSession: true,
+        // 队列播到末尾的自动续批，不是用户点的「播放」：不能借它解除
+        // 「蓝牙断开停止播放」的保护，否则断开后会自己续播到扬声器。
+        userInitiated: false,
       );
     } catch (error) {
       if (requestSerial == _personalFmRequestSerial) {

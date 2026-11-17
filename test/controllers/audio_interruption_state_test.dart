@@ -351,6 +351,30 @@ void main() {
       finish();
     });
 
+    testWidgets('打断结束事件漏发时，用户显式播放仍能出声（闩锁自愈）', (tester) async {
+      await startPlaying(tester);
+
+      // 只收到 begin，永远收不到 end（部分 ROM / 通话被打断的路径会漏发）。
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+
+      handler.playCallCount = 0;
+      await controller.togglePlay();
+      await tester.pump();
+
+      expect(
+        handler.playCallCount,
+        1,
+        reason: '用户显式播放是比系统事件更强的意图，不能因为漏发 end 永久失效',
+      );
+      expect(controller.isPlaying, isTrue);
+
+      finish();
+    });
+
     testWidgets('duck 类打断不暂停（音量归响度服务）', (tester) async {
       await startPlaying(tester);
       handler.pauseCallCount = 0;

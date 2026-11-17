@@ -269,7 +269,9 @@ class PlayerController extends _PlayerControllerBase
         final song = currentSong;
         if (song == null) return;
         debugPrint('[时音][player] 网络已恢复，自动重播: ${song.title}');
-        unawaited(playSong(song, isRetry: true));
+        // 自动重播是流程续跑，不是新的用户意图：不能借它解除
+        // 「蓝牙断开停止播放」的保护，否则断网重连后会自己播到扬声器。
+        unawaited(playSong(song, isRetry: true, userInitiated: false));
       },
     );
     _audioHandler.attachTransportControls(
@@ -1121,9 +1123,16 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   ///
   /// 断连保护「只能由用户显式播放解除」是这套机制的要点——否则断开瞬间
   /// 排在队里的自动恢复会把声音放到扬声器上，防外放就白做了。
+  ///
+  /// 同时清掉 [_interruptionRequiresPause]：这是一个**闩锁**，正常由打断
+  /// 结束事件解除，但部分 ROM / 电话被打断的路径会漏发 end 事件，如果不给
+  /// 出口，用户在通话结束后点播放将永远没反应（只能重启 App）。
+  /// 用户主动点播放是比系统事件更强的意图信号，以此自愈；真正仍在通话中
+  /// 时，音频焦点由系统裁决，不会被这里放行。
   void _handleManualPlay() {
     _cancelAutomaticResume();
     _resumeBlockedByDisconnect = false;
+    _interruptionRequiresPause = false;
   }
 
   /// 排一次自动恢复（打断结束 / 设备接入）。
