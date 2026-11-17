@@ -221,7 +221,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
       if (_disposed) return;
       // VIP 过期：领取后走完整播放流程重试（保留定位）
       if (error is VipRequiredException && vipClaim != null) {
-        final claimed = await _tryClaimVipAndRetry(
+        final outcome = await _tryClaimVipAndRetry(
           song,
           queue: queue,
           initialPosition: targetPosition > Duration.zero
@@ -229,7 +229,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
               : null,
           preserveClimax: true,
         );
-        if (claimed) return;
+        // 只有「已重新起播」才收手；领取失败与「领了仍无地址」都落错误态，
+        // 切音质是用户主动动作，不自作主张跳歌。
+        if (outcome == VipRetryOutcome.resumed) return;
       }
       if (currentSong?.hash != song.hash) {
         debugPrint('[时音][player] 切音质失败时歌曲已切换，跳过错误态');

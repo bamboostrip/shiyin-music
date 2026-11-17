@@ -8,6 +8,7 @@ import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/services/music_api.dart';
 import 'package:shiyin_music/services/music_audio_handler.dart';
+import 'package:shiyin_music/services/vip_background_task.dart';
 import 'package:shiyin_music/ui/widgets/toast.dart';
 
 class _FakeAudioPlayer extends Fake implements AudioPlayer {
@@ -149,9 +150,38 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   Future<void> close() async {}
 }
 
+class _FakeVipClaim extends Fake implements VipBackgroundTask {
+  VipClaimResult result = const VipClaimResult(
+    VipClaimStatus.alreadyClaimed,
+    '今日已领取',
+  );
+  int claimCalls = 0;
+
+  @override
+  Future<VipClaimResult> claimNow(LoginSession? session) async {
+    claimCalls++;
+    return result;
+  }
+}
+
 class _MockMusicApi extends Fake implements MusicApi {
   Object? songUrlError;
   bool returnEmptyUrl = false;
+
+  /// 按 hash 指定「解析成功但没有地址」（版权下架/需购买专辑，issue #25）。
+  final emptyUrlHashes = <String>{};
+
+  /// 按 hash 指定「解析抛错」（模拟网络/服务端异常，非确定性失败）。
+  final errorUrlHashes = <String, Object>{};
+
+  /// 按 hash 指定「首次解析要求 VIP、领取后重试仍无地址」（需购买专辑）。
+  final vipThenEmptyHashes = <String>{};
+
+  /// 按 hash 指定「每次解析都要求 VIP」（领了也不给，模拟档位不覆盖）。
+  final vipAlwaysHashes = <String>{};
+
+  /// 每首歌的地址解析请求次数：用于验证确定性无音源不再走 2s 重试。
+  final songUrlCallsByHash = <String, int>{};
 
   @override
   Future<PlayUrl> songUrl(
@@ -159,8 +189,24 @@ class _MockMusicApi extends Fake implements MusicApi {
     AudioQuality quality = AudioQuality.standard,
     bool hashOnly = false,
   }) async {
+    final calls = songUrlCallsByHash.update(
+      song.hash,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+    if (vipAlwaysHashes.contains(song.hash)) {
+      throw const VipRequiredException();
+    }
+    if (vipThenEmptyHashes.contains(song.hash)) {
+      if (calls == 1) throw const VipRequiredException();
+      return PlayUrl(url: '', hash: song.hash);
+    }
+    final perSongError = errorUrlHashes[song.hash];
+    if (perSongError != null) throw perSongError;
     if (songUrlError != null) throw songUrlError!;
-    if (returnEmptyUrl) return PlayUrl(url: '', hash: song.hash);
+    if (returnEmptyUrl || emptyUrlHashes.contains(song.hash)) {
+      return PlayUrl(url: '', hash: song.hash);
+    }
     return PlayUrl(url: 'https://example.com/${song.hash}.mp3', hash: song.hash);
   }
 
@@ -438,6 +484,255 @@ void main() {
 
       expect(controller.errorMessage, isNull);
       expect(controller.lastPlaybackFailureToast, isNull);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    // ---- issue #25：收藏列表里无音源的歌要能自动跳过 ----
+    //
+    // 旧实现的自动跳过门槛是「连续失败 3 次」，而任一首成功起播都会把
+    // streak 清零；收藏里零散的无音源歌夹在能播的歌之间，永远等不到第 3 次，
+    // 只能停在该曲错误态、由用户手动点下一首。
+
+    testWidgets('歌单中间的无音源歌曲自动跳到下一首（issue #25）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2), _song(3)];
+      controller.queue = songs;
+
+      // 第一首正常起播（把 streak 归零，模拟「夹在正常歌之间」）
+      await controller.playSong(songs[0]);
+      await tester.pump();
+      expect(controller.isPlaying, isTrue);
+
+      // 第二首解析成功但没有地址（版权下架/需购买专辑）
+      api.emptyUrlHashes.add(songs[1].hash);
+      api.songUrlCallsByHash.clear();
+
+      // 自然播完进入第二首
+      await controller.playSong(songs[1]);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(
+        controller.currentSong?.hash,
+        songs[2].hash,
+        reason: '确定性无音源应一次即跳过，不要求连续失败 3 次',
+      );
+      expect(controller.isPlaying, isTrue);
+      expect(
+        api.songUrlCallsByHash[songs[1].hash],
+        1,
+        reason: '服务端已明确回答没有地址，不该再等 2s 重发重试',
+      );
+      expect(
+        find.textContaining('暂无音源，已跳过'),
+        findsOneWidget,
+        reason: '跳过后给一次轻提示，说明歌曲被跳过而不是自己换了',
+      );
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('整单都无音源时按队列长度封顶停下，不无限循环（issue #25）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2), _song(3)];
+      controller.queue = songs;
+      for (final song in songs) {
+        api.emptyUrlHashes.add(song.hash);
+      }
+
+      await controller.playSong(songs[0]);
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(
+        find.text('连续多首歌曲无音源，已停止自动跳过'),
+        findsOneWidget,
+        reason: '跳过上限 = 队列长度，整单无效时必须停住并报错',
+      );
+      expect(controller.isPlaying, isFalse);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('无音源跳过不给网络失败白送计数（两类预算互不污染）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2), _song(3), _song(4)];
+      controller.queue = songs;
+      // 前两首确定性无音源：连续跳过两次
+      api.emptyUrlHashes.addAll([songs[0].hash, songs[1].hash]);
+      // 第三首是网络异常（「可能只是暂时不行」），不该被前两首的跳过带进阈值
+      api.errorUrlHashes[songs[2].hash] = Exception('连接超时');
+
+      await controller.playSong(songs[0]);
+      // 级联跳到第三首；第三首首次失败后还有一次 2s 自动重试
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(
+        controller.currentSong?.hash,
+        songs[2].hash,
+        reason: '只失败过一次的网络异常不应被跳过（阈值仍是连续 3 次）',
+      );
+      expect(controller.isPlaying, isFalse);
+      expect(
+        api.songUrlCallsByHash[songs[3].hash],
+        isNull,
+        reason: '第四首不该被拉起来',
+      );
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('VIP 已领取但仍无地址时按无音源自动跳过（issue #25）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2)];
+      controller.queue = songs;
+      // 首次解析要求 VIP，领取成功（今日已领）后接口仍然不给地址
+      api.vipThenEmptyHashes.add(songs[0].hash);
+      final claim = _FakeVipClaim();
+      controller.vipClaim = claim;
+
+      await controller.playSong(songs[0]);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(claim.claimCalls, 1, reason: '每首歌只领取一次，不递归');
+      expect(
+        controller.currentSong?.hash,
+        songs[1].hash,
+        reason: '领了 VIP 仍无地址 = 确定不可播，应直接跳到下一首',
+      );
+      expect(controller.isPlaying, isTrue);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('今日已领 VIP 仍被拒时按无音源自动跳过（issue #25）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2)];
+      controller.queue = songs;
+      api.vipAlwaysHashes.add(songs[0].hash);
+      final claim = _FakeVipClaim();
+      controller.vipClaim = claim;
+
+      await controller.playSong(songs[0]);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(claim.claimCalls, 1);
+      expect(
+        controller.currentSong?.hash,
+        songs[1].hash,
+        reason: '今天早领过 VIP 仍说需要 VIP，是这个账号今天播不了，应跳过',
+      );
+      expect(controller.isPlaying, isTrue);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('刚领到 VIP 仍被拒不跳过（可能还没生效）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2)];
+      controller.queue = songs;
+      api.vipAlwaysHashes.add(songs[0].hash);
+      final claim = _FakeVipClaim()
+        ..result = const VipClaimResult(VipClaimStatus.success, '今日已领取');
+      controller.vipClaim = claim;
+
+      await controller.playSong(songs[0]);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(claim.claimCalls, 1);
+      expect(
+        controller.currentSong?.hash,
+        songs[0].hash,
+        reason: '刚领取可能还在生效中，留在原曲让用户重试，不擅自跳歌',
+      );
+      expect(controller.isPlaying, isFalse);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('VIP 领取失败不自动跳过（可能是暂时问题）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2)];
+      controller.queue = songs;
+      api.errorUrlHashes[songs[0].hash] = const VipRequiredException();
+      final claim = _FakeVipClaim()
+        ..result = const VipClaimResult(VipClaimStatus.failed, '领取失败');
+      controller.vipClaim = claim;
+
+      await controller.playSong(songs[0]);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(claim.claimCalls, 1);
+      expect(
+        controller.currentSong?.hash,
+        songs[0].hash,
+        reason: '领取本身失败（未登录/配额/网络）不算确定性无音源，不该跳歌',
+      );
+      expect(controller.isPlaying, isFalse);
+
+      controller.dispose();
+      fakeAudioPlayer.disposeStreams();
+      await cleanUpToastAndSettle(tester);
+    });
+
+    testWidgets('恢复播放遇到无音源只前进一首（自动跳过不与恢复链叠跳）', (tester) async {
+      await pumpToastHost(tester);
+
+      final songs = [_song(1), _song(2), _song(3)];
+      controller.queue = songs;
+      controller.currentSong = songs[0];
+      api.emptyUrlHashes.add(songs[0].hash);
+
+      final resumed = await controller.resumePlayback();
+      // resumePlayback 失败后自己会推进到下一首；控制器排的无音源跳过
+      // 延迟一拍触发，此刻当前歌已换人，必须放弃——否则会连跳两首。
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(resumed, isTrue);
+      expect(
+        controller.currentSong?.hash,
+        songs[1].hash,
+        reason: '只应前进到第二首，第三首不得被跳过',
+      );
+      expect(controller.isPlaying, isTrue);
 
       controller.dispose();
       fakeAudioPlayer.disposeStreams();

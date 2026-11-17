@@ -273,7 +273,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           return;
         }
         if (playUrl.url.isEmpty) {
-          throw Exception(
+          // 确定性无音源：解析请求本身成功、只是没有地址（下架/需购买专辑）。
+          // 用专门类型标记，失败处理据此走「一次即判跳过」，不再当网络故障
+          // 攒连续失败次数（issue #25）。
+          throw NoPlayableSourceException(
             song.isCloudDrive
                 ? '云盘歌曲暂时没有可播放地址'
                 : song.source == SongSource.netease
@@ -357,6 +360,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _consecutivePlayFailures = 0;
       _autoSkippedInStreak = 0;
       _autoSkipStreakSince = null;
+      // 无音源跳过与网络失败跳过分开记账，成功起播同样整体归零。
+      _autoSkippedNoSourceInStreak = 0;
+      _noSourceSkipStreakSince = null;
       // 曲末跳过的墙钟预算同步重新起算。它此前只在「自然播完」时清零，而
       // 曲末失败那条路（本预算存在的理由）恰恰不会再走自然播完：一首几分钟
       // 的歌播完后，下一次曲末失败必然被 60s 预算判成「超预算」，于是曲末
@@ -378,17 +384,22 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       }
     } catch (error) {
       if (_disposed) return;
+      var noSource = error is NoPlayableSourceException;
       // VIP 过期：自动领取后重试一次（转发定位/队列上下文，避免冷启动
       // 定位与高潮试听从 0 秒重播）。isRetry 内不再领取：重试后仍报 VIP
       // 说明领取无效/服务端持续拒绝，不设限会形成"领取→重试→再领取"无限循环。
+      //
+      // 领取失败（未登录/配额/网络）仍按普通失败计数；领取成功却仍拿不到
+      // 地址则是确定性不可播，并入无音源一类走立即跳过（issue #25）。
       if (!isRetry && error is VipRequiredException && vipClaim != null) {
-        final claimed = await _tryClaimVipAndRetry(
+        final outcome = await _tryClaimVipAndRetry(
           song,
           queue: queue,
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
         );
-        if (claimed) return;
+        if (outcome == VipRetryOutcome.resumed) return;
+        if (outcome == VipRetryOutcome.noSource) noSource = true;
       }
       // 网络类失败（非 VIP、非首次重试）：短暂等待后自动重试一次。
       // 车机弱网/网络切换瞬间首次请求常失败，重试后即可恢复；
@@ -397,8 +408,13 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 例外：已进入"连续失败自动跳过"状态（_autoSkippedInStreak > 0）时
       // 不再逐首重试——此时基本是网络/服务端级故障，每首再等 2 秒会把
       // 跳过扫描拖成数分钟的跳歌风暴，直接计入失败并继续跳。
+      //
+      // 另一个例外：确定性无音源不重试。服务端已经明确回答「这首没有地址」，
+      // 再等 2 秒重发一次同样只是拿回空地址；对收藏里成片下架的歌，那 2 秒
+      // 会变成逐首累加的卡顿（issue #25）。
       if (!isRetry &&
           error is! VipRequiredException &&
+          !noSource &&
           _autoSkippedInStreak == 0) {
         // 等待期间用户可能已切歌：旧歌的自动重试不得抢回播放权。
         if (currentSong?.hash != song.hash) {
@@ -445,8 +461,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       isPreparing = false;
       notifyListeners();
       _nextLog('playSong 落错误态: ${song.title} → $error');
-      // 已走完 VIP 领取与自动重试仍失败：计一次最终失败，达阈值自动前进。
-      _registerPlaybackFailure(song);
+      // 已走完 VIP 领取与（网络类失败的）自动重试仍失败：计入失败，按失败
+      // 类型决定是否立即前进（无音源一次即跳，网络类攒够阈值再跳）。
+      _registerPlaybackFailure(song, noSource: noSource);
     } finally {
       // 兜底：任何提前 return/异常路径都不得让引擎停在本次静音态（否则整首
       // 歌永久无声）。代际不匹配说明已有更新的切歌流程接管，由它负责解除，
@@ -645,24 +662,36 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
   /// 记录一次最终播放失败（已走完 VIP 领取与自动重试）。
   ///
-  /// 连续失败达 [_kAutoSkipFailureThreshold] 次后自动跳到下一首：坏源
-  /// （无版权/地址失效）与断网场景下，播放器此前会永久卡在同一首的错误态，
-  /// 用户只能手动一首首点。跳过策略：
+  /// 分两类，计数与预算都各自独立：
+  ///
+  /// - **确定性无音源**（`noSource`，见 [NoPlayableSourceException]）：服务端
+  ///   已明确回答没有地址，**一次即判跳过**。旧实现沿用「连续失败 3 次」阈值，
+  ///   而任何一首成功起播都会把 streak 清零——收藏列表里零散的无音源歌夹在
+  ///   能播的歌之间，永远等不到第 3 次，只能用户手动点下一首（issue #25）。
+  /// - **网络/解码类失败**：仍是连续 [_kAutoSkipFailureThreshold] 次才跳，
+  ///   避免弱网抖动把整单抽干。
+  ///
+  /// **无音源不计入 [_consecutivePlayFailures]**：它不能作为「网络好不好」的
+  /// 证据，混进来会让一串跳过给后面的网络失败白送计数——实测两首无音源跳过
+  /// 后，第三首网络异常只失败一次就被当成「第 3 次」跳掉（而它再重试一次
+  /// 可能就播了）。
+  ///
+  /// 两类共用的限流：
   /// - 单曲队列不跳（无处可去，保持错误态提示）；
-  /// - 本轮 streak 内跳过次数上限 = min(队列长度, [_kMaxAutoSkipsPerStreak])：
-  ///   连续多首失败说明是网络/服务端问题而非单曲问题，早点停下报错——
-  ///   每首都要走一遍自动重试（2s 等待），长队列会变成数分钟的跳歌风暴；
-  /// - 墙钟预算 [_kAutoSkipWallClockBudget]：弱网下每首跳过仍要 15-20s
-  ///   的地址解析，只按次数限制最坏要 2-3 分钟才停，超时即停；
+  /// - 本轮 streak 跳过次数上限不超过队列长度（整单都坏时停住，不无限循环）；
+  /// - 墙钟预算 [_kAutoSkipWallClockBudget]：弱网下每首跳过仍要 15-20s 的
+  ///   地址解析，只按次数限制最坏要几分钟才停，超时即停；
   /// - 任一首成功起播即整体归零（见 playSong 起播后的清零）。
-  void _registerPlaybackFailure(Song song) {
+  void _registerPlaybackFailure(Song song, {bool noSource = false}) {
     if (_disposed) return;
-    _consecutivePlayFailures++;
-    if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) {
-      final toastMessage = '《${song.title}》暂无可播放音源';
-      lastPlaybackFailureToast = toastMessage;
-      Toast.error(toastMessage);
-      return;
+    if (!noSource) {
+      _consecutivePlayFailures++;
+      if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) {
+        final toastMessage = '《${song.title}》暂无可播放音源';
+        lastPlaybackFailureToast = toastMessage;
+        Toast.error(toastMessage);
+        return;
+      }
     }
 
     final queueLength = queue.length;
@@ -672,35 +701,60 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       Toast.error(toastMessage);
       return;
     }
-    final skipLimit = queueLength < _kMaxAutoSkipsPerStreak
-        ? queueLength
-        : _kMaxAutoSkipsPerStreak;
-    final since = _autoSkipStreakSince ??= DateTime.now();
+    final cap = noSource ? _kMaxNoSourceSkipsPerStreak : _kMaxAutoSkipsPerStreak;
+    final skipLimit = queueLength < cap ? queueLength : cap;
+    final skipped = noSource
+        ? _autoSkippedNoSourceInStreak
+        : _autoSkippedInStreak;
+    final since = noSource
+        ? (_noSourceSkipStreakSince ??= DateTime.now())
+        : (_autoSkipStreakSince ??= DateTime.now());
     final overBudget =
         DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
-    if (_autoSkippedInStreak >= skipLimit || overBudget) {
+    if (skipped >= skipLimit || overBudget) {
       debugPrint(
-        '[时音][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
-        '$_autoSkippedInStreak 首（上限 $skipLimit'
+        '[时音][player] ${noSource ? '无音源' : '连续失败 $_consecutivePlayFailures 次'}'
+        '，本轮已自动跳过 $skipped 首（上限 $skipLimit'
         '${overBudget ? '，已超墙钟预算 $_kAutoSkipWallClockBudget' : ''}），停止跳转',
       );
-      const toastMessage = '连续多首歌曲播放失败，已停止播放';
+      final toastMessage = noSource
+          ? '连续多首歌曲无音源，已停止自动跳过'
+          : '连续多首歌曲播放失败，已停止播放';
       lastPlaybackFailureToast = toastMessage;
       Toast.error(toastMessage);
       return;
     }
-    _autoSkippedInStreak++;
+    if (noSource) {
+      _autoSkippedNoSourceInStreak++;
+    } else {
+      _autoSkippedInStreak++;
+    }
     debugPrint(
-      '[时音][player] 连续失败 $_consecutivePlayFailures 次，自动跳过: ${song.title}',
+      '[时音][player] ${noSource ? '无音源' : '连续失败 $_consecutivePlayFailures 次'}'
+      '，自动跳过: ${song.title}',
     );
-    final toastMessage = '《${song.title}》播放失败，已跳过';
+    final toastMessage = noSource
+        ? '《${song.title}》暂无音源，已跳过'
+        : '《${song.title}》播放失败，已跳过';
     lastPlaybackFailureToast = toastMessage;
-    Toast.show(toastMessage);
+    // 无音源是快跳过（无重试等待），成片下架时逐首弹会把提示刷成一片闪动：
+    // 只在本轮首次跳过时提示，连跳过程静默，用户仍能从歌曲切换看出发生了跳过。
+    if (!noSource || _autoSkippedNoSourceInStreak == 1) {
+      Toast.show(toastMessage);
+    }
     // 脱离当前调用栈：本流程的 finally 尚未执行，直接 await next() 会形成
     // 逐曲嵌套的 await 链；延后一拍让本次收尾先完成（finally 的深度计数
     // 随后归零，不会误清新流程的守卫）。
     Future<void>.delayed(Duration.zero, () {
       if (_disposed) return;
+      // 失败到真正跳过之间可能已有别人接管：冷启动恢复链（resumePlayback）
+      // 靠同一个 errorMessage 自行推进、用户手动点了别的歌、或另一条失败
+      // 流程已经切走。此刻 currentSong 不再是失败的那首就放弃，否则会连跳
+      // 两首——把本来可播的下一首也丢掉。
+      if (!_isSameSongIdentity(currentSong, song)) {
+        debugPrint('[时音][player] 自动跳过放弃(已切歌): ${song.title}');
+        return;
+      }
       unawaited(next());
     });
   }
@@ -791,10 +845,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
   }
 
-  /// VIP 过期时自动领取并重试播放，成功返回 true。
+  /// VIP 过期时自动领取并重试播放。
   /// 转发调用方的队列/定位/高潮上下文，避免重试丢定位。
+  /// 结果见 [VipRetryOutcome]：`resumed` 已重新起播、`noSource` 领了仍无地址
+  /// （确定性不可播）、`failed` 领取本身没成功（按普通失败计数）。
   @override
-  Future<bool> _tryClaimVipAndRetry(
+  Future<VipRetryOutcome> _tryClaimVipAndRetry(
     Song song, {
     List<Song>? queue,
     Duration? initialPosition,
@@ -802,34 +858,52 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   }) async {
     try {
       final result = await vipClaim!.claimNow(null);
-      if (result.status == VipClaimStatus.success ||
-          result.status == VipClaimStatus.alreadyClaimed) {
-        debugPrint('[时音][player] VIP 已领取，重试播放: ${song.title}');
-        final playUrl = await _api.songUrl(
+      final claimed =
+          result.status == VipClaimStatus.success ||
+          result.status == VipClaimStatus.alreadyClaimed;
+      if (!claimed) return VipRetryOutcome.failed;
+      debugPrint('[时音][player] VIP 已领取，重试播放: ${song.title}');
+      final PlayUrl playUrl;
+      try {
+        playUrl = await _api.songUrl(
           song,
           quality: audioQuality,
           hashOnly: _isPersonalFmActive,
         );
-        if (playUrl.url.isNotEmpty) {
-          errorMessage = null;
-          // 重新走完整播放流程（保留定位与高潮武装）；
-          // isRetry 防止服务端反复在"下发 URL"与 VIP 异常之间抖动时形成无限领取/重试递归。
-          unawaited(
-            playSong(
-              song,
-              queue: queue,
-              initialPosition: initialPosition,
-              preserveClimax: preserveClimax,
-              isRetry: true,
-            ),
-          );
-          return true;
+      } on VipRequiredException {
+        // 刚领到（今天第一次）可能还没生效：交给连续失败阈值与重试兜住；
+        // 今天早已领过、接口仍说需要 VIP，说明这个账号今天就是播不了这首
+        // （领取档位不覆盖/需购买专辑），等价无音源。
+        if (result.status == VipClaimStatus.alreadyClaimed) {
+          debugPrint('[时音][player] 今日已领 VIP 仍被拒，按无音源处理: ${song.title}');
+          return VipRetryOutcome.noSource;
         }
+        rethrow;
       }
+      if (playUrl.url.isEmpty) {
+        // 领取成功（或今日已领）却仍然没有地址：这不是「等 VIP 恢复」能解决的，
+        // 对播放器来说等价于无音源。旧实现统一返回 false → 落到连续失败阈值
+        // → 同样卡住不跳（issue #25）。
+        debugPrint('[时音][player] VIP 已领取但仍无地址，按无音源处理: ${song.title}');
+        return VipRetryOutcome.noSource;
+      }
+      errorMessage = null;
+      // 重新走完整播放流程（保留定位与高潮武装）；
+      // isRetry 防止服务端反复在"下发 URL"与 VIP 异常之间抖动时形成无限领取/重试递归。
+      unawaited(
+        playSong(
+          song,
+          queue: queue,
+          initialPosition: initialPosition,
+          preserveClimax: preserveClimax,
+          isRetry: true,
+        ),
+      );
+      return VipRetryOutcome.resumed;
     } catch (e) {
       debugPrint('[时音][player] VIP 领取/重试失败: $e');
+      return VipRetryOutcome.failed;
     }
-    return false;
   }
 
   /// 稳定播放 15s 后再后台缓存本次音频：快速切歌/跳过不会为每首歌都下载

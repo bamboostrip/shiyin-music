@@ -59,11 +59,23 @@ enum PlaybackMode { playlistLoop, shuffle, singleLoop }
 
 /// 连续播放失败达到该次数后自动跳到下一首（见 [_PlayerPlayback._registerPlaybackFailure]）。
 /// 库级常量：静态成员不能经实例访问，而该逻辑在 part 文件的 mixin 内。
+///
+/// 只约束「可能只是一时不行」的失败（网络/解码/服务端）。确定性无音源
+/// （[NoPlayableSourceException]）不走这个阈值，一次即判跳过——见
+/// [_kMaxNoSourceSkipsPerStreak]。
 const int _kAutoSkipFailureThreshold = 3;
 
 /// 单轮失败 streak 内自动跳过的次数上限（与队列长度取小）：连续多首失败
 /// 基本是网络/服务端问题，早点停下报错，避免长队列下的跳歌风暴。
 const int _kMaxAutoSkipsPerStreak = 5;
+
+/// 单轮 streak 内「确定性无音源」自动跳过的次数上限（与队列长度取小）。
+///
+/// 比 [_kMaxAutoSkipsPerStreak] 宽松得多：无音源是已经确定的结论（地址解析
+/// 成功但为空），单首只耗一次地址解析、不再等 2s 重试，而收藏/歌单里连续
+/// 几十首下架并不罕见——上限太小用户仍要手动一首首点（issue #25）。
+/// 仍按队列长度封顶：整单都无效时不至于无限循环空转。
+const int _kMaxNoSourceSkipsPerStreak = 30;
 
 /// 单轮失败 streak 自动跳过的墙钟预算：每次跳过仍要完整走一遍地址解析
 /// （弱网下单首可达 15-20s），仅按次数限制时长队列最坏要 2-3 分钟才停。
@@ -98,6 +110,20 @@ enum PlayConfirm {
   /// 超时且引擎侧静默（会话被抢/未 ready 又不抛错的未来路径），
   /// 调用方不得按成功记账：不清失败计数、不记历史不做缓存。
   timeoutSilent,
+}
+
+/// 「VIP 领取后重试」的结果（见 [_PlayerPlayback._tryClaimVipAndRetry]）。
+enum VipRetryOutcome {
+  /// 已领取并重新起播（未 await），调用方直接收手。
+  resumed,
+
+  /// 领取成功/今日已领，但接口仍然不给地址：本曲确定不可播，按「无音源」
+  /// 立即跳到下一首，不再计入连续失败。
+  noSource,
+
+  /// 领取本身失败（未登录/配额/网络/正在领取中）：可能只是暂时不行，
+  /// 按普通失败计数，让重试与阈值的保守策略继续兜住。
+  failed,
 }
 
 // PlayerController 的私有设置键/常量（原类内 static const，拆分后提升为库级常量，
@@ -688,12 +714,24 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// completed 守卫失效。计数化后状态只在最后一个在途加载结束时归零。
   int _changingSourceDepth = 0;
 
-  /// 连续播放失败次数（任一曲成功起播即归零）。
+  /// 连续「网络/解码类」播放失败次数（任一曲成功起播即归零）。
+  ///
+  /// 只统计 [_kAutoSkipFailureThreshold] 关心的那一类失败：确定性无音源
+  /// （[NoPlayableSourceException]）不进这个计数——它不能作为「网络好不好」
+  /// 的证据，混进来会给随后的网络失败白送次数、把 3 次的保守阈值提前打满。
   int _consecutivePlayFailures = 0;
 
   /// 本轮失败 streak 内已自动跳过的曲数：上限为队列长度——整轮都失败就
   /// 停下报错，不做无限循环（坏源/断网时"跳一次失败一次"会瞬间扫光队列）。
   int _autoSkippedInStreak = 0;
+
+  /// 本轮 streak 内因「确定性无音源」已自动跳过的曲数（与
+  /// [_autoSkippedInStreak] 分账，见 [_kMaxNoSourceSkipsPerStreak]）。
+  int _autoSkippedNoSourceInStreak = 0;
+
+  /// 无音源跳过这一路自己的墙钟起点：与 [_autoSkipStreakSince] 分开，
+  /// 否则一条 streak 被另一类跳过提前起算/超时，误伤另一类的预算。
+  DateTime? _noSourceSkipStreakSince;
 
   /// 连续「曲末停滞 watchdog 强制推进」次数（[_tryConsumeNearEndSkipBudget]）。
   ///
@@ -1199,7 +1237,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   void _schedulePlayCache(Song song, AudioQuality quality, String networkUrl);
 
   /// VIP 过期领取后重试（playback 分片实现，settings 的切音质路径复用）。
-  Future<bool> _tryClaimVipAndRetry(
+  Future<VipRetryOutcome> _tryClaimVipAndRetry(
     Song song, {
     List<Song>? queue,
     Duration? initialPosition,

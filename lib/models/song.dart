@@ -908,6 +908,21 @@ class VipRequiredException implements Exception {
   String toString() => message;
 }
 
+/// 本曲**确定**没有可播放音源时抛出（地址解析成功但为空：版权下架、
+/// 需购买专辑等），与网络/解码这类「可能只是暂时不行」的失败区分开。
+///
+/// 播放器据此走「一次即判定、立即自动跳过」，而不是按连续失败阈值等
+/// 第 N 次——收藏列表里零散的无音源歌夹在能播的歌之间时，成功起播会把
+/// 连续失败计数清零，永远等不到阈值（issue #25）。
+class NoPlayableSourceException implements Exception {
+  const NoPlayableSourceException([this.message = '这首歌暂时没有可播放地址']);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class LyricLine {
   const LyricLine({
     required this.time,
