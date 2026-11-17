@@ -343,6 +343,40 @@ void main() {
     expect(find.byType(CarLeftPlayerPanel), findsOneWidget);
   });
 
+  testWidgets('2560×1440 + 130% 缩放：面板在物理像素上仍是 30%', (tester) async {
+    // 界面缩放会把布局视口先除以 scale，若占比是「相对虚拟宽」取的，
+    // 物理上仍是 30%（591 × 1.3 = 768），不会叠加放大。这条钉住这个不变量。
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setCarModeEnabled(true);
+    final player = _FakePlayerController(currentSong: _song(0))
+      ..duration = const Duration(minutes: 3, seconds: 57);
+
+    tester.view.physicalSize = const Size(2560, 1440);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const zoom = 1.3;
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => CarDisplayViewport.maybe(
+          enabled: theme.carModeEnabled,
+          scale: zoom,
+          marginTop: 20,
+          marginBottom: 10,
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: _shell(theme, player: player),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final logical = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
+    expect(logical * zoom, closeTo(2560 * 0.30, 2));
+  });
+
   testWidgets('常见车机分辨率 × 缩放档位：播放中壳层无布局异常', (tester) async {
     final cases = <(Size, double)>[
       (const Size(1280, 720), 1.3),
@@ -352,6 +386,10 @@ void main() {
       // 用户实车日志复现：虚拟高度 564（非车机缩放，矮窗口/分屏同类形态）。
       (const Size(1280, 564), 1.0),
       (const Size(1280, 600), 1.0),
+      // issue #24 用户的分辨率：原生 2560×1440（面板 768、封面 576，
+      // 是面板按 30% 取宽后最大的一档）与 130% 缩放两档。
+      (const Size(2560, 1440), 1.0),
+      (const Size(2560, 1440), 1.3),
     ];
     final theme = ThemeController();
     await theme.load();

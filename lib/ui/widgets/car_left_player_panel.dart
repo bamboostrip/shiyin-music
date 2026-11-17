@@ -31,19 +31,32 @@ class CarLeftPlayerPanel extends StatelessWidget {
 
     // 车机左侧播放面板尺寸（issue #24）。
     //
-    // 旧实现是 320/380 的固定宽度，只随「窗口宽是否 ≥960」切一档，与屏幕
-    // 实际有多宽无关：1280 宽车机上占 29.7%（观感正常），1707 逻辑宽
-    // （2560×1600 / dpr1.5）上只剩 22%，2560 上只有 15%——高分车机因此
-    // 「又窄又空」。现在按窗口宽度的比例取（QQ 音乐车机版约 1/3），并对
-    // 面板内所有固定尺寸做等比放大，封面与按钮一起变大。
+    // 设计目标是**占比 ≈30% 屏宽**，参照 QQ 音乐车机版（按其车机截图实测：
+    // 屏幕 185→1270px、面板右边界 ≈498px，约 29%）。这个数与旧实现的观感
+    // 也对得上：旧版固定 380，在 1280 逻辑宽（1920×1080 屏 @dpr1.5，车机
+    // 最常见的组合）上正好 29.7%——所以「原来 1080 上的比例」是 ~30%，
+    // 不是 20%（20% 只在 dpr=1.0 的 1920 逻辑宽上出现，那种屏很少）。
     //
-    // 下限 320 保证 800/1024 宽的小车机不比改造前更窄；上限 780 只是兜底，
-    // 防止超宽屏上把右侧内容区挤到断点以下（1707 逻辑宽下取 563，不触顶）。
-    // 另按可用高度收一次（0.62 高）：32:9 这类超宽矮屏若只按宽度取，面板会
-    // 又宽又扁、封面被挤成小块。
+    // 这里等价于 web 的 flex 3:7——右侧内容区是 Expanded，吃掉剩下的 70%。
+    // 不直接写 `Expanded(flex: 3)` 是因为小屏上 30% 放不下五个控制键，
+    // 需要一条「可用性下限」，而 flex 表达不了 min-width。
+    //
+    // 所以**不设上限**：1280 逻辑宽 → 384、1707 → 512、1920 → 576、
+    // 2560 → 768、3840 → 1152，永远 30%。issue #24 用户的 dpr 未实测
+    // （日志导出时诊断头还没有 Screen 行），原生 dpr=1 就取 768、dpr1.5
+    // 的 1707 就取 512——两种情况都是 30%，规则与 dpr 解耦。
+    // 只保留下限（≥960 保底 380、<960 保底 320）与「可用高 × 0.62」收口
+    // （32:9 超宽矮屏：2560×720 → 446，否则面板会又宽又扁）。
+    //
+    // 历史：v3.0.20 首版把目标占比定成了 1/3，1920 逻辑宽上从 380 涨到 634，
+    // 又因为「封面上限 = 面板内宽全额」变成大图 + 两侧各 70dp 留白，观感
+    // 反而比旧版差；这次把封面收成内容宽的 0.84，占比也从 33% 收到 30%。
+    final double panelMinWidth = size.width < 960 ? 320.0 : 380.0;
     final double panelWidth = math
-        .min((size.width * 0.33).clamp(320.0, 780.0), availableHeight * 0.62)
-        .clamp(320.0, 780.0)
+        .max(
+          math.min(size.width * 0.30, availableHeight * 0.62),
+          panelMinWidth,
+        )
         .toDouble();
 
     // 可用高度连固定块都放不下（分屏/极小窗口）时直接留空面板，避免溢出。
@@ -54,13 +67,16 @@ class CarLeftPlayerPanel extends StatelessWidget {
     // 内部等比系数：以旧设计基线（380 宽 × 720 高）为 1.0。
     // 同时受宽、高约束：超宽矮屏（2560×720 这类 32:9）不能只按宽度放大，
     // 否则固定块变高一倍、封面会被挤到 24dp（历史溢出问题的另一种形态）。
+    // 下限 0.85 对应 320 的小屏档（320/380 ≈ 0.84），比原先写死的 0.92
+    // 更贴合旧的小屏参数（padding 14 / 播放键 56 / 图标 32）；上限 2.2 覆盖
+    // 到 3840 逻辑宽（面板 1152），保证超大屏上封面/按键不会相对变小。
     final double scale = math
         .min(panelWidth / 380.0, availableHeight / 720.0)
-        .clamp(0.92, 2.0)
+        .clamp(0.85, 2.2)
         .toDouble();
-    // 字号单独封顶：封面/按钮按 scale 全额放大，文字只跟到 1.45 倍，
+    // 字号单独封顶：封面/按钮按 scale 全额放大，文字只跟到 1.7 倍，
     // 否则会和右侧内容区（14~16sp）脱节得太厉害。
-    final textScale = math.min(scale, 1.45);
+    final textScale = math.min(scale, 1.7);
     final panelPadding = 20.0 * scale;
 
     final colorScheme = Theme.of(context).colorScheme;
@@ -85,11 +101,13 @@ class CarLeftPlayerPanel extends StatelessWidget {
         verticalPadding * 2 -
         fixedContentHeight -
         28.0 * scale;
-    // issue #24：封面上限从固定 280 改为「面板内宽 / 可用高度」共同决定。
-    // 0.40 高度上限让封面在 1280×720 上维持旧观感（≈288），高分车机随
-    // 逻辑高度放大（1707×960 ≈ 384，与 QQ 车机版占宽 22.5% 基本一致）。
+    // issue #24：封面上限从固定 280 改为「面板内容宽 / 可用高度」共同决定。
+    // 0.84 让封面在基线屏上等于旧值（(380-40)*0.84 ≈ 286，旧 280），
+    // 宽屏随面板一起变大（1707×960 → 384、1920×1080 → 432、2560×1440 → 576，
+    // 这几档实际由 0.40 高度上限收口），且始终留出两侧留白；0.40 高度上限
+    // 防止 32:9 超宽矮屏上封面把控制条挤出去。
     final double artworkMax = math.min(
-      panelWidth - panelPadding * 2,
+      (panelWidth - panelPadding * 2) * 0.84,
       availableHeight * 0.40,
     );
     // 上下界都是推导值，这里用 min/max 组合同等价钳制：clamp 在下界 > 上界时
@@ -265,8 +283,10 @@ class CarLeftPlayerPanel extends StatelessWidget {
                       builder: (context, _) {
                         final liked = auth.isLiked(song);
                         // 车机远距离触控：收藏按钮加大，保证 >=48dp 触控目标。
-                        final favBtnSize = math.min(60.0 * scale, 76.0);
-                        final favIconSize = math.min(34.0 * scale, 44.0);
+                        // 不再设绝对上限（旧版写死 76/44）：scale 现在能到 2.2，
+                        // 卡在 76 会让大屏上的爱心只有播放键一半大。
+                        final favBtnSize = 60.0 * scale;
+                        final favIconSize = 34.0 * scale;
                         return Container(
                           width: favBtnSize,
                           height: favBtnSize,

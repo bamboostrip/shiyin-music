@@ -120,33 +120,68 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('面板宽度按窗口宽度比例（约 1/3），不再是固定 380', (tester) async {
-    await pumpPanelAt(tester, const Size(1280, 720));
-    final at1280 = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
-    expect(at1280, closeTo(1280 * 0.33, 0.5));
+  testWidgets('按占比取宽：任何宽度都是 30% 屏宽（相当于 flex 3:7）', (tester) async {
+    await pumpPanelAt(tester, const Size(1920, 1080));
+    final at1920 = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
+    expect(at1920, closeTo(576, 0.5));
+    expect(at1920 / 1920, closeTo(0.30, 0.01));
 
-    await pumpPanelAt(tester, const Size(1707, 960));
-    final at1707 = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
-    expect(at1707, closeTo(1707 * 0.33, 0.5));
-    expect(at1707, greaterThan(at1280), reason: '高分车机上面板应同比变宽');
-
-    // 2560×1600 车机（issue #24 用户设备）：逻辑宽 1707 时占比 33%，
-    // 旧实现只有 22%。
-    expect(at1707 / 1707, greaterThan(0.31));
+    // 不设上限：2560 逻辑宽（dpr=1 的 1440p 屏）也是 30%，不再是 25%。
+    await pumpPanelAt(tester, const Size(2560, 1440));
+    final at2560 = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
+    expect(at2560, closeTo(768, 0.5));
+    expect(at2560 / 2560, closeTo(0.30, 0.01));
+    expect(at2560, greaterThan(at1920), reason: '屏越宽面板越宽');
   });
 
-  testWidgets('小屏车机不劣化：320 下限与超宽屏 780 上限', (tester) async {
+  testWidgets('1280 逻辑宽维持旧观感：384 ≈ 旧 380（29.7% → 30%）', (tester) async {
+    // 1920×1080 车机多数是 dpr 1.5 → 1280 逻辑宽，旧实现固定 380 = 29.7%，
+    // 正好是 QQ 车机版的 ~29%——所以这类设备改完只差 4dp。
+    await pumpPanelAt(tester, const Size(1280, 720));
+    expect(tester.getSize(find.byType(CarLeftPlayerPanel)).width, closeTo(384, 0.5));
+
+    // 1707（2560×1440 @dpr1.5）按 30% 取 512，比旧的 380 明显变宽——这正是
+    // issue #24 用户要的。
+    await pumpPanelAt(tester, const Size(1707, 960));
+    expect(tester.getSize(find.byType(CarLeftPlayerPanel)).width, closeTo(512, 0.5));
+  });
+
+  testWidgets('1920×1080 回归：左栏不许超过 1/3 屏，封面不顶满面板', (tester) async {
+    // v3.0.20 首版 33% + 「封面上限 = 面板内宽全额」，在 1920 上变成 634 的
+    // 宽栏 + 两侧各 70dp 留白。这里同时钉住占比与封面留白。
+    await pumpPanelAt(tester, const Size(1920, 1080));
+    final panel = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
+    expect(panel / 1920, lessThan(0.32));
+    expect(tester.getSize(find.byType(Artwork)).width, lessThan(panel * 0.80));
+  });
+
+  testWidgets('没有上限：4K 逻辑宽也是 30%，内部等比系数跟得上', (tester) async {
+    await pumpPanelAt(tester, const Size(3840, 2160));
+    final panel = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
+    expect(panel, closeTo(1152, 0.5));
+    expect(panel / 3840, closeTo(0.30, 0.01));
+    // 封面仍留白、不顶满（scale 上限 2.2 时 padding 会一起放大）
+    expect(tester.getSize(find.byType(Artwork)).width, lessThan(panel * 0.82));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('小屏 320 下限：800×480 / 1024×600', (tester) async {
     await pumpPanelAt(tester, const Size(800, 480));
     expect(
       tester.getSize(find.byType(CarLeftPlayerPanel)).width,
       closeTo(320, 0.5),
     );
 
-    await pumpPanelAt(tester, const Size(2560, 1440));
+    await pumpPanelAt(tester, const Size(1024, 600));
     expect(
       tester.getSize(find.byType(CarLeftPlayerPanel)).width,
-      closeTo(780, 0.5),
+      closeTo(380, 0.5),
     );
+  });
+
+  testWidgets('小屏 800×480 缩小档不溢出', (tester) async {
+    await pumpPanelAt(tester, const Size(800, 480));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('封面随屏幕一起放大，且不超过面板内容宽度', (tester) async {
@@ -155,12 +190,11 @@ void main() {
 
     await pumpPanelAt(tester, const Size(1707, 960));
     final art1707 = tester.getSize(find.byType(Artwork)).width;
-
-    expect(art1280, greaterThan(200), reason: '1280 基线封面应不小于旧值 280 一级');
-    expect(art1707, greaterThan(art1280 * 1.15), reason: '高分车机封面要明显更大');
-
     final panel1707 = tester.getSize(find.byType(CarLeftPlayerPanel)).width;
-    expect(art1707, lessThan(panel1707), reason: '封面不能超出面板');
+
+    expect(art1280, greaterThan(270), reason: '1280 封面应与旧值 280 同档');
+    expect(art1707, greaterThan(art1280 * 1.25), reason: '高分车机封面要明显更大');
+    expect(art1707, lessThan(panel1707 * 0.82), reason: '封面不能顶满面板');
   });
 
   testWidgets('矮横屏（1280×480）不溢出', (tester) async {
@@ -177,6 +211,39 @@ void main() {
       textScaler: const TextScaler.linear(1.3),
     );
     expect(tester.takeException(), isNull);
-    expect(tester.getSize(find.byType(Artwork)).width, greaterThan(300));
+    expect(tester.getSize(find.byType(Artwork)).width, greaterThan(270));
+  });
+
+  testWidgets('控件随面板等比放大（收藏/播放键不再有绝对上限）', (tester) async {
+    await pumpPanelAt(tester, const Size(1280, 720));
+    expect(
+      tester.getSize(find.byIcon(Icons.favorite_border_rounded)).width,
+      closeTo(34, 0.5),
+    );
+    expect(tester.getSize(find.byIcon(Icons.pause_rounded)).width, closeTo(40, 0.5));
+
+    // scale 2.0：爱心 68、播放图标 80，而不是被旧的 44/76 天花板卡住。
+    await pumpPanelAt(tester, const Size(2560, 1440));
+    expect(
+      tester.getSize(find.byIcon(Icons.favorite_border_rounded)).width,
+      closeTo(68, 0.5),
+    );
+    expect(tester.getSize(find.byIcon(Icons.pause_rounded)).width, closeTo(80, 0.5));
+  });
+
+  testWidgets('原生 2560×1440（dpr=1）+ 系统大字号不溢出', (tester) async {
+    // issue #24 用户的设备可能就是原生 2560×1440（dpr=1）：面板 768、
+    // 封面 576、scale 2.0，是这次改动里面板最大的一档，必须钉住不溢出。
+    await pumpPanelAt(tester, const Size(2560, 1440));
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.byType(Artwork)).width, greaterThan(500));
+
+    for (final scaler in const [
+      TextScaler.linear(1.12),
+      TextScaler.linear(1.3),
+    ]) {
+      await pumpPanelAt(tester, const Size(2560, 1440), textScaler: scaler);
+      expect(tester.takeException(), isNull, reason: 'textScaler $scaler 溢出');
+    }
   });
 }
