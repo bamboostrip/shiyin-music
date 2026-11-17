@@ -608,12 +608,6 @@ class DownloadService {
       var outputPath = finalPath;
       if (task.kind == DownloadTaskKind.download) {
         outputPath = await _correctExtension(finalPath);
-
-        // Android：按路径写入公共目录的文件不会自动进系统媒体库，主动触发
-        // 一次扫描，车机 / 其他播放器 / 相册才能立即看到（应用专属目录会被
-        // 系统忽略，调用无副作用）。扫描是尽力而为，不阻塞下载结果。
-        // 用纠正后的路径：扫描是按路径入索引的。
-        unawaited(AndroidStorageAccess.scanFile(outputPath));
       }
 
       return outputPath;
@@ -678,6 +672,14 @@ class DownloadService {
       coverBytes: coverBytes,
     );
   }
+
+  /// 触发一次系统媒体库扫描（Android 才有效，其他平台内部 no-op）。
+  ///
+  /// 必须在**标签写完之后**再扫：MediaStore 在扫描当刻就把音频的
+  /// 艺人/专辑/封面快照进索引，先扫后写标签的话，系统音乐库、车机蓝牙
+  /// 列表会一直显示「未知艺人」直到文件被再次扫描。
+  Future<void> scanForMediaLibrary(String filePath) =>
+      AndroidStorageAccess.scanFile(filePath);
 
   /// 从封面磁盘缓存读取某 URL 的封面原始字节；未命中 / 读取失败返回 null。
   ///

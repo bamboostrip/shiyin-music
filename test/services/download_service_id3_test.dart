@@ -216,6 +216,34 @@ void main() {
     expect(tagged.sublist(tagged.length - audio.length), audio);
   });
 
+  test('无损请求被服务端降级成 mp3：文件名按真实编码纠正为 .mp3', () async {
+    // 请求无损（文件名模板给 .flac），但服务端实际回 MP3 字节——
+    // 这正是「扩展名撒谎」的场景，第三方播放器会按 .flac 选解析器而读不出。
+    final server = _AudioServer(dummyAudio());
+    final url = await server.start();
+    addTearDown(server.stop);
+
+    final path = await service.download(
+      song: testSong,
+      quality: AudioQuality.lossless,
+      url: url,
+      onProgress: (_, _) {},
+    );
+
+    expect(path.toLowerCase().endsWith('.mp3'), isTrue);
+    expect(File(path).existsSync(), isTrue);
+    // 纠正后原 .flac 名不应残留成空壳。
+    expect(
+      downloadDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.toLowerCase().endsWith('.flac')),
+      isEmpty,
+    );
+    // 字节与下载内容一致（纠正只改名，不动内容）。
+    expect(await File(path).readAsBytes(), dummyAudio());
+  });
+
   test('同一首歌二次下载：覆盖同名文件不产生 (2) 副本，也不叠加重复 ID3', () async {
     final audio = dummyAudio();
     final server = _AudioServer(audio);

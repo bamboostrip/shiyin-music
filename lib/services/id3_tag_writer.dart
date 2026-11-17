@@ -48,8 +48,9 @@ class Id3TagWriter {
   /// - 读写标签过程中出现任何异常。
   ///
   /// [coverBytes]：封面原始图片字节（PNG/JPEG），为 null 时不写 APIC；
-  /// [lyricsText]：内嵌歌词文本，非空时写 USLT——本期下载链路不传（歌词
-  /// 另走 local_lyrics_service/在线匹配），接口先保留。
+  /// [lyricsText]：内嵌歌词文本，非空时写 USLT。下载收尾
+  /// （`DownloadMetadataWriter`）会把在线歌词传进来，让第三方播放器/车机
+  /// 也能显示歌词。
   static Future<bool> injectMetadata({
     required String filePath,
     required Song song,
@@ -137,7 +138,7 @@ class Id3TagWriter {
     final apic = coverBytes == null ? null : _buildApicFrame(coverBytes);
     if (apic != null) frames.add(apic);
 
-    // USLT 内嵌歌词（可选，本期下载链路不传）。
+    // USLT 内嵌歌词（下载收尾时由 DownloadMetadataWriter 传入）。
     if (lyricsText != null && lyricsText.trim().isNotEmpty) {
       frames.add(_buildUsltFrame(lyricsText));
     }

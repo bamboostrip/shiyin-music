@@ -878,6 +878,10 @@ class DownloadController extends ChangeNotifier {
         lyricsText: lyricsText,
         saveLyricsFile: _saveLyricsFile,
       );
+      // Android：按路径写进公共目录的文件不会自动进系统媒体库。扫描放在
+      // 标签写完之后——MediaStore 在扫描当刻快照艺人/专辑/封面，先扫后写
+      // 会让系统音乐库与车机蓝牙列表长期显示「未知艺人」。
+      unawaited(_service.scanForMediaLibrary(path));
       return path;
     } catch (error) {
       debugPrint('[时音][download] 写入元数据失败（已忽略）: ${song.title} $error');
