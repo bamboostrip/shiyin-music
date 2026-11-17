@@ -99,7 +99,8 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
       bool isRetry = false,
       Duration? initialPosition,
       bool preserveClimax = false,
-      bool preservePersonalFmSession = false}) async {
+      bool preservePersonalFmSession = false,
+      bool userInitiated = true}) async {
     played.add(song);
     notifyListeners();
   }

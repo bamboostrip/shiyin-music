@@ -333,7 +333,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     _sleepFinishCurrentSongOption = false;
     sleepTimerRemaining = null;
     notifyListeners();
-    unawaited(_audioHandler.pause());
+    unawaited(_audioHandler.pause(userInitiated: false));
   }
 
   @override
@@ -452,6 +452,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     autoPlayOnDeviceConnected =
         prefs.getBool(_autoPlayOnDeviceConnectedSettingKey) ??
         autoPlayOnDeviceConnected;
+    autoPauseOnDeviceDisconnect =
+        prefs.getBool(_autoPauseOnDeviceDisconnectSettingKey) ??
+        autoPauseOnDeviceDisconnect;
     bluetoothLyricsEnabled =
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;

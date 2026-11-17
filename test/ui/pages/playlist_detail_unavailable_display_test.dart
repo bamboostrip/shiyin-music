@@ -136,6 +136,7 @@ class _FakePlayerController extends ChangeNotifier
     Duration? initialPosition,
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
+    bool userInitiated = true,
   }) async {
     playCalls.add((song, queue));
   }

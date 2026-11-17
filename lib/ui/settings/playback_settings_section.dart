@@ -45,6 +45,7 @@ class PlaybackSettingsSection extends StatelessWidget {
     final parts = <String>[];
     if (!player.audioInterruptionEnabled) parts.add('已阻止打断');
     if (player.autoResumeAfterInterruption) parts.add('自动恢复');
+    if (player.autoPauseOnDeviceDisconnect) parts.add('断开即停');
     return parts.isEmpty ? '未开启' : parts.join(' · ');
   }
 

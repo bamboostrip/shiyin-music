@@ -816,12 +816,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
       Future<void>.delayed(delay, () {
         if (!mounted) return;
         if (hasRestored) {
-          widget.player.resumePlayback();
+          // 启动自播不是用户意图：不能借它解除「蓝牙断开停止播放」的保护
+          // （上游 3.3.0 `c7ba1e6`：蓝牙没连上时开机自播会直接外放）。
+          widget.player.resumePlayback(userInitiated: false);
         } else {
           // 防御拷贝（对齐上游 PR #156）：songs 取自 data.daily，是首页模型
           // 持有的可复用列表；playSong 会接管并持有队列引用，拷贝一份再交给
           // 播放器，避免后续刷新/重置首页数据时与播放队列共用同一 List。
-          widget.player.playSong(songs.first, queue: List<Song>.of(songs));
+          widget.player.playSong(
+            songs.first,
+            queue: List<Song>.of(songs),
+            userInitiated: false,
+          );
         }
       });
     });

@@ -88,6 +88,8 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   void attachTransportControls({
     required Future<void> Function() onNext,
     required Future<void> Function() onPrevious,
+    void Function()? onPlay,
+    void Function()? onPause,
   }) {}
 
   @override
@@ -109,10 +111,10 @@ class _RecordingAudioHandler extends Fake implements MusicAudioHandler {
   }
 
   @override
-  Future<void> play() async {}
+  Future<void> play({bool userInitiated = true}) async {}
 
   @override
-  Future<void> pause() async {}
+  Future<void> pause({bool userInitiated = true}) async {}
 
   @override
   Future<void> stop() async {}

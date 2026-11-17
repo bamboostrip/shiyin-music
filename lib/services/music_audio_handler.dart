@@ -134,7 +134,14 @@ class MusicAudioHandler extends BaseAudioHandler
   static const toggleLikeActionName = 'shiyin.toggle_like';
   static const toggleDesktopLyricsActionName = 'shiyin.toggle_desktop_lyrics';
 
-  final AudioPlayer audioPlayer = AudioPlayer();
+  /// 打断与断连策略**归 PlayerController 独占**（见
+  /// `player_controller.desktop.dart` 的 `_setupAudioSessionListeners`）。
+  ///
+  /// 上游 3.3.0 `9426621` 的结论：just_audio 自带的打断处理会在焦点回来后
+  /// 自行 `play()`，绕过用户主动暂停与「蓝牙断开停止播放」，表现就是
+  /// 「暂停后接个电话，挂断自己开始播」。关掉它之后 pause/resume/duck
+  /// 全部由控制器按显式意图决定，这也是 `play({userInitiated})` 存在的前提。
+  final AudioPlayer audioPlayer = AudioPlayer(handleInterruptions: false);
 
   bool _notificationActionsEnabled = false;
   NotificationActionBridge? _notificationActions;
@@ -157,6 +164,9 @@ class MusicAudioHandler extends BaseAudioHandler
 
   Future<void> Function()? _onNext;
   Future<void> Function()? _onPrevious;
+  /// 用户发起的播放/暂停（通知栏、锁屏、耳机线控），见 [attachTransportControls]。
+  void Function()? _onPlay;
+  void Function()? _onPause;
   int _queueIndex = 0;
 
   /// 当前投递给系统媒体会话的歌曲：歌词元数据（LyricInfo/extras）重建
@@ -207,17 +217,29 @@ class MusicAudioHandler extends BaseAudioHandler
   final Map<int, _ProxyRoute> _proxyRoutes = {};
   int _loadSeq = 0;
 
+  /// 控制器接线（由 main.dart 在创建后注入）。
+  ///
+  /// [onPlay] / [onPause] 只在**用户发起**的播放/暂停时回调（通知栏、锁屏、
+  /// 耳机线控、媒体键），供控制器作废「自动恢复」定时器与断连保护。
+  /// 控制器内部走 `play(userInitiated: false)` / `pause(userInitiated: false)`，
+  /// 不会反过来把流程自己发的指令当成用户意图。
   void attachTransportControls({
     required Future<void> Function() onNext,
     required Future<void> Function() onPrevious,
+    void Function()? onPlay,
+    void Function()? onPause,
   }) {
     _onNext = onNext;
     _onPrevious = onPrevious;
+    _onPlay = onPlay;
+    _onPause = onPause;
   }
 
   void detachTransportControls() {
     _onNext = null;
     _onPrevious = null;
+    _onPlay = null;
+    _onPause = null;
   }
 
   /// 注入通知卡片自定义按钮的回调（见 [NotificationActionBridge]）。
@@ -1125,7 +1147,8 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> play() async {
+  Future<void> play({bool userInitiated = true}) async {
+    if (userInitiated) _onPlay?.call();
     // 曲末恢复：completed 且位置停在尾部时，移动端原生 just_audio 的
     // playing 是陈旧 true（EOF 不回写），直接 play() 会被其首行
     // `if (playing) return` 短路——通知栏/锁屏/耳机媒体键的播放键在曲末
@@ -1166,7 +1189,8 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> pause() async {
+  Future<void> pause({bool userInitiated = true}) async {
+    if (userInitiated) _onPause?.call();
     await audioPlayer.pause();
   }
 
@@ -1187,6 +1211,9 @@ class MusicAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> stop() async {
+    // 系统「停止」等同用户放弃播放：必须作废自动恢复，否则下一句打断结束
+    // 还会把它拉起来（与 pause 同源，见 [attachTransportControls]）。
+    _onPause?.call();
     await audioPlayer.stop();
   }
 

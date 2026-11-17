@@ -308,6 +308,8 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool get autoResumeAfterInterruption => false;
   @override
+  bool get autoPauseOnDeviceDisconnect => true;
+  @override
   bool get addListeningTimeEnabled => false;
   @override
   bool get allowCellularPrecache => false;

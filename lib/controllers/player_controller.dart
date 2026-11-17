@@ -110,6 +110,13 @@ enum PlayConfirm {
   /// 超时且引擎侧静默（会话被抢/未 ready 又不抛错的未来路径），
   /// 调用方不得按成功记账：不清失败计数、不记历史不做缓存。
   timeoutSilent,
+
+  /// 起播被状态机拒绝：企图次已过期（用户暂停/切歌/断连），
+  /// 或断连保护生效、或打断期间要求暂停。
+  ///
+  /// 与 [timeoutSilent] 分开是因为处置不同——这不是引擎异常，
+  /// 而是「本来就不该播」：既不记失败、也不该打错误日志、更不重试。
+  blocked,
 }
 
 /// 「VIP 领取后重试」的结果（见 [_PlayerPlayback._tryClaimVipAndRetry]）。
@@ -146,6 +153,8 @@ const _audioInterruptionEnabledSettingKey =
     'settings.audio_interruption_enabled';
 const _autoResumeAfterInterruptionSettingKey =
     'settings.auto_resume_after_interruption';
+const _autoPauseOnDeviceDisconnectSettingKey =
+    'settings.auto_pause_on_device_disconnect';
 const _playbackSpeedSettingKey = 'settings.playback_speed';
 const _userVolumeSettingKey = 'settings.user_volume';
 const _desktopLyricsEnabledSettingKey = 'settings.desktop_lyrics_enabled';
@@ -245,7 +254,11 @@ class PlayerController extends _PlayerControllerBase
   /// 经 MethodChannel 下发，这里转成播控动作；非 Android 平台内部 no-op。
   final MediaKeyService _mediaKeyService = MediaKeyService();
 
-  PlayerController(super.api, super.audioHandler) {
+  PlayerController(
+    super.api,
+    super.audioHandler, {
+    super.audioSessionProvider,
+  }) {
     unawaited(_restoreSettings());
     unawaited(_restorePlaybackState());
     // 车机切网（WiFi ↔ 蜂窝 ↔ 离线）后恢复网络时，若上一首因断网停在
@@ -259,7 +272,14 @@ class PlayerController extends _PlayerControllerBase
         unawaited(playSong(song, isRetry: true));
       },
     );
-    _audioHandler.attachTransportControls(onNext: next, onPrevious: previous);
+    _audioHandler.attachTransportControls(
+      onNext: next,
+      onPrevious: previous,
+      // 通知栏/锁屏/耳机线控是**用户显式意图**：作废自动恢复并解除断连保护，
+      // 与 togglePlay 内部再调一次是幂等的（_cancelAutomaticResume 只推进代次）。
+      onPlay: _handleManualPlay,
+      onPause: _cancelAutomaticResume,
+    );
     // 车机方控前台兜底：原生只发标准媒体键，这里映射到与通知栏/媒体键
     // 同一套播控。控制器没有独立 play/pause/stop，按当前 isPlaying 走
     // togglePlay，避免「暂停键在已暂停时反而起播」这类双触发。
@@ -465,7 +485,9 @@ class PlayerController extends _PlayerControllerBase
     _flushPendingVolumePersist();
     _flushPendingLyricOffsetPersist();
     _networkRestoredSub?.cancel();
-    _autoResumeTimer?.cancel();
+    // 代次一并推进：排队的自动恢复回调可能已越过 cancel（await 之后），
+    // 只有代次比对能拦住它在 dispose 后起播。
+    _cancelAutomaticResume();
     _sleepTimer?.cancel();
     _playCacheTimer?.cancel();
     _positionSub.cancel();
@@ -535,7 +557,19 @@ class PlayerController extends _PlayerControllerBase
 /// （同库私有，零可见性改动）。
 /// 跨分片引用的方法在此声明为抽象契约，由各职责 mixin 提供实现。
 abstract class _PlayerControllerBase extends ChangeNotifier {
-  _PlayerControllerBase(this._api, this._audioHandler);
+  _PlayerControllerBase(
+    this._api,
+    this._audioHandler, {
+    Future<AudioSession> Function()? audioSessionProvider,
+  }) : _audioSessionProvider =
+           audioSessionProvider ?? (() => AudioSession.instance);
+
+  /// AudioSession 获取入口（可注入）。
+  ///
+  /// 打断/断连策略从 just_audio 收归控制器后（上游 3.3.0 `9426621`），
+  /// 这段逻辑就成了「暂停/恢复」的唯一出处，必须能被单测观察与伪造事件；
+  /// 直接写 `AudioSession.instance` 时测试只能走平台通道，无法断言。
+  final Future<AudioSession> Function() _audioSessionProvider;
 
   /// 下载控制器（由 main.dart 在创建后注入，供 UI 访问下载功能）。
   DownloadController? downloadController;
@@ -812,6 +846,13 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool audioInterruptionEnabled = true;
   bool autoResumeAfterInterruption = false;
   bool autoPlayOnDeviceConnected = false;
+
+  /// 蓝牙/耳机断开（becomingNoisy）时是否立即停止播放，防止误外放。
+  ///
+  /// 默认 **true**：Android 在蓝牙掉线/拔耳机时会把音频改路由到扬声器继续播，
+  /// 车机熄火、走出车外就变成手机外放（上游 3.3.0 `56d0c9f` 修的就是这个）。
+  /// 关闭后回到旧行为：断开时按 [autoResumeAfterInterruption] 决定是否恢复。
+  bool autoPauseOnDeviceDisconnect = true;
   bool bluetoothLyricsEnabled = false;
 
   /// 手环/AVRCP 歌词标题同步：开启后 MediaSession 的 title 为当前歌词行
@@ -887,6 +928,47 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   bool _bluetoothLyricsTitleSyncApplied = false;
 
   Timer? _autoResumeTimer;
+
+  // ---- 音频打断 / 断连保护状态（上游 3.3.0 `9426621`）----------------------
+  //
+  // 背景：just_audio 自带的打断处理会在焦点回来后自行起播，绕过用户主动暂停；
+  // 我们的「自动恢复」定时器又只看「有当前歌且没在播」，两者叠加就是
+  // 「暂停后接个电话，挂断自己开始播」。把打断策略收归控制器后，这里保存
+  // 决策所需的全部状态。
+
+  /// 进入打断/断连事件时，播放器是否正在播放（或有一个**用户发起**的
+  /// 起播请求仍在途）。打断结束时只有它为真才允许恢复。
+  bool _wasPlayingAtInterruption = false;
+
+  /// 当前是否处于系统音频打断中（来电、语音助手等）。
+  bool _isAudioInterrupted = false;
+
+  /// 本次打断是否要求我们处于暂停态（非 duck 类打断）。
+  ///
+  /// 用于拦住「打断期间仍在解析的起播请求」：地址解析 + 重试可能跨数秒，
+  /// 期间来电已经让我们暂停，解析完成后那个请求不能自己把声音放出来。
+  bool _interruptionRequiresPause = false;
+
+  /// 蓝牙/耳机断开后置位，**只有显式用户播放**才能解除。
+  ///
+  /// 与 [autoPauseOnDeviceDisconnect] 配合：断开即暂停，且断开前发出的
+  /// 自动恢复/在途起播一律作废，避免声音意外切到扬声器外放。
+  bool _resumeBlockedByDisconnect = false;
+
+  /// 自动恢复定时器代次：重启定时器或用户手动操作时递增，
+  /// 使已排队的旧回调自行失效（定时器本身 cancel 不足以覆盖 await 之后）。
+  int _autoResumeSerial = 0;
+
+  /// 播放意图代次：**每次用户显式操作播放**（点歌/播放键/上一首下一首）递增。
+  ///
+  /// 意图在任何网络或音源加载**之前**登记；加载完成时比对代次，不一致就
+  /// 放弃起播。这是「加载完成不得授予新权限」的唯一判据——用户的暂停、
+  /// 断连都体现为代次推进，在途请求自然作废。
+  int _playbackIntentSerial = 0;
+
+  /// 仍在途的起播意图（用于判断「要不要在打断结束后恢复」）。
+  int? _pendingPlaybackIntent;
+
   Duration? sleepTimerRemaining;
   Timer? _sleepTimer;
   Timer? _saveStateTimer;
@@ -967,14 +1049,39 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 发起播放，只在有界时间内等待平台确认（理由见 [_kPlayConfirmTimeout]）。
   ///
-  /// 返回值区分三种结局：平台确认成功、超时但引擎已在播（等同成功）、
-  /// 超时且引擎静默（调用方不应按成功记账）。只读 `audioPlayer.playing`
-  /// 做复核：just_audio 的 playing 含 buffering 为 true，慢网不会误判；
-  /// 本方法调用前刚 `loadSong` 成功，processingState 不可能是 completed，
-  /// 不用担心 EOF 陈旧 true。
-  Future<PlayConfirm> _requestPlayback() async {
+  /// 返回值区分四种结局：平台确认成功、超时但引擎已在播（等同成功）、
+  /// 超时且引擎静默（调用方不应按成功记账）、被状态机拒绝（同上）。
+  /// 只读 `audioPlayer.playing` 做复核：just_audio 的 playing 含 buffering 为 true，
+  /// 慢网不会误判；本方法调用前刚 `loadSong` 成功，processingState 不可能是
+  /// completed，不用担心 EOF 陈旧 true。
+  ///
+  /// [expectedIntent]：调用方在**进入网络/音源加载之前**登记的企图代次。
+  /// 加载期间用户可能暂停、切歌或断开蓝牙，那些操作都会推进
+  /// [_playbackIntentSerial]；代次对不上就说明这次起播已经失去授权，
+  /// 直接返回 [PlayConfirm.blocked] 而不出声。这是「加载完成不得授予新权限」
+  /// 的唯一执行点（上游 3.3.0 `9426621`）。
+  ///
+  /// [allowDuringInterruption]：只有「阻止打断」模式下的主动对抗恢复才为真。
+  Future<PlayConfirm> _requestPlayback({
+    int? expectedIntent,
+    bool allowDuringInterruption = false,
+  }) async {
+    if (expectedIntent != null &&
+        (expectedIntent != _playbackIntentSerial ||
+            _resumeBlockedByDisconnect ||
+            (_interruptionRequiresPause &&
+                audioInterruptionEnabled &&
+                !allowDuringInterruption))) {
+      _nextLog(
+        '起播被拒绝: '
+        '${expectedIntent != _playbackIntentSerial ? '企图已过期' : ''}'
+        '${_resumeBlockedByDisconnect ? ' 断连保护' : ''}'
+        '${_interruptionRequiresPause && !allowDuringInterruption ? ' 打断待恢复' : ''}',
+      );
+      return PlayConfirm.blocked;
+    }
     try {
-      await _audioHandler.play().timeout(_kPlayConfirmTimeout);
+      await _audioHandler.play(userInitiated: false).timeout(_kPlayConfirmTimeout);
       return PlayConfirm.confirmed;
     } on TimeoutException {
       // 读引擎侧真相，不读 controller 的 isPlaying（后者是 UI 真相源，
@@ -993,6 +1100,56 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   }
 
   AudioPlayer get audioPlayer => _audioHandler.audioPlayer;
+
+  /// 作废所有「自动恢复」意图，并推进企图代次。
+  ///
+  /// 任何**用户显式操作**（播放/暂停/切歌）与打断开始都调用它：
+  /// 定时器取消只是第一层，[Timer] 回调里已经越过 await 的部分只能靠
+  /// 代次比对拦下（[_scheduleAutomaticResume] 与 [_requestPlayback] 各检一次）。
+  ///
+  /// 放在基类而不是 `_PlayerDesktop`：播放/队列/私人 FM 各分片都要调用它，
+  /// 兄弟 mixin 之间互相看不见。
+  void _cancelAutomaticResume() {
+    _autoResumeTimer?.cancel();
+    _autoResumeTimer = null;
+    _autoResumeSerial++;
+    _playbackIntentSerial++;
+    _wasPlayingAtInterruption = false;
+  }
+
+  /// 用户显式发起播放：作废自动恢复，并解除断连保护。
+  ///
+  /// 断连保护「只能由用户显式播放解除」是这套机制的要点——否则断开瞬间
+  /// 排在队里的自动恢复会把声音放到扬声器上，防外放就白做了。
+  void _handleManualPlay() {
+    _cancelAutomaticResume();
+    _resumeBlockedByDisconnect = false;
+  }
+
+  /// 排一次自动恢复（打断结束 / 设备接入）。
+  void _scheduleAutomaticResume(
+    Duration delay, {
+    bool allowDuringInterruption = false,
+  }) {
+    _autoResumeTimer?.cancel();
+    final serial = ++_autoResumeSerial;
+    final intentSerial = _playbackIntentSerial;
+    _autoResumeTimer = Timer(delay, () async {
+      if (serial != _autoResumeSerial ||
+          _resumeBlockedByDisconnect ||
+          (_isAudioInterrupted && !allowDuringInterruption) ||
+          audioPlayer.playing ||
+          isPreparing ||
+          _isChangingSource ||
+          currentSong == null) {
+        return;
+      }
+      await _requestPlayback(
+        expectedIntent: intentSerial,
+        allowDuringInterruption: allowDuringInterruption,
+      );
+    });
+  }
 
   MusicApi get api => _api;
 
@@ -1149,6 +1306,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     Duration? initialPosition,
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
+    bool userInitiated = true,
   });
 
   /// 启动私人 FM（酷狗官方「猜你喜欢」= 红心 Radio + 口味推荐）。

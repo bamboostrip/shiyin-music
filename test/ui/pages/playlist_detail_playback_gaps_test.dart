@@ -104,6 +104,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
     Duration? initialPosition,
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
+    bool userInitiated = true,
   }) async {
     playSongCalls++;
     // 与真实控制器一致：每轮起播先清空上一轮的错误与友好提示记录。

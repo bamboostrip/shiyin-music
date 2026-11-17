@@ -155,6 +155,8 @@ mixin _PlayerQueue on _PlayerControllerBase {
 
   @override
   Future<void> next() async {
+    // 用户显式切歌：作废自动恢复与断连保护（与 togglePlay 同源）。
+    _handleManualPlay();
     // 私人 FM：队列末尾的「下一首」= 续拉下一批推荐（不循环回第一首）。
     if (_isPersonalFmActive && _isAtQueueEnd) {
       await _loadNextPersonalFmBatch(isOverplay: false);
@@ -166,6 +168,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
       nextSong,
       queue: queue,
       preservePersonalFmSession: _isPersonalFmActive,
+      userInitiated: false,
     );
   }
 
@@ -183,6 +186,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
 
   @override
   Future<void> previous() async {
+    _handleManualPlay();
     if (queue.isEmpty) {
       await _seekToStartSafe();
       return;
@@ -196,6 +200,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
           queue[fmIndex - 1],
           queue: queue,
           preservePersonalFmSession: true,
+          userInitiated: false,
         );
       } else {
         await _seekToStartSafe();
@@ -210,14 +215,18 @@ mixin _PlayerQueue on _PlayerControllerBase {
       }
       final prevIndex = _shuffleQueue.previous(queue.length);
       if (prevIndex >= 0 && prevIndex < queue.length) {
-        await playSong(queue[prevIndex], queue: queue);
+        await playSong(
+          queue[prevIndex],
+          queue: queue,
+          userInitiated: false,
+        );
         return;
       }
     }
 
     final index = currentIndex;
     if (index > 0) {
-      await playSong(queue[index - 1], queue: queue);
+      await playSong(queue[index - 1], queue: queue, userInitiated: false);
     } else {
       await _seekToStartSafe();
     }
