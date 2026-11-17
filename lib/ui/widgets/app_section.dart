@@ -86,6 +86,12 @@ class AppHorizontalRail<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
+    // 横轨高度必须随字号长高：卡片是「封面 + 两行文字」，封面尺寸固定，
+    // 文字放大后会顶破固定高度（实测系统字号 130% + 车机模式 1.23 倍、
+    // 合计 1.6 时，「新歌速递」卡片溢出 2.5px）。按封面约占 2/3 高估算，
+    // 只放大余下 1/3 的文字区，字号 1.0 时高度完全不变。
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final railHeight = height + height * 0.32 * (textScale - 1);
     return LayoutBuilder(
       builder: (context, constraints) {
         // 宽内容区（桌面宽窗 / 平板侧栏形态）：横轨转网格，
@@ -116,7 +122,7 @@ class AppHorizontalRail<T> extends StatelessWidget {
                     maxCrossAxisExtent: (itemWidth ?? 110) * 2 + separatorWidth,
                     mainAxisSpacing: separatorWidth,
                     crossAxisSpacing: separatorWidth,
-                    mainAxisExtent: height,
+                    mainAxisExtent: railHeight,
                   ),
                   itemBuilder: (context, index) {
                     final child = itemBuilder(context, items[index]);
@@ -128,7 +134,7 @@ class AppHorizontalRail<T> extends StatelessWidget {
                 )
               else
                 SizedBox(
-                  height: height,
+                  height: railHeight,
                   child: HorizontalWheelScroll(
                     builder: (context, controller) => ListView.separated(
                       controller: controller,

@@ -6,6 +6,7 @@ import '../form_factor.dart';
 ///
 /// 设置页（字体大小弹窗留在 settings_page）与个性化分节共用。
 String fontScaleLabel(double scale) {
+  if (scale >= 1.3) return '超大';
   if (scale >= 1.2) return '特大';
   if (scale >= 1.1) return '大';
   return '标准';

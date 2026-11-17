@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
@@ -2383,6 +2384,15 @@ class _SongSectionState extends State<_SongSection> {
                     itemsPerPage = 3;
                   }
 
+                  // 行高必须随字号一起长：封面固定 48，两行文字超过封面时
+                  // 会把整行撑高，而这个区块的高度是写死的（PageView 需要
+                  // 有界高度）。历史上字号「特大」(1.2) 在 1280x720 上就会
+                  // 溢出 6px，车机模式再补档到 1.23 时更明显。
+                  final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+                  final double rowHeight = math.max(
+                    60.0,
+                    42.0 * textScale + 12.0,
+                  );
                   final rowCount = (itemsPerPage / crossAxisCount).ceil();
                   final pageCount = (widget.songs.length / itemsPerPage).ceil();
 
@@ -2402,7 +2412,7 @@ class _SongSectionState extends State<_SongSection> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        height: rowCount * 60.0,
+                        height: rowCount * rowHeight,
                         child: HorizontalWheelPageScroll(
                           controller: _pageController,
                           child: PageView.builder(

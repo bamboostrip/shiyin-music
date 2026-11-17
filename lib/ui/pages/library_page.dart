@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../widgets/liquid_glass_ui.dart';
 import '../design_tokens.dart';
@@ -901,7 +903,13 @@ class _QuickHubTileState extends State<_QuickHubTile> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOutCubic,
-            height: 68,
+            // 两行文字（标题 15 + 副标题 11.5）在大字号下会超过写死的 68：
+            // 「特大」(1.2) 实测溢出 3.2px，车机模式补档后同样会撞上。
+            // 42 × 字号 + 20 内边距在 1.0 时仍取 68，字号变大才真正长高。
+            height: math.max(
+              68.0,
+              42.0 * MediaQuery.textScalerOf(context).scale(1.0) + 20.0,
+            ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: cardBgColor,

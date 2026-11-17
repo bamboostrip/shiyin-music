@@ -106,8 +106,12 @@ class ThemeController extends ChangeNotifier {
   static const _carMarginTopKey = 'theme.car_margin_top';
   static const _carMarginBottomKey = 'theme.car_margin_bottom';
 
-  /// 全局字体大小档位（1.0 = 标准，1.1 = 大，1.2 = 特大）。
-  static const fontScaleOptions = [1.0, 1.1, 1.2];
+  /// 全局字体大小档位（1.0 标准 / 1.1 大 / 1.2 特大 / 1.3 超大）。
+  ///
+  /// 车机模式会再乘 [carModeFontScaleFactor]（1.12），四档在车机上分别是
+  /// 1.12 / 1.232 / 1.344 / 1.456——每一档都保留，不再做任何「补档」：
+  /// 低分车机的用户会觉得「大」偏大，默认必须能回到 1.12。
+  static const fontScaleOptions = [1.0, 1.1, 1.2, 1.3];
 
   /// 车机模式下文字放大倍数（远距离观看更清晰）。
   static const double carModeFontScaleFactor = 1.12;

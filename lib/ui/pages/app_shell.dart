@@ -146,7 +146,12 @@ class _AppShellState extends State<AppShell> {
     // 关闭时回到普通布局（宽屏用 NavigationRail），与原项目行为一致；
     // 平板横屏适配留给上游后续开发。
     if (isLandscape && widget.theme.carModeEnabled) {
-      // 车机模式下文字相对放大（保留系统无障碍设置）。
+      // 车机模式下文字相对放大（保留系统无障碍设置）：统一 ×1.12，不做补档。
+      //
+      // 曾试过「低于大档时补到大」，但那会让「标准」和「大」在车机里渲染一致，
+      // 切档时画面毫无变化（像 bug）；而且低分辨率车机上部分用户觉得「大」偏大，
+      // 默认必须能回到 1.12。所以字号档位一概交给用户自己选（设置 → 字体大小），
+      // 车机只保留这个远距离系数。
       final baseTextScaler = MediaQuery.textScalerOf(context);
       final scaledTextScaler = _RelativeTextScaler(
         base: baseTextScaler,

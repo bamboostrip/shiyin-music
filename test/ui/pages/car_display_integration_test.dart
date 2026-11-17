@@ -377,6 +377,64 @@ void main() {
     expect(logical * zoom, closeTo(2560 * 0.30, 2));
   });
 
+  testWidgets('非车机 + 特大/超大字号在 1280×720 不溢出', (tester) async {
+    // 首页歌曲卡片区块原本写死 3 行 × 60，字号放大到「特大」就会溢出 6px
+    // （车机模式再补档到 1.23 时 9px）。行高改为随字号增长后钉住这一档。
+    final theme = ThemeController();
+    await theme.load();
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // 「特大」1.2 与「超大」1.3 两档都要撑住（车机模式下再乘 1.12 同理）。
+    for (final scale in const [1.2, 1.3]) {
+      await theme.setFontScale(scale);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: _shell(theme),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: '字号 $scale 溢出');
+    }
+  });
+
+  testWidgets('车机 + 系统 130% 字号（1.456 倍）不溢出', (tester) async {
+    // 车机模式只做 ×1.12 的远距离补偿，系统字号 130% 时合计 1.456
+    // （等于用户选「超大」那档）；这里确认这个量级不会溢出。
+    final theme = ThemeController();
+    await theme.load();
+    await theme.setCarModeEnabled(true);
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.3),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        ),
+        home: _shell(
+          theme,
+          player: _FakePlayerController(currentSong: _song(0)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('常见车机分辨率 × 缩放档位：播放中壳层无布局异常', (tester) async {
     final cases = <(Size, double)>[
       (const Size(1280, 720), 1.3),

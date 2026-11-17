@@ -580,6 +580,7 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   @override
   double get fontScale => 1.0;
 
+
   @override
   Color get seedColor => const Color(0xFF5B6CF9);
 

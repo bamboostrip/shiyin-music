@@ -58,6 +58,7 @@ void main() {
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
       expect(find.text('特大'), findsOneWidget);
+      expect(find.text('超大'), findsOneWidget, reason: '字号共四档');
 
       // 点击特大
       await tester.tap(find.text('特大'));
@@ -65,6 +66,28 @@ void main() {
 
       expect(theme.fontScaleCalls, [1.2]);
       expect(find.byType(Dialog), findsNothing);
+    });
+
+    testWidgets('车机模式下四档依旧齐全（不做补档、不隐藏标准）', (tester) async {
+      // 低分车机上有用户觉得「大」偏大，默认必须能回到 1.12：车机模式只做
+      // ×1.12 的远距离补偿，档位一概交给用户自己选。
+      final theme = _FakeTheme()..carMode = true;
+      await _pump(tester, theme: theme);
+      await _openAppearanceSettings(tester);
+
+      expect(find.text('标准'), findsOneWidget);
+
+      await tester.tap(find.text('字体大小'));
+      await tester.pumpAndSettle();
+      // 弹窗内四档齐全（页面背景里还有一处「标准」摘要，所以按 Dialog 限定）
+      final inDialog = find.byType(Dialog);
+      for (final label in const ['标准', '大', '特大', '超大']) {
+        expect(
+          find.descendant(of: inDialog, matching: find.text(label)),
+          findsOneWidget,
+          reason: '车机模式下也应列出「$label」',
+        );
+      }
     });
 
     testWidgets('缓存管理弹窗使用居中 Dialog，包含关闭按钮与管理项', (tester) async {
@@ -336,8 +359,9 @@ class _FakeTheme extends ChangeNotifier implements ThemeController {
   bool get hasCustomSeedColor => false;
   @override
   bool get landscapeEnabled => false;
+  bool carMode = false;
   @override
-  bool get carModeEnabled => false;
+  bool get carModeEnabled => carMode;
   @override
   bool get isAutomotiveDevice => false;
 

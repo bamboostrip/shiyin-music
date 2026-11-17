@@ -238,6 +238,7 @@ class _PersonalizationSettingsPageState
     );
   }
 
+
   /// 选择字体大小：桌面端居中 Dialog，移动端 BottomSheet。
   Future<void> _selectFontScale(BuildContext context) async {
     final tc = widget.themeController;
@@ -306,9 +307,7 @@ class _PersonalizationSettingsPageState
                               Text(
                                 scale == 1.0
                                     ? '默认大小'
-                                    : scale == 1.1
-                                    ? '整体放大 10%'
-                                    : '整体放大 20%',
+                                    : '整体放大 ${((scale - 1) * 100).round()}%',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: colorScheme.onSurfaceVariant,
