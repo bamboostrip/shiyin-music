@@ -108,6 +108,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     if (userInitiated) _handleManualPlay();
     final intentSerial = _playbackIntentSerial;
     _pendingPlaybackIntent = intentSerial;
+    // 任何实际起播都会消费掉「待恢复进度」：它只属于恢复出来的那一首，
+    // 留着会被下一次 playSong 误用（[resumePlayback] 已先把值取到局部变量）。
+    _resumePosition = null;
     // 私人 FM 会话的保持判定：只有「在本次播放使用的队列里点歌」才算仍在
     // FM 会话内（同队列上一首/下一首、播放页点当前队列的其他歌、同曲重播）。
     // 从已下载/本地/历史等入口点单曲时 queue 参数为 null 且歌曲不在当前队列，
@@ -335,6 +338,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         _nextLog('playSong 放弃(加载期间已切歌): ${song.title}');
         return;
       }
+      // 音源确实换成这首歌了：从此刻起 audioPlayer.position 才归属它。
+      // 进度保存以这个标记为准（见 _saveCurrentPosition）；周期任务则等
+      // 起播确认后才启动——只加载不出声时没必要每 5 秒唤醒一次。
+      _positionOwnerHash = song.hash;
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
       }
@@ -967,6 +974,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 挂断自己开始播」就是靠这一步修掉的）。
       _cancelAutomaticResume();
       await _audioHandler.pause(userInitiated: false);
+      // 暂停瞬间落盘一次进度：用户经常暂停后直接退出，周期任务可能还没轮到。
+      _saveCurrentPosition();
       return;
     }
     // 用户主动播放：解除断连保护（断连只能由显式播放解除）。
@@ -1506,12 +1515,17 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
     final maxAttempts = queue.length;
     var songToPlay = currentSong!;
+    // 恢复出来的进度只作用于第一首；失败换下一首时它是另一首歌的位置，
+    // 带上只会把新歌拉到几分钟处。取值后立刻清空，避免二次生效。
+    final resumePosition = _resumePosition;
+    _resumePosition = null;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       errorMessage = null;
       await playSong(
         songToPlay,
         queue: queue,
+        initialPosition: attempt == 0 ? resumePosition : null,
         // 只有第一次是「恢复」，后续是失败后换下一首，一律不再当用户意图。
         userInitiated: userInitiated && attempt == 0,
       );

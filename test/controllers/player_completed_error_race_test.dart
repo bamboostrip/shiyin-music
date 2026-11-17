@@ -191,20 +191,31 @@ void main() {
   late _MockMusicApi api;
   late PlayerController controller;
 
+  var finishedOnce = false;
+
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     fakeAudioPlayer = _FakeAudioPlayer();
     handler = _RecordingAudioHandler(fakeAudioPlayer);
     api = _MockMusicApi();
     controller = PlayerController(api, handler);
+    finishedOnce = false;
   });
+
+  /// 用例体内显式收尾：`_verifyInvariants` 早于 tearDown 执行，而起播成功后
+  /// 控制器会起一个周期存进度的定时器，不在体内 dispose 会被判「有挂起定时器」。
+  void finish() {
+    if (finishedOnce) return;
+    finishedOnce = true;
+    controller.dispose();
+    fakeAudioPlayer.disposeStreams();
+  }
 
   tearDown(() async {
     for (var i = 0; i < 8; i++) {
       await Future<void>.delayed(Duration.zero);
     }
-    controller.dispose();
-    fakeAudioPlayer.disposeStreams();
+    finish();
   });
 
   Future<void> pumpToastHost(WidgetTester tester) async {
@@ -242,6 +253,7 @@ void main() {
     await tester.pump();
 
     expect(controller.isPlaying, isFalse);
+    finish();
   });
 
   testWidgets('completed 后的迟到引擎错误不对已播完歌曲弹「没有音源」', (tester) async {
@@ -272,6 +284,7 @@ void main() {
     expect(find.text('播放中断，请稍后重试'), findsNothing);
 
     await cleanUpToastAndSettle(tester);
+    finish();
   });
 
   test('completed 自动下一首仍推进到下一曲，迟到错误不阻断', () async {

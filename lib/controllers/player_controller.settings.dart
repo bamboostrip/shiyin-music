@@ -363,11 +363,23 @@ mixin _PlayerSettings on _PlayerControllerBase {
   /// 退后台（main.dart AppLifecycleState.paused）调用：硬终止进程不做任何异步
   /// 收尾，防抖窗口内的切歌必须先刷写，否则下次启动恢复到上一首歌。
   Future<void> flushPlaybackState() async {
+    // 进度单独一个键，顺手一起刷：退出/退后台是最容易「听到一半就没了」的点。
+    _saveCurrentPosition();
     _saveStateTimer?.cancel();
     _saveStateTimer = null;
     // 防抖已被取消：这次写失败就等于把窗口内本该落盘的切歌一起丢了，
     // 所以失败后重排一次，交给后续切歌/下一次生命周期兜住。
     if (!await _savePlaybackStateGuarded()) _scheduleSavePlaybackState();
+  }
+
+  /// 恢复出来的位置是否值得应用。
+  ///
+  /// 尾 3 秒内不恢复：否则一开播就撞曲末，自动下一首，用户看到的是
+  /// 「刚进来就跳歌」。用「剩余时长」判断而不是百分比，长播客/有声书不受影响。
+  bool _isResumablePosition(Song song, Duration saved) {
+    final total = song.duration;
+    if (total == null || total <= Duration.zero) return true;
+    return total - saved > const Duration(seconds: 3);
   }
 
   Future<void> _savePlaybackState() async {
@@ -615,6 +627,27 @@ mixin _PlayerSettings on _PlayerControllerBase {
       // 暂无歌词 + 无高潮标记。时长先用歌曲元数据占位（引擎加载后覆盖），
       // 歌词走缓存优先（30 天）+ 静默刷新，高潮走网络补拉。
       duration = currentSong?.duration ?? Duration.zero;
+
+      // 恢复播放进度：全局单点（最后在播那首 + 位置），只在 hash 对上时采用。
+      // 写进内存的 position 有两个用处：暂停态下界面直接显示「上次听到 03:12」，
+      // 以及未开自动播放时用户点播放能从这里续（见 togglePlay 的 idle 分支）。
+      final restoredSong = currentSong;
+      final savedPosition = restoredSong == null
+          ? null
+          : parseSavedPosition(
+              prefs.getString(_currentPositionKey),
+              restoredSong.hash,
+            );
+      if (restoredSong != null &&
+          savedPosition != null &&
+          _isResumablePosition(restoredSong, savedPosition)) {
+        _setPositionBase(savedPosition, playing: false);
+        _lastSmoothPosition = savedPosition;
+        _emitPosition();
+        _resumePosition = savedPosition;
+      } else {
+        _resumePosition = null;
+      }
 
       // 与 _restoreSettings 同理：构造函数 unawaited 发起，await 之后
       // 可能已 dispose，不得再通知或触发补拉。

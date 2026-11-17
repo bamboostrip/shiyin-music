@@ -201,6 +201,19 @@ const _searchPlayReplaceQueueSettingKey = 'settings.search_play_replace_queue';
 const _showUnavailableSongsSettingKey = 'settings.show_unavailable_songs';
 const _playbackStateKey = 'playback_state';
 const _playbackStateMaxQueueSize = 200;
+
+/// 播放进度（全局单点：最后在播的那一首 + 位置）。
+///
+/// **不并进 [_playbackStateKey]**：快照里带整条队列（最多 200 首），
+/// 而进度需要每几秒写一次；PC 端 SharedPreferences 每次 set 都要把整张 map
+/// 重编码并同步落盘（实测文件约 1.5MB），5 秒重写一次整队列是明显的性能倒退。
+/// 单独一个只有几十字节的小键，代价恒定。
+const _currentPositionKey = 'playback.current_position';
+
+/// 进度落盘节奏。移动端（尤其车机）熄火即断电，5 秒一存；
+/// 桌面端有退出钩子 + 暂停落盘兜底，20 秒足够且省 IO。
+const _positionSaveIntervalMobile = Duration(seconds: 5);
+const _positionSaveIntervalDesktop = Duration(seconds: 20);
 // 听歌时长上报周期/检查周期：对齐上游 3.3.0（e9dde17 #151）由 30min/1min
 // 收紧为 5min/15s，缩短服务端同步延迟；未满周期的余量跨会话持久化见
 // [_pendingListenTimeMsKey] 与 _PlayerSettings._savePendingListenTime。
@@ -232,6 +245,31 @@ const int kLyricOffsetStoreLimit = 200;
 
 /// 偏移落盘连调合并窗口（见 _PlayerLyrics._scheduleLyricOffsetPersist）。
 const Duration _kLyricOffsetPersistWindow = Duration(milliseconds: 500);
+
+/// 解析磁盘上保存的播放进度（纯函数，便于单测）。
+///
+/// 新格式 `{"hash": "...", "ms": 12345}`：**只有 hash 与 [songHash] 一致才采用**，
+/// 否则返回 null——退出前若是别的歌在播，套用它的位置会把新歌拉到几分钟处。
+/// 兼容旧格式（裸 int 毫秒）。
+Duration? parseSavedPosition(Object? raw, String? songHash) {
+  if (raw is int) {
+    return raw > 0 ? Duration(milliseconds: raw) : null;
+  }
+  if (raw is! String || raw.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    final hash = decoded['hash'];
+    final ms = decoded['ms'];
+    if (ms is! int || ms <= 0) return null;
+    if (songHash != null && songHash.isNotEmpty && hash != songHash) {
+      return null;
+    }
+    return Duration(milliseconds: ms);
+  } catch (_) {
+    return null;
+  }
+}
 
 /// 播放器控制器：状态拆分见 [_PlayerControllerBase]，职责分片见各 part 文件。
 class PlayerController extends _PlayerControllerBase
@@ -490,6 +528,7 @@ class PlayerController extends _PlayerControllerBase
     // 代次一并推进：排队的自动恢复回调可能已越过 cancel（await 之后），
     // 只有代次比对能拦住它在 dispose 后起播。
     _cancelAutomaticResume();
+    _stopPositionSaving();
     _sleepTimer?.cancel();
     _playCacheTimer?.cancel();
     _positionSub.cancel();
@@ -971,6 +1010,26 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 仍在途的起播意图（用于判断「要不要在打断结束后恢复」）。
   int? _pendingPlaybackIntent;
 
+  // ---- 播放进度持久化（全局单点：最后在播那首 + 位置）--------------------
+
+  /// 从磁盘恢复出来、尚未作用到音频引擎上的进度。
+  ///
+  /// 恢复时音源还没加载，此刻 seek 无效；由 [resumePlayback] 在第一次
+  /// `playSong` 时作为 `initialPosition` 带进去，用过即清。
+  Duration? _resumePosition;
+
+  /// 是否有待应用的恢复进度（UI 可据此提示「已从 xx:xx 继续」）。
+  bool get hasPendingResumePosition => _resumePosition != null;
+
+  /// 引擎里**当前实际持有**的那首歌的 hash（`loadSong` 成功后才更新）。
+  ///
+  /// 切歌时 [currentSong] 会先变，音源要等网络解析完才换；这个窗口里
+  /// `audioPlayer.position` 仍属于上一首。写进度前必须比对它，否则会把
+  /// 旧歌位置记到新歌 hash 上（弱网切歌 + 退后台立即落盘最容易踩）。
+  String? _positionOwnerHash;
+
+  Timer? _positionSaveTimer;
+
   Duration? sleepTimerRemaining;
   Timer? _sleepTimer;
   Timer? _saveStateTimer;
@@ -1084,6 +1143,8 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     }
     try {
       await _audioHandler.play(userInitiated: false).timeout(_kPlayConfirmTimeout);
+      // 真正出声后才需要周期存进度（只加载/只准备不建定时器）。
+      _startPositionSaving();
       return PlayConfirm.confirmed;
     } on TimeoutException {
       // 读引擎侧真相，不读 controller 的 isPlaying（后者是 UI 真相源，
@@ -1095,12 +1156,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
         '${enginePlaying ? '按已起播继续' : '引擎静默，不按成功记账'}'
         '（Android play(Result) 拖到曲末才回执，属已知平台行为，非错误）',
       );
+      // 超时但引擎确实在播（Android play(Result) 拖到曲末的已知行为）：
+      // 等同起播成功，周期存进度照常启动。
+      if (enginePlaying) _startPositionSaving();
       return enginePlaying
           ? PlayConfirm.timeoutPlaying
           : PlayConfirm.timeoutSilent;
     }
   }
-
   AudioPlayer get audioPlayer => _audioHandler.audioPlayer;
 
   /// 作废所有「自动恢复」意图，并推进企图代次。
@@ -1158,6 +1221,52 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
         allowDuringInterruption: allowDuringInterruption,
       );
     });
+  }
+
+  /// 写一次播放进度（全局单点：只记最后在播的那一首）。
+  ///
+  /// 三道闸，缺一条就会写脏数据：
+  /// 1. **归属**：[currentSong] 已换成新歌、音源却还在解析时，
+  ///    `audioPlayer.position` 仍是上一首的——必须等 [_positionOwnerHash] 对上；
+  /// 2. **非零**：加载/暂停瞬间可能读到 0ms，直接写等于把真实进度抹掉；
+  /// 3. **不阻塞**：fire-and-forget，失败只记日志（进度不是关键路径）。
+  ///
+  /// 放在基类：播放分片要调它（暂停/起播），设置分片也要（退出钩子）。
+  void _saveCurrentPosition() {
+    final song = currentSong;
+    if (song == null || song.hash.isEmpty) return;
+    if (_positionOwnerHash != song.hash) return;
+    final ms = audioPlayer.position.inMilliseconds;
+    if (ms <= 0) return;
+    final payload = jsonEncode({'hash': song.hash, 'ms': ms});
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_currentPositionKey, payload))
+        .catchError((Object error) {
+          debugPrint('[时音][player] 播放进度写盘失败（忽略）: $error');
+          return false;
+        });
+  }
+
+  /// 起一个周期任务，播放中每隔一段时间存一次进度。
+  ///
+  /// 为什么需要周期而不是只靠暂停/退出：车机熄火是**直接断电**，没有任何
+  /// 生命周期回调；桌面崩溃/强杀同理。周期任务把「最多丢一段」压到可接受。
+  void _startPositionSaving() {
+    final interval =
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)
+        ? _positionSaveIntervalMobile
+        : _positionSaveIntervalDesktop;
+    _positionSaveTimer ??= Timer.periodic(interval, (_) {
+      // 暂停时位置不变，没必要写盘（暂停那一刻已单独存过）。
+      if (!isPlaying) return;
+      _saveCurrentPosition();
+    });
+  }
+
+  void _stopPositionSaving() {
+    _positionSaveTimer?.cancel();
+    _positionSaveTimer = null;
   }
 
   MusicApi get api => _api;
