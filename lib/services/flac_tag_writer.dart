@@ -31,6 +31,9 @@ class FlacTagWriter {
   /// Vorbis comment 的 vendor 字段（写进文件，播放器一般不展示）。
   static const String vendor = 'shiyin';
 
+  /// 单个元数据块的长度上限（块头 24 位长度字段）：超了写不进去。
+  static const int _maxMetadataBlockLength = 0xffffff;
+
   /// 向 [filePath] 写入 Vorbis comment / 封面，成功返回 true。
   ///
   /// [lyricsText] 非空时写 `LYRICS`，并顺手删掉旧的 `UNSYNCEDLYRICS`/`LYRIC`
@@ -104,6 +107,20 @@ class FlacTagWriter {
       comments.addAll(
         replacements.entries.map((entry) => '${entry.key}=${entry.value}'),
       );
+      // 封面块超过单块上限（≈16MB）时只跳过封面：让它把整次写入拖下水的话，
+      // 文本标签（歌名/歌手/专辑/歌词）会一起丢掉，与 ID3 侧「超限只跳
+      // 封面」的行为也不对称。
+      final pictureBlock = coverBytes == null ? null : _writePicture(coverBytes);
+      final usablePicture =
+          pictureBlock != null &&
+              pictureBlock.length <= _maxMetadataBlockLength
+          ? pictureBlock
+          : null;
+      if (pictureBlock != null && usablePicture == null) {
+        debugPrint(
+          '[FlacTagWriter] 封面过大，跳过 PICTURE 块: ${pictureBlock.length} 字节',
+        );
+      }
       final newBlocks = <_Block>[
         blocks.first,
         (type: 4, bytes: _writeComments(blockVendor, comments)),
@@ -111,12 +128,12 @@ class FlacTagWriter {
           // 丢掉旧的 comment 块（已在上面重建）与旧的 3 号封面（type 6，
           // picture type 3 = front cover）。
           if (block.type != 4 &&
-              !(coverBytes != null &&
+              !(usablePicture != null &&
                   block.type == 6 &&
                   block.bytes.length >= 4 &&
                   ByteData.sublistView(block.bytes).getUint32(0) == 3))
             block,
-        if (coverBytes != null) (type: 6, bytes: _writePicture(coverBytes)),
+        if (usablePicture != null) (type: 6, bytes: usablePicture),
       ];
       final sink = temporary.openWrite();
       try {
@@ -124,7 +141,7 @@ class FlacTagWriter {
         for (var index = 0; index < newBlocks.length; index++) {
           final block = newBlocks[index];
           final length = block.bytes.length;
-          if (length > 0xffffff) {
+          if (length > _maxMetadataBlockLength) {
             throw const FormatException('FLAC 元数据块过大');
           }
           sink.add([

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/download_controller.dart';
+import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/settings/cache_management_sheet.dart';
 import 'package:shiyin_music/ui/widgets/toast.dart';
 
@@ -49,6 +50,30 @@ class _FakeDownloads extends ChangeNotifier implements DownloadController {
   Future<void> setSaveLyricsFile(bool enabled) async {
     saveLyricsFileValue = enabled;
     notifyListeners();
+  }
+
+  /// 「修复已下载文件」入口的可用性依赖下载表；默认给空表（按钮置灰），
+  /// 具体修复流程在 `test/controllers/download_repair_test.dart` 覆盖。
+  List<DownloadEntry> repairEntries = const [];
+  DownloadRepairResult repairResult = DownloadRepairResult.empty;
+  int repairCalls = 0;
+
+  @override
+  List<DownloadEntry> get downloadEntries => repairEntries;
+
+  /// 修复中标记（弹层重开时用它还原按钮态）。
+  @override
+  bool get isRepairing => repairingValue;
+
+  bool repairingValue = false;
+
+  @override
+  Future<DownloadRepairResult> repairDownloadedFiles({
+    void Function(int processed, int total)? onProgress,
+  }) async {
+    repairCalls++;
+    onProgress?.call(1, repairEntries.length);
+    return repairResult;
   }
 
   @override
@@ -330,5 +355,96 @@ void main() {
       expect(find.text(_customDir), findsOneWidget);
       expect(find.text('(自定义)'), findsOneWidget);
     });
+
+    testWidgets('修复已下载文件：无下载条目时按钮置灰，有条目才可点', (tester) async {
+      // 空表：按钮禁用（点了也没有意义，避免弹「修复了 0 首」）
+      await tester.pumpWidget(wrap(CacheManagementSheet(downloads: _FakeDownloads())));
+      await tester.pumpAndSettle();
+      expect(find.text('修复已下载文件'), findsOneWidget);
+      final disabled = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, '修复'),
+      );
+      expect(disabled.onPressed, isNull);
+
+      // 一条已下载：按钮可用
+      await tester.pumpWidget(
+        wrap(
+          CacheManagementSheet(
+            downloads: _FakeDownloads()..repairEntries = [_downloadedEntry],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final enabled = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, '修复'),
+      );
+      expect(enabled.onPressed, isNotNull);
+    });
+
+    testWidgets('控制器仍在修复（弹层关掉又重开）→ 按钮保持置灰并显示修复中', (tester) async {
+      final downloads = _FakeDownloads()
+        ..repairEntries = [_downloadedEntry]
+        ..repairingValue = true;
+      await tester.pumpWidget(
+        wrap(CacheManagementSheet(downloads: downloads)),
+      );
+      // 修复中用不确定态进度条（无限动画），不能 pumpAndSettle。
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('修复中'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      final button = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, '修复中'),
+      );
+      expect(button.onPressed, isNull);
+      expect(downloads.repairCalls, 0);
+    });
+
+    testWidgets('修复已下载文件：点击后调用控制器并提示汇总', (tester) async {
+      final downloads = _FakeDownloads()
+        ..repairEntries = [_downloadedEntry]
+        ..repairResult = const DownloadRepairResult(
+          total: 1,
+          repaired: 1,
+          renamed: 1,
+          skipped: 0,
+          failed: 0,
+        );
+
+      // Toast 走全局 navigatorKey，必须挂在 MaterialApp 上才有 Overlay。
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: Toast.navigatorKey,
+          home: Scaffold(
+            body: SizedBox(
+              width: 420,
+              child: CacheManagementSheet(downloads: downloads),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, '修复'));
+      // 先让修复回调与 Toast 插入落地，再等淡入动画。
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(downloads.repairCalls, 1);
+      expect(find.textContaining('修复完成'), findsOneWidget);
+      expect(find.textContaining('1 个扩展名已纠正'), findsOneWidget);
+
+      // 收尾：pump 掉 Toast 计时器与退场动画，避免留下 pending timer。
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+    });
   });
 }
+
+const _downloadedEntry = DownloadEntry(
+  song: Song(id: '1', title: '已下载', artist: '歌手', hash: 'h1'),
+  quality: AudioQuality.standard,
+  status: DownloadStatus.downloaded,
+  filePath: r'D:\MyMusic\shiyin_downloads\a.mp3',
+);

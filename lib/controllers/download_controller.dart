@@ -7,9 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/music_models.dart';
+import '../services/audio_file_format.dart';
 import '../services/desktop_system_integration.dart';
 import '../services/download_metadata_writer.dart';
 import '../services/download_service.dart';
+import '../services/lyric_cache_service.dart';
 import '../services/music_api.dart';
 import '../ui/widgets/toast.dart';
 
@@ -35,6 +37,45 @@ class BatchDownloadResult {
 
   /// 已加入队列（含已下载与失败）的总处理数量。
   int get total => enqueued + skipped + failed;
+}
+
+/// 已下载文件修复（旧库迁移）的汇总。
+///
+/// 只服务「字节判型 → 扩展名纠正 → 写标签 → 媒体库扫描」这条收尾链路，
+/// 不涉及重新下载：失败条目原文件与索引都保持不动，可直接重试。
+class DownloadRepairResult {
+  const DownloadRepairResult({
+    required this.total,
+    required this.repaired,
+    required this.renamed,
+    required this.skipped,
+    required this.failed,
+  });
+
+  static const empty = DownloadRepairResult(
+    total: 0,
+    repaired: 0,
+    renamed: 0,
+    skipped: 0,
+    failed: 0,
+  );
+
+  /// 本轮参与修复的已下载条目数。
+  final int total;
+
+  /// 成功补写标签（可能伴随扩展名纠正）的条目数。
+  final int repaired;
+
+  /// 其中扩展名按真实编码改过名的条目数。
+  final int renamed;
+
+  /// 跳过数：在播、文件缺失、认不出编码（AAC/APE/WAV 等）、修复期间条目被
+  /// 删/重下。
+  final int skipped;
+
+  /// 失败数：读/写/改名抛错，或标签实际没写进去（writer 把异常吞成
+  /// `tagsWritten: false`）。原文件与索引不变，可重试。
+  final int failed;
 }
 
 /// 下载条目。
@@ -872,22 +913,42 @@ class DownloadController extends ChangeNotifier {
         debugPrint('[时音][download] 拉取歌词失败（已忽略）: ${song.title} $error');
       }
       if (_disposed) return path;
-      await _service.writeDownloadMetadata(
-        filePath: path,
-        song: song,
-        lyricsText: lyricsText,
-        saveLyricsFile: _saveLyricsFile,
-      );
-      // Android：按路径写进公共目录的文件不会自动进系统媒体库。扫描放在
-      // 标签写完之后——MediaStore 在扫描当刻快照艺人/专辑/封面，先扫后写
-      // 会让系统音乐库与车机蓝牙列表长期显示「未知艺人」。
-      unawaited(_service.scanForMediaLibrary(path));
-      return path;
-    } catch (error) {
-      debugPrint('[时音][download] 写入元数据失败（已忽略）: ${song.title} $error');
+      try {
+        await _service.writeDownloadMetadata(
+          filePath: path,
+          song: song,
+          lyricsText: lyricsText,
+          saveLyricsFile: _saveLyricsFile,
+        );
+      } catch (error) {
+        debugPrint('[时音][download] 写入元数据失败（已忽略）: ${song.title} $error');
+      }
+      // Android：按路径写进公共目录的文件不会自动进系统媒体库。扫描必须在
+      // **标签写入尝试之后**——MediaStore 在扫描当刻快照艺人/专辑/封面，
+      // 先扫后写会让系统音乐库与车机蓝牙列表长期显示「未知艺人」。
+      //
+      // 标签写失败也要扫（所以放在写标签的 try/catch 之外）：文件至少得先
+      // 被系统看见；标签稍后由「修复已下载文件」补写并重扫，而漏扫则连
+      // 条目都没有。
+      await _scanMediaLibrary(path);
       return path;
     } finally {
       _releaseMetadataSlot();
+    }
+  }
+
+  /// 触发一次媒体库扫描；失败/超时只记日志。
+  ///
+  /// 扫描是锦上添花：既不能把已下载成功的歌判成失败，也不能让平台通道
+  /// 挂死拖住收尾（原生侧只是把扫描排队后立刻返回，5s 只是防呆窗口）。
+  /// 用 await 而不是 unawaited，是为了让「扫描先于写索引」成为确定顺序。
+  Future<void> _scanMediaLibrary(String path) async {
+    try {
+      await _service
+          .scanForMediaLibrary(path)
+          .timeout(const Duration(seconds: 5));
+    } catch (error) {
+      debugPrint('[时音][download] 媒体库扫描失败（已忽略）: $error');
     }
   }
 
@@ -1198,6 +1259,244 @@ class DownloadController extends ChangeNotifier {
     final index = normalized.lastIndexOf('/');
     final name = index >= 0 ? normalized.substring(index + 1) : normalized;
     return name.isEmpty ? null : name;
+  }
+
+  // ===== 已下载文件修复（旧库迁移） =====
+
+  /// 同一时刻只允许一次修复（设置页连点 / 前后台切换重复触发）。
+  bool _repairing = false;
+
+  /// 是否正在修复已下载文件。
+  ///
+  /// 供设置页在「弹层被关掉又重开」时还原按钮态：进度计数在弹层 State 里，
+  /// 重开后拿不到，但至少不能让人以为没在跑而再点一次。
+  bool get isRepairing => _repairing;
+
+  /// 修复已下载文件：补做「字节判型 → 扩展名纠正 → 写标签 → 重扫媒体库」。
+  ///
+  /// 收尾链路（`_download` → `_enrichDownload`）只覆盖升级后的新下载；升级
+  /// 前落盘的旧文件名可能撒谎（`.flac` 里是降档后的 MP3）、没有内嵌标签，
+  /// 第三方播放器/车机会按扩展名选错解析器或显示「未知艺人」。本方法把
+  /// 同一套收尾补做一遍。
+  ///
+  /// 边界（与 `docs/handover/2026-11-18-download-migration-and-scan-order-test.md`）：
+  /// - 只遍历索引里状态为 [DownloadStatus.downloaded] 且文件存在的条目，
+  ///   绝不扫描索引之外的目录（不碰用户手动放进去的未知文件），不删任何文件；
+  /// - 不重新下载、不改音质、不碰播放缓存目录；
+  /// - 在播文件跳过（rename/整文件重写会打断播放），文件缺失跳过（交给
+  ///   [reconcileDownloads]）；
+  /// - 串行处理且与批量下载共用 [_metadataConcurrency] 槽位：整文件重写大
+  ///   无损动辄几十 MB，并发铺开会打满磁盘与内存；
+  /// - 每首处理完立即落盘索引（改名后不落盘的话，杀进程重跑会找不到文件），
+  ///   重跑幂等：已正确的文件只重写标签，不会产生 `(n)` 副本。
+  ///
+  /// 刻意**不联网**：歌词只取 `LyricCacheService` 里已有的文本，封面只取
+  /// `ImageDiskCache` 已落盘的字节。旧库几十首逐首等 8s 歌词接口，会把一次
+  /// 修复拖成几分钟，弱网下还大概率空手而归。
+  ///
+  /// [onProgress] 回调 (已处理数, 总数)，供设置页展示进度。
+  Future<DownloadRepairResult> repairDownloadedFiles({
+    void Function(int processed, int total)? onProgress,
+  }) async {
+    if (_repairing || _disposed) return DownloadRepairResult.empty;
+    _repairing = true;
+    try {
+      // 快照遍历：修复期间可能有下载完成/删除，按快照处理并以 identity 守卫
+      // 写回（见 [_updateRepairedPath]），不回写过期结论。
+      final snapshot = _downloads.values
+          .where((e) => e.status == DownloadStatus.downloaded)
+          .toList();
+      final total = snapshot.length;
+      var repaired = 0;
+      var renamed = 0;
+      var skipped = 0;
+      var failed = 0;
+      onProgress?.call(0, total);
+      for (var index = 0; index < snapshot.length; index++) {
+        if (_disposed) break;
+        final outcome = await _repairOneDownload(snapshot[index]);
+        if (outcome.repaired) {
+          repaired++;
+          if (outcome.renamed) renamed++;
+        } else if (outcome.failed) {
+          failed++;
+        } else {
+          skipped++;
+        }
+        onProgress?.call(index + 1, total);
+      }
+      // 顺手回收崩溃残留的标签临时文件（`.id3.tmp` / `.tag.tmp`）：下载目录
+      // 一直没有对应的清理器，公共「下载」目录里会一直堆着几十 MB 的残片。
+      await _sweepStaleTagTempFiles(snapshot);
+      debugPrint(
+        '[时音][download] 修复完成：共 $total 首，修复 $repaired'
+        '（改名 $renamed），跳过 $skipped，失败 $failed',
+      );
+      return DownloadRepairResult(
+        total: total,
+        repaired: repaired,
+        renamed: renamed,
+        skipped: skipped,
+        failed: failed,
+      );
+    } finally {
+      _repairing = false;
+    }
+  }
+
+  /// 修复单个条目。返回值三态：成功（含是否改名）/ 跳过 / 失败。
+  ///
+  /// 跳过与失败的差别只在可重试性：跳过是「这条本来就不该处理」（在播、
+  /// 文件没了、编码不支持、修复期间被删/重下），失败是「该处理但抛错了」或
+  /// 「标签实际没写进去」，用户重试有机会成功。
+  Future<({bool repaired, bool renamed, bool failed})> _repairOneDownload(
+    DownloadEntry entry,
+  ) async {
+    final path = entry.filePath;
+    if (path == null || path.isEmpty) {
+      return (repaired: false, renamed: false, failed: false);
+    }
+    // 快照与实表已经不一致（修复期间被删除/重下/退到失败重试）：这一条跳过。
+    // 否则改名会落在新下载正在用的目标路径上，索引还因 identity 守卫不更新，
+    // 变成「文件换了名字、索引还指旧名」。
+    if (!identical(_downloads[_downloadKey(entry.song)], entry)) {
+      debugPrint('[时音][download] 修复跳过（条目已变化）: ${entry.song.title}');
+      return (repaired: false, renamed: false, failed: false);
+    }
+    // 在播文件：rename 会让正在播放的 Range 请求 404，整文件重写更会直接
+    // 把文件短暂替换掉，留到下次（与删下载/历史目录搬移同一条保护口径）。
+    if (_isPlayingFile(path)) {
+      debugPrint('[时音][download] 修复跳过（正在播放）: ${entry.song.title}');
+      return (repaired: false, renamed: false, failed: false);
+    }
+    if (!await File(path).exists()) {
+      // 文件缺失不在这里判生死：找回/裁剪是 reconcileDownloads 的职责。
+      return (repaired: false, renamed: false, failed: false);
+    }
+    await _acquireMetadataSlot();
+    try {
+      // 认不出编码（AAC/APE/WAV…）就整条跳过：既不改名也不写标签，
+      // 避免在真正的音频数据中间下刀。
+      final format = await inspectAudioFile(path);
+      if (format.format == AudioFileFormat.unsupported) {
+        debugPrint('[时音][download] 修复跳过（编码不支持）: $path');
+        return (repaired: false, renamed: false, failed: false);
+      }
+      var finalPath = path;
+      var renamed = false;
+      // 1) 按真实字节纠正扩展名；改名成功立刻落索引，不等整批结束。
+      final corrected = await _service.correctExtension(path);
+      if (corrected != path) {
+        finalPath = corrected;
+        renamed = true;
+        // 落到 `(n)` 备选名时 stem 变了，边文件要跟着走（纯换扩展名时
+        // 两边 `.lrc` 同路径，方法内部直接返回）。
+        await _relocateLyricsSidecar(path, corrected);
+        await _updateRepairedPath(entry, corrected);
+        debugPrint(
+          '[时音][download] 修复：扩展名已纠正 '
+          '${_basenameOf(path)} -> ${_basenameOf(corrected)}',
+        );
+      }
+      // 2) 写标签（+ 按当前设置决定是否留 `.lrc` 副本）。
+      //
+      // writer 自己把异常吞成 `tagsWritten: false`，所以必须看返回值：没写
+      // 进去就等于这次没修好（典型场景是改名被占用、`.flac` 名字里塞 ID3 被
+      // 拒），谎报「已更新标签」会让用户以为车机下次就能看到艺人名。
+      final metadata = await _service.writeDownloadMetadata(
+        filePath: finalPath,
+        song: entry.song,
+        lyricsText: await _cachedLyricsText(entry.song),
+        saveLyricsFile: _saveLyricsFile,
+      );
+      if (!metadata.tagsWritten) {
+        debugPrint('[时音][download] 修复未生效（标签没写进去）: $finalPath');
+        return (repaired: false, renamed: false, failed: true);
+      }
+      // 3) 只对公共目录重扫媒体库：应用专属目录系统不索引，扫了没意义。
+      if (await _service.isSharedStoragePath(finalPath)) {
+        // 改过名的话顺手扫一次旧路径：部分 ROM 在路径已不存在时会移除
+        // MediaStore 里的旧条目（行为不保证）。没移除的接受残留——
+        // 原生侧只有 scanFile 没有删除能力，做 MediaStore 删除需要另开
+        // 分区存储/权限/回滚一整套，风险远大于收益。
+        if (renamed) await _scanMediaLibrary(path);
+        await _scanMediaLibrary(finalPath);
+      }
+      return (repaired: true, renamed: renamed, failed: false);
+    } catch (error) {
+      debugPrint('[时音][download] 修复失败（保留原文件）: ${entry.song.title} $error');
+      return (repaired: false, renamed: false, failed: true);
+    } finally {
+      _releaseMetadataSlot();
+    }
+  }
+
+  /// 把索引里 [entry] 的路径改成 [newPath]（仅在条目仍是同一条时写回）。
+  ///
+  /// 修复期间用户可能已经删掉/重下这首歌（表内对象已换）：以最新状态为准，
+  /// 不能把旧条目的路径盖回去。
+  Future<void> _updateRepairedPath(DownloadEntry entry, String newPath) async {
+    final key = _downloadKey(entry.song);
+    if (!identical(_downloads[key], entry)) return;
+    _downloads[key] = entry.copyWith(filePath: newPath);
+    // 销毁后（弹层关闭 + 控制器退场）不要再 notify：ChangeNotifier 已释放，
+    // 但索引必须落盘——文件真的改名了，不写盘重启后就找不回它。
+    if (!_disposed) notifyListeners();
+    await _persistDownloads();
+  }
+
+  /// 扩展名改名后同步搬走同名 `.lrc` 边文件（否则留下孤儿歌词）。
+  ///
+  /// 只在「歌名（stem）也变了」时才搬（改名落到 `(n)` 备选名的情形）：
+  /// 同名 `.lrc` 属于谁本就无从判定，硬搬会把另一首歌的歌词抢走；而只是
+  /// 换扩展名时两边 `.lrc` 路径完全相同，本来就不需要搬。
+  Future<void> _relocateLyricsSidecar(String from, String to) async {
+    try {
+      final source = File(DownloadMetadataWriter.lyricsFilePath(from));
+      if (!await source.exists()) return;
+      final target = DownloadMetadataWriter.lyricsFilePath(to);
+      if (target == source.path) return;
+      // 目标已有边文件（另一首歌的歌词）：不覆盖，两边各留各的。
+      if (await File(target).exists()) return;
+      await source.rename(target);
+    } catch (error) {
+      // 边文件只是可移植副本：搬不动不影响音频与标签，下次写 `.lrc` 会覆盖。
+      debugPrint('[时音][download] 迁移 LRC 边文件失败（已忽略）: $error');
+    }
+  }
+
+  /// 手边已有的歌词文本（歌词磁盘缓存），没有则 null。
+  Future<String?> _cachedLyricsText(Song song) async {
+    try {
+      final lines = await LyricCacheService.instance.read(song.hash);
+      if (lines == null || lines.isEmpty) return null;
+      final text = downloadLyricsText(lines);
+      return text.isEmpty ? null : text;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 清理各下载目录里崩溃残留的标签临时文件（见
+  /// [DownloadService.cleanStaleTagTempFilesIn]）。
+  ///
+  /// 按条目的实际父目录去重：换过下载位置后文件散落在自定义目录/历史目录，
+  /// 只清当前目录会漏。
+  Future<void> _sweepStaleTagTempFiles(List<DownloadEntry> entries) async {
+    final dirs = <String, Directory>{};
+    for (final entry in entries) {
+      final path = entry.filePath;
+      if (path == null || path.isEmpty) continue;
+      final parent = File(path).parent;
+      dirs[parent.path] = parent;
+    }
+    for (final dir in dirs.values) {
+      try {
+        await _service.cleanStaleTagTempFilesIn(dir);
+      } catch (error) {
+        debugPrint('[时音][download] 清理标签临时文件失败（已忽略）: $error');
+      }
+    }
   }
 
   // ===== 播放缓存 =====

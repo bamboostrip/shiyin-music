@@ -13,6 +13,7 @@ import '../models/music_models.dart';
 import 'android_storage_access.dart';
 import 'audio_file_format.dart';
 import 'download_metadata_writer.dart';
+import 'flac_tag_writer.dart';
 import 'id3_tag_writer.dart';
 import 'image_disk_cache.dart';
 
@@ -256,16 +257,7 @@ class DownloadService {
   /// 3. 真实不可写（未授权、卷离线、只读介质、路径指向文件）：记日志后
   ///    回退默认目录，设置值保留，存储恢复后自动重新生效。
   Future<Directory?> _resolveAndroidCustomDir(String path) async {
-    final appDirs = <String>[];
-    try {
-      final external = await getExternalStorageDirectory();
-      if (external != null) appDirs.add(external.path);
-    } catch (_) {
-      // path_provider 偶尔不可用：退化为仍需权限判断，保守侧更安全
-    }
-    try {
-      appDirs.add((await getApplicationDocumentsDirectory()).path);
-    } catch (_) {}
+    final appDirs = await _androidAppDirs();
     final withinAppDirs = isPathWithinDirectories(path, appDirs);
     if (!withinAppDirs &&
         !await AndroidStorageAccess.hasSharedStorageAccess()) {
@@ -304,6 +296,81 @@ class DownloadService {
       await dir.create(recursive: true);
     }
     return dir;
+  }
+
+  /// Android 应用专属目录（无需「所有文件访问」即可读写）。
+  ///
+  /// 「应用专属 vs 公共存储」的判据只用到这两处：外置存储的
+  /// `Android/data/<包名>/files` 与应用文档目录。取不到的候选直接跳过
+  /// （path_provider 偶发不可用），此时按「公共存储」处理 —— 保守侧：
+  /// 多扫一次无副作用的媒体库，好过漏扫导致车机看不到歌。
+  Future<List<String>> _androidAppDirs() async {
+    final appDirs = <String>[];
+    try {
+      final external = await getExternalStorageDirectory();
+      if (external != null) appDirs.add(external.path);
+    } catch (_) {
+      // path_provider 偶尔不可用：退化为仍需权限判断，保守侧更安全
+    }
+    try {
+      appDirs.add((await getApplicationDocumentsDirectory()).path);
+    } catch (_) {}
+    return appDirs;
+  }
+
+  /// [path] 是否落在 Android 系统会索引的公共存储（而非应用专属目录）。
+  ///
+  /// 旧下载修复用它决定要不要触发媒体库扫描：应用专属目录
+  /// （`Android/data/<包名>/files`、应用文档目录）本身不被系统索引，扫了
+  /// 也没有意义；只有用户把下载位置自定义到公共目录（`Music`、`Download`
+  /// 等，需要「所有文件访问」）时，MediaStore/车机蓝牙列表才认这些文件。
+  ///
+  /// 非 Android 平台恒为 false：桌面端 [scanForMediaLibrary] 本就是 no-op。
+  Future<bool> isSharedStoragePath(String path) async {
+    if (!Platform.isAndroid) return false;
+    if (path.trim().isEmpty) return false;
+    return !isPathWithinDirectories(path, await _androidAppDirs());
+  }
+
+  /// 清理目录里崩溃残留的标签临时文件（`.id3.tmp` / `.tag.tmp`）。
+  ///
+  /// 标签写入是「同目录临时文件 + rename」：写到一半被系统杀进程会留下一个
+  /// 与音频同级的大文件（无损动辄几十 MB）。播放缓存目录的 `.part` 有清理
+  /// 器，下载目录此前没有，用户自定义到公共「下载」目录时会一直堆着。
+  ///
+  /// 只删「够旧」的：修复可与新下载并发，尚在写入的临时文件 mtime 是新的。
+  /// 认不出的后缀一律不碰，返回删除的个数。
+  Future<int> cleanStaleTagTempFilesIn(
+    Directory dir, {
+    Duration minAge = const Duration(hours: 1),
+  }) async {
+    if (!dir.existsSync()) return 0;
+    final now = DateTime.now();
+    var removed = 0;
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        final path = entity.path;
+        if (!path.endsWith(Id3TagWriter.tempSuffix) &&
+            !path.endsWith(FlacTagWriter.tempSuffix)) {
+          continue;
+        }
+        try {
+          final modified = (await entity.stat()).modified;
+          if (now.difference(modified) < minAge) continue;
+          await entity.delete();
+          removed++;
+        } catch (_) {
+          // 单个文件失败（被占用/竞态删除）：跳过，下次再清
+        }
+      }
+    } catch (error) {
+      debugPrint('[DownloadService] 清理标签临时文件失败（已忽略）: $error');
+    }
+    if (removed > 0) {
+      debugPrint('[DownloadService] 清理标签临时文件 $removed 个: ${dir.path}');
+    }
+    return removed;
   }
 
   /// 历史下载目录候选（不含当前目录），供索引与磁盘对账。
@@ -617,6 +684,13 @@ class DownloadService {
     }
   }
 
+  /// 按真实编码纠正扩展名（公开封装，供旧下载修复复用）。
+  ///
+  /// 与 [_correctExtension] 同一条路径：识别不出格式、扩展名已经正确、
+  /// rename 失败（被占用/权限）时都原样返回；纠正后与另一首歌撞名（同歌
+  /// 不同音质并存）走 [resolveNonCollidingPath] 的防覆盖决策，绝不覆盖。
+  Future<String> correctExtension(String path) => _correctExtension(path);
+
   /// 按真实编码纠正扩展名，返回（可能已改名的）路径。
   ///
   /// 识别不出格式就原样返回，绝不为了「看起来整齐」删文件。
@@ -632,6 +706,9 @@ class DownloadService {
         return path;
       }
       final dot = path.lastIndexOf('.');
+      // 最后一个点落在目录名里 = 文件名本身没有扩展名（用户手动改名等）：
+      // 不猜。否则会拼出「My.mp3/歌曲」这种把文件搬进别的目录的怪路径。
+      if (dot <= path.lastIndexOf(RegExp(r'[/\\]'))) return path;
       final corrected = '${path.substring(0, dot)}$extension';
       // 纠正后可能与另一首歌撞名（同歌不同音质并存）：走同一套防覆盖决策。
       final target = File(corrected).existsSync()

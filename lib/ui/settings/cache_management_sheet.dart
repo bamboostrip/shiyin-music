@@ -34,6 +34,13 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
   int? _imageCacheSize;
   bool _clearing = false;
 
+  /// 「修复已下载文件」进行中（按钮置灰 + 进度条）。
+  bool _repairing = false;
+
+  /// 修复进度（已处理 / 总数），由控制器回调实时更新。
+  int _repairProcessed = 0;
+  int _repairTotal = 0;
+
   @override
   void initState() {
     super.initState();
@@ -176,6 +183,167 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
     }
   }
 
+  /// 「修复已下载文件」入口（旧库迁移/补扫）。
+  ///
+  /// 只做手动入口，不做首启静默迁移：整文件重写很吃 IO，用户能自己决定
+  /// 什么时候跑，失败了还能重试。进度与结果都在本卡片上呈现。
+  Widget _buildRepairTile(BuildContext context) {
+    final downloads = widget.downloads;
+    if (downloads == null) return const SizedBox.shrink();
+    // 监听下载表：弹层打开期间下载完成/删除会改变条目数，按钮可用性跟着刷新。
+    return AnimatedBuilder(
+      animation: downloads,
+      builder: (context, _) => _repairTileCard(context, downloads),
+    );
+  }
+
+  Widget _repairTileCard(BuildContext context, DownloadController downloads) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final total = _repairTotal;
+    final processed = _repairProcessed > total ? total : _repairProcessed;
+    // 弹层被关掉又重开时本 State 是新的（进度计数丢了），但控制器可能还在
+    // 跑：此时必须继续显示「修复中」并置灰按钮，否则用户会以为没在跑。
+    final repairing = _repairing || downloads.isRepairing;
+    // 没有已下载条目时按钮无意义（列表为空说明一首都没下过）。
+    final hasDownloads = downloads.downloadEntries.any(
+      (e) => e.status == DownloadStatus.downloaded,
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: .06) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: .10)
+              : Colors.white.withValues(alpha: .92),
+          width: 1.1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? .18 : .04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: isDark ? .22 : .10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.build_circle_outlined,
+              size: 20,
+              color: colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '修复已下载文件',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  repairing
+                      ? (_repairing ? '正在修复 $processed/$total 首…' : '正在修复…')
+                      : '为升级前下载的歌补写标签、按真实音频格式纠正扩展名',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+                if (repairing) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      // 进度未知（刚重开弹层）或总数为 0 时给不确定态，
+                      // 避免除零与假进度。
+                      value: _repairing && total > 0 ? processed / total : null,
+                      minHeight: 4,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: repairing || _clearing || !hasDownloads
+                ? null
+                : _repairDownloads,
+            child: Text(
+              repairing ? '修复中' : '修复',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _repairDownloads() async {
+    final downloads = widget.downloads;
+    if (downloads == null || _repairing) return;
+    setState(() {
+      _repairing = true;
+      _repairProcessed = 0;
+      _repairTotal = downloads.downloadEntries
+          .where((e) => e.status == DownloadStatus.downloaded)
+          .length;
+    });
+    try {
+      final result = await downloads.repairDownloadedFiles(
+        onProgress: (processed, total) {
+          if (!mounted) return;
+          setState(() {
+            _repairProcessed = processed;
+            _repairTotal = total;
+          });
+        },
+      );
+      if (!mounted) return;
+      if (result.total == 0) {
+        Toast.show('还没有已下载的歌曲可以修复');
+      } else {
+        final parts = <String>[
+          '${result.repaired} 首已更新标签',
+          if (result.renamed > 0) '${result.renamed} 个扩展名已纠正',
+          if (result.skipped > 0) '${result.skipped} 首跳过',
+          if (result.failed > 0) '${result.failed} 首失败',
+        ];
+        // 失败多半是文件被占用/空间不足，提示用户可再次点修复重试。
+        if (result.failed > 0) {
+          Toast.error('修复完成：${parts.join('，')}');
+        } else {
+          Toast.success('修复完成：${parts.join('，')}');
+        }
+      }
+      // 改名与写标签都会改变占用大小，顺手刷新统计。
+      await _loadSizes();
+    } catch (_) {
+      if (mounted) Toast.error('修复失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _repairing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -273,6 +441,11 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
               if (mounted) setState(() {});
             },
           ),
+          const SizedBox(height: 10),
+          // 旧下载修复（升级前的文件不走新下载的收尾链路：扩展名可能撒谎、
+          // 没有内嵌标签）。做成手动入口而不是首启静默迁移：整文件重写很
+          // 吃 IO，出问题用户能重试，也能自己决定什么时候跑。
+          _buildRepairTile(context),
         ],
         const SizedBox(height: 10),
         CacheItem(

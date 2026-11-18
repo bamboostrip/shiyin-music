@@ -151,6 +151,29 @@ void main() {
       expect(ok, isFalse);
       expect(await file.readAsBytes(), original, reason: '拒写时文件必须原样不动');
     });
+
+    test('封面超过单块上限（≈16MB）只跳封面，文本标签照写', () async {
+      // PICTURE 块的 24 位长度字段放不下：不能因为一个封面让整次标签写入
+      // 失败（那样歌名/歌手/歌词会一起丢），与 ID3 侧「超限只跳封面」对齐。
+      final file = await writeFile('big.flac', buildFlac());
+      final hugeCover = Uint8List(0xffffff + 1)
+        ..[0] = 0x89
+        ..[1] = 0x50
+        ..[2] = 0x4e
+        ..[3] = 0x47;
+
+      final ok = await FlacTagWriter.injectMetadata(
+        filePath: file.path,
+        song: const Song(id: '1', title: '大封面', artist: 'A', hash: 'h1'),
+        coverBytes: hugeCover,
+      );
+
+      expect(ok, isTrue);
+      final asUtf8 = const Utf8Decoder(
+        allowMalformed: true,
+      ).convert(await file.readAsBytes());
+      expect(asUtf8.contains('TITLE=大封面'), isTrue);
+    });
   });
 
   group('元数据收尾编排', () {

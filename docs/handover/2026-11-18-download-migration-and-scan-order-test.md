@@ -1,6 +1,8 @@
 # 下载旧库迁移/补扫 + 扫描顺序测试 交接说明
 
-> 状态：待排期（非阻塞缺陷）
+> 状态：**已实现**（任务 A 按「设置页手动入口」最小版本 + 任务 B 全量测试）；
+> 仅剩 Android 真机（10/13/14）与公共目录的 MediaStore 旧条目表现待验证，
+> 实现落点见文末「7. 实现落点」。
 >
 > 背景提交：`0a06c90`（FLAC/ID3 标签、按字节纠正扩展名、可选 LRC）、`5ccfac2`（媒体库扫描移到写标签之后）
 >
@@ -164,3 +166,78 @@
   - 有较多「下载到公共目录给车机/第三方播放器」的用户，或收到过「已下载的歌显示未知艺人/扩展名错打不开」反馈 → 值得做，按任务 A 排期；
   - 用户主要 App 内播放、默认目录 → 优先级低，可先只做「设置页手动修复」的最小版本。
 - 无论是否做迁移，都建议先补任务 B 的测试，避免现有顺序被无意识改回去。
+
+## 7. 实现落点（2026-11-18）
+
+任务 A 选了「B. 设置页手动入口」这一档（风险可控、出问题用户能重试），
+任务 B 全量落地。
+
+**控制器（`lib/controllers/download_controller.dart`）**
+
+- `repairDownloadedFiles({onProgress})` → `DownloadRepairResult`
+  （`total / repaired / renamed / skipped / failed`）：串行遍历索引里
+  `downloaded` 且有文件的条目，逐首「字节判型 → `correctExtension` →
+  立即落盘索引 → 写标签 → 公共目录才重扫」；在播/文件缺失/编码不支持/快照
+  与实表已不一致（修复期间被删或重下）跳过，单条失败不中断整批，可重试；
+  `tagsWritten == false`（writer 吞掉异常）算失败，不谎报「已更新标签」；
+  同一时刻只允许一次（`_repairing`，`isRepairing` 供弹层重开还原按钮态）。
+- `_scanMediaLibrary(path)`：扫描统一入口，5s 防呆超时 + 失败只记日志
+  （平台通道挂死不能拖住下载收尾/修复）。
+- 注意：修复**不判断「标签是否已存在」**，每次运行都会重写标签（大无损库有
+  IO 代价）；结果幂等，不会产生 `(n)` 副本，只是重复跑会重复写。
+- 与批量下载共用 `_metadataConcurrency` 槽位（并发不叠加），每首处理完即
+  `_persistDownloads()`，杀进程重跑幂等（不产生 `(n)` 副本）。
+- **不联网**：歌词取 `LyricCacheService` 已有文本、封面取 `ImageDiskCache`
+  已落盘字节（对应 §2.3 第 4 步「迁移时建议跳过联网歌词」）。
+- `_enrichDownload` 收口：`scanForMediaLibrary` 从「写标签之后、同 try 内
+  `unawaited`」改为「标签写入尝试之后的统一出口、await」，语义变成
+  **写标签失败也扫描**；扫描自身异常只记日志，不再可能把下载判为失败。
+
+**服务（`lib/services/download_service.dart`）**
+
+- `correctExtension(path)`：`_correctExtension` 的公开封装，迁移与新下载共用
+  （补了「文件名本身没有扩展名」的守卫：最后一个点落在目录名里时不动文件，
+  否则会拼出把文件搬进别的目录的怪路径）。
+- `isSharedStoragePath(path)`：Android 公共存储判定（复用
+  `_androidAppDirs()`，非 Android 恒 false），决定要不要扫媒体库。
+- `cleanStaleTagTempFilesIn(dir)`：回收崩溃残留的 `.id3.tmp` / `.tag.tmp`
+  （只删超过 1 小时的，避开正在写入的），对应 §5 第一条。
+
+**UI（`lib/ui/settings/cache_management_sheet.dart`）**
+
+- 设置 → 缓存管理新增「修复已下载文件」卡片：按钮 + `已处理/总数` 进度条 +
+  完成后 Toast 汇总（修复/纠正扩展名/跳过/失败），完成后刷新占用统计；
+  弹层关掉又重开时按 `isRepairing` 还原「修复中」并入灰按钮（进度计数拿不到，
+  进度条退化成不确定态）。
+
+**MediaStore 旧条目**：按 §2.4 的 **a + c**——改名后先把旧路径也扫一次
+（部分 ROM 会移除失效条目），未移除的接受残留（原生侧只有 `scanFile`，
+没有删除能力；做 `deleteMediaByPath` 需要另开分区存储/权限/回滚一整套）。
+
+**测试**
+
+- `test/controllers/download_scan_order_test.dart`：4 例——顺序
+  `download → writeDownloadMetadata → scanForMediaLibrary`；写标签抛异常
+  仍扫描；扫描抛异常不影响下载结果；传输期间销毁不写标签/不扫描/不写索引。
+- `test/controllers/download_repair_test.dart`：15 例——`.flac` 实为 MP3、
+  `.mp3` 实为 FLAC、扩展名已正确、目标名冲突落 `(2)`、编码不支持、写标签
+  失败、标签实际没写进去（writer 返回 false，不能谎报「已更新」）、在播跳过、
+  文件缺失、修复期间条目被删（快照过期即跳过，不抢删除/重下的文件）、
+  幂等（二次写入标签是替换）、`(2)` 名时 `.lrc` 边文件跟着走、公共目录才
+  扫描 + 改名后先扫旧路径、残片清理。用真实临时目录 + 最小字节样本，
+  标签写入委托真实 `DownloadService`。
+- `test/ui/settings/cache_management_sheet_test.dart` 补 3 例（按钮可用性、
+  弹层重开还原「修复中」、点击后调用控制器并提示汇总）。
+- `test/services/download_metadata_test.dart` 补 1 例：FLAC 封面超过
+  `0xffffff`（≈16MB）只跳封面，文本标签照写（顺带修掉 §5 第四条：此前
+  会让整次写入失败）。
+
+**仍待真机 / 未做**
+
+- Android 10/13/14 各一次：默认 App 专属目录（迁移可完成、媒体库无新增）、
+  自定义公共目录（艺人/专辑/封面正确、旧条目残留是否可接受）、迁移中杀进程
+  后重启可续。
+- §5 其余小问题未动：`DownloadMetadataResult` 的逐条 UI 提示、
+  `Id3TagWriter` 的 `.mp3` 后缀硬校验（rename 被占用时文本标签仍会丢）、
+  网易云下架曲死代码、重下时旧 `.lrc` 不覆盖。
+- 没有做「首启后空闲静默迁移」（§2.2 的 A 档），也没有 prefs 版本 gate。
