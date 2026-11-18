@@ -99,7 +99,25 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     Duration? initialPosition,
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
+    bool userInitiated = true,
+    int? expectedIntent,
   }) async {
+    // 播放意图在**任何网络/音源加载之前**登记（上游 3.3.0 `9426621`）：
+    // 用户在这次加载期间暂停/切歌/断开蓝牙，都会推进企图代次，加载完成时
+    // _requestPlayback 比对不上就不会出声。内部调用方（自动下一首、曲末
+    // 推进、私人 FM 续批）传 userInitiated=false，避免把流程动作记成用户意图。
+    //
+    // [expectedIntent]：有些入口在进入本方法**之前**还有一段网络等待（私人
+    // FM 拉首批列表），代次应该在更早的用户点按时就登记。这类调用方把当时
+    // 的代次传进来（与 userInitiated:false 搭配）；否则这里只能取「等待结束
+    // 后的当前代次」，等待期间用户的暂停/断连就会被吞掉。不传时行为与旧实现
+    // 完全一致。
+    if (userInitiated) _handleManualPlay();
+    final intentSerial = expectedIntent ?? _playbackIntentSerial;
+    _pendingPlaybackIntent = intentSerial;
+    // 任何实际起播都会消费掉「待恢复进度」：它只属于恢复出来的那一首，
+    // 留着会被下一次 playSong 误用（[resumePlayback] 已先把值取到局部变量）。
+    _resumePosition = null;
     // 私人 FM 会话的保持判定：只有「在本次播放使用的队列里点歌」才算仍在
     // FM 会话内（同队列上一首/下一首、播放页点当前队列的其他歌、同曲重播）。
     // 从已下载/本地/历史等入口点单曲时 queue 参数为 null 且歌曲不在当前队列，
@@ -327,6 +345,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         _nextLog('playSong 放弃(加载期间已切歌): ${song.title}');
         return;
       }
+      // 音源确实换成这首歌了：从此刻起 audioPlayer.position 才归属它。
+      // 进度保存以这个标记为准（见 _saveCurrentPosition）；周期任务则等
+      // 起播确认后才启动——只加载不出声时没必要每 5 秒唤醒一次。
+      _positionOwnerHash = song.hash;
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
       }
@@ -348,7 +370,16 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 起播请求不能无界 await：Android 端平台确认会拖到曲末，把本方法的
       // finally（→ _changingSourceDepth）钉在 1 一整首歌，completed 分支与
       // 中途错误处理都会被整条挡掉。理由详见 [_kPlayConfirmTimeout]。
-      final confirm = await _requestPlayback();
+      final confirm = await _requestPlayback(expectedIntent: intentSerial);
+      if (confirm == PlayConfirm.blocked) {
+        // 加载期间用户已暂停/切歌/断开蓝牙（或仍在打断中）：不出声、不记账。
+        // 不计失败是刻意的——这不是播放失败，是「本来就不该播」。
+        // 音源已经归属且定位完成，把此刻位置落一次盘；否则「选歌后立即
+        // 暂停」时磁盘还留着这首歌上一次的旧进度，重启会跳回旧位置。
+        unawaited(_saveCurrentPosition());
+        _nextLog('playSong 起播被状态机拒绝: ${song.title}');
+        return;
+      }
       if (confirm == PlayConfirm.timeoutSilent) {
         // 超时且引擎静默：load 成功但引擎没接住（会话被抢/未 ready 又不抛错）。
         // 不清失败计数（否则自动跳过失效）、不记历史不做缓存；不抛异常，
@@ -397,6 +428,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           queue: queue,
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
+          // 入口代次继续生效：领取期间用户若已暂停/断连，重试不得起播。
+          expectedIntent: expectedIntent,
         );
         if (outcome == VipRetryOutcome.resumed) return;
         if (outcome == VipRetryOutcome.noSource) noSource = true;
@@ -436,6 +469,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           isRetry: true,
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
+          // 自动重试不是新的用户意图：期间用户若已暂停/断连，重试必须失效，
+          // 不能借这次重试解除断连保护。
+          userInitiated: false,
+          // 沿用入口代次：等待重试的 2s 里用户暂停/断连，重试同样不得起播。
+          expectedIntent: expectedIntent,
         );
         return;
       }
@@ -445,7 +483,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         debugPrint('[时音][player] 失败落错误态前歌曲已切换，跳过: ${song.title}');
         return;
       }
-      unawaited(_audioHandler.pause());
+      unawaited(_audioHandler.pause(userInitiated: false));
       // 失败收尾：本次切歌可能已把旧音频静音，按代际解除，避免引擎停留在
       // 静音态（先 pause 再还原音量，用户不会再听到旧歌外放）。
       await _unmuteEngineForSourceSwitch(
@@ -499,6 +537,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         );
         _scheduleSavePlaybackState();
       }
+      if (_pendingPlaybackIntent == intentSerial) _pendingPlaybackIntent = null;
     }
   }
 
@@ -545,7 +584,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         : (song.duration ?? Duration.zero);
     if (songDuration > Duration.zero &&
         songDuration - errorPosition <= _kNearEndDecodeErrorThreshold) {
-      unawaited(_audioHandler.pause());
+      unawaited(_audioHandler.pause(userInitiated: false));
       isPlaying = false;
       notifyListeners();
       // 本次「完成」若会被 _handleCompleted 去重掉（同曲已完成过/正在处理），
@@ -590,7 +629,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       'errorPos=${errorPosition.inMilliseconds}ms '
       'songDur=${songDuration.inMilliseconds}ms err=$error',
     );
-    unawaited(_audioHandler.pause());
+    unawaited(_audioHandler.pause(userInitiated: false));
     // 同步收敛播放态：pause 是引擎异步确认，不先置 false 的话 UI 会
     // 在错误提示出现后仍短暂显示「播放中」。
     isPlaying = false;
@@ -855,6 +894,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     List<Song>? queue,
     Duration? initialPosition,
     bool preserveClimax = false,
+    int? expectedIntent,
   }) async {
     try {
       final result = await vipClaim!.claimNow(null);
@@ -897,6 +937,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
           isRetry: true,
+          // 领取成功后的重试是流程续跑，不是新的用户意图：等待领取期间
+          // 若已断连/进入打断，这次重试不能把它们解除。
+          userInitiated: false,
+          // 入口代次继续生效：等待领取期间用户若已暂停/切歌，重试不得起播。
+          expectedIntent: expectedIntent,
         ),
       );
       return VipRetryOutcome.resumed;
@@ -942,35 +987,56 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     // 若继续读 audioPlayer.playing，曲终点「播放」会走进 pause 分支
     // （图标与行为相反）。
     if (isPlaying) {
-      await _audioHandler.pause();
+      // 用户主动暂停：作废排队中的自动恢复与在途起播（「暂停后接电话、
+      // 挂断自己开始播」就是靠这一步修掉的）。
+      _cancelAutomaticResume();
+      await _audioHandler.pause(userInitiated: false);
+      // 暂停瞬间落盘一次进度：用户经常暂停后直接退出，周期任务可能还没轮到。
+      // 这里不 await —— prefs 写盘不该挡住 UI 的播放/暂停图标切换；退出路径
+      // 另有 flushPlaybackState() 会 await 同一份进度。
+      unawaited(_saveCurrentPosition());
       return;
     }
-    // 冷启动恢复播放状态后，音频引擎只恢复了队列/当前歌曲状态，
-    // 尚未加载任何音频源（idle）。此时直接 play() 只是空转
-    // （UI 显示播放中但不出声），必须走完整播放流程加载当前歌曲。
-    if (audioPlayer.processingState == ProcessingState.idle) {
-      final song = currentSong;
-      if (song != null) {
-        final initPos =
-            _pendingIdlePosition ?? (position > Duration.zero ? position : null);
-        _pendingIdlePosition = null;
-        await playSong(song, queue: queue, initialPosition: initPos);
+    // 用户主动播放：解除断连保护（断连只能由显式播放解除）。
+    _handleManualPlay();
+    final intentSerial = _playbackIntentSerial;
+    _pendingPlaybackIntent = intentSerial;
+    try {
+      // 冷启动恢复播放状态后，音频引擎只恢复了队列/当前歌曲状态，
+      // 尚未加载任何音频源（idle）。此时直接 play() 只是空转
+      // （UI 显示播放中但不出声），必须走完整播放流程加载当前歌曲。
+      if (audioPlayer.processingState == ProcessingState.idle) {
+        final song = currentSong;
+        if (song != null) {
+          final initPos =
+              _pendingIdlePosition ??
+              (position > Duration.zero ? position : null);
+          _pendingIdlePosition = null;
+          await playSong(
+            song,
+            queue: queue,
+            initialPosition: initPos,
+            userInitiated: false,
+          );
+          return;
+        }
+      }
+      if (audioPlayer.processingState == ProcessingState.completed) {
+        // just_audio.play() 首行 `if (playing) return`，而 completed 不会把
+        // just_audio.playing 置回 false。必须先 pause 再 seek+play，否则
+        // 进度回零了却永远不出声。
+        // 这一轮是同一首歌的全新一遍：先清完成去重/曲末耗尽残留，否则本遍
+        // 播完时 completed 会被上一轮的标记去重吞掉，队列不再前进。
+        _resetCompletionLatchForReplay();
+        await _audioHandler.pause(userInitiated: false);
+        await _audioHandler.seek(Duration.zero);
+        await _requestPlayback(expectedIntent: intentSerial);
         return;
       }
+      await _requestPlayback(expectedIntent: intentSerial);
+    } finally {
+      if (_pendingPlaybackIntent == intentSerial) _pendingPlaybackIntent = null;
     }
-    if (audioPlayer.processingState == ProcessingState.completed) {
-      // just_audio.play() 首行 `if (playing) return`，而 completed 不会把
-      // just_audio.playing 置回 false。必须先 pause 再 seek+play，否则
-      // 进度回零了却永远不出声。
-      // 这一轮是同一首歌的全新一遍：先清完成去重/曲末耗尽残留，否则本遍
-      // 播完时 completed 会被上一轮的标记去重吞掉，队列不再前进。
-      _resetCompletionLatchForReplay();
-      await _audioHandler.pause();
-      await _audioHandler.seek(Duration.zero);
-      await _requestPlayback();
-      return;
-    }
-    await _requestPlayback();
   }
 
   void previewSeek(Duration position) {
@@ -1060,11 +1126,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   /// 覆盖调用方刚定位到的目标位置。这里只收敛播放标志，不动位置。
   Future<void> _ensurePlaying() async {
     if (isPlaying) return;
+    // 调用方只有 [seekToAndPlay] / 高潮试听这类用户动作：先解除自动恢复与
+    // 断连保护，再按当前企图代次起播（来电打断中会被状态机拒绝）。
+    _handleManualPlay();
+    final intentSerial = _playbackIntentSerial;
     if (audioPlayer.processingState == ProcessingState.completed) {
       _resetCompletionLatchForReplay();
     }
-    await _audioHandler.pause();
-    await _requestPlayback();
+    await _audioHandler.pause(userInitiated: false);
+    await _requestPlayback(expectedIntent: intentSerial);
   }
 
   /// 当前歌曲「原地重新起播」（曲末点播放 / 曲末点歌词定位）时清掉上一轮的
@@ -1128,12 +1198,16 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     );
 
     try {
+      // 曲末推进同样登记企图：单曲循环重播要经过延时/定位，期间用户若
+      // 暂停或断开蓝牙，这次重播必须失效（否则「挂断后自己开始播」会在
+      // 曲末再演一遍）。
+      final intentSerial = _playbackIntentSerial;
       if (_sleepFinishCurrentSong) {
         _sleepFinishCurrentSong = false;
         _sleepFinishCurrentSongOption = false;
         sleepTimerRemaining = null;
         notifyListeners();
-        unawaited(_audioHandler.pause());
+        unawaited(_audioHandler.pause(userInitiated: false));
         _nextLog('完成处理分支: 睡眠定时"播完这首再停" → 暂停，不切歌');
         return;
       }
@@ -1151,12 +1225,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         // completed 后 just_audio.playing 仍为 true，play() 会被
         // `if (playing) return` 短路——必须先 pause 归零再起播。
         _nextLog('完成处理分支: 单曲循环 → 重播本曲');
-        await _audioHandler.pause();
+        await _audioHandler.pause(userInitiated: false);
         await seek(Duration.zero);
         if (currentSong?.hash != song.hash) return;
         // 同样有界等待：无界 await 会让完成锁一直留到曲末，下一轮重播的
         // completed 被 _willHandleCompletion 去重吞掉（单曲循环只循环一次）。
-        await _requestPlayback();
+        await _requestPlayback(expectedIntent: intentSerial);
         _completedSongHash = null;
         return;
       }
@@ -1171,7 +1245,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         '完成处理分支: 自动切下一首 → ${nextSong.title} '
         '(hash=${nextSong.hash} isSameSong=${nextSong.hash == song.hash})',
       );
-      await playSong(nextSong, queue: queue);
+      // 自动切下一首不是用户意图：用户已暂停/断连时它照样要出声（曲末推进
+      // 本身是「继续播」的语义），但不得解除断连保护，故传 false。
+      await playSong(nextSong, queue: queue, userInitiated: false);
     } catch (error) {
       // playSong 内部不抛；这里只可能是 seek/play 引擎异常，记日志
       // 落错误态，避免 unawaited 调用方的未处理异常
@@ -1350,7 +1426,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         // 预算耗尽：停住并给持久提示（Toast 瞬态，errorMessage 持久）。
         // 不 seek(0)：留在冻结处可 fail-fast，用户点播只需验证尾部，
         // 不必重听整首；若用户手动播完触发自然 completed，预算会正常重置。
-        unawaited(_audioHandler.pause());
+        unawaited(_audioHandler.pause(userInitiated: false));
         isPlaying = false;
         errorMessage = '连续多次在曲末播放失败，已停止自动切歌';
         _tailSkipExhausted = true;
@@ -1450,15 +1526,28 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   /// - [PlaybackMode.playlistLoop] / [PlaybackMode.shuffle]：自动切下一首重试
   ///
   /// 返回 true 表示成功开始播放（或用户在恢复期间手动接管了播放）。
-  Future<bool> resumePlayback() async {
+  /// [userInitiated]：首页「开机自启播放」等流程调用时传 false，
+  /// 否则启动自播会被当成用户意图、解除断连保护（上游 3.3.0 `c7ba1e6`：
+  /// 蓝牙没连上时开机自播会把声音放到手机扬声器）。
+  Future<bool> resumePlayback({bool userInitiated = true}) async {
     if (currentSong == null || queue.isEmpty) return false;
 
     final maxAttempts = queue.length;
     var songToPlay = currentSong!;
+    // 恢复出来的进度只作用于第一首；失败换下一首时它是另一首歌的位置，
+    // 带上只会把新歌拉到几分钟处。取值后立刻清空，避免二次生效。
+    final resumePosition = _resumePosition;
+    _resumePosition = null;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       errorMessage = null;
-      await playSong(songToPlay, queue: queue);
+      await playSong(
+        songToPlay,
+        queue: queue,
+        initialPosition: attempt == 0 ? resumePosition : null,
+        // 只有第一次是「恢复」，后续是失败后换下一首，一律不再当用户意图。
+        userInitiated: userInitiated && attempt == 0,
+      );
       // 恢复链可能耗时数秒（地址解析+重试），期间用户可能已手动点了别的歌：
       // currentSong 已换人时立即收手，绝不再用 _nextSong() 抢占用户的选择。
       if (currentSong?.hash != songToPlay.hash) return true;

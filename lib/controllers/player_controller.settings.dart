@@ -149,6 +149,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
 
     final resumePlayback = isPlaying;
     final targetPosition = smoothPosition;
+    // 与 playSong 同构的企图代次：解析/加载期间用户暂停、切歌、断连都会
+    // 推进 serial，加载完成后的起播必须作废。切音质本身不是「显式播放」，
+    // 因此这里不调 _handleManualPlay()——断连保护仍需用户按播放键解除。
+    final intentSerial = _playbackIntentSerial;
+    if (resumePlayback) _pendingPlaybackIntent = intentSerial;
     isPreparing = true;
     errorMessage = null;
     _tailSkipExhausted = false;
@@ -169,10 +174,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
         // 复用主路径解析：云盘/网易/智能降级语义与 playSong 一致
         final playUrl = await _resolvePlayUrl(song);
         // 解析耗时数秒，期间用户可能已切歌：旧音质不得抢引擎
-        if (currentSong?.hash != song.hash) {
-          debugPrint('[时音][player] 切音质解析期间已切歌，丢弃旧结果');
-          return;
-        }
+      if (currentSong?.hash != song.hash ||
+          (resumePlayback && intentSerial != _playbackIntentSerial)) {
+        debugPrint('[时音][player] 切音质解析期间已切歌/暂停，丢弃旧结果');
+        return;
+      }
         if (playUrl.url.isEmpty) {
           throw Exception('当前音质暂时没有可播放地址');
         }
@@ -198,20 +204,32 @@ mixin _PlayerSettings on _PlayerControllerBase {
         queueSongs: queue,
         queueIndex: currentIndex,
       );
-      // 加载期间同样可能被切歌抢先：旧音质的 seek/play 全部作废
-      if (currentSong?.hash != song.hash) {
-        debugPrint('[时音][player] 切音质加载期间已切歌，中止旧后续动作');
+      // 加载期间同样可能被切歌/暂停抢先：旧音质的 seek/play 全部作废
+      if (currentSong?.hash != song.hash ||
+          (resumePlayback && intentSerial != _playbackIntentSerial)) {
+        debugPrint('[时音][player] 切音质加载期间已切歌/暂停，中止旧后续动作');
         return;
       }
+      // 音源已换成这首歌：后续进度写盘才归属它（与 playSong 同一判据）。
+      _positionOwnerHash = song.hash;
       if (targetPosition > Duration.zero) {
         // 走公开 seek：serial/clamp/notify 语义与手势一致
         await seek(targetPosition);
       }
-      if (currentSong?.hash != song.hash) return;
+      if (currentSong?.hash != song.hash ||
+          (resumePlayback && intentSerial != _playbackIntentSerial)) {
+        return;
+      }
       if (resumePlayback) {
         // 有界等待平台确认：Android 端无界 await 会拖到曲末，把换源深度与
         // isPreparing 钉死（详见 _kPlayConfirmTimeout）。
-        await _requestPlayback();
+        final confirm = await _requestPlayback(expectedIntent: intentSerial);
+        if (confirm == PlayConfirm.blocked) {
+          // 同 playSong：音源已归属/已定位，落一次盘避免残留旧位置。
+          unawaited(_saveCurrentPosition());
+          debugPrint('[时音][player] 切音质起播被状态机拒绝: ${song.title}');
+          return;
+        }
       }
       // 切音质稳定播放后再后台缓存（同样受蜂窝门控约束；快速切歌会取消）
       if (networkUrl != null && isAudioPrecacheAllowed) {
@@ -228,6 +246,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
               ? targetPosition
               : null,
           preserveClimax: true,
+          // 切音质期间用户暂停/切歌同样作废这次领取重试。
+          expectedIntent: intentSerial,
         );
         // 只有「已重新起播」才收手；领取失败与「领了仍无地址」都落错误态，
         // 切音质是用户主动动作，不自作主张跳歌。
@@ -250,6 +270,10 @@ mixin _PlayerSettings on _PlayerControllerBase {
           isPreparing = false;
           notifyListeners();
         }
+      }
+      // 与 playSong finally 同构：只清自己登记的意图，别清掉后来流程的。
+      if (_pendingPlaybackIntent == intentSerial) {
+        _pendingPlaybackIntent = null;
       }
     }
   }
@@ -333,7 +357,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     _sleepFinishCurrentSongOption = false;
     sleepTimerRemaining = null;
     notifyListeners();
-    unawaited(_audioHandler.pause());
+    unawaited(_audioHandler.pause(userInitiated: false));
   }
 
   @override
@@ -363,11 +387,25 @@ mixin _PlayerSettings on _PlayerControllerBase {
   /// 退后台（main.dart AppLifecycleState.paused）调用：硬终止进程不做任何异步
   /// 收尾，防抖窗口内的切歌必须先刷写，否则下次启动恢复到上一首歌。
   Future<void> flushPlaybackState() async {
+    // 进度单独一个键，顺手一起刷：退出/退后台是最容易「听到一半就没了」的点。
+    // 必须 await：桌面 quitGracefully 在钩子返回后直接 TerminateProcess，
+    // 未完成的 prefs 写会被硬杀丢掉。
+    await _saveCurrentPosition();
     _saveStateTimer?.cancel();
     _saveStateTimer = null;
     // 防抖已被取消：这次写失败就等于把窗口内本该落盘的切歌一起丢了，
     // 所以失败后重排一次，交给后续切歌/下一次生命周期兜住。
     if (!await _savePlaybackStateGuarded()) _scheduleSavePlaybackState();
+  }
+
+  /// 恢复出来的位置是否值得应用。
+  ///
+  /// 尾 3 秒内不恢复：否则一开播就撞曲末，自动下一首，用户看到的是
+  /// 「刚进来就跳歌」。用「剩余时长」判断而不是百分比，长播客/有声书不受影响。
+  bool _isResumablePosition(Song song, Duration saved) {
+    final total = song.duration;
+    if (total == null || total <= Duration.zero) return true;
+    return total - saved > const Duration(seconds: 3);
   }
 
   Future<void> _savePlaybackState() async {
@@ -452,6 +490,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     autoPlayOnDeviceConnected =
         prefs.getBool(_autoPlayOnDeviceConnectedSettingKey) ??
         autoPlayOnDeviceConnected;
+    autoPauseOnDeviceDisconnect =
+        prefs.getBool(_autoPauseOnDeviceDisconnectSettingKey) ??
+        autoPauseOnDeviceDisconnect;
     bluetoothLyricsEnabled =
         prefs.getBool(_bluetoothLyricsEnabledSettingKey) ??
         bluetoothLyricsEnabled;
@@ -612,6 +653,27 @@ mixin _PlayerSettings on _PlayerControllerBase {
       // 暂无歌词 + 无高潮标记。时长先用歌曲元数据占位（引擎加载后覆盖），
       // 歌词走缓存优先（30 天）+ 静默刷新，高潮走网络补拉。
       duration = currentSong?.duration ?? Duration.zero;
+
+      // 恢复播放进度：全局单点（最后在播那首 + 位置），只在 hash 对上时采用。
+      // 写进内存的 position 有两个用处：暂停态下界面直接显示「上次听到 03:12」，
+      // 以及未开自动播放时用户点播放能从这里续（见 togglePlay 的 idle 分支）。
+      final restoredSong = currentSong;
+      final savedPosition = restoredSong == null
+          ? null
+          : parseSavedPosition(
+              prefs.getString(_currentPositionKey),
+              restoredSong.hash,
+            );
+      if (restoredSong != null &&
+          savedPosition != null &&
+          _isResumablePosition(restoredSong, savedPosition)) {
+        _setPositionBase(savedPosition, playing: false);
+        _lastSmoothPosition = savedPosition;
+        _emitPosition();
+        _resumePosition = savedPosition;
+      } else {
+        _resumePosition = null;
+      }
 
       // 与 _restoreSettings 同理：构造函数 unawaited 发起，await 之后
       // 可能已 dispose，不得再通知或触发补拉。

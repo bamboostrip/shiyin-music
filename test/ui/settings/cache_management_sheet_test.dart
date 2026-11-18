@@ -39,6 +39,18 @@ class _FakeDownloads extends ChangeNotifier implements DownloadController {
   @override
   int get playCacheLimit => 300 * 1024 * 1024;
 
+  /// 「同时保存 LRC 歌词」开关（上游 3.3.0 `d688884`）。
+  bool saveLyricsFileValue = false;
+
+  @override
+  bool get saveLyricsFile => saveLyricsFileValue;
+
+  @override
+  Future<void> setSaveLyricsFile(bool enabled) async {
+    saveLyricsFileValue = enabled;
+    notifyListeners();
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

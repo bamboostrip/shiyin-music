@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/music_models.dart';
 import 'android_storage_access.dart';
+import 'audio_file_format.dart';
+import 'download_metadata_writer.dart';
 import 'id3_tag_writer.dart';
 import 'image_disk_cache.dart';
 
@@ -596,51 +598,88 @@ class DownloadService {
       }
       await File(partPath).rename(finalPath);
 
-      // 下载完成后立即写入 ID3v2.3 标签（仅用户主动下载的 MP3）。这里用
-      // await 而不是上游的 unawaited：下载 future 完成时标签已就位，索引/
-      // 扫描拿到的就是最终文件，不会出现「已入库但播放器读不到标签」窗口。
-      // 注入失败静默降级（见 _injectId3Tag），不影响下载结果；FLAC 需
-      // Vorbis comment，不在本期范围，直接跳过。
-      if (task.kind == DownloadTaskKind.download &&
-          finalPath.toLowerCase().endsWith('.mp3')) {
-        await _injectId3Tag(finalPath, task.song);
-      }
-
-      // Android：按路径写入公共目录的文件不会自动进系统媒体库，主动触发
-      // 一次扫描，车机 / 其他播放器 / 相册才能立即看到（应用专属目录会被
-      // 系统忽略，调用无副作用）。扫描是尽力而为，不阻塞下载结果。
+      // 扩展名纠正（上游 3.3.0 `d688884`）：文件名在**请求音质**时就定好了
+      // 扩展名，而服务端可能降级下发别的编码（flac → 320/128，
+      // 见 DownloadController 的 _downloadQualityFallbackChain）。按真实字节
+      // 改名，第三方播放器 / 车机才会选对解析器。
+      //
+      // 只对用户下载做：播放缓存文件由本 App 自己按 codec 探测播放，改名
+      // 反而会让缓存索引里的路径失配。
+      var outputPath = finalPath;
       if (task.kind == DownloadTaskKind.download) {
-        unawaited(AndroidStorageAccess.scanFile(finalPath));
+        outputPath = await _correctExtension(finalPath);
       }
 
-      return finalPath;
+      return outputPath;
     } finally {
       _cancelTokens.remove(registryKey);
       _partPaths.remove(registryKey);
     }
   }
 
-  /// 为刚落盘的下载 MP3 注入 ID3v2.3 标签（歌名 / 歌手 / 专辑 / 封面）。
+  /// 按真实编码纠正扩展名，返回（可能已改名的）路径。
   ///
-  /// 两层兜底保证「标签写失败 ≠ 下载失败」：封面读取失败只丢 APIC 帧；
-  /// 写标签任何异常都只记日志——文件本身已完整落盘，缺标签顶多是第三方
-  /// 播放器/车机不显示元数据，回退行为与注入前完全一致。
-  Future<void> _injectId3Tag(String filePath, Song song) async {
+  /// 识别不出格式就原样返回，绝不为了「看起来整齐」删文件。
+  Future<String> _correctExtension(String path) async {
     try {
-      Uint8List? coverBytes;
-      final coverUrl = song.coverUrl;
-      if (coverUrl != null && coverUrl.isNotEmpty) {
-        coverBytes = await _cachedCoverBytes(coverUrl);
+      final format = await inspectAudioFile(path);
+      final extension = switch (format.format) {
+        AudioFileFormat.mp3 => '.mp3',
+        AudioFileFormat.flac => '.flac',
+        AudioFileFormat.unsupported => null,
+      };
+      if (extension == null || path.toLowerCase().endsWith(extension)) {
+        return path;
       }
-      await Id3TagWriter.injectMetadata(
-        filePath: filePath,
-        song: song,
-        coverBytes: coverBytes,
+      final dot = path.lastIndexOf('.');
+      final corrected = '${path.substring(0, dot)}$extension';
+      // 纠正后可能与另一首歌撞名（同歌不同音质并存）：走同一套防覆盖决策。
+      final target = File(corrected).existsSync()
+          ? resolveNonCollidingPath(corrected, path)
+          : corrected;
+      await File(path).rename(target);
+      debugPrint(
+        '[DownloadService] 扩展名按真实编码纠正: '
+        '${File(path).uri.pathSegments.last} -> ${File(target).uri.pathSegments.last}',
       );
+      return target;
     } catch (error) {
-      debugPrint('[DownloadService] 写入 ID3 标签失败（已忽略，不影响下载）: $error');
+      debugPrint('[DownloadService] 扩展名纠正失败（保留原路径）: $error');
+      return path;
     }
   }
+
+  /// 为刚落盘的下载写标签与歌词（用户主动下载才调用）。
+  ///
+  /// 与上游的差别见 [DownloadMetadataWriter] 顶部：不联网取封面、
+  /// 不引入 `audio_metadata_reader` 回读旧标签。
+  Future<DownloadMetadataResult> writeDownloadMetadata({
+    required String filePath,
+    required Song song,
+    String? lyricsText,
+    bool saveLyricsFile = false,
+  }) async {
+    Uint8List? coverBytes;
+    final coverUrl = song.coverUrl;
+    if (coverUrl != null && coverUrl.isNotEmpty) {
+      coverBytes = await _cachedCoverBytes(coverUrl);
+    }
+    return DownloadMetadataWriter.write(
+      filePath: filePath,
+      song: song,
+      lyricsText: lyricsText,
+      saveLyricsFile: saveLyricsFile,
+      coverBytes: coverBytes,
+    );
+  }
+
+  /// 触发一次系统媒体库扫描（Android 才有效，其他平台内部 no-op）。
+  ///
+  /// 必须在**标签写完之后**再扫：MediaStore 在扫描当刻就把音频的
+  /// 艺人/专辑/封面快照进索引，先扫后写标签的话，系统音乐库、车机蓝牙
+  /// 列表会一直显示「未知艺人」直到文件被再次扫描。
+  Future<void> scanForMediaLibrary(String filePath) =>
+      AndroidStorageAccess.scanFile(filePath);
 
   /// 从封面磁盘缓存读取某 URL 的封面原始字节；未命中 / 读取失败返回 null。
   ///
@@ -687,12 +726,59 @@ class DownloadService {
     return '$stem ($index)$ext';
   }
 
-  /// 文件的有效音频字节数：文件总大小减去文件头可能存在的 ID3v2 标签。
+  /// 文件的有效音频字节数：总大小减去文件头的元数据块。
   ///
-  /// 只有本 fork 下载 MP3 后写标签的文件会带这段前缀；`.flac`/`.part`
-  /// 等无标签文件结果与原文件大小一致（见 [resolveNonCollidingPath]）。
-  static int _audioContentLength(File file) =>
-      file.lengthSync() - Id3TagWriter.existingTagLengthSync(file);
+  /// [resolveNonCollidingPath] 用它判断「同名是不是同一首歌」：同歌重下时
+  /// 目标文件已经带过标签，直接比总大小会多出标签字节，被误判成
+  /// 「同名不同歌」而多存一份 `(2).mp3`。
+  ///
+  /// 两种容器都要剥：
+  /// - MP3/部分 FLAC 可能带 ID3v2 前缀（[Id3TagWriter.existingTagLengthSync]）；
+  /// - 真正的 FLAC 在 `fLaC` 之后是元数据块链（STREAMINFO/Vorbis comment/
+  ///   PICTURE…），写完标签后这段会变长，同样要跳过。
+  static int _audioContentLength(File file) {
+    final total = file.lengthSync();
+    final id3 = Id3TagWriter.existingTagLengthSync(file);
+    return total - id3 - _flacMetadataLength(file, id3);
+  }
+
+  /// `fLaC` 标记之后、音频帧之前的元数据块总长度（含块头）；非 FLAC 返回 0。
+  static int _flacMetadataLength(File file, int start) {
+    RandomAccessFile? reader;
+    try {
+      reader = file.openSync();
+      final length = reader.lengthSync();
+      if (start + 4 > length) return 0;
+      reader.setPositionSync(start);
+      if (!const [0x66, 0x4c, 0x61, 0x43]
+          .every((byte) => reader!.readByteSync() == byte)) {
+        return 0;
+      }
+      var consumed = 4;
+      var last = false;
+      var guard = 0;
+      while (!last && guard++ < 1024) {
+        if (start + consumed + 4 > length) return 0;
+        final header = <int>[
+          reader.readByteSync(),
+          reader.readByteSync(),
+          reader.readByteSync(),
+          reader.readByteSync(),
+        ];
+        last = header[0] & 0x80 != 0;
+        final blockLength = (header[1] << 16) | (header[2] << 8) | header[3];
+        consumed += 4 + blockLength;
+      }
+      return consumed <= length ? consumed : 0;
+    } catch (_) {
+      // 读失败时退回「不剥元数据」：宁可多存一份，也不要误判成同一首覆盖。
+      return 0;
+    } finally {
+      try {
+        reader?.closeSync();
+      } catch (_) {}
+    }
+  }
 
   /// 断点续传决策（纯函数，供单测）：已有 .part 且服务器确认 Range
   /// （HTTP 206）才续传追加；服务器忽略 Range 返回 200 全量时必须整体
@@ -795,11 +881,20 @@ class DownloadService {
     }
   }
 
-  /// 删除文件（若存在）。
+  /// 删除文件（若存在），连同同名的 `.lrc` 边文件。
+  ///
+  /// 边文件只在「内嵌失败」或用户勾选「同时保存 LRC」时产生；删歌时留下
+  /// 孤立的 `.lrc` 会让下次下载同名歌读到上一首的歌词（同名不同歌场景）。
   Future<void> deleteFile(String path) async {
     final file = File(path);
     if (file.existsSync()) {
       await file.delete();
+    }
+    try {
+      final sidecar = File(DownloadMetadataWriter.lyricsFilePath(path));
+      if (await sidecar.exists()) await sidecar.delete();
+    } catch (error) {
+      debugPrint('[DownloadService] 删除 LRC 边文件失败（已忽略）: $error');
     }
   }
 

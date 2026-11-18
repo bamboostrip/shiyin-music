@@ -2,89 +2,154 @@
 part of 'player_controller.dart';
 
 mixin _PlayerDesktop on _PlayerControllerBase {
+  /// 系统音频打断与设备断连策略（**本 fork 独占**，just_audio 的
+  /// `handleInterruptions` 已关闭，见 `MusicAudioHandler.audioPlayer`）。
+  ///
+  /// 移植上游 3.3.0 `56d0c9f` + `9426621` + `c7ba1e6`，按本 fork 的架构改了三处：
+  ///
+  /// - **不做手动 duck 音量**。上游在这里用 `_volumeBeforeDuck/_duckedVolume`
+  ///   把引擎音量对半压，但本 fork 的引擎音量由 [LoudnessService] 独占
+  ///   （正向增益走 Android LoudnessEnhancer，衰减走 `setVolume` + 渐变 ramp），
+  ///   任何一处裸 `setVolume` 都会被下一次 `applyGain` 覆盖，还会和用户音量
+  ///   互相打。duck（导航播报/通知提示音）保持现状：不暂停也不改音量。
+  /// - **起播收口是 [_requestPlayback]**（带平台确认超时），不是上游的
+  ///   `_startPlayback`，所以企图代次守卫加在那里。
+  /// - **自动恢复统一走 [_scheduleAutomaticResume]**：定时器代次
+  ///   （[_autoResumeSerial]）负责让排队中的旧回调失效。旧实现直接
+  ///   `Timer(callback)`，用户在这一拍里暂停也拦不住。
   Future<void> _setupAudioSessionListeners() async {
     try {
-      final session = await AudioSession.instance;
+      final session = await _audioSessionProvider();
       await session.configure(_audioSessionConfiguration);
-      _interruptionSub = session.interruptionEventStream.listen((event) {
-        if (event.begin) {
-          // 打断开始：系统可能已自动暂停播放器。
-          // 若开启了"阻止打断"，立即恢复播放以对抗暂停。
-          if (!audioInterruptionEnabled && isPlaying && currentSong != null) {
-            _autoResumeTimer?.cancel();
-            _autoResumeTimer = Timer(const Duration(milliseconds: 300), () {
-              if (!isPlaying && currentSong != null) {
-                unawaited(_audioHandler.play());
-              }
-            });
-          }
-        } else {
-          // 打断结束：若开启了"自动恢复"或"阻止打断"，恢复播放。
-          if ((autoResumeAfterInterruption || (!audioInterruptionEnabled)) &&
-              currentSong != null) {
-            _autoResumeTimer?.cancel();
-            _autoResumeTimer = Timer(const Duration(milliseconds: 500), () {
-              if (!isPlaying && currentSong != null) {
-                unawaited(_audioHandler.play());
-              }
-            });
-          }
-        }
-      });
-      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
-        if (!audioInterruptionEnabled) {
-          // 阻止打断模式下忽略耳机拔出
-          return;
-        }
-        if (autoResumeAfterInterruption && currentSong != null) {
-          _autoResumeTimer?.cancel();
-          _autoResumeTimer = Timer(const Duration(milliseconds: 500), () {
-            if (!isPlaying && currentSong != null) {
-              unawaited(_audioHandler.play());
-            }
-          });
-        }
-      });
+      _interruptionSub = session.interruptionEventStream.listen(
+        handleInterruptionEvent,
+      );
+      _becomingNoisySub = session.becomingNoisyEventStream.listen(
+        (_) => handleBecomingNoisy(),
+      );
       _previousDevices = await session.getDevices();
-      _devicesSub = session.devicesStream.listen((devices) {
-        if (_previousDevices != null) {
-          final addedDevices = devices.difference(_previousDevices!);
-          if (addedDevices.isNotEmpty) {
-            // ignore: experimental_member_use
-            final hasNewAudioDevice = addedDevices.any(
-              (d) =>
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.bluetoothA2dp ||
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.bluetoothLe ||
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.bluetoothSco ||
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.wiredHeadset ||
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.wiredHeadphones ||
-                  // ignore: experimental_member_use
-                  d.type == AudioDeviceType.carAudio,
-            );
-
-            if (hasNewAudioDevice &&
-                autoPlayOnDeviceConnected &&
-                currentSong != null &&
-                !isPlaying) {
-              _autoResumeTimer?.cancel();
-              _autoResumeTimer = Timer(const Duration(milliseconds: 500), () {
-                if (!isPlaying && currentSong != null) {
-                  unawaited(_audioHandler.play());
-                }
-              });
-            }
-          }
-        }
-        _previousDevices = devices;
-      });
+      _devicesSub = session.devicesStream.listen(handleDevicesChanged);
     } catch (_) {
       // AudioSession not available on this platform
     }
+  }
+
+  /// 系统音频打断事件（来电、语音助手、其他 App 抢焦点）。
+  ///
+  /// 公开给测试直接驱动：`AudioSession` 是私有构造的单例，单测无法伪造，
+  /// 而这里的决策逻辑（要不要暂停、要不要恢复）才是容易错的部分。
+  @visibleForTesting
+  void handleInterruptionEvent(AudioInterruptionEvent event) {
+    if (event.begin) {
+      _autoResumeTimer?.cancel();
+      _autoResumeSerial++;
+      // 同一轮打断会连发多次 begin（不同焦点类型），只在首次采样，
+      // 否则后到的 begin 看到的是「已经被我 pause 掉」的 false。
+      if (!_isAudioInterrupted) {
+        _wasPlayingAtInterruption =
+            audioPlayer.playing ||
+            _pendingPlaybackIntent == _playbackIntentSerial;
+      }
+      _isAudioInterrupted = true;
+      if (event.type == AudioInterruptionType.duck) {
+        // 见类注释：音量归 LoudnessService，这里不接管。
+        return;
+      }
+      _interruptionRequiresPause = true;
+      if (audioInterruptionEnabled) {
+        // 关闭了 just_audio 的自动打断，暂停必须由我们自己发；
+        // userInitiated=false：这是流程动作，不能当成用户放弃播放。
+        unawaited(_audioHandler.pause(userInitiated: false));
+      } else if (_wasPlayingAtInterruption) {
+        // 「阻止打断」模式：主动对抗系统的暂停。
+        _scheduleAutomaticResume(
+          const Duration(milliseconds: 300),
+          allowDuringInterruption: true,
+        );
+      }
+      return;
+    }
+
+    final shouldResume = _wasPlayingAtInterruption;
+    _wasPlayingAtInterruption = false;
+    _isAudioInterrupted = false;
+    _interruptionRequiresPause = false;
+    if (event.type != AudioInterruptionType.duck &&
+        audioInterruptionEnabled &&
+        (!autoResumeAfterInterruption ||
+            event.type != AudioInterruptionType.pause)) {
+      // 本轮不恢复：连在途的起播请求一起作废。它可能正卡在地址解析里，
+      // 不作废就会在几百毫秒后自己出声（「挂断后自己开始播」的另一半）。
+      _cancelAutomaticResume();
+    }
+    if (event.type == AudioInterruptionType.pause &&
+        shouldResume &&
+        (autoResumeAfterInterruption || (!audioInterruptionEnabled)) &&
+        currentSong != null) {
+      _scheduleAutomaticResume(const Duration(milliseconds: 500));
+    }
+  }
+
+  /// 音频路由即将变得「不私密」（拔耳机 / 蓝牙断开）。
+  @visibleForTesting
+  void handleBecomingNoisy() {
+    if (autoPauseOnDeviceDisconnect) {
+      // 蓝牙掉线/拔耳机：Android 会把音频改路由到扬声器继续播。
+      // 置断连保护并立刻暂停；保护只能由用户显式播放解除。
+      _resumeBlockedByDisconnect = true;
+      _cancelAutomaticResume();
+      unawaited(_audioHandler.pause(userInitiated: false));
+      return;
+    }
+    if (!audioInterruptionEnabled) {
+      // 阻止打断模式下忽略耳机拔出（用户明确表示不想被打断）。
+      return;
+    }
+    // 关闭了「断开停止播放」：仍要暂停（防外放是底线），
+    // 只是允许按 autoResumeAfterInterruption 自行恢复。
+    final wasPlaying = audioPlayer.playing;
+    unawaited(_audioHandler.pause(userInitiated: false));
+    if (wasPlaying && autoResumeAfterInterruption && currentSong != null) {
+      _scheduleAutomaticResume(const Duration(milliseconds: 500));
+    }
+  }
+
+  /// 音频设备列表变化（插拔耳机/接上车机）。
+  @visibleForTesting
+  void handleDevicesChanged(Set<AudioDevice> devices) {
+    if (_previousDevices != null) {
+      final addedDevices = devices.difference(_previousDevices!);
+      if (addedDevices.isNotEmpty) {
+        // ignore: experimental_member_use
+        final hasNewAudioDevice = addedDevices.any(
+          (d) =>
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.bluetoothA2dp ||
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.bluetoothLe ||
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.bluetoothSco ||
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.wiredHeadset ||
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.wiredHeadphones ||
+              // ignore: experimental_member_use
+              d.type == AudioDeviceType.carAudio,
+        );
+
+        if (hasNewAudioDevice &&
+            autoPlayOnDeviceConnected &&
+            currentSong != null &&
+            !isPlaying &&
+            // 打断期间不抢占：来电中接上车机不该开始放歌。
+            !_isAudioInterrupted) {
+          // 重新接上设备等同「用户把耳机插回来」，解除断连保护。
+          _resumeBlockedByDisconnect = false;
+          _scheduleAutomaticResume(const Duration(milliseconds: 500));
+        }
+      }
+    }
+    _previousDevices = devices;
   }
 
   /// 根据打断设置生成 AudioSessionConfiguration。
@@ -121,7 +186,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
   /// 重新配置 AudioSession 以应用最新的打断策略。
   Future<void> _reconfigureAudioSession() async {
     try {
-      final session = await AudioSession.instance;
+      final session = await _audioSessionProvider();
       await session.configure(_audioSessionConfiguration);
     } catch (_) {
       // AudioSession not available on this platform
@@ -133,6 +198,18 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     autoResumeAfterInterruption = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_autoResumeAfterInterruptionSettingKey, enabled);
+    notifyListeners();
+  }
+
+  /// 开关「蓝牙断开停止播放」（默认开，上游 3.3.0 `56d0c9f`）。
+  ///
+  /// 关闭后回到旧行为：断开时仍会暂停（防外放是底线），但允许按
+  /// [autoResumeAfterInterruption] 自行恢复。
+  Future<void> setAutoPauseOnDeviceDisconnect(bool enabled) async {
+    if (autoPauseOnDeviceDisconnect == enabled) return;
+    autoPauseOnDeviceDisconnect = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_autoPauseOnDeviceDisconnectSettingKey, enabled);
     notifyListeners();
   }
 

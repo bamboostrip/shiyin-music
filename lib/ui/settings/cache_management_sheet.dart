@@ -255,6 +255,24 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
           // 下载存储目录信息块：只展示路径 + 复制；「更改目录 / 恢复默认」
           // 不搬上游入口（fork 桌面设置已有等价项，避免双入口）。
           DownloadDirInfo(downloads: widget.downloads!),
+          const SizedBox(height: 10),
+          // 「同时保存 LRC 歌词」（上游 3.3.0 `d688884`）：默认关——歌词会
+          // 内嵌进音频；开启后额外落一份同名 `.lrc`，方便拷到车机/U 盘
+          // 给第三方播放器用。内嵌失败时无论开关都会兜底落一份。
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            secondary: Icon(
+              Icons.lyrics_outlined,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            title: const Text('同时保存 LRC 歌词'),
+            subtitle: const Text('下载时额外保留一份歌词文件；内嵌失败会自动保存'),
+            value: widget.downloads!.saveLyricsFile,
+            onChanged: (enabled) async {
+              await widget.downloads!.setSaveLyricsFile(enabled);
+              if (mounted) setState(() {});
+            },
+          ),
         ],
         const SizedBox(height: 10),
         CacheItem(

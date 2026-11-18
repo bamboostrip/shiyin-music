@@ -68,7 +68,7 @@ void main() {
     }
   });
 
-  test('下载 mp3 完成后自动写入 ID3v2.3 标签，音频字节完整', () async {
+  test('下载 mp3 完成后写入 ID3v2.3 标签，音频字节完整', () async {
     final audio = dummyAudio();
     final server = _AudioServer(audio);
     final url = await server.start();
@@ -80,6 +80,14 @@ void main() {
       url: url,
       onProgress: (_, _) {},
     );
+    // 契约变更（上游 3.3.0 `d688884`）：download() 只负责落盘与扩展名纠正，
+    // 标签/歌词由 writeDownloadMetadata() 收尾（需要联网拉歌词，不能塞进
+    // 传输路径里）。
+    final result = await service.writeDownloadMetadata(
+      filePath: path,
+      song: testSong,
+    );
+    expect(result.tagsWritten, isTrue);
 
     expect(path.toLowerCase().endsWith('.mp3'), isTrue);
     final bytes = await File(path).readAsBytes();
@@ -129,6 +137,14 @@ void main() {
       url: url,
       onProgress: (_, _) {},
     );
+    await service.writeDownloadMetadata(filePath: hitPath, song: const Song(
+      id: 's_hit',
+      title: '封面命中',
+      artist: '歌手',
+      albumName: '专辑',
+      hash: 'hash_cover_hit',
+      coverUrl: coverUrl,
+    ));
     final hitBytes = await File(hitPath).readAsBytes();
     expect(containsSequence(hitBytes, ascii.encode('APIC')), isTrue);
     expect(containsSequence(hitBytes, jpeg), isTrue);
@@ -148,17 +164,29 @@ void main() {
       url: url,
       onProgress: (_, _) {},
     );
+    await service.writeDownloadMetadata(filePath: missPath, song: const Song(
+      id: 's_miss',
+      title: '封面未命中',
+      artist: '歌手',
+      hash: 'hash_cover_miss',
+      coverUrl: 'https://img.example.com/cover_miss.jpg',
+    ));
     final missBytes = await File(missPath).readAsBytes();
     expect(containsSequence(missBytes, ascii.encode('APIC')), isFalse);
     expect(containsSequence(missBytes, utf16Le('封面未命中')), isTrue);
     expect(missBytes.sublist(missBytes.length - audio.length), audio);
   });
 
-  test('无损 .flac 跳过标签注入，字节与下载内容一致', () async {
+  test('无损 .flac：下载阶段不动字节，收尾写 Vorbis comment 且音频帧保留', () async {
+    // 最小可写 FLAC：fLaC + 唯一元数据块 STREAMINFO(34) + 音频帧。
+    final audio = Uint8List.fromList(
+      List<int>.generate(64, (i) => 0x80 + (i % 0x40)),
+    );
     final flac = Uint8List.fromList(<int>[
       ...ascii.encode('fLaC'),
-      0x00, 0x00, 0x00, 0x22,
-      ...List<int>.generate(48, (i) => i),
+      0x80, 0x00, 0x00, 0x22, // type 0（STREAMINFO），最后一块，长度 34
+      ...List<int>.generate(34, (i) => i),
+      ...audio,
     ]);
     final server = _AudioServer(flac);
     final url = await server.start();
@@ -172,9 +200,48 @@ void main() {
     );
 
     expect(path.toLowerCase().endsWith('.flac'), isTrue);
-    // FLAC 需 Vorbis comment（本期不做）：文件必须与下载内容完全一致，
-    // 不能塞 ID3 头（尾部 ID3 会让部分解码器直接报错）。
+    // 下载阶段完全不碰文件内容。
     expect(await File(path).readAsBytes(), flac);
+
+    // 收尾：FLAC 走 Vorbis comment，且 fLaC 必须在偏移 0（不能塞 ID3 前缀）。
+    final result = await service.writeDownloadMetadata(
+      filePath: path,
+      song: testSong,
+    );
+    expect(result.tagsWritten, isTrue);
+    final tagged = await File(path).readAsBytes();
+    expect(tagged.sublist(0, 4), ascii.encode('fLaC'));
+    expect(containsSequence(tagged, ascii.encode('TITLE=')), isTrue);
+    // 音频帧原样保留在尾部。
+    expect(tagged.sublist(tagged.length - audio.length), audio);
+  });
+
+  test('无损请求被服务端降级成 mp3：文件名按真实编码纠正为 .mp3', () async {
+    // 请求无损（文件名模板给 .flac），但服务端实际回 MP3 字节——
+    // 这正是「扩展名撒谎」的场景，第三方播放器会按 .flac 选解析器而读不出。
+    final server = _AudioServer(dummyAudio());
+    final url = await server.start();
+    addTearDown(server.stop);
+
+    final path = await service.download(
+      song: testSong,
+      quality: AudioQuality.lossless,
+      url: url,
+      onProgress: (_, _) {},
+    );
+
+    expect(path.toLowerCase().endsWith('.mp3'), isTrue);
+    expect(File(path).existsSync(), isTrue);
+    // 纠正后原 .flac 名不应残留成空壳。
+    expect(
+      downloadDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.toLowerCase().endsWith('.flac')),
+      isEmpty,
+    );
+    // 字节与下载内容一致（纠正只改名，不动内容）。
+    expect(await File(path).readAsBytes(), dummyAudio());
   });
 
   test('同一首歌二次下载：覆盖同名文件不产生 (2) 副本，也不叠加重复 ID3', () async {
@@ -189,6 +256,7 @@ void main() {
       url: url,
       onProgress: (_, _) {},
     );
+    await service.writeDownloadMetadata(filePath: firstPath, song: testSong);
     final firstBytes = await File(firstPath).readAsBytes();
 
     final secondPath = await service.download(
@@ -197,6 +265,7 @@ void main() {
       url: url,
       onProgress: (_, _) {},
     );
+    await service.writeDownloadMetadata(filePath: secondPath, song: testSong);
 
     // 关键回归：写标签后目标文件比新的纯音频 .part 大，冲突判定若按文件
     // 总大小比较会误判"同名不同歌"而多存一份 "(2).mp3"。
@@ -225,6 +294,10 @@ void main() {
       quality: AudioQuality.standard,
       url: url,
       onProgress: (_, _) {},
+    );
+    await service.writeDownloadMetadata(
+      filePath: path,
+      song: const Song(id: 'empty', title: '', artist: '', hash: 'hash_empty'),
     );
 
     expect(File(path).existsSync(), isTrue);

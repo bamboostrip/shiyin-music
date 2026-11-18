@@ -127,6 +127,8 @@ class _EngineAudioHandler extends Fake implements MusicAudioHandler {
   void attachTransportControls({
     required Future<void> Function() onNext,
     required Future<void> Function() onPrevious,
+    void Function()? onPlay,
+    void Function()? onPause,
   }) {}
 
   @override
@@ -168,7 +170,7 @@ class _EngineAudioHandler extends Fake implements MusicAudioHandler {
   }
 
   @override
-  Future<void> play() async {
+  Future<void> play({bool userInitiated = true}) async {
     if (engine.playing) return; // just_audio: if (playing) return;
     engine.playing = true;
     if (engine.state != ProcessingState.ready) {
@@ -184,7 +186,7 @@ class _EngineAudioHandler extends Fake implements MusicAudioHandler {
   }
 
   @override
-  Future<void> pause() async {
+  Future<void> pause({bool userInitiated = true}) async {
     if (!engine.playing) return; // just_audio: if (!playing) return;
     engine.playing = false;
     engine.emit();
