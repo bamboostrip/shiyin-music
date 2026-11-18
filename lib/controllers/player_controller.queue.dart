@@ -157,6 +157,11 @@ mixin _PlayerQueue on _PlayerControllerBase {
   Future<void> next() async {
     // 用户显式切歌：作废自动恢复与断连保护（与 togglePlay 同源）。
     _handleManualPlay();
+    await _advanceToNext();
+  }
+
+  @override
+  Future<void> _advanceToNext() async {
     // 私人 FM：队列末尾的「下一首」= 续拉下一批推荐（不循环回第一首）。
     if (_isPersonalFmActive && _isAtQueueEnd) {
       await _loadNextPersonalFmBatch(isOverplay: false);

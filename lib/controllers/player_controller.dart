@@ -252,6 +252,9 @@ const Duration _kLyricOffsetPersistWindow = Duration(milliseconds: 500);
 /// 否则返回 null——退出前若是别的歌在播，套用它的位置会把新歌拉到几分钟处。
 /// 兼容旧格式（裸 int 毫秒）。
 Duration? parseSavedPosition(Object? raw, String? songHash) {
+  // 没有可归属的 hash（空 hash 歌/未知歌）时一律不恢复：磁盘上这条记录必然
+  // 属于别的歌，套用只会把新歌拉到无关位置。
+  if (songHash == null || songHash.isEmpty) return null;
   if (raw is int) {
     return raw > 0 ? Duration(milliseconds: raw) : null;
   }
@@ -262,7 +265,7 @@ Duration? parseSavedPosition(Object? raw, String? songHash) {
     final hash = decoded['hash'];
     final ms = decoded['ms'];
     if (ms is! int || ms <= 0) return null;
-    if (songHash != null && songHash.isNotEmpty && hash != songHash) {
+    if (hash != songHash) {
       return null;
     }
     return Duration(milliseconds: ms);
@@ -1235,17 +1238,24 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   ///    刚起播就暂停）必须如实写，否则还会恢复到上一次的旧位置；
   /// 3. **不抛错**：写盘失败只记日志（进度不是关键路径）。
   ///
+  /// [allowWhilePreparing]：切音质重载在 `isPreparing` 仍为 true 时就已被
+  /// 状态机拦下（还没走到 finally），但音源已归属且定位完成，这一拍必须落盘；
+  /// 由该分支显式豁免加载态闸门，其他调用方保持默认。
+  ///
   /// 返回 [Future] 是为了让 `flushPlaybackState()` **await**：桌面
   /// `quitGracefully` 在 await 完钩子后直接 `TerminateProcess`，fire-and-forget
   /// 的 prefs 写可能还没落地就被硬杀，等于退出钩子白刷。
   ///
   /// 放在基类：播放分片要调它（暂停/起播），设置分片也要（退出钩子）。
-  Future<void> _saveCurrentPosition() async {
+  Future<void> _saveCurrentPosition({bool allowWhilePreparing = false}) async {
     final song = currentSong;
     if (song == null || song.hash.isEmpty) return;
     if (_positionOwnerHash != song.hash) return;
     // 音源已归属但还在加载/定位：此刻的 0 是中间态，不是用户要的位置。
-    if (isPreparing || _pendingInitialPosition != null) return;
+    if (!allowWhilePreparing &&
+        (isPreparing || _pendingInitialPosition != null)) {
+      return;
+    }
     final ms = audioPlayer.position.inMilliseconds;
     if (ms < 0) return;
     final payload = jsonEncode({'hash': song.hash, 'ms': ms});
@@ -1476,6 +1486,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   Future<void> seek(Duration position);
 
   Future<void> next();
+
+  /// 队列内前进一首的**真正实现**（不含「用户显式切歌」的意图登记）。
+  ///
+  /// [next] 先登记用户意图再调用它；自动跳过等流程动作必须直接调这个，
+  /// 否则会把断连/打断保护当成用户点了「下一首」解除掉。
+  Future<void> _advanceToNext();
 
   Future<void> previous();
 

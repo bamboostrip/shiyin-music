@@ -150,6 +150,9 @@ class _MockMusicApi extends Fake implements MusicApi {
   /// `songUrl` 对这些 hash 抛网络错误（模拟首次解析失败，验证重试路径）。
   final Set<String> failSongUrlHashes = <String>{};
 
+  /// `songUrl` 对这些 hash 返回空地址（模拟确定性无音源）。
+  final Set<String> emptyUrlHashes = <String>{};
+
   @override
   Future<PlayUrl> songUrl(
     Song song, {
@@ -158,6 +161,9 @@ class _MockMusicApi extends Fake implements MusicApi {
   }) async {
     if (failSongUrlHashes.contains(song.hash)) {
       throw Exception('mock network error');
+    }
+    if (emptyUrlHashes.contains(song.hash)) {
+      return PlayUrl(url: '', hash: song.hash);
     }
     final pending = gate;
     if (pending != null) await pending.future;
@@ -300,6 +306,71 @@ void main() {
 
       expect(handler.pauseCallCount, 1);
       expect(controller.isPlaying, isFalse);
+
+      finish();
+    });
+  });
+
+  group('自动跳过与重试的意图边界', () {
+    testWidgets('断连保护期间自动跳过不得起播', (tester) async {
+      await startPlaying(tester); // 队列 [歌曲1, 歌曲2]，歌曲1 在播
+      handler.playCallCount = 0;
+      controller.handleBecomingNoisy(); // 断连保护 + 暂停
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+
+      // 自动路径（重试/网络恢复重播）取到一首确定性无音源的歌：失败后
+      // 自动跳过会推进队列。旧实现走 next()，会把断连保护当成用户点了
+      // 「下一首」解除掉；自动跳过必须只推进队列、不登记用户意图。
+      api.emptyUrlHashes.add('hash_2');
+      await controller.playSong(
+        _song(2),
+        queue: controller.queue,
+        userInitiated: false,
+      );
+      await tester.pump(const Duration(milliseconds: 10)); // 自动跳过零延迟触发
+      await tester.pump(const Duration(milliseconds: 10));
+
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '断连保护只能由用户显式播放解除，自动跳过不得起播',
+      );
+      expect(controller.isPlaying, isFalse);
+
+      finish();
+    });
+
+    testWidgets('普通起播的 2s 重试必须沿用入口代次', (tester) async {
+      // 普通入口（不传 expectedIntent）：首次解析失败 → 2s 后自动重试。
+      // 若重试重新取当前代次，等待期间「打断结束」推进的代次就白推了。
+      handler.playCallCount = 0;
+      api.failSongUrlHashes.add('hash_5');
+      final pending = controller.playSong(_song(5));
+      await tester.pump();
+      expect(controller.errorMessage, '播放失败，正在重试...');
+
+      // 重试等待期间来电、挂断（默认不自动恢复 → 结束会推进代次）。
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      await tester.pump();
+
+      api.failSongUrlHashes.clear();
+      await tester.pump(const Duration(seconds: 2));
+      await pending;
+      await tester.pump();
+
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '重试必须沿用本次起播的入口代次，不能捡回起播权',
+      );
+      expect(controller.isPlaying, isFalse);
+      expect(controller.errorMessage, isNull);
 
       finish();
     });

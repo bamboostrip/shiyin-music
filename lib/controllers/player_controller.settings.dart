@@ -226,7 +226,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
         final confirm = await _requestPlayback(expectedIntent: intentSerial);
         if (confirm == PlayConfirm.blocked) {
           // 同 playSong：音源已归属/已定位，落一次盘避免残留旧位置。
-          unawaited(_saveCurrentPosition());
+          // 此刻 isPreparing 仍为 true（finally 还没跑），需要显式豁免。
+          unawaited(_saveCurrentPosition(allowWhilePreparing: true));
           debugPrint('[时音][player] 切音质起播被状态机拒绝: ${song.title}');
           return;
         }

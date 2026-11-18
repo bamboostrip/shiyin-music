@@ -61,18 +61,38 @@ mixin _MusicApiSong on _MusicApiBase {
         ? albumAudioId
         : null;
     final albumId = song.albumId;
-    final json = asMap(
-      await _client.get('/song/url', {
-        'hash': song.hash,
-        'quality': quality.apiValue,
-        if (!hashOnly) ...{
-          if (albumId != null && albumId.isNotEmpty) 'album_id': albumId,
-          'album_audio_id': ?numericAlbumAudioId,
-        },
-        'free_part': false,
-      }),
-    );
+    final raw = await _client.get('/song/url', {
+      'hash': song.hash,
+      'quality': quality.apiValue,
+      if (!hashOnly) ...{
+        if (albumId != null && albumId.isNotEmpty) 'album_id': albumId,
+        'album_audio_id': ?numericAlbumAudioId,
+      },
+      'free_part': false,
+    });
+    // Rust 层失败时会回传原始信封（status/error_code/msg；成功时通常已被
+    // unwrap 成 data 本身）。业务错误不能当成「空地址」——以前会一路落到
+    // NoPlayableSourceException，被播放器按确定性下架一次即跳；限流/会话
+    // 失效/200 错误体时会连续误跳。这里统一转成可重试的 ApiException。
+    if (raw == null) {
+      throw ApiException('播放地址响应为空，请稍后重试');
+    }
+    final json = asMap(raw);
+    if (json.isEmpty) {
+      throw ApiException('播放地址响应异常，请稍后重试');
+    }
+    final status = asInt(json['status']);
+    final errorCode = asInt(json['error_code']);
+    final ok =
+        (status == null || status == 1 || status == 200) &&
+        (errorCode == null || errorCode == 0);
     final playUrl = PlayUrl.fromJson(json);
+    if (!ok) {
+      if (playUrl.requiresVip) throw const VipRequiredException();
+      throw ApiException(
+        asString(json['msg']) ?? asString(json['message']) ?? '播放地址获取失败',
+      );
+    }
     if (playUrl.url.isEmpty && playUrl.requiresVip) {
       throw const VipRequiredException();
     }

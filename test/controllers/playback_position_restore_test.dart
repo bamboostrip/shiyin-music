@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
@@ -78,6 +79,12 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   void emitPlaying(bool value) {
     playing = value;
     _playerStateController.add(PlayerState(value, ProcessingState.ready));
+  }
+
+  /// 模拟引擎位置上报，让 controller 的 position/smoothPosition 跟上。
+  void emitPosition(Duration value) {
+    currentPosition = value;
+    _positionController.add(value);
   }
 
   void disposeStreams() {
@@ -242,6 +249,12 @@ void main() {
       expect(parseSavedPosition('{"hash":"h1","ms":-1}', 'h1'), isNull);
       expect(parseSavedPosition(null, 'h1'), isNull);
     });
+
+    test('当前歌 hash 为空时拒绝任何记录（无法归属）', () {
+      expect(parseSavedPosition('{"hash":"h1","ms":90000}', ''), isNull);
+      expect(parseSavedPosition('{"hash":"h1","ms":90000}', null), isNull);
+      expect(parseSavedPosition(90000, ''), isNull);
+    });
   });
 
   group('启动恢复', () {
@@ -389,6 +402,44 @@ void main() {
       final record =
           jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
       expect(record['ms'], 90000, reason: '原记录必须原样保留');
+    });
+
+    test('切音质重载被状态机拦下：已归属/已定位的进度仍要落盘', () async {
+      final song = _song(1);
+      final controller = buildController();
+      await settle();
+
+      controller.queue = [song];
+      await controller.playSong(song);
+      await settle();
+      fakeAudioPlayer.emitPosition(const Duration(seconds: 42));
+      await settle();
+
+      api.gate = Completer<void>();
+      final pending = controller.setAudioQuality(
+        AudioQuality.high,
+        reloadCurrent: true,
+      );
+      await settle();
+
+      // 打断开始只设闩锁、不推进企图代次：重载会走完加载，但起播会被拒。
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+
+      api.gate!.complete();
+      await pending;
+      await settle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final record =
+          jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
+      expect(record['hash'], song.hash);
+      expect(
+        record['ms'],
+        greaterThan(40000),
+        reason: '重载被拦下时 isPreparing 仍为 true，必须显式豁免才能落盘',
+      );
     });
   });
 }

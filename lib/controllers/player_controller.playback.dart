@@ -428,8 +428,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           queue: queue,
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
-          // 入口代次继续生效：领取期间用户若已暂停/断连，重试不得起播。
-          expectedIntent: expectedIntent,
+          // 本次起播的入口代次继续生效：领取期间用户若已暂停/断连，
+          // 重试不得起播（这里必须用本次 playSong 的 intentSerial，不能用
+          // 参数 expectedIntent——普通入口不传它，内层会重新捕获新代次）。
+          expectedIntent: intentSerial,
         );
         if (outcome == VipRetryOutcome.resumed) return;
         if (outcome == VipRetryOutcome.noSource) noSource = true;
@@ -472,8 +474,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           // 自动重试不是新的用户意图：期间用户若已暂停/断连，重试必须失效，
           // 不能借这次重试解除断连保护。
           userInitiated: false,
-          // 沿用入口代次：等待重试的 2s 里用户暂停/断连，重试同样不得起播。
-          expectedIntent: expectedIntent,
+          // 沿用本次起播的入口代次：等待重试的 2s 里用户暂停/断连，
+          // 重试同样不得起播（普通入口不传 expectedIntent，必须用
+          // 本次 playSong 的 intentSerial，否则内层会重新捕获新代次）。
+          expectedIntent: intentSerial,
         );
         return;
       }
@@ -761,6 +765,11 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           : '连续多首歌曲播放失败，已停止播放';
       lastPlaybackFailureToast = toastMessage;
       Toast.error(toastMessage);
+      if (noSource) {
+        // 确定性无音源已连跳上限：网络恢复时也没必要再自动重播这首，
+        // 否则每次连网都会重试一遍并再弹一次停止提示。
+        _tailSkipExhausted = true;
+      }
       return;
     }
     if (noSource) {
@@ -781,9 +790,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     if (!noSource || _autoSkippedNoSourceInStreak == 1) {
       Toast.show(toastMessage);
     }
-    // 脱离当前调用栈：本流程的 finally 尚未执行，直接 await next() 会形成
+    // 脱离当前调用栈：本流程的 finally 尚未执行，直接 await 会形成
     // 逐曲嵌套的 await 链；延后一拍让本次收尾先完成（finally 的深度计数
     // 随后归零，不会误清新流程的守卫）。
+    //
+    // 走 _advanceToNext 而不是 next()：自动跳过是流程动作，不是用户显式
+    // 切歌，不能借机解除断连/打断保护（next() 会 _handleManualPlay）。
     Future<void>.delayed(Duration.zero, () {
       if (_disposed) return;
       // 失败到真正跳过之间可能已有别人接管：冷启动恢复链（resumePlayback）
@@ -794,7 +806,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         debugPrint('[时音][player] 自动跳过放弃(已切歌): ${song.title}');
         return;
       }
-      unawaited(next());
+      unawaited(_advanceToNext());
     });
   }
 
