@@ -68,6 +68,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
     bool userInitiated = true,
+    int? expectedIntent,
   }) async {
     lastPlayedSong = song;
     currentSong = song;

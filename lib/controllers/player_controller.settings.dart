@@ -246,6 +246,8 @@ mixin _PlayerSettings on _PlayerControllerBase {
               ? targetPosition
               : null,
           preserveClimax: true,
+          // 切音质期间用户暂停/切歌同样作废这次领取重试。
+          expectedIntent: intentSerial,
         );
         // 只有「已重新起播」才收手；领取失败与「领了仍无地址」都落错误态，
         // 切音质是用户主动动作，不自作主张跳歌。

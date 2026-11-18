@@ -1434,6 +1434,13 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   // ---- 跨职责分片的成员契约（由各 part 文件的职责 mixin 实现）----
 
+  /// 播放一首歌。
+  ///
+  /// [expectedIntent]：调用方在**更早的网络等待之前**登记的播放企图代次
+  /// （如私人 FM 拉取首批列表之前，与 `userInitiated: false` 搭配）；为空
+  /// 时用进入本方法时的代次。传入后，等待期间用户的暂停/切歌/断连（默认
+  /// 断连策略）或打断结束都会让本次起播作废，但加载仍会完成（队列与音源
+  /// 就绪），用户显式播放即可续上。
   Future<void> playSong(
     Song song, {
     List<Song>? queue,
@@ -1442,12 +1449,16 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
     bool userInitiated = true,
+    int? expectedIntent,
   });
 
   /// 启动私人 FM（酷狗官方「猜你喜欢」= 红心 Radio + 口味推荐）。
   ///
   /// [initialSongs] 传入首页已预取的预览批次，避免点按后再等一次网络；
-  /// 为空时现拉一批。成功返回 true 并立即开播第一首。
+  /// 为空时现拉一批。成功返回 true；正常情况下立即开播第一首，若拉取期间
+  /// 用户已暂停/断连/打断结束（企图代次前进），则只预载队列与音源、等用户
+  /// 显式播放；若其间用户已重新开始播放，则放弃本次启动、不打扰当前音频。
+  /// 以上两种「被更晚动作接管」都不返回错误。
   Future<bool> startPersonalFm({List<Song>? initialSongs});
 
   /// 私人 FM 会话内队列播到末尾时续拉下一批（自然播完/手动下一首共用）。
@@ -1535,6 +1546,7 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     List<Song>? queue,
     Duration? initialPosition,
     bool preserveClimax,
+    int? expectedIntent,
   });
 
   Future<void> _refreshEqualizerConfig();

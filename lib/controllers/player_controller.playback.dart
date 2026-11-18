@@ -100,13 +100,20 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     bool preserveClimax = false,
     bool preservePersonalFmSession = false,
     bool userInitiated = true,
+    int? expectedIntent,
   }) async {
     // 播放意图在**任何网络/音源加载之前**登记（上游 3.3.0 `9426621`）：
     // 用户在这次加载期间暂停/切歌/断开蓝牙，都会推进企图代次，加载完成时
     // _requestPlayback 比对不上就不会出声。内部调用方（自动下一首、曲末
     // 推进、私人 FM 续批）传 userInitiated=false，避免把流程动作记成用户意图。
+    //
+    // [expectedIntent]：有些入口在进入本方法**之前**还有一段网络等待（私人
+    // FM 拉首批列表），代次应该在更早的用户点按时就登记。这类调用方把当时
+    // 的代次传进来（与 userInitiated:false 搭配）；否则这里只能取「等待结束
+    // 后的当前代次」，等待期间用户的暂停/断连就会被吞掉。不传时行为与旧实现
+    // 完全一致。
     if (userInitiated) _handleManualPlay();
-    final intentSerial = _playbackIntentSerial;
+    final intentSerial = expectedIntent ?? _playbackIntentSerial;
     _pendingPlaybackIntent = intentSerial;
     // 任何实际起播都会消费掉「待恢复进度」：它只属于恢复出来的那一首，
     // 留着会被下一次 playSong 误用（[resumePlayback] 已先把值取到局部变量）。
@@ -421,6 +428,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           queue: queue,
           initialPosition: initialPosition,
           preserveClimax: preserveClimax,
+          // 入口代次继续生效：领取期间用户若已暂停/断连，重试不得起播。
+          expectedIntent: expectedIntent,
         );
         if (outcome == VipRetryOutcome.resumed) return;
         if (outcome == VipRetryOutcome.noSource) noSource = true;
@@ -463,6 +472,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           // 自动重试不是新的用户意图：期间用户若已暂停/断连，重试必须失效，
           // 不能借这次重试解除断连保护。
           userInitiated: false,
+          // 沿用入口代次：等待重试的 2s 里用户暂停/断连，重试同样不得起播。
+          expectedIntent: expectedIntent,
         );
         return;
       }
@@ -883,6 +894,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     List<Song>? queue,
     Duration? initialPosition,
     bool preserveClimax = false,
+    int? expectedIntent,
   }) async {
     try {
       final result = await vipClaim!.claimNow(null);
@@ -928,6 +940,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           // 领取成功后的重试是流程续跑，不是新的用户意图：等待领取期间
           // 若已断连/进入打断，这次重试不能把它们解除。
           userInitiated: false,
+          // 入口代次继续生效：等待领取期间用户若已暂停/切歌，重试不得起播。
+          expectedIntent: expectedIntent,
         ),
       );
       return VipRetryOutcome.resumed;

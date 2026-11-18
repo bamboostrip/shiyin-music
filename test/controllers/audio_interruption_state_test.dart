@@ -147,12 +147,18 @@ class _MockMusicApi extends Fake implements MusicApi {
   /// 非空时 `personalFm` 挂起（模拟 FM 首批还在拉取）。
   Completer<void>? fmGate;
 
+  /// `songUrl` 对这些 hash 抛网络错误（模拟首次解析失败，验证重试路径）。
+  final Set<String> failSongUrlHashes = <String>{};
+
   @override
   Future<PlayUrl> songUrl(
     Song song, {
     AudioQuality quality = AudioQuality.standard,
     bool hashOnly = false,
   }) async {
+    if (failSongUrlHashes.contains(song.hash)) {
+      throw Exception('mock network error');
+    }
     final pending = gate;
     if (pending != null) await pending.future;
     return PlayUrl(url: 'https://example.com/${song.hash}.mp3', hash: song.hash);
@@ -294,6 +300,145 @@ void main() {
 
       expect(handler.pauseCallCount, 1);
       expect(controller.isPlaying, isFalse);
+
+      finish();
+    });
+  });
+
+  group('私人 FM 启动拉取期间的意图', () {
+    testWidgets('拉取期间用户暂停：完成后不得起播，队列预载且显式播放可续', (tester) async {
+      // 弱网下 FM 首批要在点按之后才拉回来：期间用户按了暂停，拉取完成
+      // 不能把「用户意图」捡回来自己起播。
+      await startPlaying(tester);
+      handler.playCallCount = 0;
+      api.fmGate = Completer<void>();
+      final started = controller.startPersonalFm();
+      await tester.pump();
+      expect(controller.isLoadingPersonalFm, isTrue);
+
+      // 用户暂停：推进企图代次。
+      await controller.togglePlay();
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+
+      api.fmGate!.complete();
+      final success = await started;
+      await tester.pump();
+
+      expect(success, isTrue, reason: '被状态机拦下不是加载失败');
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '用户已经暂停，拉取完成不得自动起播',
+      );
+      expect(controller.isPlaying, isFalse);
+      expect(controller.errorMessage, isNull);
+      // 队列与音源仍装载：用户按播放能直接从这一首继续。
+      expect(controller.currentSong?.hash, 'hash_9');
+
+      await controller.togglePlay();
+      await tester.pump();
+      expect(controller.isPlaying, isTrue, reason: '显式播放应能续上已预载的 FM 队列');
+      expect(handler.playCallCount, 1);
+
+      finish();
+    });
+
+    testWidgets('拉取期间用户暂停后又恢复播放：不得用 FM 预载顶掉正在播的歌', (tester) async {
+      await startPlaying(tester);
+      handler.playCallCount = 0;
+      api.fmGate = Completer<void>();
+      final started = controller.startPersonalFm();
+      await tester.pump();
+
+      await controller.togglePlay(); // 暂停
+      await tester.pump();
+      // 恢复播放：比点按 FM 更晚的用户意图。
+      await controller.togglePlay();
+      await tester.pump();
+      expect(controller.isPlaying, isTrue);
+      expect(handler.playCallCount, 1);
+
+      api.fmGate!.complete();
+      final success = await started;
+      await tester.pump();
+
+      expect(success, isTrue, reason: '被更晚的播放动作接管，不算加载失败');
+      expect(
+        controller.currentSong?.hash,
+        'hash_1',
+        reason: '正在播的歌不能被 FM 预载换掉（否则最后一次操作是播放却变静音）',
+      );
+      expect(controller.isPlaying, isTrue);
+      expect(handler.playCallCount, 1, reason: 'FM 不应再起播');
+
+      finish();
+    });
+
+    testWidgets('拉取期间打断结束（默认不自动恢复）：完成后不得起播', (tester) async {
+      await startPlaying(tester);
+      handler.playCallCount = 0;
+      api.fmGate = Completer<void>();
+      final started = controller.startPersonalFm();
+      await tester.pump();
+
+      // 打完电话：默认「打断结束不自动恢复」会撤销在途起播。
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      controller.handleInterruptionEvent(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      await tester.pump();
+      expect(controller.isPlaying, isFalse);
+
+      api.fmGate!.complete();
+      await started;
+      await tester.pump();
+
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '打断结束已撤销在途起播，拉取完成不得自己开始',
+      );
+      expect(controller.isPlaying, isFalse);
+      expect(controller.errorMessage, isNull);
+
+      finish();
+    });
+
+    testWidgets('自动重试不得绕过错期的企图代次', (tester) async {
+      // 首次解析失败 → 2s 后 playSong 自动重试。重试若重新取当前代次，
+      // 就会绕过入口登记（私人 FM 拉取期间暂停/断连正是这条路径）。
+      handler.playCallCount = 0;
+      api.failSongUrlHashes.add('hash_5');
+      final pending = controller.playSong(
+        _song(5),
+        // 比任何真实代次都早、必然过期：模拟入口登记后已被推进。
+        expectedIntent: -1,
+        userInitiated: false,
+      );
+      await tester.pump();
+
+      expect(
+        controller.errorMessage,
+        '播放失败，正在重试...',
+        reason: '前置：首次解析失败并进入 2s 自动重试',
+      );
+
+      // 让重试的解析成功：重试若丢掉入口代次就会起播。
+      api.failSongUrlHashes.clear();
+      await tester.pump(const Duration(seconds: 2));
+      await pending;
+      await tester.pump();
+
+      expect(
+        handler.playCallCount,
+        0,
+        reason: '自动重试必须沿用入口代次，不能捡回起播权',
+      );
+      expect(controller.isPlaying, isFalse);
+      expect(controller.errorMessage, isNull);
 
       finish();
     });

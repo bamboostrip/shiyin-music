@@ -2,7 +2,9 @@
 //
 // 对应酷狗官方「猜你喜欢」入口（api.json 的 `/personal/fm`，mode=normal 即
 // 「红心 Radio」+ 根据听歌口味推荐）。会话语义：
-// - [startPersonalFm] 拉首批（或复用首页已预取的预览批次）并立即开播；
+// - [startPersonalFm] 拉首批（或复用首页已预取的预览批次）并开播；拉取期间
+//   用户已暂停/断连/打断结束时只预载队列与音源、不起播，等用户显式播放；
+//   若其间用户已重新开始播放，则放弃预载、不打断当前音频；
 // - 会话进行中队列播到末尾时自动续拉下一批（自然播完 isOverplay=true、
 //   手动"下一首" isOverplay=false），不循环、不随机；
 // - 手动"上一首"仍可在本次会话已推荐过的歌里回退；
@@ -43,11 +45,14 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
       return false;
     }
 
-    // 用户点按「私人 FM」是显式播放意图，意图要在**网络拉取之前**登记
-    // （上游 3.3.0 `9426621` 对 startPersonalFm 的处理）：拉取期间断开
-    // 蓝牙/来电打断会推进企图代次并建立保护，拉取完成后的起播不得再以
-    // 「用户意图」自居把保护解掉——否则断开瞬间之后 FM 拉取完成会直接
-    // 从扬声器外放。
+    // 用户点按「私人 FM」是显式播放意图：意图要在**网络拉取之前**登记。
+    // 拉取期间用户暂停、蓝牙/耳机断开、来电打断结束（默认不自动恢复）都
+    // 会推进企图代次；拉取完成后的 playSong 用入口代次校验，对不上就只
+    // 装载队列与音源、不起播（用户显式播放即可从这一首继续）。
+    // 若期间用户反而重新开始播放（暂停后又按播放/原曲重播，详见下方
+    // isPlaying 分支），则放弃预载，别把正在播的音频换掉。
+    // 上游 3.3.0 `9426621` 在代次对不上时直接放弃整个启动；本 fork 保留
+    // 「队列预载、等用户按播放」的体验，所以把代次带进 playSong。
     _handleManualPlay();
     final intentSerial = _playbackIntentSerial;
     _pendingPlaybackIntent = intentSerial;
@@ -63,6 +68,12 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
       if (_disposed || requestSerial != _personalFmRequestSerial) {
         return false;
       }
+      if (intentSerial != _playbackIntentSerial && isPlaying) {
+        // 拉取期间用户已经重新开始播放（暂停后又按播放、原曲重播等）：
+        // 这比点按 FM 更晚，不能用 FM 预载把正在播的音频换掉变成静音。
+        // 不返回错误：首页不该弹「加载失败」，FM 卡片也保持未激活。
+        return true;
+      }
       if (songs.isEmpty) {
         errorMessage = '暂时没有新的私人 FM 推荐';
         return false;
@@ -73,9 +84,12 @@ mixin _PlayerPersonalFm on _PlayerControllerBase {
         songs.first,
         queue: songs,
         preservePersonalFmSession: true,
-        // 意图已在方法入口声明过；这里再声明一次会解掉拉取期间建立的
-        // 断连/打断保护（与 _loadNextPersonalFmBatch 的口径一致）。
+        // 意图已在方法入口声明过，这里不能再声明（会解掉拉取期间建立的
+        // 断连/打断保护）；把入口代次带进去，拉取期间的暂停/断连/打断
+        // 结束才能作废这次起播。被拦下时队列与音源仍装载，用户按播放
+        // 就能从这一首继续。
         userInitiated: false,
+        expectedIntent: intentSerial,
       );
       return errorMessage == null;
     } catch (error) {
