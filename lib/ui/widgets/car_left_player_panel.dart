@@ -563,7 +563,15 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
     if (_correctScheduled) return;
     _correctScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _locate.correctWhenEntranceSettled(_entrance, _activeRowKey);
+      if (mounted) {
+        // 实时取 index：入场期间切歌不会定位到旧 index。
+        _locate.correctWhenEntranceSettled(
+          _entrance,
+          _activeRowKey,
+          index: _indexOfCurrent(),
+          itemCount: widget.player.queue.length,
+        );
+      }
     });
   }
 
@@ -612,8 +620,13 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
                         tooltip: '定位到正在播放',
                         visualDensity: VisualDensity.compact,
                         onPressed: activeIndex >= 0
-                            ? () =>
-                                unawaited(_locate.locate(activeIndex, _activeRowKey))
+                            ? () => unawaited(
+                                  _locate.locate(
+                                    activeIndex,
+                                    _activeRowKey,
+                                    itemCount: widget.player.queue.length,
+                                  ),
+                                )
                             : null,
                         icon: const Icon(Icons.my_location_rounded, size: 20),
                         color: colorScheme.onSurfaceVariant,

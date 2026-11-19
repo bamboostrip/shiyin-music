@@ -127,8 +127,15 @@ void main() {
   });
 
   testWidgets('重复添加同一首歌：定位不崩溃且按钮可回到首个匹配行', (tester) async {
+    // 31 首长队列，重复对放中部（index 12/13）——首个匹配行不在顶部，
+    // 定位后 offset 非零且接近居中（旧用例重复对在顶部，断言恒真）。
     final dup = _song(7, hash: 'hash-dup');
-    final songs = [_song(1), dup, _song(7, hash: 'hash-dup'), _song(3)];
+    final songs = [
+      for (var i = 0; i < 12; i++) _song(i + 1),
+      dup,
+      _song(7, hash: 'hash-dup'),
+      for (var i = 13; i < 30; i++) _song(i + 1),
+    ];
     final player = _FakePlayerController()
       ..queue = songs
       ..currentSong = dup
@@ -136,10 +143,15 @@ void main() {
     await _openSheet(tester, player); // 若 GlobalKey 重复挂载会在此抛异常
 
     expect(find.text('测试歌曲7'), findsNWidgets(2));
-    // 两行都高亮（既有行为），定位按钮可用（key 只挂首个匹配行）。
+    // 两行都高亮（既有行为），key 只挂首个匹配行（index 12）。
     await tester.tap(find.byTooltip('定位到正在播放'));
     await tester.pumpAndSettle();
-    expect(_sheetPosition(tester).pixels, 0.0); // 首个匹配行就在顶部附近
+
+    final position = _sheetPosition(tester);
+    final expected =
+        (12 * 58 + 28 - position.viewportDimension / 2).clamp(0.0, position.maxScrollExtent);
+    expect(position.pixels, greaterThan(0)); // 非恒真：中部行定位后必非零
+    expect(position.pixels, moreOrLessEquals(expected, epsilon: 29));
   });
 
   testWidgets('短队列回归：标题/计数渲染，当前第 2 首时不滚动', (tester) async {
