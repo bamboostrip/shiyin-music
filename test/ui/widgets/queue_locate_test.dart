@@ -44,10 +44,11 @@ void main() {
     await tester.pump(); // 第一段：jump 到真实视口估算位。
     await tester.pump(); // 第二段：目标行挂载后 ensureVisible 精修。
 
-    // 居中：行顶 19*58 + 行高一半 28 - 视口一半。
+    // 居中：行顶 19*58 + 行高一半 28 - 视口一半。估算位 831 与精修目标 830
+    // 仅差 1px，容差必须收紧到 0.1 才能检测第二段（精修）丢失。
     final expected =
         (19 * 58 + 28 - position.viewportDimension / 2).clamp(0.0, position.maxScrollExtent);
-    expect(position.pixels, moreOrLessEquals(expected, epsilon: 1));
+    expect(position.pixels, moreOrLessEquals(expected, epsilon: 0.1));
     locate.dispose();
   });
 
@@ -70,7 +71,7 @@ void main() {
     final position = locate.controller.position;
     final expected =
         (19 * 58 + 28 - position.viewportDimension / 2).clamp(0.0, position.maxScrollExtent);
-    expect(position.pixels, moreOrLessEquals(expected, epsilon: 1));
+    expect(position.pixels, moreOrLessEquals(expected, epsilon: 0.1));
 
     // 滚走后行被懒构建卸载：locate 先瞬移到真实视口估算位，再精修居中。
     locate.controller.jumpTo(0);
@@ -79,16 +80,18 @@ void main() {
     final locating = locate.locate(19, key);
     final estimate =
         ((19 + 0.5) * 58 - position.viewportDimension / 2).clamp(0.0, position.maxScrollExtent);
-    expect(position.pixels, moreOrLessEquals(estimate, epsilon: 1)); // 第一段：瞬移
+    expect(position.pixels, moreOrLessEquals(estimate, epsilon: 0.1)); // 第一段：瞬移
     await tester.pumpAndSettle(); // 第二段：行重新挂载 → 250ms 平滑精修
     await locating;
-    expect(position.pixels, moreOrLessEquals(expected, epsilon: 1));
+    expect(position.pixels, moreOrLessEquals(expected, epsilon: 0.1));
 
-    // 行从未挂载（新 key）：locate 停在估算位返回，不崩溃。
-    final missLocating = locate.locate(19, GlobalKey());
+    // 行从未挂载（新 key）：此刻在 830（19 行精修位），对 fresh key 定位到
+    // 0 行——估算 (0.5*58 - viewport/2) clamp 后为 0。jump 应发生且无精修，
+    // 精确停在估算位 0（可区分「无操作」与「jump 后未精修」）。
+    final missLocating = locate.locate(0, GlobalKey());
     await tester.pump();
     await missLocating;
-    expect(position.pixels, moreOrLessEquals(estimate, epsilon: 1));
+    expect(position.pixels, 0.0);
 
     locate.correctWhenEntranceSettled(null, GlobalKey()); // 未挂载 key：不崩
     expect(locate.controller.hasClients, isTrue);

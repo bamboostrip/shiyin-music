@@ -24,7 +24,6 @@ class QueueLocateController {
     double assumedViewportExtent = 480,
   })  : _rowStride = rowStride,
         _initialIndex = initialIndex,
-        _assumedViewportExtent = assumedViewportExtent,
         controller = ScrollController(
           // 目标行中心对准假定视口中心；480 为手机弹层内容区典型高度，
           // 偏差只影响入场结束后的校正跳变量（≤ 半个视口误差的一半）。
@@ -35,7 +34,6 @@ class QueueLocateController {
 
   final double _rowStride;
   final int? _initialIndex;
-  final double _assumedViewportExtent;
   final ScrollController controller;
 
   /// 精确校正：目标行 [rowKey] 居中。宿主在首帧后的回调里调用。
@@ -90,14 +88,13 @@ class QueueLocateController {
     );
   }
 
-  /// 目标行居中偏移估算：优先用真实视口，无 client 时退回构造期假定视口。
+  /// 目标行居中偏移估算：用真实视口，clamp 到合法滚动范围。
+  ///
+  /// 仅被 [_centerOn] 于 `hasClients` 早退之后调用，无需无 client 回退。
   double _centerEstimate(int index) {
-    if (controller.hasClients) {
-      final position = controller.position;
-      return ((index + 0.5) * _rowStride - position.viewportDimension / 2)
-          .clamp(0.0, position.maxScrollExtent);
-    }
-    return math.max(0.0, (index + 0.5) * _rowStride - _assumedViewportExtent / 2);
+    final position = controller.position;
+    return ((index + 0.5) * _rowStride - position.viewportDimension / 2)
+        .clamp(0.0, position.maxScrollExtent);
   }
 
   void dispose() => controller.dispose();
