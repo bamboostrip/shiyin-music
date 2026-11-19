@@ -22,7 +22,7 @@ Future<void> showQueueSheet(
     context: context,
     showDragHandle: true,
     backgroundColor: Theme.of(context).colorScheme.surface,
-    builder: (sheetContext) => _QueueSheetBody(player: player),
+    builder: (_) => _QueueSheetBody(player: player),
   );
 }
 

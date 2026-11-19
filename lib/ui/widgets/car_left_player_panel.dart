@@ -506,7 +506,7 @@ class CarLeftPlayerPanel extends StatelessWidget {
       context: context,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (sheetContext) => _CarQueueSheetBody(player: player),
+      builder: (_) => _CarQueueSheetBody(player: player),
     );
   }
 

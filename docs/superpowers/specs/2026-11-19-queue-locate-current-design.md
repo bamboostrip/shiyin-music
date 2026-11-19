@@ -25,7 +25,7 @@
 
 ## 交互行为
 
-- **打开面板**：首帧前按固定行步长估算 `initialScrollOffset`，首帧后 `Scrollable.ensureVisible` 精确校正到居中。全程 jump 无滚动动画（PC 面板同款策略），且发生在 sheet 入场动画期间/之前，用户无感知。
+- **打开面板**：首帧前按标称行步长 + 假定视口 360 估算 `initialScrollOffset` 落点；入场动画**播完后**再校正——先按实测行步长 jump 到居中估算位，等一帧目标行挂载后 `Scrollable.ensureVisible` 精修居中（jump 校正无动画；定位按钮为 ~250ms 平滑滚动）。
 - **头部定位按钮**：头部「清空」左侧新增 `IconButton`（`Icons.my_location_rounded`，tooltip/语义标签「定位到正在播放」，与歌单详情页 FAB 同图标同语义）。点击平滑滚动（~250ms）回当前行居中。当前歌不在队列时禁用（防御，理论不发生）。
 - **定位目标**：`index == activeIndex`（第一个匹配行）的行居中显示。
 - 移动端与车机行为一致。
@@ -37,15 +37,16 @@
 纯滚动职责，不依赖 PlayerController：
 
 ```dart
-QueueLocateController({required double rowStride, int? initialIndex})
-  → ScrollController controller        // initialScrollOffset = max(0, index * stride)
-  → void correctAfterFirstFrame(GlobalKey rowKey)  // ensureVisible 居中、无动画（字体缩放兜底）
-  → Future<void> locate(GlobalKey rowKey)          // ensureVisible 居中 + 平滑动画
+QueueLocateController({required double rowStride, int? initialIndex, double assumedViewportExtent = 360})
+  → ScrollController controller        // initialScrollOffset = max(0, (index + 0.5) * stride - assumed/2)，仅管首帧落点
+  → void correctWhenEntranceSettled(Animation<double>? entrance, GlobalKey rowKey,
+      {required int index, required int itemCount})  // 入场播完后两段式校正，无动画
+  → Future<void> locate(int index, GlobalKey rowKey, {required int itemCount})  // 两段式 + ~250ms 平滑精修
   → void dispose()
 ```
 
-- 队列 sheet 均为 `shrinkWrap: true` 全量 build，active 行 context 首帧必在，无需歌单页那套懒加载探测。
-- 行步长参数化：移动端 `QueueTile` 56 + 分隔 2 = 58；车机两行 `ListTile`（title+subtitle）72 + 分隔 2 = 74。估算只影响首帧落点，post-frame 校正保证精确，行高误差不致错。
+- 队列列表为**懒构建**（`shrinkWrap: true` 不保证全量 build），active 行滚出视口 + 缓存区后 context 即被卸载。定位走两段式：第一段按**实测行步长**（`(maxScrollExtent + viewportDimension) / itemCount`，懒构建 sliver 的 scrollExtent 含未构建项估计，字体缩放下行高增大也能收敛）jump 到居中估算位，等一帧目标行挂载，仍未挂载则重估重跳（上限 3 轮）；第二段 `ensureVisible` 精修。行始终未挂载则停留在估算位。
+- 行步长参数化：移动端 `QueueTile` 56 + 分隔 2 = 58；车机两行 `ListTile`（title+subtitle）72 + 分隔 2 = 74。标称步长只影响首帧落点与首轮估算，实测步长重估保证字体缩放下（行高 1.2/1.3 档增大）深队列也能精确居中。
 
 ### `queue_sheet.dart` 改造
 
@@ -80,4 +81,5 @@ QueueLocateController({required double rowStride, int? initialIndex})
 - 不改 PC `desktop_queue_panel.dart`（已有打开定位，无按钮诉求未提出）。
 - 不做切歌跟随滚动。
 - 不统一车机与移动端队列行 UI（保留驾驶简化）。
-- 不动 `shrinkWrap` 全量 build 的性能现状（另题）。
+- 不处理车机队列 sheet 字体不随车机 ×1.12 系数放大（先存在的 navigator 层级行为，非本特性引入）。
+- 不动 `shrinkWrap` 的性能现状（另题）。
