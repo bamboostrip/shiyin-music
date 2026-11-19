@@ -4,6 +4,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 
 class MusicApplication : Application() {
@@ -11,6 +13,33 @@ class MusicApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         setupNotificationChannels()
+        registerCarMediaBroadcastReceiver()
+    }
+
+    /**
+     * 车机私有媒体广播兜底（issue #15）：进程级运行时注册，App 存活期间
+     * 前台/后台都能收到。两类广播都来自车机系统/其他应用，必须
+     * RECEIVER_EXPORTED；Manifest 静态注册在 targetSdk 26+ 收不到这些
+     * 隐式广播（不在 Android 8+ 豁免清单），运行时注册是唯一途径。
+     * 广播本身只在车机发媒体指令时才会到达，手机上零开销。
+     */
+    private fun registerCarMediaBroadcastReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND)
+            // 带动作后缀的变体：部分固件按整条 action 下发而不是用 extra。
+            addAction("${CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND}.next")
+            addAction("${CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND}.previous")
+            addAction("${CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND}.togglepause")
+            addAction("${CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND}.pause")
+            addAction("${CarMediaBroadcastReceiver.ACTION_SERVICE_COMMAND}.play")
+            addAction(Intent.ACTION_MEDIA_BUTTON)
+        }
+        val receiver = CarMediaBroadcastReceiver()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
     }
 
     private fun setupNotificationChannels() {
