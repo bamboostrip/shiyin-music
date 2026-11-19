@@ -23,6 +23,8 @@
 
 ### Task 1: `QueueLocateController` 共享定位器（TDD）
 
+> **修订（实现期裁定）**：本仓库 Flutter 3.44.8 上 `shrinkWrap` 不再全量保活行，下方 Step 1/3 的原始代码有两处缺陷已按「两段式 jump 估算 + ensureVisible 精修」重做（见 Produces 契约与 task-1-report.md）；Step 1/3 代码块保留为最初稿，实现与测试以实际提交为准。
+
 **Files:**
 - Create: `lib/ui/widgets/queue_locate.dart`
 - Test: `test/ui/widgets/queue_locate_test.dart`
@@ -32,8 +34,8 @@
 - Produces（Task 2/3 依赖，签名精确一致）:
   - `QueueLocateController({required double rowStride, int? initialIndex, double assumedViewportExtent = 480})`
   - `final ScrollController controller`（`initialScrollOffset = max(0, (initialIndex + 0.5) * rowStride - assumedViewportExtent / 2)`，`initialIndex == null || < 0` 时为 0）
-  - `void correctWhenEntranceSettled(Animation<double>? entrance, GlobalKey rowKey)`
-  - `Future<void> locate(GlobalKey rowKey)`
+  - `void correctWhenEntranceSettled(Animation<double>? entrance, GlobalKey rowKey)`——入场动画播完后的帧：先 `jumpTo` 居中估算（真实 viewportDimension，比构造期假定 480 准），下一帧 `ensureVisible` 居中精修
+  - `Future<void> locate(int index, GlobalKey rowKey)`——先 `jumpTo` 居中估算瞬移（不依赖目标行已挂载），下一帧行在则 250ms `ensureVisible` 精修；不在则停在估算位（本仓库 Flutter 3.44.8 `shrinkWrap` 不再全量保活行，定位器必须懒构建下可用，宿主 ListView **无需**加 cacheExtent）
   - `void dispose()`
 
 - [ ] **Step 1: 写失败测试**
@@ -506,7 +508,8 @@ class _QueueSheetBodyState extends State<_QueueSheetBody> {
                         tooltip: '定位到正在播放',
                         visualDensity: VisualDensity.compact,
                         onPressed: activeIndex >= 0
-                            ? () => unawaited(_locate.locate(_activeRowKey))
+                            ? () =>
+                                unawaited(_locate.locate(activeIndex, _activeRowKey))
                             : null,
                         icon: const Icon(Icons.my_location_rounded, size: 20),
                         color: colorScheme.onSurfaceVariant,
@@ -712,7 +715,8 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
                         tooltip: '定位到正在播放',
                         visualDensity: VisualDensity.compact,
                         onPressed: activeIndex >= 0
-                            ? () => unawaited(_locate.locate(_activeRowKey))
+                            ? () =>
+                                unawaited(_locate.locate(activeIndex, _activeRowKey))
                             : null,
                         icon: const Icon(Icons.my_location_rounded, size: 20),
                         color: colorScheme.onSurfaceVariant,
