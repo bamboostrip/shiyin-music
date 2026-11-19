@@ -7,6 +7,7 @@ import '../../models/music_models.dart';
 import '../player/song_tap_handler.dart';
 import 'artwork.dart';
 import 'marquee_text.dart';
+import 'queue_locate.dart';
 import 'toast.dart';
 
 /// 弹出播放队列面板（底部弹层）。
@@ -21,110 +22,185 @@ Future<void> showQueueSheet(
     context: context,
     showDragHandle: true,
     backgroundColor: Theme.of(context).colorScheme.surface,
-    builder: (sheetContext) {
-      final colorScheme = Theme.of(sheetContext).colorScheme;
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 头部（队列数 + 清空按钮可用态）同样监听 player，
-              // 面板打开期间队列变化时保持刷新（与桌面端 DesktopQueuePanel 一致）。
-              AnimatedBuilder(
-                animation: player,
+    builder: (sheetContext) => _QueueSheetBody(player: player),
+  );
+}
+
+/// 队列面板主体：头部（标题/计数/定位/清空）+ 可滚动队列列表。
+///
+/// 打开时自动滚到正在播放行居中（issue #28）；入场动画播完前视口高度
+/// 在变，校正等动画结束后执行。切歌不跟随滚动（仅高亮与行 key 跟随），
+/// 头部定位按钮一键找回。
+class _QueueSheetBody extends StatefulWidget {
+  const _QueueSheetBody({required this.player});
+
+  final PlayerController player;
+
+  @override
+  State<_QueueSheetBody> createState() => _QueueSheetBodyState();
+}
+
+class _QueueSheetBodyState extends State<_QueueSheetBody> {
+  /// QueueTile 行高 56（40 封面 + 上下 8 padding）+ 分隔 2。
+  static const double _rowStride = 58;
+
+  final GlobalKey _activeRowKey = GlobalKey();
+  late final QueueLocateController _locate;
+  Animation<double>? _entrance;
+  bool _correctScheduled = false;
+
+  int _indexOfCurrent() {
+    final current = widget.player.currentSong;
+    if (current == null) return -1;
+    return widget.player.queue.indexWhere((song) => isSameSong(current, song));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _locate = QueueLocateController(
+      rowStride: _rowStride,
+      initialIndex: _indexOfCurrent(),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _entrance ??= ModalRoute.of(context)?.animation;
+    if (_correctScheduled) return;
+    _correctScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _locate.correctWhenEntranceSettled(_entrance, _activeRowKey);
+    });
+  }
+
+  @override
+  void dispose() {
+    _locate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 头部（队列数 + 定位/清空可用态）监听 player，
+            // 面板打开期间队列变化时保持刷新（与桌面端 DesktopQueuePanel 一致）。
+            AnimatedBuilder(
+              animation: widget.player,
+              builder: (context, _) {
+                final activeIndex = _indexOfCurrent();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Text(
+                        '播放队列',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${widget.player.queue.length} 首',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                      const Spacer(),
+                      // 定位到正在播放行（issue #28）。
+                      IconButton(
+                        tooltip: '定位到正在播放',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: activeIndex >= 0
+                            ? () =>
+                                unawaited(_locate.locate(activeIndex, _activeRowKey))
+                            : null,
+                        icon: const Icon(Icons.my_location_rounded, size: 20),
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      TextButton(
+                        onPressed: widget.player.queue.length > 1
+                            ? () => clearQueue(context, widget.player)
+                            : null,
+                        child: Text(
+                          '清空',
+                          style: TextStyle(color: colorScheme.error),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            Flexible(
+              child: AnimatedBuilder(
+                animation: widget.player,
                 builder: (context, _) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      children: [
-                        Text(
-                          '播放队列',
-                          style: Theme.of(sheetContext)
+                  if (widget.player.queue.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(
+                        child: Text(
+                          '播放队列为空',
+                          style: Theme.of(context)
                               .textTheme
-                              .titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w900),
+                              .bodyMedium
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${player.queue.length} 首',
-                          style:
-                              Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                        ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: player.queue.length > 1
-                              ? () => clearQueue(sheetContext, player)
-                              : null,
-                          child: Text(
-                            '清空',
-                            style: TextStyle(color: colorScheme.error),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              Flexible(
-                child: AnimatedBuilder(
-                  animation: player,
-                  builder: (context, _) {
-                    if (player.queue.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 32),
-                        child: Center(
-                          child: Text(
-                            '播放队列为空',
-                            style: Theme.of(sheetContext)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                          ),
-                        ),
-                      );
-                    }
-                    return ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: player.queue.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 2),
-                      itemBuilder: (context, index) {
-                        final song = player.queue[index];
-                        final active = isSameSong(player.currentSong, song);
-                        return QueueTile(
+                      ),
+                    );
+                  }
+                  // 行 key 只挂首个匹配行：重复添加同一首歌时多行都高亮，
+                  // 但 GlobalKey 只能有一个，避免重复挂载崩溃。
+                  final activeIndex = _indexOfCurrent();
+                  return ListView.separated(
+                    controller: _locate.controller,
+                    shrinkWrap: true,
+                    itemCount: widget.player.queue.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 2),
+                    itemBuilder: (context, index) {
+                      final song = widget.player.queue[index];
+                      final active = isSameSong(widget.player.currentSong, song);
+                      return KeyedSubtree(
+                        key: index == activeIndex ? _activeRowKey : null,
+                        child: QueueTile(
                           song: song,
                           index: index + 1,
                           active: active,
-                          isPlaying: active && player.isPlaying,
+                          isPlaying: active && widget.player.isPlaying,
                           onTap: () {
                             // 点到当前歌只关面板不重播（对齐列表页 318eea8）
-                            if (isSameSong(player.currentSong, song)) {
-                              Navigator.of(sheetContext).pop();
+                            if (isSameSong(widget.player.currentSong, song)) {
+                              Navigator.of(context).pop();
                               return;
                             }
-                            Navigator.of(sheetContext).pop();
-                            player.playSong(song, queue: player.queue);
+                            Navigator.of(context).pop();
+                            widget.player.playSong(song, queue: widget.player.queue);
                           },
-                          onDelete: player.queue.length > 1
-                              ? () => removeFromQueue(sheetContext, player, index)
+                          onDelete: widget.player.queue.length > 1
+                              ? () => removeFromQueue(context, widget.player, index)
                               : null,
-                        );
-                      },
-                    );
-                  },
-                ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
-    },
-  );
+      ),
+    );
+  }
 }
 
 /// 从队列中移除指定项（保留当前播放歌曲）。
