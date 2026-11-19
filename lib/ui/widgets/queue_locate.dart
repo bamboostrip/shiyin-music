@@ -11,7 +11,8 @@ import 'package:flutter/material.dart';
 /// - 队列面板在带入场动画的 modal 底部弹层里，动画期间视口高度在变，
 ///   [correctWhenEntranceSettled] 等路由动画播完后再校正（无动画/已播完
 ///   则下一帧立即），[locate] 供头部定位按钮；
-/// - 两者同走两段式：第一段按**实测行步长**（懒构建 sliver 的内容总长
+/// - 两者同走两段式：目标行**已挂载**（视口 ± cacheExtent 内）则跳过瞬移
+///   直接精修；否则第一段按**实测行步长**（懒构建 sliver 的内容总长
 ///   / 行数，字体缩放下行高变大也能收敛）jump 到居中估算位，等一帧让
 ///   目标行挂载，仍未挂载则重估重跳（上限 3 轮）；第二段
 ///   `ensureVisible` 精修居中（[locate] 平滑 ~250ms，校正无动画）。
@@ -74,7 +75,8 @@ class QueueLocateController {
   Future<void> locate(int index, GlobalKey rowKey, {required int itemCount}) =>
       _centerOn(rowKey, index: index, itemCount: itemCount, animate: true);
 
-  /// 两段式居中：实测步长估算 jump（未挂载则重估重跳）→ ensureVisible 精修。
+  /// 两段式居中：行已挂载则直接 `ensureVisible` 平滑精修；否则按实测步长
+  /// 估算 jump（未挂载则重估重跳）后再精修。
   ///
   /// 目标行始终未挂载/无 client 时停留在最后一次估算位返回，不崩溃。
   Future<void> _centerOn(
@@ -84,21 +86,26 @@ class QueueLocateController {
     required bool animate,
   }) async {
     if (!controller.hasClients) return;
-    // 第一段：按实测步长 jump 到居中估算位。懒列表挂载目标行需要一帧，
-    // 仍未挂载说明估算偏了（字体缩放等）——重挂载后 extent 更准，重估
-    // 重跳（行均匀缩放一轮即收敛；上限 3 轮防极端不收敛死循环）。
-    BuildContext? rowContext;
-    for (var round = 0; round < _maxJumpRounds; round++) {
-      controller.jumpTo(_centerEstimate(index, _measuredStride(itemCount)));
-      // 主动排帧并等帧结束：懒列表围绕新偏移重建后才能查挂载。
-      WidgetsBinding.instance.scheduleFrame();
-      await WidgetsBinding.instance.endOfFrame;
-      if (!controller.hasClients) return;
-      rowContext = rowKey.currentContext;
-      if (rowContext != null && rowContext.mounted) break;
-      rowContext = null;
+    // 行已挂载（视口 ± cacheExtent 内）：跳过瞬移直接精修。车机行高不
+    // 均匀（subtitle 长歌手名折行）时实测步长只是全局平均，行明明在附近
+    // 还按平均瞬移反而可能被带偏；可见顺滑滚、远瞬移体验也更好。
+    BuildContext? rowContext = rowKey.currentContext;
+    if (rowContext == null || !rowContext.mounted) {
+      // 第一段：按实测步长 jump 到居中估算位。懒列表挂载目标行需要一帧，
+      // 仍未挂载说明估算偏了（字体缩放等）——重挂载后 extent 更准，重估
+      // 重跳（行均匀缩放一轮即收敛；上限 3 轮防极端不收敛死循环）。
+      for (var round = 0; round < _maxJumpRounds; round++) {
+        controller.jumpTo(_centerEstimate(index, _measuredStride(itemCount)));
+        // 主动排帧并等帧结束：懒列表围绕新偏移重建后才能查挂载。
+        WidgetsBinding.instance.scheduleFrame();
+        await WidgetsBinding.instance.endOfFrame;
+        if (!controller.hasClients) return;
+        rowContext = rowKey.currentContext;
+        if (rowContext != null && rowContext.mounted) break;
+        rowContext = null;
+      }
+      if (rowContext == null || !rowContext.mounted) return;
     }
-    if (rowContext == null || !rowContext.mounted) return;
     // 第二段：精修到几何精确居中。
     await Scrollable.ensureVisible(
       rowContext,

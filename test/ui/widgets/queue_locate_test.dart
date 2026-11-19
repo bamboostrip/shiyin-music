@@ -128,6 +128,29 @@ void main() {
     locate.dispose();
   });
 
+  testWidgets('行已挂载时跳过瞬移：直接平滑精修', (tester) async {
+    final locate = QueueLocateController(rowStride: 58, initialIndex: 19);
+    final key = GlobalKey();
+    await tester.pumpWidget(_harness(locate: locate, activeKey: key));
+
+    // 先精确定位到 19 行居中（830），目标行已挂载在视口内。
+    final first = locate.locate(19, key, itemCount: 40);
+    await tester.pumpAndSettle();
+    await first;
+    final position = locate.controller.position;
+    final before = position.pixels;
+    expect(key.currentContext, isNotNull);
+
+    // 再次定位：行在视口内，不应有 stage1 瞬移——未 pump 前 pixels 必须不动
+    // （瞬移路径会同步 jumpTo 实测步长估算位 ≠ 精修位）。
+    final second = locate.locate(19, key, itemCount: 40);
+    expect(position.pixels, before);
+    await tester.pumpAndSettle();
+    await second;
+    expect(position.pixels, moreOrLessEquals(before, epsilon: 0.1));
+    locate.dispose();
+  });
+
   testWidgets('入场动画倒放（弹层关闭）：撤监听不校正', (tester) async {
     final locate = QueueLocateController(rowStride: 58, initialIndex: 19);
     final key = GlobalKey();

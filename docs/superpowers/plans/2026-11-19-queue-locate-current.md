@@ -31,11 +31,11 @@
 
 **Interfaces:**
 - Consumes: 无（纯 Flutter）
-- Produces（Task 2/3 依赖，签名精确一致）:
-  - `QueueLocateController({required double rowStride, int? initialIndex, double assumedViewportExtent = 480})`
-  - `final ScrollController controller`（`initialScrollOffset = max(0, (initialIndex + 0.5) * rowStride - assumedViewportExtent / 2)`，`initialIndex == null || < 0` 时为 0）
-  - `void correctWhenEntranceSettled(Animation<double>? entrance, GlobalKey rowKey)`——入场动画播完后的帧：先 `jumpTo` 居中估算（真实 viewportDimension，比构造期假定 480 准），下一帧 `ensureVisible` 居中精修
-  - `Future<void> locate(int index, GlobalKey rowKey)`——先 `jumpTo` 居中估算瞬移（不依赖目标行已挂载），下一帧行在则 250ms `ensureVisible` 精修；不在则停在估算位（本仓库 Flutter 3.44.8 `shrinkWrap` 不再全量保活行，定位器必须懒构建下可用，宿主 ListView **无需**加 cacheExtent）
+- Produces（Task 2/3 依赖，签名精确一致；下方 Task 2/3 步骤代码内的调用为初版写法，**签名以本清单为准**）:
+  - `QueueLocateController({required double rowStride, int? initialIndex, double assumedViewportExtent = 360})`
+  - `final ScrollController controller`（`initialScrollOffset = max(0, (initialIndex + 0.5) * rowStride - assumedViewportExtent / 2)`，`initialIndex == null || < 0` 时为 0——仅管首帧落点）
+  - `void correctWhenEntranceSettled(Animation<double>? entrance, GlobalKey rowKey, {required int index, required int itemCount})`——入场动画播完后的帧（null/已播完则下一帧）：目标行已挂载直接 `ensureVisible` 居中精修（无动画）；未挂载则先按**实测行步长**（`(maxScrollExtent + viewportDimension) / itemCount`）`jumpTo` 居中估算，等一帧仍未挂载再重估重跳（上限 3 轮），挂载后精修
+  - `Future<void> locate(int index, GlobalKey rowKey, {required int itemCount})`——行已挂载跳过瞬移直接 250ms `ensureVisible` 平滑精修；未挂载走上述 jump+重估路径，始终未挂载则停在估算位（本仓库 Flutter 3.44.8 `shrinkWrap` 不再全量保活行，定位器必须懒构建下可用，宿主 ListView **无需**加 cacheExtent）
   - `void dispose()`
 
 - [ ] **Step 1: 写失败测试**
@@ -457,6 +457,8 @@ class _QueueSheetBodyState extends State<_QueueSheetBody> {
     _entrance ??= ModalRoute.of(context)?.animation;
     if (_correctScheduled) return;
     _correctScheduled = true;
+    // 注：调用签名以 Task 1 Produces 为准——终审后 correctWhenEntranceSettled
+    // 已加 index/itemCount 参数（此处步骤代码为初版，未回写）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _locate.correctWhenEntranceSettled(_entrance, _activeRowKey);
     });
@@ -509,6 +511,7 @@ class _QueueSheetBodyState extends State<_QueueSheetBody> {
                         visualDensity: VisualDensity.compact,
                         onPressed: activeIndex >= 0
                             ? () =>
+                                // 注：签名以 Task 1 Produces 为准（locate 已加 itemCount）。
                                 unawaited(_locate.locate(activeIndex, _activeRowKey))
                             : null,
                         icon: const Icon(Icons.my_location_rounded, size: 20),
@@ -665,6 +668,8 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
     _entrance ??= ModalRoute.of(context)?.animation;
     if (_correctScheduled) return;
     _correctScheduled = true;
+    // 注：调用签名以 Task 1 Produces 为准——终审后 correctWhenEntranceSettled
+    // 已加 index/itemCount 参数（此处步骤代码为初版，未回写）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _locate.correctWhenEntranceSettled(_entrance, _activeRowKey);
     });
@@ -716,6 +721,7 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
                         visualDensity: VisualDensity.compact,
                         onPressed: activeIndex >= 0
                             ? () =>
+                                // 注：签名以 Task 1 Produces 为准（locate 已加 itemCount）。
                                 unawaited(_locate.locate(activeIndex, _activeRowKey))
                             : null,
                         icon: const Icon(Icons.my_location_rounded, size: 20),

@@ -12,8 +12,8 @@ import 'toast.dart';
 
 /// 弹出播放队列面板（底部弹层）。
 ///
-/// 从 MiniPlayer 抽取共享：桌面播放栏（desktop_player_bar.dart）复用同一面板，
-/// 行为与原有 MiniPlayer 完全一致。
+/// 移动端播放页（player_page.dart）的队列入口；桌面播放栏不走本面板，
+/// 用独立的 DesktopQueuePanel（desktop_player_bar.dart → showDesktopQueuePanel）。
 Future<void> showQueueSheet(
   BuildContext context,
   PlayerController player,
