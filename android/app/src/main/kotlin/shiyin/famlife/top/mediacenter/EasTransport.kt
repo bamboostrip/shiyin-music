@@ -49,6 +49,13 @@ object EasTransport {
     @Volatile
     private var binder: IBinder? = null
 
+    /** 本进程是否成功连上过 EAS Framework（哪怕后来断开）。
+     * 桥接层用它区分「ECARX 车机服务重启要自愈」与「手机上根本没有这
+     * 服务、别反复重试刷日志」。 */
+    @Volatile
+    var everConnected = false
+        private set
+
     @Volatile
     private var descriptor: String? = null
 
@@ -113,6 +120,7 @@ object EasTransport {
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             binder = service
+            everConnected = true
             descriptor = runCatching { service?.interfaceDescriptor }.getOrNull()
             CarMediaCenterLog.log("[eas] 已连接 descriptor=$descriptor")
         }
@@ -129,35 +137,48 @@ object EasTransport {
         return b.isBinderAlive
     }
 
-    /** 发一次通用 RPC；成功返回 mRetMsg.mData，失败返回 null。 */
-    fun call(service: String, module: String, method: String, param: ByteArray): ByteArray? {
+    /** 取媒体中心主 Binder（IMediaCenterSvc）的通用 RPC 入口。
+     *
+     * 默认 transaction code 失败（固件升级换了 code）时清缓存自发现
+     * （扫描 1..40 的只读探针）后重试一次——移植源把这段自发现放在
+     * call() 通用路径里，本仓只有这一个入口需要它。
+     */
+    fun mediaCenterBinder(): IBinder? {
         if (!connectAndWait(CarMediaCenterBridge.appContext())) {
             return null
         }
-        val code = effectiveCallCode()
-        var r = transact(code, service, module, method, param, null, null)
-        if (r?.data == null) {
-            // 启动瞬间可能与其他 Binder 调用并发，先用同一个 code 重试一次。
-            try {
-                Thread.sleep(150L)
-            } catch (_: InterruptedException) {
-            }
-            r = transact(code, service, module, method, param, null, null)
+        val r = transact(
+            effectiveCallCode(),
+            "mediacenter",
+            "MediaCenterAPI",
+            "getMainBinder",
+            "NoParam".toByteArray(),
+            EMPTY_ATTACH,
+            null,
+        )
+        if (r?.binder != null) {
+            return r.binder
         }
-        if (r?.data == null) {
-            // 固件换了 code：清缓存重新发现一次。
-            callCode = 0
-            val found = discover()
-            if (found > 0) {
-                r = transact(found, service, module, method, param, null, null)
-            }
+        callCode = 0
+        val found = discover()
+        if (found > 0) {
+            val retry = transact(
+                found,
+                "mediacenter",
+                "MediaCenterAPI",
+                "getMainBinder",
+                "NoParam".toByteArray(),
+                EMPTY_ATTACH,
+                null,
+            )
+            return retry?.binder
         }
-        return r?.data
+        return null
     }
 
     /**
-     * IEASFrameworkService.asyncBinderCall(message, extraBinder)——比 call
-     * 多一个 Binder 参数，用于把 token / 回调交给服务端（updateZoneId、
+     * IEASFrameworkService.asyncBinderCall(message, extraBinder)——比通用
+     * call 多一个 Binder 参数，用于把 token / 回调交给服务端（updateZoneId、
      * registerEx 走这里）。
      */
     fun asyncBinderCall(
@@ -180,23 +201,6 @@ object EasTransport {
             extra,
         )
         return r != null
-    }
-
-    /** 取媒体中心主 Binder（IMediaCenterSvc）的通用 RPC 入口。 */
-    fun mediaCenterBinder(): IBinder? {
-        if (!connectAndWait(CarMediaCenterBridge.appContext())) {
-            return null
-        }
-        val r = transact(
-            effectiveCallCode(),
-            "mediacenter",
-            "MediaCenterAPI",
-            "getMainBinder",
-            "NoParam".toByteArray(),
-            EMPTY_ATTACH,
-            null,
-        )
-        return r?.binder
     }
 
     /** 扫描 1..40，找到能返回合法 mData 的 transaction code 并缓存。 */
@@ -272,7 +276,9 @@ object EasTransport {
             data.writeString(module)
             data.writeString(method)
             data.writeByteArray(param)
-            data.writeByteArray(attach ?: EMPTY_ATTACH)
+            // attach 原样透传：null 写成长度 -1（与移植源一致）；线上路径
+            // 实际都传 EMPTY_ATTACH（长度 0）。
+            data.writeByteArray(attach)
             extra?.let { data.writeStrongBinder(it) }
             check(b.transact(code, data, reply, 0)) { "transact($code) 返回 false" }
             reply.readException()

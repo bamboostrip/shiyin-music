@@ -80,13 +80,15 @@ mixin _PlayerCarMediaCenter on _PlayerControllerBase {
     }
     _carMcAttached = true;
 
-    // 曲目变化：上行完整状态（含整篇 LRC，HUD 歌词数据源）。
+    // 曲目变化：上行元数据（整篇 LRC 由歌词签名变化时补推，见
+    // [_carMcPushState]——歌词是异步加载的，mediaItem 事件先到时 lyrics
+    // 还是空的）。
     _carMcMediaItemSub = _audioHandler.mediaItem.listen((item) {
       _carMcLastItem = item;
       if (item == null) {
         return;
       }
-      _carMcPushState(includeLyric: true);
+      _carMcPushState();
     });
 
     // 播放态翻转：开播抢焦点 / 暂停补焦，并上行状态。
@@ -101,17 +103,19 @@ mixin _PlayerCarMediaCenter on _PlayerControllerBase {
       } else {
         unawaited(_carMediaCenter.notifyPaused());
       }
-      _carMcPushState(includeLyric: false);
+      _carMcPushState();
     });
 
-    // 进度心跳（1s 节流）：原生按锚点外推进度，这里周期性纠偏锚点。
+    // 进度心跳（1s 节流）：原生按锚点外推进度，这里周期性纠偏锚点；
+    // 歌词迟到（切歌后异步加载完成/纯音乐→有词替换）也由心跳按签名
+    // 变化补推整篇 LRC。
     _carMcPositionSub = _audioHandler.audioPlayer.positionStream.listen((_) {
       final now = DateTime.now();
       if (now.difference(_carMcLastHeartbeatAt) < const Duration(seconds: 1)) {
         return;
       }
       _carMcLastHeartbeatAt = now;
-      _carMcPushState(includeLyric: false);
+      _carMcPushState();
     });
   }
 
@@ -127,12 +131,29 @@ mixin _PlayerCarMediaCenter on _PlayerControllerBase {
     _carMediaCenter.detach();
   }
 
+  /// 上次上行时的歌词签名：长度 + 首尾行时间 + 列表身份。签名变化才
+  /// 重组/上行整篇 LRC（2~4KB），否则每秒心跳都白拼一遍。
+  String? _carMcLastLrcSignature;
+
+  /// 当前歌词列表的签名；空列表返回空串。
+  String _carMcLyricsSignature() {
+    final lines = lyrics;
+    if (lines.isEmpty) {
+      return '';
+    }
+    return '${lines.length}:${lines.first.time}:${lines.last.time}:'
+        '${identityHashCode(lines)}';
+  }
+
   /// 组一次完整状态并上行。
   ///
-  /// [includeLyric] 为 true 时附带整篇 LRC（曲目/歌词变化时；[lyrics]
-  /// 为空则带上空串清掉 HUD 上的旧歌词），进度心跳只纠偏锚点不带歌词，
-  /// 避免每秒重组 2~4KB 文本。
-  void _carMcPushState({required bool includeLyric}) {
+  /// 整篇 LRC 由**歌词签名变化**驱动（曲目切换后歌词异步加载完成、纯音乐
+  /// 被有词版本替换等场景都能覆盖，且不会随歌词行心跳每秒重推）；签名
+  /// 未变时省略 lyric 键，原生侧保留上次值。
+  void _carMcPushState() {
+    final lrcSignature = _carMcLyricsSignature();
+    final lyricChanged = lrcSignature != _carMcLastLrcSignature;
+    _carMcLastLrcSignature = lrcSignature;
     final song = currentSong;
     unawaited(
       _carMediaCenter.pushState(
@@ -144,7 +165,7 @@ mixin _PlayerCarMediaCenter on _PlayerControllerBase {
         positionMs: position.inMilliseconds,
         playing: isPlaying,
         speed: _audioHandler.audioPlayer.speed,
-        lyric: includeLyric ? (LrcFormatter.buildFullLrc(lyrics) ?? '') : null,
+        lyric: lyricChanged ? (LrcFormatter.buildFullLrc(lyrics) ?? '') : null,
         lyricLine: _carMcCurrentLyricLine(),
       ),
     );

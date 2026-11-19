@@ -321,19 +321,28 @@ class PlayerController extends _PlayerControllerBase
         unawaited(playSong(song, isRetry: true, userInitiated: false));
       },
     );
+    // 通知栏/锁屏/耳机线控：**不走去重闸门**——每个按键都是用户显式意图，
+    // 快速连点两次就是想跳两首；这些通道历史上也没有双投递（系统对媒体键
+    // 要么路由给 MediaSession 要么派给前台 Activity，二选一）。
     _audioHandler.attachTransportControls(
-      onNext: () => carGated('next', next),
-      onPrevious: () => carGated('previous', previous),
+      onNext: next,
+      onPrevious: previous,
       // 通知栏/锁屏/耳机线控是**用户显式意图**：作废自动恢复并解除断连保护，
       // 与 togglePlay 内部再调一次是幂等的（_cancelAutomaticResume 只推进代次）。
-      onPlay: () => carGated('play', _handleManualPlay),
-      onPause: () => carGated('pause', _cancelAutomaticResume),
+      onPlay: _handleManualPlay,
+      onPause: _cancelAutomaticResume,
     );
     // 车机方控前台兜底：原生只发标准媒体键，这里映射到与通知栏/媒体键
     // 同一套播控。控制器没有独立 play/pause/stop，按当前 isPlaying 走
     // togglePlay，避免「暂停键在已暂停时反而起播」这类双触发。
+    // 走 carControlGate（车机广播可能与系统媒体键路由双投递），闸门键在
+    // 计算时把 togglePlay 归一成 play/pause——否则「前台 togglePlay + EAS
+    // play」两个键名各放行一次，双触发恰好抵消成死键。
     _mediaKeyService.attach(
-      onTogglePlay: () => carGated('togglePlay', togglePlay),
+      onTogglePlay: () => carGated(
+        isPlaying ? 'pause' : 'play',
+        togglePlay,
+      ),
       onPlay: () => carGated(
         'play',
         () async {
@@ -356,8 +365,8 @@ class PlayerController extends _PlayerControllerBase
       ),
     );
     // Flyme Auto（ECARX）媒体中心接入（issue #15）：方向盘按键经私有
-    // EAS 媒体中心 Binder 回调下发；三个外部输入源共用 carControlGate
-    // 去重（EAS 与 MediaSession 双路由时折叠同一次按键）。
+    // EAS 媒体中心 Binder 回调下发；EAS 回调与媒体键兜底两条「车机侧」
+    // 输入共用 carControlGate 去重（同一次按键双路由时折叠）。
     attachCarMediaCenter(
       onNext: next,
       onPrevious: previous,

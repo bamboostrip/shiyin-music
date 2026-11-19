@@ -70,9 +70,23 @@ object CarMediaCenterBridge {
     @Volatile
     private var expectFocusCallback = false
 
+    // 以下三个字段会被 Binder 回调线程与主线程（ticker）并发触碰。
+    @Volatile
     private var lastRegCheckAt = 0L
+
+    @Volatile
     private var lastFocusWho: String? = null
+
+    @Volatile
     private var pullCount = 0
+
+    /** 服务自愈进行中（防重入）。 */
+    @Volatile
+    private var refreshingSvc = false
+
+    /** 重注册冷却（对齐移植源 RE_REGISTER_COOLDOWN_MS，防 Binder 回调与主线程并发双注册）。 */
+    @Volatile
+    private var lastReRegisterAt = 0L
 
     // 进度锚点：车机进度条不会自己走，ticker 按锚点+速度外推。
     @Volatile
@@ -115,9 +129,13 @@ object CarMediaCenterBridge {
         }
         channel = ch
         // 原生日志 → Dart 落盘（AppLogService）：用户无 adb 时唯一的
-        // 诊断出口。
+        // 诊断出口。日志可能从 Binder 线程打来，invokeMethod 必须切主线程
+        //（本 Flutter 引擎 FlutterJNI 强制 @UiThread，越线程直接抛异常，
+        // 见 MainActivity 响度分析回调的同类处理）。
         CarMediaCenterLog.forwarder = { line ->
-            runCatching { ch.invokeMethod("onLog", line) }
+            main.post {
+                runCatching { ch.invokeMethod("onLog", line) }
+            }
         }
         if (nativeInitStarted) {
             return
@@ -158,9 +176,40 @@ object CarMediaCenterBridge {
 
     private fun usable(): Boolean = svc?.alive() == true
 
+    /**
+     * 媒体中心主 Binder 失活（系统服务重启/固件升级）时的自愈：后台线程
+     * 重取 IMediaCenterSvc 后回主线程重注册。对齐移植源 NativeFull.init()
+     * 的刷新逻辑——不做这层，服务死过一次后功能静默失效到 App 重启。
+     *
+     * 必须后台线程：connectAndWait 里等 onServiceConnected 的循环最长 3 秒，
+     * 而该回调本身投递在主线程，主线程里等它必然超时（自锁）。
+     */
+    private fun refreshSvcAsync(reason: String) {
+        if (refreshingSvc || !EasTransport.everConnected) {
+            return
+        }
+        refreshingSvc = true
+        CarMediaCenterLog.log("[nfull] 媒体中心服务不可用（$reason），后台重连")
+        Thread({
+            val binder = EasTransport.mediaCenterBinder()
+            refreshingSvc = false
+            if (binder == null) {
+                CarMediaCenterLog.log("[nfull] 重连失败，等待下次播放/切源触发再试")
+                return@Thread
+            }
+            svc = MediaCenterSvc(binder)
+            CarMediaCenterLog.log("[nfull] 重连成功 svcAlive=${svc?.alive()}")
+            main.post { register() }
+        }, "shiyin-mediacenter-refresh").start()
+    }
+
     /** 注册：registerInMusic(19) + updateZoneId(0) + registerEx + 音源类型上报。 */
+    @Synchronized
     private fun register() {
         if (ready || !usable()) {
+            if (!ready && nativeInitStarted) {
+                refreshSvcAsync("register")
+            }
             return
         }
         val s = svc ?: return
@@ -215,8 +264,18 @@ object CarMediaCenterBridge {
         }
     }
 
-    /** 重新注册：清掉本地旧 token 再走一遍（不抢焦点）。 */
+    /**
+     * 重新注册：清掉本地旧 token 再走一遍（不抢焦点）。
+     * 冷却 800ms：register 链可从主线程（开播）与 Binder 线程（切源回调）
+     * 并发进入，防抖 + @Synchronized 防双注册漏 token。
+     */
+    @Synchronized
     private fun reRegister(reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastReRegisterAt < 800L) {
+            return
+        }
+        lastReRegisterAt = now
         CarMediaCenterLog.log("[注册] $reason -> 重新注册 ${appPkg()}")
         ready = false
         token = null
@@ -229,6 +288,10 @@ object CarMediaCenterBridge {
      * 必须补推才能填上内容页。
      */
     fun recoverRegistration(reason: String) {
+        if (!usable()) {
+            refreshSvcAsync("recoverRegistration")
+            return
+        }
         reRegister(reason)
         if (!ready || token == null) {
             return
@@ -275,29 +338,35 @@ object CarMediaCenterBridge {
         val ch = channel
         if (ch == null) {
             CarMediaCenterLog.log("[控制] Dart 通道未就绪，丢弃 $action")
-            return true
+            return false
         }
-        runCatching {
-            ch.invokeMethod(
-                "onControl",
-                mapOf("action" to action, "source" to label),
-                object : MethodChannel.Result {
-                    override fun success(result: Any?) = Unit
-                    override fun error(
-                        errorCode: String,
-                        errorMessage: String?,
-                        errorDetails: Any?,
-                    ) {
-                        CarMediaCenterLog.log("[控制] Dart 处理 $action 失败: $errorCode")
-                    }
+        // 控制回调来自 Binder 线程，invokeMethod 必须切主线程（同 forwarder
+        // 的注释：引擎强制 @UiThread，越线程直接抛异常被吞 → 方向盘键全部
+        // 静默丢失）。同步返回值（是否接手）在调度前就算好，不受影响。
+        main.post {
+            runCatching {
+                ch.invokeMethod(
+                    "onControl",
+                    mapOf("action" to action, "source" to label),
+                    object : MethodChannel.Result {
+                        override fun success(result: Any?) = Unit
 
-                    override fun notImplemented() {
-                        CarMediaCenterLog.log("[控制] Dart 未实现 onControl（通道未接线？）")
-                    }
-                },
-            )
-        }.onFailure {
-            CarMediaCenterLog.log("[控制] invokeMethod(onControl/$action) 异常: ${it.message}")
+                        override fun error(
+                            errorCode: String,
+                            errorMessage: String?,
+                            errorDetails: Any?,
+                        ) {
+                            CarMediaCenterLog.log("[控制] Dart 处理 $action 失败: $errorCode")
+                        }
+
+                        override fun notImplemented() {
+                            CarMediaCenterLog.log("[控制] Dart 未实现 onControl（通道未接线？）")
+                        }
+                    },
+                )
+            }.onFailure {
+                CarMediaCenterLog.log("[控制] invokeMethod(onControl/$action) 异常: ${it.message}")
+            }
         }
         return true
     }
@@ -472,6 +541,12 @@ object CarMediaCenterBridge {
      */
     private fun onPlayStarted() {
         if (!usable()) {
+            // 服务曾连上过（ECARX 车机）但主 Binder 失活：后台重连，本次
+            // requestPlay 顺延到重连后的 register 链；从未连上（手机）则
+            // 静默跳过。
+            if (EasTransport.everConnected) {
+                refreshSvcAsync("onPlayStarted")
+            }
             return
         }
         if (!ready || token == null) {

@@ -11,41 +11,41 @@ import android.net.Uri
  * 的 Binder 回调 getter）无锁交错，允许读到略旧的整体一致的快照值。
  */
 object CarNowPlaying {
-    @JvmField
+    @Volatile
     var title: String = ""
 
-    @JvmField
+    @Volatile
     var artist: String = ""
 
-    @JvmField
+    @Volatile
     var album: String = ""
 
-    @JvmField
+    @Volatile
     var durationMs: Long = 0L
 
-    @JvmField
+    @Volatile
     var positionMs: Long = 0L
 
-    @JvmField
+    @Volatile
     var playing: Boolean = false
 
-    @JvmField
+    @Volatile
     var artwork: String? = null
 
     /** 整篇 LRC 文本（HUD 歌词用，可空）。 */
-    @JvmField
+    @Volatile
     var lyric: String? = null
 
     /** 当前歌词句（HUD 单行歌词，车机经 getter 主动 pull）。 */
-    @JvmField
+    @Volatile
     var lyricLine: String? = null
 
     /** 卡片上的音源图标（本 APK 内的 resource uri，别的 App 的 adaptive icon 车机解不出）。 */
-    @JvmField
+    @Volatile
     var appIcon: String? = null
 
     /** 媒体中心卡片点击时打开本 App 的意图。 */
-    @JvmField
+    @Volatile
     var launchIntent: PendingIntent? = null
 
     /**

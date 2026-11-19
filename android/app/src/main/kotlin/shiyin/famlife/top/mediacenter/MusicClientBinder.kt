@@ -60,6 +60,8 @@ class MusicClientBinder {
     private val cOnDownload = 16
     private val cOnSourceChanged = 17
     private val cOnReplay = 18
+    private val cOnPlayRecommend = 19
+    private val cOnCancelRecommend = 20
     private val cOnMediaSelectedPlay = 21
     private val cOnMediaForward = 22
     private val cOnMediaRewind = 23
@@ -71,7 +73,9 @@ class MusicClientBinder {
     private val cGetMultiMediaList = 29
     private val cCtrlPlayMediaList = 30
     private val cCtrlPauseMediaList = 31
+    private val cCtrlCollect = 32
     private val cOperationType = 33
+    private val cCtrlCollectByUuid = 34
 
     // ---- IMusicPlaybackInfo.transaction（服务端 → 我们，逐个 getter）
     private val iGetLaunchIntent = 1
@@ -119,7 +123,8 @@ class MusicClientBinder {
     private val statusPaused = 0
     private val statusPlaying = 1
 
-    /** 仅供日志：车机 pull 到的播放态变化时打一条。 */
+    /** 仅供日志：车机 pull 到的播放态变化时打一条（Binder 线程写读）。 */
+    @Volatile
     private var lastReportedStatus = -1
 
     private val info = InfoBinder()
@@ -466,7 +471,25 @@ class MusicClientBinder {
                     reply.writeNoException()
                     reply.writeInt(0)
                 }
-                cOnMediaSelected -> {
+                cCtrlCollect -> {
+                    runCatching {
+                        data?.readInt()
+                        data?.readInt()
+                    }
+                    CarMediaCenterBridge.noteCmd(code, "ctrlCollect（未声明能力）")
+                    reply.writeNoException()
+                    reply.writeInt(-1)
+                }
+                cCtrlCollectByUuid -> {
+                    runCatching {
+                        data?.readInt()
+                        data?.readString()
+                        data?.readInt()
+                    }
+                    CarMediaCenterBridge.noteCmd(code, "ctrlCollectByUuid（未声明能力）")
+                    reply.writeNoException()
+                }
+                cOnMediaSelected, cOnPlayRecommend, cOnCancelRecommend -> {
                     // 参数是设备侧 Parcelable/Binder 数据对象，不解析直接拒绝。
                     CarMediaCenterBridge.noteCmd(code, "旧式媒体对象回调（未解析）")
                     reply.writeNoException()
