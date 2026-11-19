@@ -564,7 +564,8 @@ class _CarQueueSheetBodyState extends State<_CarQueueSheetBody> {
     _correctScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        // 实时取 index：入场期间切歌不会定位到旧 index。
+        // 首帧时取 index：首帧到入场结束之间切歌的话，首跳仍按旧
+        // index 估算，精修段会跟随行 key 落到新当前行。
         _locate.correctWhenEntranceSettled(
           _entrance,
           _activeRowKey,
