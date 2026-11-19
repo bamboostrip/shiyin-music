@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audio_service/audio_service.dart'
+    show MediaItem, PlaybackState;
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -22,7 +24,9 @@ import '../models/audio_effect_presets.dart';
 import '../models/music_models.dart';
 import '../services/audio_effects_service.dart';
 import '../services/cache_service.dart';
+import '../services/app_log_service.dart';
 import '../services/bluetooth_lyrics_service.dart';
+import '../services/car_media_center_service.dart';
 import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
@@ -54,6 +58,7 @@ part 'player_controller.lyrics.dart';
 part 'player_controller.effects.dart';
 part 'player_controller.desktop.dart';
 part 'player_controller.settings.dart';
+part 'player_controller.carmc.dart';
 
 enum PlaybackMode { playlistLoop, shuffle, singleLoop }
 
@@ -283,7 +288,8 @@ class PlayerController extends _PlayerControllerBase
         _PlayerLyrics,
         _PlayerEffects,
         _PlayerDesktop,
-        _PlayerSettings {
+        _PlayerSettings,
+        _PlayerCarMediaCenter {
   /// EQ 预设表（16 项）与音效档案表（6 项）已拆到 models 层集中维护
   /// （曲线与调法注释见 audio_effect_presets.dart），此处保留原静态入口
   /// 签名，既有消费方零改动。
@@ -316,27 +322,49 @@ class PlayerController extends _PlayerControllerBase
       },
     );
     _audioHandler.attachTransportControls(
-      onNext: next,
-      onPrevious: previous,
+      onNext: () => carGated('next', next),
+      onPrevious: () => carGated('previous', previous),
       // 通知栏/锁屏/耳机线控是**用户显式意图**：作废自动恢复并解除断连保护，
       // 与 togglePlay 内部再调一次是幂等的（_cancelAutomaticResume 只推进代次）。
-      onPlay: _handleManualPlay,
-      onPause: _cancelAutomaticResume,
+      onPlay: () => carGated('play', _handleManualPlay),
+      onPause: () => carGated('pause', _cancelAutomaticResume),
     );
     // 车机方控前台兜底：原生只发标准媒体键，这里映射到与通知栏/媒体键
     // 同一套播控。控制器没有独立 play/pause/stop，按当前 isPlaying 走
     // togglePlay，避免「暂停键在已暂停时反而起播」这类双触发。
     _mediaKeyService.attach(
-      onTogglePlay: togglePlay,
+      onTogglePlay: () => carGated('togglePlay', togglePlay),
+      onPlay: () => carGated(
+        'play',
+        () async {
+          if (!isPlaying) await togglePlay();
+        },
+      ),
+      onPause: () => carGated(
+        'pause',
+        () async {
+          if (isPlaying) await togglePlay();
+        },
+      ),
+      onNext: () => carGated('next', next),
+      onPrevious: () => carGated('previous', previous),
+      onStop: () => carGated(
+        'stop',
+        () async {
+          if (isPlaying) await togglePlay();
+        },
+      ),
+    );
+    // Flyme Auto（ECARX）媒体中心接入（issue #15）：方向盘按键经私有
+    // EAS 媒体中心 Binder 回调下发；三个外部输入源共用 carControlGate
+    // 去重（EAS 与 MediaSession 双路由时折叠同一次按键）。
+    attachCarMediaCenter(
+      onNext: next,
+      onPrevious: previous,
       onPlay: () async {
         if (!isPlaying) await togglePlay();
       },
       onPause: () async {
-        if (isPlaying) await togglePlay();
-      },
-      onNext: next,
-      onPrevious: previous,
-      onStop: () async {
         if (isPlaying) await togglePlay();
       },
     );
@@ -590,6 +618,7 @@ class PlayerController extends _PlayerControllerBase
     unawaited(_superLyric.unregisterPublisher());
     _audioHandler.detachTransportControls();
     _mediaKeyService.detach();
+    disposeCarMediaCenter();
     unawaited(_audioHandler.close());
     unawaited(_desktopLyrics.hide());
     super.dispose();

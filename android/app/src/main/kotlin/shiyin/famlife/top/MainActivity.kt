@@ -149,6 +149,11 @@ class MainActivity : AudioServiceActivity() {
         // MediaSession 处理（通知栏/锁屏/蓝牙 AVRCP）。
         carMediaKeyHandler = CarMediaKeyHandler(this, flutterEngine)
 
+        // Flyme Auto（ECARX）媒体中心接入（issue #15）：方向盘按键由私有
+        // EAS 媒体中心下发，标准 KeyEvent/MediaSession 路径收不到。内部
+        // 后台线程连接，非 ECARX 车机 bindService 失败即休眠，零副作用。
+        shiyin.famlife.top.mediacenter.CarMediaCenterBridge.init(this, flutterEngine)
+
         // AI / 外部 DeepLink（shiyin://）：VIEW intent 的 data 交给 Dart 解析
         // 与执行。冷启动链接已在 onCreate 暂存，由 Dart 的 getInitialLink 取走
         // （取走后置空，Dart 可在 Activity 重建后回前台时补拉一次）；热启动

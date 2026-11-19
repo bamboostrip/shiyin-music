@@ -29,6 +29,13 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Flyme Auto（ECARX）媒体中心接入（issue #15）：bindService 目标包
+         com.ecarx.sdk.openapi 的可见性声明（targetSdk 30+ 包可见性过滤，
+         Android 11 车机必需）。非 ECARX 设备上该包不存在，声明无副作用。 -->
+    <queries>
+        <package android:name="com.ecarx.sdk.openapi" />
+    </queries>
+
         <!-- 自定义 Application：任何组件（Activity/Service/Receiver）启动前先创建
              通知渠道，防止 audio_service 在车机上以 IMPORTANCE_LOW 预建渠道导致
              MIN 静默配置失效（渠道重要性创建后无法程序化下调）。 -->
