@@ -57,6 +57,66 @@ extension AppShortcutActionLabel on AppShortcutAction {
   };
 }
 
+/// 解析持久化的键位 JSON（应用内/全局两张表共用）：
+///
+/// - 坏 JSON/非对象 → null（调用方回退默认表，不让快捷键全灭）；
+/// - 动作键缺失（老版本/半截配置）→ 该动作回默认；
+///   **显式空数组保留**——它表示「该动作的键被别的动作抢走了」，
+///   回落默认会把重复占用一起带回来；
+/// - 单条脏数据跳过；同一组合多处出现先到先得
+///   （手改配置/旧版本残留都不该让任何动作静默失效）。
+Map<E, List<KeyBinding>>? decodeBindingsJson<E extends Enum>(
+  String raw, {
+  required Iterable<E> actions,
+  required List<KeyBinding> Function(E action) defaults,
+}) {
+  try {
+    final json = jsonDecode(raw);
+    if (json is! Map) return null;
+    final result = <E, List<KeyBinding>>{};
+    final claimed = <KeyBinding>{};
+    for (final action in actions) {
+      final encoded = json[action.name];
+      if (encoded is! List) {
+        result[action] = defaults(action);
+        continue;
+      }
+      final parsed = <KeyBinding>[];
+      for (final item in encoded) {
+        if (item is! String) continue;
+        final binding = KeyBinding.tryDecode(item);
+        if (binding != null && claimed.add(binding)) parsed.add(binding);
+      }
+      result[action] = parsed;
+    }
+    return result;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 指派 + 抢占（两张表共用）：把 [bindings] 给 [action]，并把这些组合从
+/// 其它动作上摘掉。
+///
+/// 被摘动作**不回落默认键**——默认键往往正是被抢走的那个组合（例如把
+/// 空格改给「快进」后，播放/暂停再回落空格就会两条记录共用一键），
+/// 摘空即「未设置」，由用户再绑或点「恢复默认」，语义可预期。
+Map<E, List<KeyBinding>> assignBindings<E extends Enum>(
+  Map<E, List<KeyBinding>> current,
+  E action,
+  List<KeyBinding> bindings,
+) {
+  return {
+    for (final entry in current.entries)
+      entry.key:
+          entry.key == action
+              ? List<KeyBinding>.of(bindings)
+              : entry.value
+                    .where((item) => !bindings.contains(item))
+                    .toList(growable: false),
+  };
+}
+
 /// 桌面快进/快退步长（←/→ 单次 seek 的秒数）。
 const Duration desktopSeekStep = Duration(seconds: 5);
 
@@ -292,8 +352,9 @@ List<SingleActivator> appShortcutActivators(
 /// 表，改键立即生效、无需重启。持久化在 SharedPreferences，脏数据一律回退
 /// 默认表——快捷键是锦上添花，绝不能因为一条坏记录让播放控制失灵。
 ///
-/// **只覆盖应用内（局部）快捷键**：系统级全局热键（App 在后台/失焦时也响应）
-/// 需要原生 RegisterHotKey 注册与冲突协商，当前版本未接入。
+/// **只覆盖应用内（局部）快捷键**：系统级全局热键（App 在后台/失焦时也
+/// 响应）见平行的 [GlobalShortcutController]（global_shortcuts.dart），
+/// 由 hotkey_manager 注册、[GlobalHotkeyService] 同步。
 class ShortcutController extends ChangeNotifier {
   ShortcutController._();
 
@@ -334,7 +395,13 @@ class ShortcutController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(prefsKey);
-      final decoded = raw == null ? null : _decode(raw);
+      final decoded = raw == null
+          ? null
+          : decodeBindingsJson(
+              raw,
+              actions: AppShortcutAction.values,
+              defaults: defaultBindingsFor,
+            );
       // 读盘是异步的：这段窗口里用户若已经在设置页改过键（冷启动首帧后
       // 就进设置页虽极端，但成本为零），不能拿磁盘旧值把它盖掉。
       if (_revision == revisionAtStart) {
@@ -387,16 +454,7 @@ class ShortcutController extends ChangeNotifier {
   /// 把 [bindings] 指派给 [action]，并把这些组合从其它动作上摘掉。
   void _assign(AppShortcutAction action, List<KeyBinding> bindings) {
     _revision++;
-    for (final other in AppShortcutAction.values) {
-      if (other == action) continue;
-      final remaining = bindingsOf(
-        other,
-      ).where((item) => !bindings.contains(item)).toList(growable: false);
-      if (remaining.length != bindingsOf(other).length) {
-        _bindings[other] = remaining;
-      }
-    }
-    _bindings[action] = List<KeyBinding>.of(bindings);
+    _bindings = assignBindings(_bindings, action, bindings);
   }
 
   /// 该组合当前被哪个动作占用（排除 [ignore]，用于录制时的冲突提示）。
@@ -435,37 +493,6 @@ class ShortcutController extends ChangeNotifier {
     for (final action in AppShortcutAction.values)
       action: defaultBindingsFor(action),
   };
-
-  Map<AppShortcutAction, List<KeyBinding>>? _decode(String raw) {
-    try {
-      final json = jsonDecode(raw);
-      if (json is! Map) return null;
-      final result = <AppShortcutAction, List<KeyBinding>>{};
-      // 一个组合只能属于一个动作：同一键位在多处出现时先到先得，
-      // 后来者丢弃（手改配置/旧版本残留都不该让播放键静默失效）。
-      final claimed = <KeyBinding>{};
-      for (final action in AppShortcutAction.values) {
-        final encoded = json[action.name];
-        // 键缺失（老版本/半截配置）才回默认；**显式的空数组要保留**——
-        // 它表示「这个动作的键被别的动作抢走了」，回落默认会把重复占用
-        // 一起带回来。
-        if (encoded is! List) {
-          result[action] = defaultBindingsFor(action);
-          continue;
-        }
-        final parsed = <KeyBinding>[];
-        for (final item in encoded) {
-          if (item is! String) continue;
-          final binding = KeyBinding.tryDecode(item);
-          if (binding != null && claimed.add(binding)) parsed.add(binding);
-        }
-        result[action] = parsed;
-      }
-      return result;
-    } catch (_) {
-      return null;
-    }
-  }
 
   Future<void> _persist() async {
     try {

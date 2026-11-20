@@ -24,6 +24,7 @@ import 'services/desktop_system_integration.dart';
 import 'services/desktop_system_media.dart';
 import 'services/device_info_service.dart';
 import 'services/download_service.dart';
+import 'services/global_hotkey_service.dart';
 import 'services/image_disk_cache.dart';
 import 'services/legacy_migration.dart';
 import 'services/lyric_cache_service.dart';
@@ -38,6 +39,7 @@ import 'ui/desktop/desktop_window.dart';
 import 'ui/desktop/lyrics_overlay_window.dart';
 import 'ui/app_theme.dart';
 import 'ui/form_factor.dart';
+import 'ui/global_shortcuts.dart';
 import 'ui/keyboard_shortcuts.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
@@ -118,8 +120,10 @@ Future<void> main(List<String> args) async {
     await themeController.detectAutomotive(const DeviceInfoService());
     await themeController.load();
     // 桌面端可改键（设置 → 键盘快捷键，issue #31）：启动即读一次
-    // 持久化配置，坏数据在内部回退默认表，不阻断启动。
+    // 持久化配置，坏数据在内部回退默认表，不阻断启动。全局表同理，
+    // 读完后 GlobalHotkeyService 会因控制器通知自动重新同步注册。
     unawaited(ShortcutController.instance.load());
+    unawaited(GlobalShortcutController.instance.load());
 
     final channelConfig = resolvePlaybackNotificationChannel(
       isCarMode: themeController.carModeEnabled,
@@ -437,6 +441,20 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
       // 落盘日志同队列刷写：quitGracefully 末尾硬终止进程，500ms 防抖
       // 缓冲来不及落地——诊断日志（曲末 watchdog 等）恰恰要在退出前留住。
       DesktopWindow.registerPreQuitFlusher(AppLogService.instance.flush);
+      // 全局热键（issue #31 后半）：hotkey_manager 注册系统级组合键，
+      // 窗口失焦/最小化也能控制播放（QQ 音乐式）。总开关/键位/注册失败
+      // 标注见设置 → 键盘快捷键。先等配置读盘再启动：否则会以默认键位
+      // 短暂注册（用户已关闭/改过的键被抢先占一下）。进程退出时系统随
+      // 进程回收热键注册，与托盘/桌面歌词同策略，不在 Dart 侧逐个拆除。
+      GlobalHotkeyService.instance = GlobalHotkeyService(
+        controller: GlobalShortcutController.instance,
+        registrar: const HotkeyManagerRegistrar(),
+        onAction: _handleGlobalShortcutAction,
+      );
+      unawaited(() async {
+        await GlobalShortcutController.instance.load();
+        await GlobalHotkeyService.instance?.start();
+      }());
       unawaited(DesktopTray.init(player: _player));
       // 桌面系统集成：下载完成通知 + 主窗标题随播放。
       // local_notifier 初始化失败时降级为无通知，不影响其余功能。
@@ -493,8 +511,26 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     }
   }
 
+  /// 全局热键动作分发（语义与 AppShortcutScope 的应用内键位一致）。
+  void _handleGlobalShortcutAction(GlobalShortcutAction action) {
+    switch (action) {
+      case GlobalShortcutAction.playPause:
+        unawaited(_player.togglePlay());
+      case GlobalShortcutAction.previousTrack:
+        unawaited(_player.previous());
+      case GlobalShortcutAction.nextTrack:
+        unawaited(_player.next());
+      case GlobalShortcutAction.volumeUp:
+        _player.setVolume((_player.volume + 0.05).clamp(0.0, 1.0));
+      case GlobalShortcutAction.volumeDown:
+        _player.setVolume((_player.volume - 0.05).clamp(0.0, 1.0));
+    }
+  }
+
   @override
   void dispose() {
+    // 摘除全局热键：注销系统注册并断开监听（热重启防重复注册）。
+    unawaited(GlobalHotkeyService.instance?.stop());
     // 先摘除托盘，避免销毁中的控制器再被托盘菜单回调触发。
     unawaited(DesktopTray.dispose());
     // 解除标题监听，避免悬空回调触发 windowManager.setTitle。

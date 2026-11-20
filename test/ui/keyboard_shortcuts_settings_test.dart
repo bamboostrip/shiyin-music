@@ -269,7 +269,8 @@ void main() {
           reason: action.name,
         );
       }
-      expect(find.text('播放 / 暂停'), findsOneWidget);
+      // 「播放 / 暂停」在应用内与全局两张表各出现一次。
+      expect(find.text('播放 / 暂停'), findsWidgets);
       expect(find.text('空格'), findsOneWidget);
       // 固定快捷键也在清单里（此前只写在更新日志里）。
       expect(find.text('Ctrl + F'), findsOneWidget);
