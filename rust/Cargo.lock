@@ -1208,6 +1208,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
+ "symphonia-metadata",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

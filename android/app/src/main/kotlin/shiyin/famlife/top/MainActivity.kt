@@ -412,6 +412,22 @@ class MainActivity : AudioServiceActivity() {
                             result.error("album_art_failed", error.message, null)
                         }
                     }
+                    "getEmbeddedCover" -> {
+                        val filePath = call.argument<String>("filePath")
+                        if (filePath.isNullOrEmpty()) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        // MediaMetadataRetriever 要读文件并解析整张图，压主线程
+                        // 会在列表滚动时逐行掉帧；后台线程解析、主线程回包。
+                        Thread {
+                            val bytes = runCatching { getEmbeddedCover(filePath) }
+                                .getOrNull()
+                            runOnUiThread {
+                                runCatching { result.success(bytes) }
+                            }
+                        }.start()
+                    }
                     "getEmbeddedLyrics" -> {
                         val filePath = call.argument<String>("filePath")
                         if (filePath.isNullOrEmpty()) {
@@ -1075,7 +1091,6 @@ class MainActivity : AudioServiceActivity() {
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.DATA,
-            MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.IS_MUSIC,
         )
 
@@ -1099,7 +1114,6 @@ class MainActivity : AudioServiceActivity() {
                 val albumColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val dataColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                val albumIdColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
 
                 while (it.moveToNext()) {
                     val id = it.getLong(idColumn)
@@ -1108,14 +1122,10 @@ class MainActivity : AudioServiceActivity() {
                     val album = it.getString(albumColumn) ?: ""
                     val duration = it.getLong(durationColumn)
                     val filePath = it.getString(dataColumn) ?: ""
-                    val albumId = it.getLong(albumIdColumn)
 
-                    // 构建专辑封面 URI
-                    val albumArtUri = ContentUris.withAppendedId(
-                        Uri.parse("content://media/external/audio/albumart"),
-                        albumId
-                    )
-
+                    // 不再返回 albumArtUri：`content://media/external/audio/
+                    // albumart/<id>` 自 Android 10 起已被移除（取图必失败），
+                    // 封面统一改由 Dart 侧按文件路径向 getEmbeddedCover 取。
                     if (filePath.isNotEmpty()) {
                         songs.add(
                             mapOf(
@@ -1125,7 +1135,6 @@ class MainActivity : AudioServiceActivity() {
                                 "album" to album,
                                 "duration" to duration,
                                 "filePath" to filePath,
-                                "albumArtUri" to albumArtUri.toString(),
                             )
                         )
                     }
@@ -1437,6 +1446,14 @@ class MainActivity : AudioServiceActivity() {
         return packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)
     }
 
+    /**
+     * 旧版专辑封面读取（按 albumId 拼 `content://media/external/audio/albumart`）。
+     *
+     * **Android 10 起该 provider URI 已被移除**，openInputStream 直接抛
+     * FileNotFoundException，所以本地音乐一直「没有封面」（issue #32）。
+     * 新扫描结果统一走 [getEmbeddedCover]（按文件路径读内嵌图）；这里只
+     * 保留给升级前就已落盘的历史记录（历史/队列里存着 content:// 封面）。
+     */
     private fun getAlbumArtBytes(albumId: Long): ByteArray? {
         val uri = ContentUris.withAppendedId(
             Uri.parse("content://media/external/audio/albumart"),
@@ -1446,6 +1463,25 @@ class MainActivity : AudioServiceActivity() {
             contentResolver.openInputStream(uri)?.use { it.readBytes() }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * 读取音频文件自带封面（ID3v2 APIC / FLAC PICTURE / MP4 covr 等）。
+     *
+     * 比 albumId 方案可靠：不依赖 MediaStore 的专辑表，也不受 Android 10
+     * 起废弃 albumart provider 的影响；与桌面端 Rust `read_local_cover`
+     * 语义保持一致（返回原始字节，由 Flutter 按展示尺寸解码）。
+     */
+    private fun getEmbeddedCover(filePath: String): ByteArray? {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(filePath)
+            retriever.embeddedPicture
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 

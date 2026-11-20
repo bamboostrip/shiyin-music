@@ -658,22 +658,39 @@ impl Biquad {
 
 /// 读取本地音频的内嵌歌词标签（USLT/LYRICS），供桌面端"本地歌曲歌词"
 /// 使用（Android 走 MediaMetadataRetriever 通道）。
+///
+/// 两层来源：容器元数据（FLAC/OGG 的 VorbisComment、MP4 ilst、AIFF 的
+/// ID3 chunk），以及单独解析的 **ID3v2** —— symphonia 的 mp3 解复用器里
+/// 没有任何 ID3 代码，mp3 的 USLT 只能从这一层拿到（issue #32：本地 mp3
+/// 一直"没有歌词"）。
 pub fn read_embedded_lyrics(path: &str) -> anyhow::Result<Option<String>> {
+    let container = read_container_lyrics(path)?;
+    if let Some(lyrics) = container {
+        return Ok(Some(lyrics));
+    }
+    Ok(crate::services::local_media::read_id3v2_tags(path).and_then(|tags| tags.lyrics))
+}
+
+/// 容器元数据里的歌词。文件打不开返回 Err，容器解析失败按"没有"处理。
+fn read_container_lyrics(path: &str) -> anyhow::Result<Option<String>> {
     let file = File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = PathBuf::from(path).extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
-    let probed = symphonia::default::get_probe().format(
+    let Ok(probed) = symphonia::default::get_probe().format(
         &hint,
         mss,
         &FormatOptions::default(),
         &Default::default(),
-    )?;
+    ) else {
+        // 解析不了容器（ape/wma 等）：不是错误，后面还有 ID3v2 兜底。
+        return Ok(None);
+    };
     let mut format = probed.format;
 
-    // 容器元数据（mp3 的 ID3 在容器层；metadata() 需 &mut）。
+    // 容器元数据（metadata() 需 &mut）。
     let mut found: Option<String> = None;
     if let Some(revision) = format.metadata().current() {
         found = find_lyrics_tag(revision.tags());
@@ -684,9 +701,7 @@ pub fn read_embedded_lyrics(path: &str) -> anyhow::Result<Option<String>> {
 fn find_lyrics_tag(tags: &[symphonia::core::meta::Tag]) -> Option<String> {
     for tag in tags {
         let is_lyrics = matches!(tag.std_key, Some(StandardTagKey::Lyrics))
-            || tag.key.eq_ignore_ascii_case("lyrics")
-            || tag.key.eq_ignore_ascii_case("unsynced lyrics")
-            || tag.key.eq_ignore_ascii_case("uslt");
+            || crate::services::local_media::is_lyrics_key(&tag.key);
         if is_lyrics {
             if let symphonia::core::meta::Value::String(s) = &tag.value {
                 if !s.trim().is_empty() {

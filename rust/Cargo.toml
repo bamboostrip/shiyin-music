@@ -17,6 +17,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 symphonia = { version = "0.5", default-features = false, features = [
     "mp3", "wav", "pcm", "ogg", "vorbis", "flac", "isomp4", "aac", "aiff",
 ] }
+# 本地 mp3 的 ID3v2（标题/内嵌歌词/内嵌封面）：symphonia 的 mp3 解复用器
+# 完全不解析 ID3v2，只能单独调 metadata 这一层（见 local_media::read_id3v2_tags）。
+symphonia-metadata = "0.5"
 # 本地音乐扫描并行 probe。
 rayon = "1"
 anyhow = "1"

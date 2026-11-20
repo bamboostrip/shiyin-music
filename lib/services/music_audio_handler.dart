@@ -11,6 +11,7 @@ import 'package:just_audio/just_audio.dart';
 import '../config/app_config.dart';
 import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
+import 'local_artwork_service.dart';
 import 'lrc_formatter.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
@@ -578,6 +579,11 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 认作音频文件的后缀白名单（小写、无点）。
   ///
   /// 只认这些，避免把路径/查询串里的其它点号误当文件后缀（如 `...&v=1.2`）。
+  ///
+  /// 与 [localAudioSupportedExtensions] 的并集对齐：本地扫描得到的格式
+  /// 如果不在这个表里，代理路径就没有后缀、Content-Type 也会被打成
+  /// `audio/mpeg`，后端按扩展名挑 demuxer 时会直接打不开（issue #32 里
+  /// `.aiff` 就踩过这条：能列出、能扫描，就是放不出来）。
   static const Set<String> _audioExtensions = {
     'mp3',
     'flac',
@@ -592,6 +598,14 @@ class MusicAudioHandler extends BaseAudioHandler
     'ape',
     'wma',
     'caf',
+    'aiff',
+    'aif',
+    'aifc',
+    'wv',
+    'tta',
+    'mka',
+    'dsf',
+    'dff',
   };
 
   /// 从远端 URL 的 path 或本地文件路径里取音频后缀（小写、无点）；未知返回 null。
@@ -623,6 +637,12 @@ class MusicAudioHandler extends BaseAudioHandler
       'ogg' || 'oga' || 'opus' => 'audio/ogg',
       'ape' => 'audio/x-ape',
       'wma' => 'audio/x-ms-wma',
+      'aiff' || 'aif' || 'aifc' => 'audio/aiff',
+      'wv' => 'audio/x-wavpack',
+      'tta' => 'audio/x-tta',
+      'mka' => 'audio/x-matroska',
+      'dsf' => 'audio/x-dsf',
+      'dff' => 'audio/x-dff',
       _ => null,
     };
   }
@@ -1012,7 +1032,12 @@ class MusicAudioHandler extends BaseAudioHandler
       ),
       artist: song.artist,
       duration: song.duration,
-      artUri: song.coverUrl == null ? null : Uri.tryParse(song.coverUrl!),
+      // `localart://`（本地内嵌封面）只在本进程内有效，系统媒体会话/通知
+      // 解析不了这种伪 URL：下发出去只会让锁屏拿一个坏 Uri 去请求，不如
+      // 直接留空（本地歌的锁屏封面本来就是空的）。
+      artUri: song.coverUrl == null || LocalArtworkService.isArtworkUrl(song.coverUrl)
+          ? null
+          : Uri.tryParse(song.coverUrl!),
       extras: buildLyricMediaExtras(
         song: song,
         lyricText: lyricText,

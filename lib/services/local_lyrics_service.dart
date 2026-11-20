@@ -76,7 +76,12 @@ class LocalLyricsService {
     if (running != null) {
       return running;
     }
-    final future = _load(song);
+    // 一行诊断：本地歌词"没有"时，先要能分清是四种来源全空，还是播放都没
+    // 起来（歌词只在起播成功后加载）。issue #32 这类反馈靠这一行定位。
+    final future = _load(song).then((lines) {
+      debugPrint('[时音][歌词] 本地歌词就绪: ${song.title} → ${lines.length} 行');
+      return lines;
+    });
     _inFlight[key] = future;
     // 成功/失败都要清登记：失败后重进播放页必须能重试，不能一直复用旧 Future。
     future.whenComplete(() => _inFlight.remove(key)).ignore();

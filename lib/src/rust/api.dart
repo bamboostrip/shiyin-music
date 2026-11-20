@@ -54,6 +54,13 @@ Future<void> cancelLoudnessAnalysis() =>
 Future<String?> readLocalLyrics({required String path}) =>
     RustLib.instance.api.crateApiReadLocalLyrics(path: path);
 
+/// 读取本地音频的内嵌封面原始字节（issue #32：桌面本地歌此前完全没有封面）。
+///
+/// 无内嵌图返回 `Ok(None)`；文件打不开/容器解析失败返回 `Err`，
+/// Dart 侧按"没有封面"静默降级。
+Future<Uint8List?> readLocalCover({required String path}) =>
+    RustLib.instance.api.crateApiReadLocalCover(path: path);
+
 /// 扫描用户添加的本地音乐根目录，结果经流事件下发；
 /// cancel_local_scan 或取消订阅可中止。
 Stream<ScanEvent> scanLocalMedia({required List<String> roots}) =>

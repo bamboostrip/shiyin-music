@@ -102,6 +102,13 @@ pub fn read_local_lyrics(path: String) -> Result<Option<String>, String> {
     loudness::read_embedded_lyrics(&path).map_err(|e| e.to_string())
 }
 
+/// 读取本地音频的内嵌封面原始字节（issue #32：桌面本地歌此前完全没有封面）。
+///
+/// 无内嵌图返回 `Ok(None)`（封面缺失是常态，不是错误）。
+pub fn read_local_cover(path: String) -> Result<Option<Vec<u8>>, String> {
+    Ok(local_media::read_cover(&path))
+}
+
 /// 本地音乐扫描流事件。
 pub struct ScanEvent {
     pub done: u32,

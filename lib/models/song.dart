@@ -923,6 +923,32 @@ class NoPlayableSourceException implements Exception {
   String toString() => message;
 }
 
+/// 本地音频文件不存在/读不到时抛出（被移动、删除、外接盘未挂载、
+/// MediaStore 里是过期条目）。见 issue #32。
+///
+/// 与 [NoPlayableSourceException] 一样属于**确定性**失败：重试没有意义，
+/// 播放器一次即判跳过。单独成类型是为了给出可行动的提示（"文件不在了"
+/// 而不是含糊的"暂无可播放音源"），并顺带触发一次本地库重扫。
+class LocalAudioMissingException implements Exception {
+  const LocalAudioMissingException(this.path);
+
+  final String path;
+
+  @override
+  String toString() => '本地文件已不存在：$path';
+}
+
+/// 本地音频格式不被当前播放内核支持时抛出（如 Android 的 APE/WMA/AIFF，
+/// ExoPlayer 没有对应解析器）。判定见 `services/local_audio_formats.dart`。
+class LocalAudioFormatException implements Exception {
+  const LocalAudioFormatException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class LyricLine {
   const LyricLine({
     required this.time,

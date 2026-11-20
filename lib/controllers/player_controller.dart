@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart'
     show MediaItem, PlaybackState;
@@ -30,6 +31,8 @@ import '../services/car_media_center_service.dart';
 import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
+import '../services/local_audio_formats.dart';
+import '../services/local_artwork_service.dart';
 import '../services/local_lyrics_service.dart';
 import '../services/lrc_formatter.dart';
 import '../services/lyric_cache_service.dart';
@@ -844,6 +847,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 本轮 streak 内因「确定性无音源」已自动跳过的曲数（与
   /// [_autoSkippedInStreak] 分账，见 [_kMaxNoSourceSkipsPerStreak]）。
   int _autoSkippedNoSourceInStreak = 0;
+
+  /// 本轮失败 streak 内是否已为「本地文件不存在」触发过重扫。
+  ///
+  /// 一次失败往往连跳好几首（整个目录被挪走），逐首重扫会让扫描器被反复
+  /// 抢占；这里只在首首失败时触发一次，成功起播后重新放开。
+  bool _localRescanRequested = false;
 
   /// 无音源跳过这一路自己的墙钟起点：与 [_autoSkipStreakSince] 分开，
   /// 否则一条 streak 被另一类跳过提前起算/超时，误伤另一类的预算。

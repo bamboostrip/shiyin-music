@@ -1,6 +1,18 @@
 // player_controller.playback.dart —— PlayerController 的职责分片：播放主流程（加载/播放/seek/完成回调/高潮试听/音量与倍速）。成员声明与字段见 player_controller.dart。
 part of 'player_controller.dart';
 
+/// 本地音源的**确定性**失败类型（issue #32）。
+///
+/// 只用于提示文案与自愈动作：计数上它们都并入「无音源」的快跳过预算
+/// （重试不会变好），但用户需要知道到底是文件没了还是格式不认。
+enum LocalPlaybackIssue {
+  /// 文件被移动/删除、外接盘未挂载、媒体库条目过期。
+  missing,
+
+  /// 当前播放内核没有该格式的解析器（见 `services/local_audio_formats.dart`）。
+  unsupportedFormat,
+}
+
 mixin _PlayerPlayback on _PlayerControllerBase {
   /// 当前用户音量（0.0–1.0）。桌面播放栏音量滑杆使用。
   /// 注意：返回用户值而非引擎值——引擎值含响度系数，直接读它滑块会跳。
@@ -305,6 +317,17 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         url = playUrl.url;
         networkUrl = playUrl.url;
       }
+      // 本地音源（自带库文件 / 已下载 / 播放缓存）在交给引擎前先做两项
+      // 确定性检查：文件还在不在、内核认不认这个格式（issue #32）。
+      //
+      // 不预检的代价是三重的：① 引擎只会回一句 `Failed to open
+      // http://127.0.0.1:xxxx/play/1.ape`，最终被失败处理糊成「暂无可播放
+      // 音源」，用户以为是版权问题；② 白等一轮 2s 网络重试 + 引擎超时；
+      // ③ 这条失败还会被计入「连续网络失败」，把后面真正因弱网失败的歌
+      // 提前推过阈值。
+      if (!_isRemoteAudioUrl(url)) {
+        _ensureLocalSourcePlayable(song, url);
+      }
       // 响度均衡:先查缓存,命中则首播前即应用正确增益(instant,无跳变);
       // 未命中则播放中分析,完成后渐变(ramp)应用。
       _currentLoudnessUrl = url;
@@ -391,6 +414,8 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _consecutivePlayFailures = 0;
       _autoSkippedInStreak = 0;
       _autoSkipStreakSince = null;
+      // 本地重扫闸门同步放开：下一轮若又出现文件缺失，仍要能触发重扫。
+      _localRescanRequested = false;
       // 无音源跳过与网络失败跳过分开记账，成功起播同样整体归零。
       _autoSkippedNoSourceInStreak = 0;
       _noSourceSkipStreakSince = null;
@@ -415,7 +440,15 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       }
     } catch (error) {
       if (_disposed) return;
-      var noSource = error is NoPlayableSourceException;
+      // 本地音源的确定性失败：文件不在了 / 内核不支持该格式。两者重试都
+      // 不会变好，与「无音源」同处一条快跳过通道，但提示文案各自点名原因
+      // （issue #32：此前一律显示「暂无可播放音源」，用户完全无从判断）。
+      final localIssue = error is LocalAudioMissingException
+          ? LocalPlaybackIssue.missing
+          : error is LocalAudioFormatException
+          ? LocalPlaybackIssue.unsupportedFormat
+          : null;
+      var noSource = error is NoPlayableSourceException || localIssue != null;
       // VIP 过期：自动领取后重试一次（转发定位/队列上下文，避免冷启动
       // 定位与高潮试听从 0 秒重播）。isRetry 内不再领取：重试后仍报 VIP
       // 说明领取无效/服务端持续拒绝，不设限会形成"领取→重试→再领取"无限循环。
@@ -499,13 +532,23 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _setPositionBase(Duration.zero, playing: false);
       _lastSmoothPosition = Duration.zero;
       _emitPosition();
-      errorMessage = error.toString();
+      // 落错误态文案：本地失败给可读原因（播放页/迷你播放器都直接显示
+      // 这条），其余保持原样（引擎/接口的异常原文，便于定位）。
+      errorMessage = switch (error) {
+        LocalAudioMissingException() => '本地文件已不存在，可能已被移动或删除',
+        final LocalAudioFormatException e => e.message,
+        _ => error.toString(),
+      };
       isPreparing = false;
       notifyListeners();
       _nextLog('playSong 落错误态: ${song.title} → $error');
       // 已走完 VIP 领取与（网络类失败的）自动重试仍失败：计入失败，按失败
       // 类型决定是否立即前进（无音源一次即跳，网络类攒够阈值再跳）。
-      _registerPlaybackFailure(song, noSource: noSource);
+      _registerPlaybackFailure(
+        song,
+        noSource: noSource,
+        localIssue: localIssue,
+      );
     } finally {
       // 兜底：任何提前 return/异常路径都不得让引擎停在本次静音态（否则整首
       // 歌永久无声）。代际不匹配说明已有更新的切歌流程接管，由它负责解除，
@@ -703,6 +746,59 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     return true;
   }
 
+  /// 是否远端音源（http/https）。本地文件虽然也经本机代理加载，但语义上
+  /// 仍是「本地」，两条路径的失败判定完全不同。
+  static bool _isRemoteAudioUrl(String url) =>
+      url.startsWith('http://') || url.startsWith('https://');
+
+  /// 本地音源起播前的确定性检查。
+  ///
+  /// 抛出的两类异常都由 [playSong] 的 catch 收口，走「一次即判跳过」：
+  /// - [LocalAudioFormatException]：当前内核没有该后缀的解析器（Android 上的
+  ///   APE/WMA/AIFF 等），交给引擎只会换来一句 `Failed to open`；
+  /// - [LocalAudioMissingException]：文件被移动/删除、外接盘没挂载、
+  ///   MediaStore 留了过期条目。这类还会触发一次本地库重扫，让列表收敛。
+  ///
+  /// 注意：格式检查排在存在性之前——格式不支持时文件通常是在的，先报
+  /// "文件不存在"会把人引到错的方向。
+  void _ensureLocalSourcePlayable(Song song, String path) {
+    final reason = unsupportedLocalAudioReason(path);
+    if (reason != null) {
+      _nextLog('本地音源格式不支持: ${song.title} → $reason');
+      throw LocalAudioFormatException('《${song.title}》$reason');
+    }
+    if (!File(path).existsSync()) {
+      _nextLog('本地音源文件缺失: ${song.title} → $path');
+      throw LocalAudioMissingException(path);
+    }
+  }
+
+  /// 本地音源确定性失败时触发一次本地库重扫（每次失败 streak 只触发一次）。
+  ///
+  /// 只对「文件不存在」触发：格式不支持与库内容无关，重扫纯属白跑；
+  /// 而文件消失往往意味着整个目录被挪走，重扫能把整片失效条目收敛掉，
+  /// 用户不用手动去设置里点扫描。
+  void _scheduleLocalRescanAfterMissing() {
+    if (_localRescanRequested) return;
+    final controller = localMusic;
+    if (controller == null) return;
+    _localRescanRequested = true;
+    _nextLog('本地文件缺失，触发本地库重扫');
+    unawaited(controller.scanLocalMusic());
+  }
+
+  /// 单曲失败的提示文案：本地确定性失败点名原因，其余沿用旧文案。
+  ///
+  /// 「暂无可播放音源」原本是所有失败的统一说法，对本地文件却是误导——
+  /// 用户会去查版权，而真正原因是文件没了或格式不认（issue #32）。
+  static String _localFailureToast(Song song, LocalPlaybackIssue? issue) {
+    return switch (issue) {
+      LocalPlaybackIssue.missing => '《${song.title}》本地文件已不存在',
+      LocalPlaybackIssue.unsupportedFormat => '《${song.title}》格式不受支持',
+      null => '《${song.title}》暂无可播放音源',
+    };
+  }
+
   /// 记录一次最终播放失败（已走完 VIP 领取与自动重试）。
   ///
   /// 分两类，计数与预算都各自独立：
@@ -725,12 +821,24 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   /// - 墙钟预算 [_kAutoSkipWallClockBudget]：弱网下每首跳过仍要 15-20s 的
   ///   地址解析，只按次数限制最坏要几分钟才停，超时即停；
   /// - 任一首成功起播即整体归零（见 playSong 起播后的清零）。
-  void _registerPlaybackFailure(Song song, {bool noSource = false}) {
+  ///
+  /// [localIssue] 只影响**提示文案**与自愈动作，不改变计数与预算归属：
+  /// 本地文件不存在/格式不支持同样是确定性失败，走 `noSource` 的快跳过。
+  void _registerPlaybackFailure(
+    Song song, {
+    bool noSource = false,
+    LocalPlaybackIssue? localIssue,
+  }) {
     if (_disposed) return;
+    if (localIssue == LocalPlaybackIssue.missing) {
+      // 文件不在了通常意味着整个目录被挪走：先让本地库重扫收敛列表，
+      // 用户不会在一条条死条目里继续点。
+      _scheduleLocalRescanAfterMissing();
+    }
     if (!noSource) {
       _consecutivePlayFailures++;
       if (_consecutivePlayFailures < _kAutoSkipFailureThreshold) {
-        final toastMessage = '《${song.title}》暂无可播放音源';
+        final toastMessage = _localFailureToast(song, localIssue);
         lastPlaybackFailureToast = toastMessage;
         Toast.error(toastMessage);
         return;
@@ -739,7 +847,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
 
     final queueLength = queue.length;
     if (queueLength <= 1) {
-      final toastMessage = '《${song.title}》暂无可播放音源';
+      final toastMessage = _localFailureToast(song, localIssue);
       lastPlaybackFailureToast = toastMessage;
       Toast.error(toastMessage);
       return;
@@ -761,7 +869,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         '${overBudget ? '，已超墙钟预算 $_kAutoSkipWallClockBudget' : ''}），停止跳转',
       );
       final toastMessage = noSource
-          ? '连续多首歌曲无音源，已停止自动跳过'
+          ? (localIssue == null
+                ? '连续多首歌曲无音源，已停止自动跳过'
+                : '连续多首本地文件无法播放，已停止自动跳过')
           : '连续多首歌曲播放失败，已停止播放';
       lastPlaybackFailureToast = toastMessage;
       Toast.error(toastMessage);
@@ -782,7 +892,9 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       '，自动跳过: ${song.title}',
     );
     final toastMessage = noSource
-        ? '《${song.title}》暂无音源，已跳过'
+        ? (localIssue == null
+              ? '《${song.title}》暂无音源，已跳过'
+              : '${_localFailureToast(song, localIssue)}，已跳过')
         : '《${song.title}》播放失败，已跳过';
     lastPlaybackFailureToast = toastMessage;
     // 无音源是快跳过（无重试等待），成片下架时逐首弹会把提示刷成一片闪动：
@@ -814,7 +926,12 @@ mixin _PlayerPlayback on _PlayerControllerBase {
   void _precacheCover(Song song) {
     final coverUrl = song.coverUrl;
     if (coverUrl == null || coverUrl.isEmpty) return;
-    if (coverUrl.startsWith('content://')) return;
+    // 本地封面（content:// 与 localart://）不是网络图：预缓存对它们没有
+    // 意义（localart 由 Artwork 按需向原生/Rust 取字节并自带缓存）。
+    if (coverUrl.startsWith('content://') ||
+        LocalArtworkService.isArtworkUrl(coverUrl)) {
+      return;
+    }
     final provider = ResizeImage(
       NetworkImage(coverUrl),
       width: 150,

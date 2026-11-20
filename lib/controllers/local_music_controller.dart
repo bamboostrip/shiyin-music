@@ -7,6 +7,7 @@ import '../core/folder_filter.dart';
 import '../models/music_models.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/services/local_media.dart' show LocalSongEntry;
+import '../services/local_artwork_service.dart';
 
 class LocalMusicController extends ChangeNotifier {
   LocalMusicController() {
@@ -214,7 +215,10 @@ class LocalMusicController extends ChangeNotifier {
                 rawTitle: rawTitle,
                 artist: artist,
                 hash: filePath,
-                coverUrl: item['albumArtUri'] as String?,
+                // 封面走「文件内嵌图」而不是 MediaStore 的 albumArtUri：
+                // 后者的 provider URI 自 Android 10 起已被移除，取图必失败
+                // （issue #32 的「本地文件加载不出封面」）。
+                coverUrl: LocalArtworkService.artworkUrlFor(filePath),
                 duration: durationMs != null
                     ? Duration(milliseconds: durationMs)
                     : null,
@@ -409,7 +413,9 @@ class LocalMusicController extends ChangeNotifier {
       artist: artist,
       albumName: entry.album.isNotEmpty ? entry.album : null,
       hash: entry.path,
-      coverUrl: null,
+      // 桌面端此前恒为 null（Rust 扫描只读标签不取图），本地歌永远只有
+      // 音符占位。改为按需读内嵌封面（Rust symphonia visuals）。
+      coverUrl: LocalArtworkService.artworkUrlFor(entry.path),
       duration: entry.durationMs > 0
           ? Duration(milliseconds: entry.durationMs.toInt())
           : null,
