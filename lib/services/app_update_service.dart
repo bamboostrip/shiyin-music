@@ -303,24 +303,12 @@ class AppUpdateService {
       return null;
     }
 
-    final releases = <Map<String, dynamic>>[];
-    final summaries = <ReleaseEntrySummary>[];
-    for (final item in decoded) {
-      if (item is! Map<String, dynamic>) continue;
-      final tag = item['tag_name']?.toString() ?? '';
-      // 跳过预发布 tag：列表接口含预发布，而 compareSemver 会把
-      // `v3.1.0-beta` 当 3.1.0 比较——不过滤会把 beta 当正式版提示，
-      // 与 L2（parseEntriesFromAtom）/L3（/releases/latest 天然排除）语义分叉。
-      if (tag.isEmpty || !isStableVersionTag(tag)) continue;
-      final body = item['body'];
-      releases.add(item);
-      summaries.add(
-        ReleaseEntrySummary(tag: tag, body: body is String ? body : ''),
-      );
-    }
-    if (summaries.isEmpty) {
+    final pairs = stableReleasesFromApi(decoded);
+    if (pairs.isEmpty) {
       return null;
     }
+    final releases = [for (final (json, _) in pairs) json];
+    final summaries = [for (final (_, summary) in pairs) summary];
 
     final selection = selectRelevantUpdate(
       summaries,
@@ -363,8 +351,49 @@ class AppUpdateService {
           body: htmlReleaseBodyToMarkdown(unescapeHtml(contentHtml)),
         ),
     ];
-    final selection = selectRelevantUpdate(
+
+    // 天花板：/releases/latest 只指向最新正式版（与 L3 同款探测）。Atom
+    // feed 不带 prerelease 标志，纯 tag 语法过滤拦不住 v3.0.22 这类**纯
+    // 正式格式 tag** 的预发布——semver 高于最新正式版的条目必为预发布
+    // （draft 不进 feed），一律丢弃。
+    String? ceilingTag;
+    try {
+      ceilingTag = await _probeLatestReleaseTag();
+    } catch (_) {
+      // 天花板探不动（网络抖动）：无法在 feed 里区分预发布，抛给容灾链
+      // 降级 L3（它对同一端点重试，天然只含正式版）。fail-closed：宁漏
+      // 一轮提示（下轮自动检查自愈），不把预发布当正式版推出去。
+      rethrow;
+    }
+    if (ceilingTag == null) {
+      // 404：仓库没有任何正式版 Release，Atom 里的条目全是预发布。
+      return null;
+    }
+    // 防御：/releases/latest 探测到非正式语法 tag 时无法作天花板，
+    // 抛错降级 L3（由它的「暂无正式发布版本」收口），不沿用语义不明的值。
+    if (!isStableVersionTag(ceilingTag)) {
+      throw StateError('暂无正式发布版本');
+    }
+    final ceilingVersion = stripVersionTagPrefix(ceilingTag);
+    final stableSummaries = dropPrereleasesAboveCeiling(
       summaries,
+      ceilingVersion,
+    );
+    if (stableSummaries.isEmpty) {
+      // Atom 窗口（约 10 条）内全是预发布：正式版天花板即最新可推版本。
+      // 天花板 > 当前 → 降级提示天花板（L3 同款无正文，宁多提示不漏
+      // 提示）；否则确定无更新。
+      if (compareSemver(ceilingVersion, AppConfig.appVersion) > 0) {
+        return _assembleFromTag(
+          tag: ceilingTag,
+          updateContent: '更新说明获取失败，请前往发布页查看。',
+        );
+      }
+      return null;
+    }
+
+    final selection = selectRelevantUpdate(
+      stableSummaries,
       currentVersion: AppConfig.appVersion,
       platformAffected: _releaseAffectsMyPlatform,
     );
@@ -389,6 +418,25 @@ class AppUpdateService {
   /// 返回类型与 L1/L2 统一为 nullable（正常结果永远非 null；此通道拿不到
   /// notes 正文，不做平台过滤，旧不旧交给 checkForUpdate 的 semver 兜底）。
   Future<AppVersionInfo?> _fetchViaRedirect() async {
+    final tag = await _probeLatestReleaseTag();
+    if (tag == null) {
+      throw StateError('暂无发布版本');
+    }
+    // /releases/latest 只指向最新正式版：探测到预发布 tag（仓库最新
+    // Release 是 beta 时）对齐 L1 语义视为"暂无正式版本"，不推 beta。
+    if (!isStableVersionTag(tag)) {
+      throw StateError('暂无正式发布版本');
+    }
+    return _assembleFromTag(tag: tag, updateContent: '更新说明获取失败，请前往发布页查看。');
+  }
+
+  /// /releases/latest 网页 302 重定向探测最新 Release tag（L3 主逻辑，
+  /// L2 也用它取「最新正式版」天花板）。
+  ///
+  /// 返回 null = 404：GitHub 该端点只指向最新正式版，仓库仅剩预发布时
+  /// 同样 404。网络失败/重定向异常抛错，由调用方决定降级方式；不在此处
+  /// 做正式版语法校验（防御场景见 [_fetchViaRedirect] 的注释）。
+  Future<String?> _probeLatestReleaseTag() async {
     final request = http.Request(
       'GET',
       Uri.parse(AppConfig.githubReleasesLatestPageUrl),
@@ -400,18 +448,13 @@ class AppUpdateService {
           .send(request)
           .timeout(const Duration(seconds: 10));
       if (response.statusCode == 404) {
-        throw StateError('暂无发布版本');
+        return null;
       }
       final tag = extractTagFromLocation(response.headers['location'] ?? '');
       if (tag == null) {
         throw StateError('重定向探测失败（${response.statusCode}）');
       }
-      // /releases/latest 只指向最新正式版：探测到预发布 tag（仓库最新
-      // Release 是 beta 时）对齐 L1 语义视为"暂无正式版本"，不推 beta。
-      if (!isStableVersionTag(tag)) {
-        throw StateError('暂无正式发布版本');
-      }
-      return _assembleFromTag(tag: tag, updateContent: '更新说明获取失败，请前往发布页查看。');
+      return tag;
     } finally {
       client.close();
     }
@@ -671,6 +714,49 @@ class ReleaseEntrySummary {
 
   /// 版本名 = tag 去掉 `v` 前缀，与 AppVersionInfo 的口径一致。
   String get versionName => stripVersionTagPrefix(tag);
+}
+
+/// 从 Releases 列表 API 响应筛出**正式版**条目（原始 JSON 供组装附件
+/// 信息，摘要供选版）。
+///
+/// 跳过四类条目：非 map、tag 为空、tag 语法非正式（[isStableVersionTag]）、
+/// GitHub 的 prerelease/draft 标志位。标志位是权威信号——预发布完全可以
+/// 打纯正式格式的 tag（v3.0.22 实例），语法层拦不住；反过来带 `-beta`
+/// 后缀的 tag 必然也标了 prerelease，两道过滤是冗余防御关系。
+/// `prerelease`/`draft` 字段缺失（异常数据）时不拦，交给语法层兜底。
+@visibleForTesting
+List<(Map<String, dynamic>, ReleaseEntrySummary)> stableReleasesFromApi(
+  List<dynamic> decoded,
+) {
+  final pairs = <(Map<String, dynamic>, ReleaseEntrySummary)>[];
+  for (final item in decoded) {
+    if (item is! Map<String, dynamic>) continue;
+    if (item['prerelease'] == true || item['draft'] == true) continue;
+    final tag = item['tag_name']?.toString() ?? '';
+    if (tag.isEmpty || !isStableVersionTag(tag)) continue;
+    final body = item['body'];
+    pairs.add((
+      item,
+      ReleaseEntrySummary(tag: tag, body: body is String ? body : ''),
+    ));
+  }
+  return pairs;
+}
+
+/// 丢弃 semver 高于天花板（最新正式版版本号）的条目。
+///
+/// Atom feed 与列表 API 不同，不带 prerelease 标志；但 GitHub 保证
+/// `/releases/latest` 只指向最新正式版——高于它的条目必为预发布
+/// （draft 不进 feed）。tag 语法过滤（[isStableVersionTag]）管的是
+/// `-beta` 后缀，这里管的是纯正式格式 tag 的预发布（v3.0.22 实例）。
+@visibleForTesting
+List<ReleaseEntrySummary> dropPrereleasesAboveCeiling(
+  List<ReleaseEntrySummary> entries,
+  String ceilingVersion,
+) {
+  return entries
+      .where((entry) => compareSemver(entry.versionName, ceilingVersion) <= 0)
+      .toList();
 }
 
 /// 平台相关性选版结果。
