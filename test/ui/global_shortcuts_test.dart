@@ -193,6 +193,30 @@ void main() {
       );
     });
 
+    test('load() 并发调用共享在途 Future：晚到者必须等首次读盘完成', () async {
+      const binding = KeyBinding(LogicalKeyboardKey.f8, control: true);
+      SharedPreferences.setMockInitialValues({
+        GlobalShortcutController.bindingsPrefsKey: jsonEncode({
+          'playPause': [binding.encode()],
+        }),
+        GlobalShortcutController.enabledPrefsKey: false,
+      });
+      final controller = GlobalShortcutController.instance;
+
+      // main.dart 依赖「load 完成后才启动全局热键注册」：第二个 load 若在
+      // 首个读盘完成前就立即返回，服务会以默认表（开关=开）抢先注册。
+      final first = controller.load();
+      final second = controller.load();
+      expect(identical(first, second), isTrue, reason: '在途 load 必须复用同一 Future');
+      await second;
+
+      expect(
+        controller.bindingsOf(GlobalShortcutAction.playPause),
+        [binding],
+      );
+      expect(controller.enabled, isFalse);
+    });
+
     test('整串配置是坏 JSON/非对象时回退默认表且开关保持默认', () async {
       for (final raw in ['{oops', '[1,2]', '"配置"', 'null']) {
         SharedPreferences.setMockInitialValues({

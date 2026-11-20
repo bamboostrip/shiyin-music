@@ -336,12 +336,11 @@ packages:
     source: hosted
     version: "0.2.3"
   hotkey_manager_linux:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: hotkey_manager_linux
-      sha256: "83676bda8210a3377bc6f1977f193bc1dbdd4c46f1bdd02875f44b6eff9a8473"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/hotkey_manager_linux"
+      relative: true
+    source: path
     version: "0.2.0"
   hotkey_manager_macos:
     dependency: transitive
@@ -360,12 +359,11 @@ packages:
     source: hosted
     version: "0.2.0"
   hotkey_manager_windows:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: hotkey_manager_windows
-      sha256: "0d03ced9fe563ed0b68f0a0e1b22c9ffe26eb8053cb960e401f68a4f070e0117"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/hotkey_manager_windows"
+      relative: true
+    source: path
     version: "0.2.0"
   http:
     dependency: "direct main"

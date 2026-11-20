@@ -214,6 +214,23 @@ void main() {
       expect(controller.bindingsOf(AppShortcutAction.seekForward), isEmpty);
     });
 
+    test('load() 并发调用共享在途 Future：晚到者必须等首次读盘完成', () async {
+      const binding = KeyBinding(LogicalKeyboardKey.f9, alt: true);
+      SharedPreferences.setMockInitialValues({
+        ShortcutController.prefsKey: jsonEncode({
+          'playPause': [binding.encode()],
+        }),
+      });
+      final controller = ShortcutController.instance;
+
+      final first = controller.load();
+      final second = controller.load();
+      expect(identical(first, second), isTrue, reason: '在途 load 必须复用同一 Future');
+      await second;
+
+      expect(controller.bindingsOf(AppShortcutAction.playPause), [binding]);
+    });
+
     test('整串配置是坏 JSON/非对象时回退默认表（不能让播放键全灭）', () async {
       // 单条记录脏（tryDecode 返回 null）已有覆盖；这里钉的是整串 blob
       // 级别的损坏：坏 JSON 抛 FormatException、合法 JSON 但不是对象、

@@ -52,14 +52,16 @@ jobs:
       # 硬依赖（appindicator，缺失时其 CMake 直接 FATAL_ERROR）+ local_notifier
       # 下载完成通知的硬依赖（libnotify-dev，缺失时其 CMake 同样 FATAL_ERROR）
       # + Rust 引擎 cpal(识曲采集) 的 alsa-sys 构建依赖（libasound2-dev +
-      # pkg-config，缺失时 cargo 报 failed to run custom build command）。
+      # pkg-config，缺失时 cargo 报 failed to run custom build command）
+      # + hotkey_manager_linux 全局热键插件的硬依赖（libkeybinder-3.0-dev，
+      # 缺失时其 CMake 同样 FATAL_ERROR）。
       # media_kit 的 libmpv 是运行期 dlopen 依赖，构建期不需要。
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build libgtk-3-dev libayatana-appindicator3-dev libnotify-dev \
-            libasound2-dev pkg-config
+            libasound2-dev pkg-config libkeybinder-3.0-dev
 
       - name: Flutter pub get
         run: flutter pub get
@@ -104,12 +106,12 @@ jobs:
           视听（ShiYin Music）Linux x64 便携版
           ====================================
 
-          运行前请安装一次运行期依赖（音频后端 libmpv、托盘 AppIndicator
-          与下载完成通知 libnotify）：
+          运行前请安装一次运行期依赖（音频后端 libmpv、托盘 AppIndicator、
+          下载完成通知 libnotify 与全局快捷键 keybinder）：
 
-            Debian 12 / Ubuntu 24.04 :  sudo apt install libmpv2 libayatana-appindicator3-1 libnotify4
-            Ubuntu 22.04             :  sudo apt install libmpv1 libayatana-appindicator3-1 libnotify4
-            Fedora / RHEL            :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3 libnotify
+            Debian 12 / Ubuntu 24.04 :  sudo apt install libmpv2 libayatana-appindicator3-1 libnotify4 libkeybinder-3.0-0
+            Ubuntu 22.04             :  sudo apt install libmpv1 libayatana-appindicator3-1 libnotify4 libkeybinder-3.0-0
+            Fedora / RHEL            :  sudo dnf install mpv-libs libayatana-appindicator3-gtk3 libnotify libkeybinder3
 
           （media_kit 按 libmpv.so → libmpv.so.2 → libmpv.so.1 顺序探测，
           Ubuntu 22.04 的 libmpv1（mpv 0.34）与 libmpv2（mpv 0.35+）均可。）
@@ -151,7 +153,7 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: bamboostrip <bamboostrip@users.noreply.github.com>
-          Depends: libgtk-3-0, libmpv2 | libmpv1, libayatana-appindicator3-1, libnotify4
+          Depends: libgtk-3-0, libmpv2 | libmpv1, libayatana-appindicator3-1, libnotify4, libkeybinder-3.0-0
           Recommends: xdg-user-dirs
           Homepage: https://github.com/bamboostrip/shiyin-music
           Description: 视听音乐播放器 (ShiYin Music)

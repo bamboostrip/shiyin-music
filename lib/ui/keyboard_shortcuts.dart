@@ -365,6 +365,7 @@ class ShortcutController extends ChangeNotifier {
 
   Map<AppShortcutAction, List<KeyBinding>> _bindings = _defaults();
   bool _loaded = false;
+  Future<void>? _loading;
 
   /// 本地改动代次：用于识别「读取配置期间用户已经改过键」。
   int _revision = 0;
@@ -388,7 +389,12 @@ class ShortcutController extends ChangeNotifier {
   ];
 
   /// 读取持久化配置。失败/缺省时保留默认表，不抛错。
-  Future<void> load() async {
+  ///
+  /// 并发调用共享同一个在途 Future（与 GlobalShortcutController 同一
+  /// 契约）：晚到的调用者必须等首次读盘完成再返回。
+  Future<void> load() => _loading ??= _load();
+
+  Future<void> _load() async {
     if (_loaded) return;
     _loaded = true;
     final revisionAtStart = _revision;
@@ -475,6 +481,7 @@ class ShortcutController extends ChangeNotifier {
     _bindings = _defaults();
     _loaded = false;
     _revision = 0;
+    _loading = null;
   }
 
   /// 仅供测试：跳过 prefs 直接注入（模拟已加载的配置）。

@@ -93,6 +93,7 @@ class GlobalShortcutController extends ChangeNotifier {
   bool _enabled = true;
   bool _loaded = false;
   int _revision = 0;
+  Future<void>? _loading;
 
   /// 是否已尝试从磁盘读取（[load] 幂等）。
   bool get loaded => _loaded;
@@ -106,7 +107,13 @@ class GlobalShortcutController extends ChangeNotifier {
       _bindings[action] ?? const [];
 
   /// 读取持久化配置。失败/缺省时保留默认表与默认开关，不抛错。
-  Future<void> load() async {
+  ///
+  /// 并发调用共享同一个在途 Future：晚到的调用者必须等首次读盘完成
+  /// 再返回，而不是拿「尚未读到」的默认表立即返回——main.dart 依赖
+  /// 「load 完成后才启动全局热键注册」这一前提。
+  Future<void> load() => _loading ??= _load();
+
+  Future<void> _load() async {
     if (_loaded) return;
     _loaded = true;
     final revisionAtStart = _revision;
@@ -201,6 +208,7 @@ class GlobalShortcutController extends ChangeNotifier {
     _enabled = true;
     _loaded = false;
     _revision = 0;
+    _loading = null;
   }
 
   /// 仅供测试：跳过 prefs 直接注入（模拟已加载的配置）。

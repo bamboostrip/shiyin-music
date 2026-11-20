@@ -128,6 +128,20 @@ dependency_overrides:
   # 必须把这一处补丁重新移植。
   desktop_multi_window:
     path: packages/desktop_multi_window
+  # 本地 vendored 副本（packages/hotkey_manager_windows +
+  # packages/hotkey_manager_linux），勿直接换回 pub.dev 版本，两处补丁——
+  # 1) 两端 Register 注册都丢弃原生返回值、恒报成功：组合被其它程序占用
+  #    （Windows RegisterHotKey / Linux keybinder_bind）时 OS 层静默失败，
+  #    设置页「注册失败」徽标永远拿不到异常。补丁改为失败即经
+  #    MethodChannel 上报 hotkey_register_failed；Linux 端顺带修掉上游
+  #    hkm_unregister 查不到时传未初始化 keystring 的未定义行为；
+  # 2) Windows 端补 MOD_NOREPEAT：按住全局热键不自动重复
+  #    （播放/暂停等一次按压只触发一次动作）。
+  # 升级 hotkey_manager 时必须把这两处补丁重新移植（0.3+ 需 Flutter 3.47+）。
+  hotkey_manager_windows:
+    path: packages/hotkey_manager_windows
+  hotkey_manager_linux:
+    path: packages/hotkey_manager_linux
 
 flutter:
   uses-material-design: true

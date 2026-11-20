@@ -416,7 +416,7 @@ class _BindingRow extends StatelessWidget {
             ),
         if (errorText != null)
           Tooltip(
-            message: '注册失败：组合可能被其它程序占用，请换一个组合。',
+            message: '注册失败：组合可能被其它程序占用或该键不被支持，请换一个组合。',
             child: Icon(
               key: ValueKey('${keyNamespace}_error_$actionKey'),
               Icons.error_outline_rounded,
