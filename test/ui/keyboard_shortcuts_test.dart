@@ -4,38 +4,60 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/ui/keyboard_shortcuts.dart';
 
 void main() {
+  // SingleActivator 未实现 ==：const 实例靠 canonicalize 才能直接比较。
+  // 桌面默认表现在从 defaultBindingsFor 派生（非 const 实例），
+  // 这里统一改为逐字段断言，不依赖 const 恒等。
+  void expectActivators(
+    List<SingleActivator> actual,
+    List<SingleActivator> expected,
+  ) {
+    expect(actual.length, expected.length);
+    for (var i = 0; i < expected.length; i++) {
+      expect(actual[i].trigger, expected[i].trigger, reason: '[$i] trigger');
+      expect(actual[i].control, expected[i].control, reason: '[$i] control');
+      expect(actual[i].shift, expected[i].shift, reason: '[$i] shift');
+      expect(actual[i].alt, expected[i].alt, reason: '[$i] alt');
+      expect(actual[i].meta, expected[i].meta, reason: '[$i] meta');
+      expect(
+        actual[i].includeRepeats,
+        expected[i].includeRepeats,
+        reason: '[$i] includeRepeats',
+      );
+    }
+  }
+
   group('快捷键表映射（桌面/移动双端差异）', () {
     test('桌面端：←/→ = 快退/快进 ±5s，Ctrl+←/→ = 上一首/下一首', () {
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.seekBackward, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowLeft)],
+        const [SingleActivator(LogicalKeyboardKey.arrowLeft)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.seekForward, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowRight)],
+        const [SingleActivator(LogicalKeyboardKey.arrowRight)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.previousTrack, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true)],
+        const [SingleActivator(LogicalKeyboardKey.arrowLeft, control: true)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.nextTrack, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowRight, control: true)],
+        const [SingleActivator(LogicalKeyboardKey.arrowRight, control: true)],
       );
     });
 
     test('桌面端：空格播放/暂停（排除按住重复）、↑/↓ 音量', () {
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.playPause, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.space, includeRepeats: false)],
+        const [SingleActivator(LogicalKeyboardKey.space, includeRepeats: false)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.volumeUp, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowUp)],
+        const [SingleActivator(LogicalKeyboardKey.arrowUp)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.volumeDown, desktop: true),
-        [const SingleActivator(LogicalKeyboardKey.arrowDown)],
+        const [SingleActivator(LogicalKeyboardKey.arrowDown)],
       );
     });
 
@@ -64,29 +86,33 @@ void main() {
     });
 
     test('移动端：空格（保留默认重复行为）/↑/↓ 与桌面一致', () {
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.playPause, desktop: false),
-        [const SingleActivator(LogicalKeyboardKey.space)],
+        const [SingleActivator(LogicalKeyboardKey.space)],
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.volumeUp, desktop: false),
         appShortcutActivators(AppShortcutAction.volumeUp, desktop: true),
       );
-      expect(
+      expectActivators(
         appShortcutActivators(AppShortcutAction.volumeDown, desktop: false),
         appShortcutActivators(AppShortcutAction.volumeDown, desktop: true),
       );
     });
 
     test('桌面端同一物理键（←）同时承载 seek（无修饰）与切歌（Ctrl）', () {
-      final desktopKeys = {
-        for (final action in AppShortcutAction.values)
-          ...appShortcutActivators(action, desktop: true),
-      };
-      // 无冲突：同一激活器只对应一个动作。
-      final flat = AppShortcutAction.values
-          .expand((a) => appShortcutActivators(a, desktop: true));
-      expect(flat.length, desktopKeys.length);
+      // 键值级去重（SingleActivator 无 ==，identity 去重对派生实例无效）：
+      // 同一「键 + 修饰」组合在默认表里只属于一个动作。
+      final seen = <String>{};
+      for (final action in AppShortcutAction.values) {
+        for (final binding in defaultBindingsFor(action)) {
+          expect(
+            seen.add(binding.encode()),
+            isTrue,
+            reason: '${action.label} 的 ${binding.label} 与其它动作重复',
+          );
+        }
+      }
     });
   });
 

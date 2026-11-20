@@ -51,7 +51,7 @@ void main() {
     addTearDown(() => debugDesktopFormFactorOverride = null);
   });
 
-  Future<_FakePlayer> pumpScope(WidgetTester tester) async {
+  Future<_FakePlayer> pumpScope(WidgetTester tester, {Widget? child}) async {
     final player = _FakePlayer();
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -60,7 +60,7 @@ void main() {
       MaterialApp(
         home: AppShortcutScope(
           player: player,
-          child: const Scaffold(body: SizedBox.expand()),
+          child: child ?? const Scaffold(body: SizedBox.expand()),
         ),
       ),
     );
@@ -129,6 +129,37 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pump();
       expect(player.nextCalls, 1);
+    });
+
+    // 改键 × 焦点守卫的交叉场景：守卫只测过默认键位、改键只测过裸作用域，
+    // 两者交集是最容易被后续改动悄悄弄坏的路径——裸字母键尤其危险，
+    // 不守卫的话用户在搜索框打字就会触发播放/暂停。
+    testWidgets('改键到裸字母后，焦点在输入框内时让位（不触发动作）', (tester) async {
+      final fieldController = TextEditingController();
+      addTearDown(fieldController.dispose);
+      final player = await pumpScope(
+        tester,
+        child: Scaffold(body: TextField(controller: fieldController)),
+      );
+
+      await ShortcutController.instance.setBinding(
+        AppShortcutAction.playPause,
+        const KeyBinding(LogicalKeyboardKey.keyK),
+      );
+      await tester.pump();
+
+      // 先证明改键真的生效：焦点不在输入框内时 K 触发播放/暂停。
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.pump();
+      expect(player.toggleCalls, 1);
+
+      // 焦点进入输入框后，同一个键必须让位给文本输入。
+      await tester.enterText(find.byType(TextField), 'shi');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.pump();
+      expect(player.toggleCalls, 1, reason: '焦点在输入框内时改键不该触发');
+      expect(fieldController.text, 'shi');
     });
   });
 }

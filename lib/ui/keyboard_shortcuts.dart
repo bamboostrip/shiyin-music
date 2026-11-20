@@ -164,15 +164,26 @@ String describeShortcutKey(LogicalKeyboardKey key) {
 
 /// 已被框架或固定快捷键占用的组合：不允许改绑，返回给用户看的原因。
 ///
-/// 这些组合分别由焦点系统（Esc/Tab）与桌面骨架的固定表（回车、Ctrl+F、
-/// Ctrl+1~6）消费；允许改绑会让「关弹层 / 切焦点 / 搜索 / 切分区」失灵，
-/// 且两个 `Shortcuts` 表谁生效取决于层级，排查成本远高于收益。
+/// 被占用的都是**精确组合**：焦点系统的裸 Esc/Tab 与 Shift+Tab（反向
+/// 遍历），桌面骨架固定表的裸回车、Ctrl+F、Ctrl+1~6。允许改绑会让
+/// 「关弹层 / 切焦点 / 打开播放页 / 搜索 / 切分区」失灵，且两个
+/// `Shortcuts` 表谁生效取决于层级，排查成本远高于收益。
+///
+/// 只拦精确组合、不按主键一刀切：Ctrl+回车、Alt+回车这类带修饰键的
+/// 搭配并未被占用，拦下它们会把空闲键位挡在门外，理由文案还会误导。
 String? reservedBindingReason(KeyBinding binding) {
   final key = binding.key;
-  if (key == LogicalKeyboardKey.escape) return 'Esc 用于关闭弹层与取消搜索';
-  if (key == LogicalKeyboardKey.tab) return 'Tab 用于切换键盘焦点';
-  if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
-    return '回车用于打开播放页（固定快捷键）';
+  final hasModifier =
+      binding.control || binding.shift || binding.alt || binding.meta;
+  if (!hasModifier) {
+    if (key == LogicalKeyboardKey.escape) return 'Esc 用于关闭弹层与取消搜索';
+    if (key == LogicalKeyboardKey.tab) return 'Tab 用于切换键盘焦点';
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      return '回车用于打开播放页（固定快捷键）';
+    }
+  } else if (
+      binding.shift && !binding.control && !binding.alt && !binding.meta) {
+    if (key == LogicalKeyboardKey.tab) return 'Shift + Tab 用于反向切换键盘焦点';
   }
   if (binding.control && !binding.shift && !binding.alt && !binding.meta) {
     if (key == LogicalKeyboardKey.keyF) return 'Ctrl + F 用于打开搜索（固定快捷键）';
@@ -241,31 +252,34 @@ List<KeyBinding> defaultBindingsFor(AppShortcutAction action) {
 ///   （空格在桌面端额外排除按住重复触发）。
 ///
 /// 桌面端实际生效的键位由 [ShortcutController] 决定（可在设置页改键），
-/// 本函数只提供默认值。
+/// 本函数只提供默认值。桌面默认表直接从 [defaultBindingsFor] 派生：
+/// 改键初始值、恢复默认与本表共用同一份事实源，新增动作不会两表漂移；
+/// 空格「排除按住重复」的规则与 [ShortcutController.activatorsOf] 一致。
 List<SingleActivator> appShortcutActivators(
   AppShortcutAction action, {
   required bool desktop,
 }) {
+  if (desktop) {
+    return [
+      for (final binding in defaultBindingsFor(action))
+        binding.toActivator(
+          includeRepeats: action != AppShortcutAction.playPause,
+        ),
+    ];
+  }
   return switch (action) {
-    AppShortcutAction.playPause => desktop
-        // 桌面排除 key repeat：按住空格不应连发播放/暂停。
-        ? const [SingleActivator(LogicalKeyboardKey.space, includeRepeats: false)]
-        : const [SingleActivator(LogicalKeyboardKey.space)],
-    AppShortcutAction.previousTrack => desktop
-        ? const [SingleActivator(LogicalKeyboardKey.arrowLeft, control: true)]
-        : const [SingleActivator(LogicalKeyboardKey.arrowLeft)],
-    AppShortcutAction.nextTrack => desktop
-        ? const [SingleActivator(LogicalKeyboardKey.arrowRight, control: true)]
-        : const [SingleActivator(LogicalKeyboardKey.arrowRight)],
-    AppShortcutAction.seekBackward => desktop
-        ? const [SingleActivator(LogicalKeyboardKey.arrowLeft)]
-        : const [],
-    AppShortcutAction.seekForward => desktop
-        ? const [SingleActivator(LogicalKeyboardKey.arrowRight)]
-        : const [],
-    AppShortcutAction.volumeUp => const [
-      SingleActivator(LogicalKeyboardKey.arrowUp),
+    AppShortcutAction.playPause => const [
+      SingleActivator(LogicalKeyboardKey.space),
     ],
+    AppShortcutAction.previousTrack => const [
+      SingleActivator(LogicalKeyboardKey.arrowLeft),
+    ],
+    AppShortcutAction.nextTrack => const [
+      SingleActivator(LogicalKeyboardKey.arrowRight),
+    ],
+    AppShortcutAction.seekBackward => const [],
+    AppShortcutAction.seekForward => const [],
+    AppShortcutAction.volumeUp => const [SingleActivator(LogicalKeyboardKey.arrowUp)],
     AppShortcutAction.volumeDown => const [
       SingleActivator(LogicalKeyboardKey.arrowDown),
     ],

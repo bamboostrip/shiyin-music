@@ -164,6 +164,38 @@ void main() {
       }
     });
 
+    test('保留键只拦精确组合：带修饰键的回车/Esc/Tab 可改绑', () async {
+      final controller = ShortcutController.instance;
+
+      // 焦点系统/固定表占用的是精确组合：裸 Esc/Tab/回车，以及
+      // Shift+Tab（框架的反向焦点遍历）——这些仍然拒绝。
+      for (final binding in const [
+        KeyBinding(LogicalKeyboardKey.escape),
+        KeyBinding(LogicalKeyboardKey.tab),
+        KeyBinding(LogicalKeyboardKey.tab, shift: true),
+        KeyBinding(LogicalKeyboardKey.enter),
+      ]) {
+        expect(reservedBindingReason(binding), isNotNull, reason: binding.label);
+      }
+
+      // 其余修饰组合（Ctrl/Alt/Shift 搭配回车、Esc、Tab）并未被任何
+      // 固定表占用，是空闲键位；一刀切拒绝会把它们挡在门外，且提示
+      // 文案（如「回车用于打开播放页」）对 Ctrl+回车这种组合是误导。
+      for (final binding in const [
+        KeyBinding(LogicalKeyboardKey.enter, control: true),
+        KeyBinding(LogicalKeyboardKey.numpadEnter, alt: true),
+        KeyBinding(LogicalKeyboardKey.escape, shift: true),
+        KeyBinding(LogicalKeyboardKey.tab, control: true),
+      ]) {
+        expect(reservedBindingReason(binding), isNull, reason: binding.label);
+        expect(
+          await controller.setBinding(AppShortcutAction.playPause, binding),
+          isTrue,
+          reason: binding.label,
+        );
+      }
+    });
+
     test('手改配置里同一键位重复出现：先到先得，不产生两个动作共用', () async {
       SharedPreferences.setMockInitialValues({
         ShortcutController.prefsKey: jsonEncode({
@@ -180,6 +212,27 @@ void main() {
         [const KeyBinding(LogicalKeyboardKey.space)],
       );
       expect(controller.bindingsOf(AppShortcutAction.seekForward), isEmpty);
+    });
+
+    test('整串配置是坏 JSON/非对象时回退默认表（不能让播放键全灭）', () async {
+      // 单条记录脏（tryDecode 返回 null）已有覆盖；这里钉的是整串 blob
+      // 级别的损坏：坏 JSON 抛 FormatException、合法 JSON 但不是对象、
+      // 显式 null——都必须回退默认表而不是把所有动作变成「未设置」。
+      for (final raw in ['{oops', '[1,2]', '"配置"', 'null']) {
+        SharedPreferences.setMockInitialValues({
+          ShortcutController.prefsKey: raw,
+        });
+        ShortcutController.instance.debugReset();
+        await ShortcutController.instance.load();
+
+        for (final action in AppShortcutAction.values) {
+          expect(
+            ShortcutController.instance.bindingsOf(action),
+            defaultBindingsFor(action),
+            reason: '$action ← prefs = $raw',
+          );
+        }
+      }
     });
 
     test('恢复默认', () async {
