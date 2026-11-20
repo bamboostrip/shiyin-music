@@ -97,7 +97,8 @@ pub fn cancel_loudness_analysis() {
     loudness::cancel_loudness_analysis();
 }
 
-/// 读取本地音频的内嵌歌词标签（桌面端对应 Android 的 getEmbeddedLyrics）。
+/// 读取本地音频的内嵌歌词标签（容器 + ID3v2 USLT/TXXX）。Android 10
+/// 裸路径不可读时的兜底见 [read_local_lyrics_from_bytes]。
 pub fn read_local_lyrics(path: String) -> Result<Option<String>, String> {
     loudness::read_embedded_lyrics(&path).map_err(|e| e.to_string())
 }

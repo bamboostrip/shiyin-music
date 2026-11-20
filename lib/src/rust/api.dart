@@ -50,7 +50,8 @@ Stream<LoudnessEvent> analyzeLoudness({required String url}) =>
 Future<void> cancelLoudnessAnalysis() =>
     RustLib.instance.api.crateApiCancelLoudnessAnalysis();
 
-/// 读取本地音频的内嵌歌词标签（桌面端对应 Android 的 getEmbeddedLyrics）。
+/// 读取本地音频的内嵌歌词标签（容器 + ID3v2 USLT/TXXX）。Android 10
+/// 裸路径不可读时的兜底见 [read_local_lyrics_from_bytes]。
 Future<String?> readLocalLyrics({required String path}) =>
     RustLib.instance.api.crateApiReadLocalLyrics(path: path);
 

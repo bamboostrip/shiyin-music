@@ -219,7 +219,10 @@ class LocalMusicController extends ChangeNotifier {
 
     // 重入保护：手动扫描进行中时，自动重扫（文件缺失触发）直接跳过——
     // 并发扫只是重复查询、last-wins，桌面路径同款守卫。
-    if (_isScanning) return;
+    if (_isScanning) {
+      debugPrint('[时音][本地音乐] 扫描进行中，跳过本次重扫请求（自动/手动并发去重）');
+      return;
+    }
 
     _isScanning = true;
     notifyListeners();

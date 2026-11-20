@@ -1489,7 +1489,9 @@ class MainActivity : AudioServiceActivity() {
     }
 
     /** 媒体元数据 IO 专用单线程执行器：封面/头部截取都是短任务，
-     *  单线程串行既避免快滚大库时的线程风暴，也不会让长查询插队饿死。 */
+     *  单线程串行既避免快滚大库时的线程风暴，也不会让长查询插队饿死。
+     *  刻意不在 onDestroy shutdown：常规单实例 Activity 下随进程存续无害；
+     *  shutdown 反而会让销毁竞态中的迟到通道调用抛 RejectedExecutionException。 */
     private val mediaIoExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**

@@ -350,4 +350,40 @@ void main() {
     expect(controller.errorMessage, contains('本地文件已不存在'));
     await tearDownController(tester);
   });
+
+  testWidgets('预检探测挂起期间已切歌：旧流程不得 loadSong 抢引擎', (tester) async {
+    await pumpToastHost(tester);
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final file = File('${Directory.systemTemp.path}/shiyin_probe_$stamp.mp3');
+    file.writeAsBytesSync(const [0, 1, 2, 3]);
+    addTearDown(() {
+      if (file.existsSync()) file.deleteSync();
+    });
+
+    final songA = _localSong(file.path, title: '歌A');
+    final songB =
+        _localSong('${Directory.systemTemp.path}/shiyin_probe_${stamp}_b.mp3');
+    controller.queue = [songA, songB];
+
+    // 探测门闩：A 的存在性探测（本地歌存在性探测可秒级挂起，如 NAS 失联）
+    // 用 Completer 控制完成时机，制造「探测在途期间切歌」的竞态窗口。
+    final probeGate = Completer<bool>();
+    controller.localFileExistsProbe = (_) => probeGate.future;
+
+    final playFuture = controller.playSong(songA);
+    await tester.pump();
+
+    // A 的探测仍在途时 currentSong 已被 B 覆盖（B 尚未走 playSong 加载）。
+    controller.currentSong = songB;
+    probeGate.complete(true);
+    await tester.pump();
+    await playFuture;
+    await tester.pump();
+
+    // A 的预检返回后必须就地丢弃：不得 loadSong 抢走 B 的引擎与媒体会话
+    // （B 未经 playSong，这里不应有任何 URL 被加载）。
+    expect(handler.loadedUrls, isEmpty);
+
+    await tearDownController(tester);
+  });
 }

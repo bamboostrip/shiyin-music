@@ -657,7 +657,8 @@ impl Biquad {
 }
 
 /// 读取本地音频的内嵌歌词标签（USLT/LYRICS），供桌面端"本地歌曲歌词"
-/// 使用（Android 走 MediaMetadataRetriever 通道）。
+/// 使用（各平台统一走本函数；Android 裸路径不可读时由 Dart 侧截头部字节
+/// 走 `read_local_lyrics_from_bytes`）。
 ///
 /// 两层来源：容器元数据（FLAC/OGG 的 VorbisComment、MP4 ilst、AIFF 的
 /// ID3 chunk），以及单独解析的 **ID3v2** —— symphonia 的 mp3 解复用器里

@@ -189,6 +189,13 @@ mixin _PlayerSettings on _PlayerControllerBase {
       // 引擎白等超时（Android 10 的 content:// 兜底同样适用）。
       if (!_isRemoteAudioUrl(url)) {
         url = await _resolveLocalSourceUrl(song, url);
+        // 预检探测同样是挂起点：期间已切歌则旧音质不得 loadSong 抢引擎
+        // （对齐上方解析期守卫的 hash 维度；intentSerial 维度由加载后的
+        // 既有守卫收口，这里保持最小修复）。
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 切音质预检期间已切歌，丢弃旧结果');
+          return;
+        }
       }
       // 响度均衡:切换音质/重载后 URL 可能变化。先查缓存命中即 instant 应用,
       // 未命中则播放中分析后渐变(序号守卫会丢弃旧结果)。

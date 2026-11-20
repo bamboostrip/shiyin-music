@@ -328,6 +328,13 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 提前推过阈值。
       if (!_isRemoteAudioUrl(url)) {
         url = await _resolveLocalSourceUrl(song, url);
+        // 存在性探测（NAS 失联可挂数秒）与上面的网络解析同为挂起点：
+        // 期间用户可能已切歌，旧歌不得继续 loadSong 抢回引擎与媒体会话。
+        if (currentSong?.hash != song.hash) {
+          debugPrint('[时音][player] 预检期间已切歌，丢弃旧结果: ${song.title}');
+          _nextLog('playSong 放弃(预检期间已切歌): ${song.title}');
+          return;
+        }
       }
       // 响度均衡:先查缓存,命中则首播前即应用正确增益(instant,无跳变);
       // 未命中则播放中分析,完成后渐变(ramp)应用。
