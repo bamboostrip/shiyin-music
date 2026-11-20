@@ -81,6 +81,18 @@ class LocalMusicController extends ChangeNotifier {
   List<Song> get songs => _songs;
   bool get isScanning => _isScanning;
 
+  /// 按裸路径查这首歌在媒体库里的 `content://` 地址。
+  ///
+  /// 用途：升级前落盘的队列/历史条目没有 [Song.localContentUri]（老版本
+  /// 不序列化该字段），Android 10 上裸路径不可读时靠这里从当前库状态兜底
+  /// （issue #32：自动重扫完成后，第二次尝试即可命中）。
+  String? contentUriForPath(String path) {
+    for (final song in _songs) {
+      if (song.id == path) return song.localContentUri;
+    }
+    return null;
+  }
+
   /// 已排除的文件夹列表（规范化后的绝对路径）。
   Set<String> get excludedFolders => Set.unmodifiable(_excludedFolders);
 

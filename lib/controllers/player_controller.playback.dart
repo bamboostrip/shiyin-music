@@ -327,7 +327,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // ③ 这条失败还会被计入「连续网络失败」，把后面真正因弱网失败的歌
       // 提前推过阈值。
       if (!_isRemoteAudioUrl(url)) {
-        url = _resolveLocalSourceUrl(song, url);
+        url = await _resolveLocalSourceUrl(song, url);
       }
       // 响度均衡:先查缓存,命中则首播前即应用正确增益(instant,无跳变);
       // 未命中则播放中分析,完成后渐变(ramp)应用。
@@ -745,55 +745,6 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       '($_consecutiveNearEndSkips/$effectiveLimit): ${song.title}',
     );
     return true;
-  }
-
-  /// 是否远端音源（http/https）。本地文件虽然也经本机代理加载，但语义上
-  /// 仍是「本地」，两条路径的失败判定完全不同。
-  static bool _isRemoteAudioUrl(String url) =>
-      url.startsWith('http://') || url.startsWith('https://');
-
-  /// 本地音源起播前的确定性检查，返回真正交给引擎的地址。
-  ///
-  /// 抛出的两类异常都由 [playSong] 的 catch 收口，走「一次即判跳过」：
-  /// - [LocalAudioFormatException]：当前内核没有该后缀的解析器（Android 上的
-  ///   APE/WMA/AIFF 等），交给引擎只会换来一句 `Failed to open`；
-  /// - [LocalAudioMissingException]：裸路径读不到、也没有可回退的媒体库地址。
-  ///
-  /// 注意两点：
-  /// 1. **格式检查排在可读性之前**——格式不支持时文件通常是在的，先报
-  ///    "文件不存在"会把人引到错的方向；
-  /// 2. 裸路径读不到时先试 `song.localContentUri`（Android 媒体库地址）：
-  ///    分区存储下 Android 10 会直接拒绝按路径读其它应用的媒体文件，
-  ///    这类机器上只有 content URI 能读。交给引擎时由
-  ///    `MusicAudioHandler` 直接透传（不进本地文件代理）。
-  String _resolveLocalSourceUrl(Song song, String path) {
-    final reason = unsupportedLocalAudioReason(path);
-    if (reason != null) {
-      _nextLog('本地音源格式不支持: ${song.title} → $reason');
-      throw LocalAudioFormatException('《${song.title}》$reason');
-    }
-    if (File(path).existsSync()) return path;
-    final contentUri = song.localContentUri;
-    if (contentUri != null && contentUri.isNotEmpty) {
-      _nextLog('本地路径不可读，回退媒体库地址: ${song.title} → $contentUri');
-      return contentUri;
-    }
-    _nextLog('本地音源文件缺失: ${song.title} → $path');
-    throw LocalAudioMissingException(path);
-  }
-
-  /// 本地音源确定性失败时触发一次本地库重扫（每次失败 streak 只触发一次）。
-  ///
-  /// 只对「文件不存在」触发：格式不支持与库内容无关，重扫纯属白跑；
-  /// 而文件消失往往意味着整个目录被挪走，重扫能把整片失效条目收敛掉，
-  /// 用户不用手动去设置里点扫描。
-  void _scheduleLocalRescanAfterMissing() {
-    if (_localRescanRequested) return;
-    final controller = localMusic;
-    if (controller == null) return;
-    _localRescanRequested = true;
-    _nextLog('本地文件缺失，触发本地库重扫');
-    unawaited(controller.scanLocalMusic());
   }
 
   /// 单曲失败的提示文案：本地确定性失败点名原因，其余沿用旧文案。

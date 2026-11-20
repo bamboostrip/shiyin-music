@@ -133,11 +133,15 @@ class _FakeMusicApi extends Fake implements MusicApi {
 
 class _SpyLocalMusicController extends LocalMusicController {
   int scanCalls = 0;
+  String? contentUriForPathOverride;
 
   @override
   Future<void> scanLocalMusic() async {
     scanCalls++;
   }
+
+  @override
+  String? contentUriForPath(String path) => contentUriForPathOverride;
 }
 
 Song _localSong(String path, {String? title}) => Song(
@@ -164,6 +168,10 @@ void main() {
     controller = PlayerController(_FakeMusicApi(), handler);
     localMusic = _SpyLocalMusicController();
     controller.localMusic = localMusic;
+    // 存在性探测默认假实现：testWidgets 跑在 FakeAsync 里，真实磁盘 IO 的
+    // Future 永远等不到完成（预检改异步 File.exists 后必须注入，与上面
+    // writeAsBytesSync 的同步写同理）。默认判「不存在」，各用例按需覆盖。
+    controller.localFileExistsProbe = (_) async => false;
   });
 
   Future<void> pumpToastHost(WidgetTester tester) async {
@@ -279,6 +287,9 @@ void main() {
 
     final song = _localSong(file.path);
     controller.queue = [song];
+    // 本用例验证「存在即直读」：覆盖为真实磁盘真相（同步探测，绕开
+    // FakeAsync 里永不完成的异步 IO），文件确实创建失败时仍会让用例变红。
+    controller.localFileExistsProbe = (_) async => file.existsSync();
 
     await controller.playSong(song);
     await tester.pump();
@@ -286,6 +297,57 @@ void main() {
     expect(handler.loadedUrls, [file.path]);
     expect(controller.errorMessage, isNull);
 
+    await tearDownController(tester);
+  });
+
+  testWidgets('陈旧队列条目：localContentUri 为空但本地库里有地址 → 兜底直读', (tester) async {
+    await pumpToastHost(tester);
+    final missing =
+        '${Directory.systemTemp.path}/shiyin_stale_${DateTime.now().microsecondsSinceEpoch}.mp3';
+    final song = _localSong(missing); // 无 localContentUri（升级前的旧记录）
+    controller.queue = [song];
+    localMusic.contentUriForPathOverride = 'content://media/external/audio/media/7';
+
+    await controller.playSong(song);
+    await tester.pump();
+
+    expect(handler.loadedUrls, ['content://media/external/audio/media/7']);
+    expect(controller.errorMessage, isNull);
+    expect(localMusic.scanCalls, 1); // 仍触发一次重扫收敛库
+    await tearDownController(tester);
+  });
+
+  testWidgets('本地库也没有地址：维持「文件已不存在」', (tester) async {
+    await pumpToastHost(tester);
+    final missing =
+        '${Directory.systemTemp.path}/shiyin_none_${DateTime.now().microsecondsSinceEpoch}.mp3';
+    final song = _localSong(missing);
+    controller.queue = [song];
+    localMusic.contentUriForPathOverride = null;
+
+    await controller.playSong(song);
+    await tester.pump();
+
+    expect(handler.loadedUrls, isEmpty);
+    expect(controller.errorMessage, contains('本地文件已不存在'));
+    await tearDownController(tester);
+  });
+
+  testWidgets('切音质重载本地歌：缺文件时不交给引擎，落可读错误', (tester) async {
+    await pumpToastHost(tester);
+    final missing =
+        '${Directory.systemTemp.path}/shiyin_q_${DateTime.now().microsecondsSinceEpoch}.mp3';
+    controller.queue = [_localSong(missing)];
+    controller.currentSong = _localSong(missing);
+
+    await controller.setAudioQuality(
+      AudioQuality.lossless,
+      reloadCurrent: true,
+    );
+    await tester.pump();
+
+    expect(handler.loadedUrls, isEmpty);
+    expect(controller.errorMessage, contains('本地文件已不存在'));
     await tearDownController(tester);
   });
 }

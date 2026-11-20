@@ -185,6 +185,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
         url = playUrl.url;
         networkUrl = playUrl.url;
       }
+      // 与 playSong 同一条确定性预检：本地音源缺文件/格式不支持时不交给
+      // 引擎白等超时（Android 10 的 content:// 兜底同样适用）。
+      if (!_isRemoteAudioUrl(url)) {
+        url = await _resolveLocalSourceUrl(song, url);
+      }
       // 响度均衡:切换音质/重载后 URL 可能变化。先查缓存命中即 instant 应用,
       // 未命中则播放中分析后渐变(序号守卫会丢弃旧结果)。
       _currentLoudnessUrl = url;
@@ -258,7 +263,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
         debugPrint('[时音][player] 切音质失败时歌曲已切换，跳过错误态');
         return;
       }
-      errorMessage = error.toString();
+      errorMessage = switch (error) {
+        LocalAudioMissingException() => '本地文件已不存在，可能已被移动或删除',
+        final LocalAudioFormatException e => e.message,
+        _ => error.toString(),
+      };
     } finally {
       var depth = _changingSourceDepth;
       if (depth > 0) {
