@@ -670,7 +670,18 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
                   marginTop: _theme.carMarginTop,
                   marginBottom: _theme.carMarginBottom,
                   child: _SystemUiOverlay(
-                    child: child ?? const SizedBox.shrink(),
+                    // 播放控制快捷键作用域必须挂在 **Navigator 之上**：
+                    // `Shortcuts` 只对「自己这棵焦点树」里的按键生效，而全屏
+                    // 播放页、对话框、底部弹层都是根导航的新路由（与 home
+                    // 路由是兄弟节点）。此前它挂在 AppShell 内部，于是进了
+                    // 全屏播放页后空格/←→/↑↓ 全部失灵（Esc 由播放页自己的
+                    // CallbackShortcuts 兜着，才没被发现）。
+                    // 回归用例：test/ui/player/player_route_integration_test.dart
+                    // →「全屏播放页快捷键（作用域在 Navigator 之上）」。
+                    child: AppShortcutScope(
+                      player: _player,
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ),

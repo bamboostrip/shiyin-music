@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shiyin_music/controllers/auth_controller.dart';
@@ -141,6 +142,15 @@ class _FakePlayerController extends ChangeNotifier
   /// 桌面播放页底部常驻播放栏（DesktopPlayerBar）会读音量。
   @override
   double volume = 0.8;
+
+  /// 快捷键 seek 落点（←/→ 各一次 ±5 秒）。
+  final List<Duration> seeks = [];
+
+  @override
+  Future<void> seek(Duration position) async => seeks.add(position);
+
+  @override
+  Future<void> setVolume(double value) async => volume = value;
 
   @override
   MusicApi get api => _FakeApi();
@@ -525,5 +535,90 @@ void main() {
         expect(find.byKey(nextKey), findsNothing);
       },
     );
+  });
+
+  // 全屏播放页是**根导航上的新路由**，与 home 路由互为兄弟：`Shortcuts` 只对
+  // 自身焦点子树里的按键生效，作用域挂在 AppShell 内部时，进了播放页就只剩
+  // 播放页自己的 Esc 还能用——空格/←→/↑↓ 全部静默失效（PC 用户体感是
+  // 「一进全屏播放页快捷键就没了」）。这里按 main.dart 的 `MaterialApp.builder`
+  // 结构复现真实挂载位置。
+  group('全屏播放页快捷键（作用域在 Navigator 之上）', () {
+    testWidgets('空格 / ←→ / Ctrl+←→ / ↑↓ 在播放页内全部生效，Esc 仍然只退出播放页', (
+      tester,
+    ) async {
+      debugDesktopFormFactorOverride = true;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final player = _FakePlayerController();
+      final auth = _FakeAuthController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          // 与 main.dart 的 MaterialApp.builder 同构：作用域包住 Navigator。
+          // 把这一层挪回 AppShell 内部，本用例立刻变红。
+          builder: (context, child) => AppShortcutScope(
+            player: player,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => PlayerPageRoute.open(
+                    context,
+                    player: player,
+                    auth: auth,
+                  ),
+                  child: const Text('打开播放页'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('打开播放页'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PlayerPage), findsOneWidget);
+
+      // 空格：播放/暂停（注意此后唱片/歌词 ticker 会持续出帧，
+      // 只能 pump 固定帧数，不能用 pumpAndSettle）。
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(player.isPlaying, isTrue, reason: '空格应切换播放状态');
+
+      // →/←：±5 秒快退/快进（桌面默认键位）。
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(player.seeks, [const Duration(seconds: 35)]);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pump();
+      expect(player.seeks.last, const Duration(seconds: 25));
+
+      // Ctrl+→：下一首（裸 → 已被 seek 占用）。
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(player.nextCalls, 1);
+      expect(player.seeks.length, 2, reason: 'Ctrl+→ 不该同时触发 seek');
+
+      // ↑：音量 +5%。
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+      expect(player.volume, closeTo(0.85, 1e-6));
+
+      // Esc 仍是「退出播放页」，不能被快捷键作用域抢走。
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(PlayerPage), findsNothing);
+    });
   });
 }

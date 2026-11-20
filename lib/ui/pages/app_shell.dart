@@ -120,7 +120,9 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    return AppShortcutScope(player: widget.player, child: _buildShell(context));
+    // 播放快捷键作用域不在这里：它必须包住 Navigator 才能覆盖全屏播放页
+    // 等根导航新路由，故上移到 MaterialApp.builder（见 main.dart）。
+    return _buildShell(context);
   }
 
   Widget _buildShell(BuildContext context) {
@@ -780,6 +782,11 @@ class _RelativeTextScaler extends TextScaler {
 ///   ←/→ 快退/快进 ±5 秒，Ctrl+←/→ 切歌，↑/↓ 音量。键位取自
 ///   [ShortcutController]（设置页「键盘快捷键」可改，改完立即重建本表）。
 ///   按键表映射见 keyboard_shortcuts.dart。
+///
+/// **挂载位置有硬约束：必须在 `MaterialApp.builder` 里包住 Navigator**
+/// （见 main.dart）。`Shortcuts` 只对自身焦点子树里的按键生效，而全屏
+/// 播放页/对话框/弹层都是根导航上的新路由——挂在 AppShell 内部时，
+/// 一旦进入全屏播放页，空格/←→/↑↓ 会全部失灵。
 class AppShortcutScope extends StatelessWidget {
   const AppShortcutScope({
     super.key,
