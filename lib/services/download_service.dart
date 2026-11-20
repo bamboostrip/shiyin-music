@@ -20,6 +20,26 @@ import 'image_disk_cache.dart';
 /// 下载任务类型。
 enum DownloadTaskKind { download, playCache }
 
+/// 下载文件命名模板：`{歌手}-{歌名}`（默认，历史行为）或 `{歌名}-{歌手}`。
+///
+/// 只作用于**新下载**；播放缓存恒用默认模板——内部缓存按 codec 探测的
+/// 路径匹配索引，模板混入只会制造索引失配，且缓存文件名用户不可见。
+enum DownloadNameTemplate {
+  artistTitle('artist-title', '歌手-歌名', '周杰伦-晴天.mp3'),
+  titleArtist('title-artist', '歌名-歌手', '晴天-周杰伦.mp3');
+
+  const DownloadNameTemplate(this.storedValue, this.label, this.example);
+
+  /// prefs 存储值（settings.download_name_template）。
+  final String storedValue;
+
+  /// 设置项展示名。
+  final String label;
+
+  /// 示例文件名（真实感展示，帮用户理解两种顺序的差别）。
+  final String example;
+}
+
 /// 历史下载目录名全集（当前名 + 改名前旧名）：配合文档/下载两个父目录
 /// 组合出全部历史落点，供 [DownloadService.legacyDownloadDirs] 对账。
 const Set<String> _legacyDownloadDirNameCandidates = {
@@ -63,6 +83,44 @@ class DownloadService {
   /// 旧自定义目录会记入 [downloadDirOverrideHistoryKey]，下次对账
   /// 按「以文件为准」语义搬入新目录（见 [legacyDownloadDirs]）。
   static const String downloadDirOverrideKey = 'download_dir_override';
+
+  /// 下载文件命名模板 prefs key（见 [DownloadNameTemplate]）。
+  static const String downloadNameTemplateKey = 'settings.download_name_template';
+
+  /// prefs 存储值 → 模板。缺失/脏值一律回退默认 [DownloadNameTemplate.artistTitle]
+  /// （与 `settings.download_quality` 的脏值策略一致：手改/旧数据不能把下载锁死）。
+  static DownloadNameTemplate nameTemplateFromStored(String? stored) =>
+      DownloadNameTemplate.values.firstWhere(
+        (t) => t.storedValue == stored,
+        orElse: () => DownloadNameTemplate.artistTitle,
+      );
+
+  /// 模板 → prefs 存储值。
+  static String storedNameTemplateValue(DownloadNameTemplate template) =>
+      template.storedValue;
+
+  /// 读取当前命名模板（按需 getInstance：SharedPreferences 有内存缓存，
+  /// 与 [downloadDir] 的读取模式一致；逐任务读取使队列中途改模板对后续
+  /// 任务立即生效）。
+  static Future<DownloadNameTemplate> loadNameTemplate() async {
+    final prefs = await SharedPreferences.getInstance();
+    return nameTemplateFromStored(prefs.getString(downloadNameTemplateKey));
+  }
+
+  /// 任务落盘文件名：用户下载按设置模板；播放缓存恒默认模板（见
+  /// [DownloadNameTemplate] 的说明）。
+  Future<String> fileNameForTask(
+    Song song,
+    AudioQuality quality,
+    DownloadTaskKind kind,
+  ) {
+    if (kind != DownloadTaskKind.download) {
+      return Future.value(fileNameFor(song, quality));
+    }
+    return loadNameTemplate().then(
+      (template) => fileNameFor(song, quality, template: template),
+    );
+  }
 
   /// 历史自定义下载目录的 prefs 键（StringList，最多保留
   /// [_maxOverrideHistory] 条）：每次换目录/恢复默认时把被替换掉的
@@ -479,13 +537,20 @@ class DownloadService {
   /// 120 码点（中文约 120 字）对单曲名足够宽裕。
   static const int _kMaxNameComponentLength = 120;
 
-  /// 文件命名：{歌手}-{歌曲名}.{ext}
-  String fileNameFor(Song song, AudioQuality quality) {
+  /// 文件命名：模板决定 `{歌手}-{歌名}` 或 `{歌名}-{歌手}`；`{ext}` 按音质。
+  String fileNameFor(
+    Song song,
+    AudioQuality quality, {
+    DownloadNameTemplate template = DownloadNameTemplate.artistTitle,
+  }) {
     final ext = quality == AudioQuality.lossless ? 'flac' : 'mp3';
     final safeArtist = _sanitizeFileName(song.artist);
     final safeTitle = _sanitizeFileName(song.title);
     final name = (safeArtist.isNotEmpty && safeTitle.isNotEmpty)
-        ? '$safeArtist-$safeTitle'
+        ? switch (template) {
+            DownloadNameTemplate.artistTitle => '$safeArtist-$safeTitle',
+            DownloadNameTemplate.titleArtist => '$safeTitle-$safeArtist',
+          }
         : song.hash.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
     return '$name.$ext';
   }
@@ -598,7 +663,8 @@ class DownloadService {
 
   Future<String> _executeTask(_PendingTask task) async {
     final key = cacheKeyFor(task.song, task.quality);
-    final fileName = fileNameFor(task.song, task.quality);
+    final fileName =
+        await fileNameForTask(task.song, task.quality, task.kind);
     final dir = task.kind == DownloadTaskKind.download
         ? await downloadDir()
         : await playCacheDir();
