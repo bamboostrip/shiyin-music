@@ -1003,7 +1003,7 @@ void main() {
   // 进度条两侧的空白都会触发展开详情页，切歌/暂停时极容易误触。契约改为
   // 「只有左侧歌曲信息块可点」，其余空白不响应、也不再显示手型光标。
   group('进播放页的点击范围仅限左侧信息块（issue #30）', () {
-    testWidgets('点击歌名（左块内）进入播放页', (tester) async {
+    testWidgets('点击左侧封面进入播放页（生产路径：封面 → 播放页）', (tester) async {
       int openCalls = 0;
       final player = _FakePlayerController()..currentSong = _song;
       await _pumpBar(
@@ -1012,7 +1012,7 @@ void main() {
         onOpenPlayerPage: () => openCalls++,
       );
 
-      await tester.tap(find.byType(MarqueeText));
+      await tester.tap(find.byType(Artwork));
       await tester.pump();
       expect(openCalls, 1);
     });

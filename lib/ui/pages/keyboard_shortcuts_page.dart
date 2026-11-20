@@ -37,12 +37,17 @@ class _KeyboardShortcutsPageState extends State<KeyboardShortcutsPage> {
     );
     if (binding == null || !mounted) return;
     final stolenFrom = controller.conflictOf(binding, ignore: action);
-    await controller.setBinding(action, binding);
+    final applied = await controller.setBinding(action, binding);
     if (!mounted) return;
+    if (!applied) {
+      Toast.error(reservedBindingReason(binding) ?? '该组合不可用');
+      return;
+    }
     Toast.success(
       stolenFrom == null
           ? '${action.label} 已改为 ${binding.label}'
-          : '${action.label} 已改为 ${binding.label}（原属「${stolenFrom.label}」）',
+          : '${action.label} 已改为 ${binding.label}；「${stolenFrom.label}」'
+                '现在未设置，请再给它指定一个键',
     );
   }
 
@@ -92,7 +97,9 @@ class _KeyboardShortcutsPageState extends State<KeyboardShortcutsPage> {
                   ),
                   text:
                       '快捷键在窗口内生效（输入框打字时自动让位）。'
-                      '点右侧「修改」后按下新的组合即可换键，改完立即生效。'
+                      '点右侧「修改」后按下新的组合即可换键，改完立即生效；'
+                      '若该组合原本属于别的动作，原动作会显示「未设置」，'
+                      '再给它指定一个键或点「恢复默认」即可。'
                       '系统级全局热键（窗口失焦/最小化也能控制播放）需要原生'
                       '热键注册，当前版本尚未支持。',
                 ),
@@ -107,6 +114,10 @@ class _KeyboardShortcutsPageState extends State<KeyboardShortcutsPage> {
                       _ShortcutRow(
                         action: action,
                         bindings: controller.bindingsOf(action),
+                        changed: !_sameBindings(
+                          controller.bindingsOf(action),
+                          defaultBindingsFor(action),
+                        ),
                         onEdit: () => _edit(action),
                         onReset: () =>
                             ShortcutController.instance.resetAction(action),
@@ -190,12 +201,16 @@ class _ShortcutRow extends StatelessWidget {
   const _ShortcutRow({
     required this.action,
     required this.bindings,
+    required this.changed,
     required this.onEdit,
     required this.onReset,
   });
 
   final AppShortcutAction action;
   final List<KeyBinding> bindings;
+
+  /// 当前键位是否已被改过（含「未设置」）：改过的行才提供单行恢复入口。
+  final bool changed;
   final VoidCallback onEdit;
   final VoidCallback onReset;
 
@@ -203,45 +218,79 @@ class _ShortcutRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Padding(
-      key: ValueKey('shortcut_row_${action.name}'),
-      padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  action.label,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  action.hint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
+
+    final info = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          action.label,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(width: 12),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          action.hint,
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontSize: 12,
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+
+    // 用 Wrap 而不是 Row：宽版一行放下，窄窗（桌面最小 360）时键位标签
+    // 自身就接近行宽，Wrap 会把「恢复/修改」折到下一行而不是溢出。
+    final controls = Wrap(
+      spacing: 6,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.end,
+      children: [
+        if (bindings.isEmpty)
+          const _KeyChip(label: '未设置', warning: true)
+        else
           for (var index = 0; index < bindings.length; index++)
             _KeyChip(
               key: ValueKey('shortcut_chip_${action.name}_$index'),
               label: bindings[index].label,
             ),
-          const SizedBox(width: 4),
-          TextButton(
-            key: ValueKey('shortcut_edit_${action.name}'),
-            onPressed: onEdit,
-            child: const Text('修改'),
+        if (changed)
+          IconButton(
+            key: ValueKey('shortcut_reset_${action.name}'),
+            tooltip: '恢复默认键位',
+            onPressed: onReset,
+            icon: const Icon(Icons.settings_backup_restore_rounded, size: 18),
           ),
-        ],
+        TextButton(
+          key: ValueKey('shortcut_edit_${action.name}'),
+          onPressed: onEdit,
+          child: const Text('修改'),
+        ),
+      ],
+    );
+
+    return Padding(
+      key: ValueKey('shortcut_row_${action.name}'),
+      padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+      // 桌面窗口最小 360 宽：键位 + 恢复 + 修改 横排会超出，窄窗改两行
+      // （说明在上、键位与操作在下），避免 RenderFlex 溢出。
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [info, const SizedBox(height: 6), controls],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: info),
+              const SizedBox(width: 12),
+              controls,
+            ],
+          );
+        },
       ),
     );
   }
@@ -295,26 +344,32 @@ class _FixedShortcutRow extends StatelessWidget {
 }
 
 class _KeyChip extends StatelessWidget {
-  const _KeyChip({super.key, required this.label});
+  const _KeyChip({super.key, required this.label, this.warning = false});
 
   final String label;
+
+  /// 未设置/冲突态：用错误色，避免「空着」被当成已生效。
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final foreground = warning ? colorScheme.error : colorScheme.onSurface;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: warning ? colorScheme.error : colorScheme.outlineVariant,
+        ),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,
-          color: colorScheme.onSurface,
+          color: foreground,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
       ),
@@ -375,6 +430,7 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'shortcut-capture');
   KeyBinding? _candidate;
   AppShortcutAction? _conflict;
+  String? _reservedReason;
 
   @override
   void dispose() {
@@ -403,10 +459,13 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
     );
     setState(() {
       _candidate = binding;
-      _conflict = ShortcutController.instance.conflictOf(
-        binding,
-        ignore: widget.action,
-      );
+      _reservedReason = reservedBindingReason(binding);
+      _conflict = reservedBindingReason(binding) == null
+          ? ShortcutController.instance.conflictOf(
+              binding,
+              ignore: widget.action,
+            )
+          : null;
     });
     return KeyEventResult.handled;
   }
@@ -457,12 +516,13 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
             ),
             const SizedBox(height: 12),
             Text(
-              conflict == null
-                  ? '组合里含 Ctrl / Shift / Alt / Win 可避免与输入冲突。Esc 取消。'
-                  : '「${conflict.label}」正在使用该组合，保存后会从它上面移除。',
+              _reservedReason ??
+                  (conflict == null
+                      ? '组合里含 Ctrl / Shift / Alt / Win 可避免与输入冲突。Esc 取消。'
+                      : '「${conflict.label}」正在使用该组合，保存后它会被置为未设置。'),
               style: theme.textTheme.bodySmall?.copyWith(
                 fontSize: 12,
-                color: conflict == null
+                color: _reservedReason == null && conflict == null
                     ? colorScheme.onSurfaceVariant
                     : colorScheme.error,
               ),
@@ -477,7 +537,7 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
         ),
         FilledButton(
           key: const ValueKey('shortcut_capture_save'),
-          onPressed: candidate == null
+          onPressed: candidate == null || _reservedReason != null
               ? null
               : () => Navigator.of(context).pop(candidate),
           child: const Text('保存'),
@@ -485,4 +545,13 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
       ],
     );
   }
+}
+
+/// 两组键位是否等价（顺序敏感；[KeyBinding] 已实现值相等）。
+bool _sameBindings(List<KeyBinding> a, List<KeyBinding> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }

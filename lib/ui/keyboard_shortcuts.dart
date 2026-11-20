@@ -160,6 +160,35 @@ String describeShortcutKey(LogicalKeyboardKey key) {
   return key.debugName ?? '按键 ${key.keyId}';
 }
 
+/// 已被框架或固定快捷键占用的组合：不允许改绑，返回给用户看的原因。
+///
+/// 这些组合分别由焦点系统（Esc/Tab）与桌面骨架的固定表（回车、Ctrl+F、
+/// Ctrl+1~6）消费；允许改绑会让「关弹层 / 切焦点 / 搜索 / 切分区」失灵，
+/// 且两个 `Shortcuts` 表谁生效取决于层级，排查成本远高于收益。
+String? reservedBindingReason(KeyBinding binding) {
+  final key = binding.key;
+  if (key == LogicalKeyboardKey.escape) return 'Esc 用于关闭弹层与取消搜索';
+  if (key == LogicalKeyboardKey.tab) return 'Tab 用于切换键盘焦点';
+  if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+    return '回车用于打开播放页（固定快捷键）';
+  }
+  if (binding.control && !binding.shift && !binding.alt && !binding.meta) {
+    if (key == LogicalKeyboardKey.keyF) return 'Ctrl + F 用于打开搜索（固定快捷键）';
+    const sidebarDigits = [
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+      LogicalKeyboardKey.digit5,
+      LogicalKeyboardKey.digit6,
+    ];
+    if (sidebarDigits.contains(key)) {
+      return 'Ctrl + 1~6 用于切换侧栏分区（固定快捷键）';
+    }
+  }
+  return null;
+}
+
 /// 纯修饰键：录制新键位时按下它们只是在「等主键」，不能当成一次绑定。
 bool isModifierKey(LogicalKeyboardKey key) {
   return key == LogicalKeyboardKey.control ||
@@ -269,7 +298,8 @@ class ShortcutController extends ChangeNotifier {
   List<KeyBinding> bindingsOf(AppShortcutAction action) =>
       _bindings[action] ?? const [];
 
-  /// 该动作当前生效的激活器；空格保持「排除按住重复」。
+  /// 该动作当前生效的激活器；「播放/暂停」保持「排除按住重复」，
+  /// 否则按住改键后的播放键会连发。
   List<SingleActivator> activatorsOf(AppShortcutAction action) => [
     for (final binding in bindingsOf(action))
       binding.toActivator(
@@ -295,31 +325,29 @@ class ShortcutController extends ChangeNotifier {
 
   /// 改键。
   ///
-  /// 同一个组合只能属于一个动作：会把该组合从其它动作上摘掉，避免
-  /// `Shortcuts` 表里后写入的项覆盖前一项、用户以为「改了却没生效」。
-  /// 被摘掉的动作若因此变空，回落它的默认键位（保证每个动作始终可用）。
-  Future<void> setBinding(
+  /// 同一个组合只能属于一个动作：会把它从其它动作上摘掉。被摘掉的动作
+  /// **不回落到默认键**——默认键往往正是被抢走的那个组合（例如把空格改给
+  /// 「快进」后，播放/暂停再回落空格就会两条记录共用一键，而 `Shortcuts`
+  /// 表里后写的覆盖前写的，表现为「播放/暂停静默失效」）。摘空即变「未设置」，
+  /// 由用户自己再绑或点「恢复默认」，语义可预期。
+  ///
+  /// 返回 false 表示该组合是系统级保留键（见 [reservedBindingReason]），
+  /// 调用方据此提示用户。
+  Future<bool> setBinding(
     AppShortcutAction action,
     KeyBinding binding,
   ) async {
-    for (final other in AppShortcutAction.values) {
-      if (other == action) continue;
-      final remaining = bindingsOf(
-        other,
-      ).where((item) => item != binding).toList(growable: false);
-      if (remaining.length == bindingsOf(other).length) continue;
-      _bindings[other] = remaining.isEmpty
-          ? defaultBindingsFor(other)
-          : remaining;
-    }
-    _bindings[action] = [binding];
+    if (reservedBindingReason(binding) != null) return false;
+    _assign(action, [binding]);
     notifyListeners();
     await _persist();
+    return true;
   }
 
-  /// 单个动作恢复默认。
+  /// 单个动作恢复默认；默认键若正被别的动作占用，从对方身上摘掉，
+  /// 保持「一个组合只属于一个动作」。
   Future<void> resetAction(AppShortcutAction action) async {
-    _bindings[action] = defaultBindingsFor(action);
+    _assign(action, defaultBindingsFor(action));
     notifyListeners();
     await _persist();
   }
@@ -329,6 +357,20 @@ class ShortcutController extends ChangeNotifier {
     _bindings = _defaults();
     notifyListeners();
     await _persist();
+  }
+
+  /// 把 [bindings] 指派给 [action]，并把这些组合从其它动作上摘掉。
+  void _assign(AppShortcutAction action, List<KeyBinding> bindings) {
+    for (final other in AppShortcutAction.values) {
+      if (other == action) continue;
+      final remaining = bindingsOf(
+        other,
+      ).where((item) => !bindings.contains(item)).toList(growable: false);
+      if (remaining.length != bindingsOf(other).length) {
+        _bindings[other] = remaining;
+      }
+    }
+    _bindings[action] = List<KeyBinding>.of(bindings);
   }
 
   /// 该组合当前被哪个动作占用（排除 [ignore]，用于录制时的冲突提示）。
@@ -374,15 +416,20 @@ class ShortcutController extends ChangeNotifier {
       final result = <AppShortcutAction, List<KeyBinding>>{};
       for (final action in AppShortcutAction.values) {
         final encoded = json[action.name];
-        final parsed = <KeyBinding>[];
-        if (encoded is List) {
-          for (final item in encoded) {
-            if (item is! String) continue;
-            final binding = KeyBinding.tryDecode(item);
-            if (binding != null) parsed.add(binding);
-          }
+        // 键缺失（老版本/半截配置）才回默认；**显式的空数组要保留**——
+        // 它表示「这个动作的键被别的动作抢走了」，回落默认会把重复占用
+        // 一起带回来。
+        if (encoded is! List) {
+          result[action] = defaultBindingsFor(action);
+          continue;
         }
-        result[action] = parsed.isEmpty ? defaultBindingsFor(action) : parsed;
+        final parsed = <KeyBinding>[];
+        for (final item in encoded) {
+          if (item is! String) continue;
+          final binding = KeyBinding.tryDecode(item);
+          if (binding != null) parsed.add(binding);
+        }
+        result[action] = parsed;
       }
       return result;
     } catch (_) {

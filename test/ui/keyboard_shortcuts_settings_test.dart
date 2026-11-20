@@ -93,23 +93,73 @@ void main() {
       expect(prefs.getString(ShortcutController.prefsKey), contains('1000:'));
     });
 
-    test('改键抢走同一个组合时，原动作回落默认键位（不会两个动作共用）', () async {
+    test('抢占同一组合：被抢的动作置为「未设置」，绝不回落默认键', () async {
       final controller = ShortcutController.instance;
-      const binding = KeyBinding(LogicalKeyboardKey.keyK, control: true);
-      await controller.setBinding(AppShortcutAction.previousTrack, binding);
-      expect(
-        controller.conflictOf(binding, ignore: AppShortcutAction.previousTrack),
-        isNull,
-      );
+      // 把「快进」改成空格——空格原本属于「播放/暂停」。
+      const binding = KeyBinding(LogicalKeyboardKey.space);
+      expect(await controller.setBinding(AppShortcutAction.seekForward, binding),
+          isTrue);
 
-      // 再把「下一首」也改成 Ctrl+K：上一首被摘掉后应回落默认 Ctrl+←，
-      // 保证每个动作始终有一个可用键。
-      await controller.setBinding(AppShortcutAction.nextTrack, binding);
-      expect(controller.bindingsOf(AppShortcutAction.nextTrack), [binding]);
+      expect(controller.bindingsOf(AppShortcutAction.seekForward), [binding]);
+      // 关键：播放/暂停不能「回落默认空格」，否则两条记录共用一键，
+      // Shortcuts 表里后者覆盖前者 → 播放/暂停静默失效。
+      expect(controller.bindingsOf(AppShortcutAction.playPause), isEmpty);
+      expect(controller.activatorsOf(AppShortcutAction.playPause), isEmpty);
+
+      // 全表不允许出现重复组合。
+      final seen = <KeyBinding, List<AppShortcutAction>>{};
+      for (final action in AppShortcutAction.values) {
+        for (final item in controller.bindingsOf(action)) {
+          seen.putIfAbsent(item, () => []).add(action);
+        }
+      }
       expect(
-        controller.bindingsOf(AppShortcutAction.previousTrack),
-        defaultBindingsFor(AppShortcutAction.previousTrack),
+        seen.entries.where((entry) => entry.value.length > 1),
+        isEmpty,
+        reason: '同一组合只能属于一个动作',
       );
+    });
+
+    test('「未设置」会持久化：重启读取后不会被默认键补回来', () async {
+      final controller = ShortcutController.instance;
+      await controller.setBinding(
+        AppShortcutAction.volumeUp,
+        const KeyBinding(LogicalKeyboardKey.space),
+      );
+      expect(controller.bindingsOf(AppShortcutAction.playPause), isEmpty);
+
+      // 模拟重启：清内存态后重新从 prefs 解码。
+      controller.debugReset();
+      await controller.load();
+      expect(controller.bindingsOf(AppShortcutAction.playPause), isEmpty);
+      expect(
+        controller.bindingsOf(AppShortcutAction.volumeUp),
+        [const KeyBinding(LogicalKeyboardKey.space)],
+      );
+    });
+
+    test('保留键（回车/ Ctrl+F / Esc / Tab）不允许改绑', () async {
+      final controller = ShortcutController.instance;
+      for (final binding in const [
+        KeyBinding(LogicalKeyboardKey.enter),
+        KeyBinding(LogicalKeyboardKey.keyF, control: true),
+        KeyBinding(LogicalKeyboardKey.escape),
+        KeyBinding(LogicalKeyboardKey.tab),
+        KeyBinding(LogicalKeyboardKey.digit3, control: true),
+      ]) {
+        expect(reservedBindingReason(binding), isNotNull,
+            reason: binding.label);
+        expect(
+          await controller.setBinding(AppShortcutAction.playPause, binding),
+          isFalse,
+          reason: binding.label,
+        );
+        expect(
+          controller.bindingsOf(AppShortcutAction.playPause),
+          defaultBindingsFor(AppShortcutAction.playPause),
+          reason: '被拒绝后键位不应变化（${binding.label}）',
+        );
+      }
     });
 
     test('恢复默认', () async {
@@ -151,6 +201,101 @@ void main() {
       // 固定快捷键也在清单里（此前只写在更新日志里）。
       expect(find.text('Ctrl + F'), findsOneWidget);
       expect(find.text('Ctrl + 1 ~ 6'), findsOneWidget);
+    });
+
+    testWidgets('桌面最小窗口宽（360）下不溢出', (tester) async {
+      // 长标签 + 「未设置」+ 恢复 + 修改 同排时曾溢出 108px；
+      // 窄窗改为两行布局，键位与操作折行。
+      ShortcutController.instance.debugSetBindings({
+        AppShortcutAction.playPause: const [],
+        AppShortcutAction.seekForward: const [
+          KeyBinding(
+            LogicalKeyboardKey.arrowRight,
+            control: true,
+            shift: true,
+            alt: true,
+          ),
+        ],
+      });
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        const MaterialApp(home: KeyboardShortcutsPage()),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('未设置'), findsOneWidget);
+    });
+
+    testWidgets('被抢走的动作显示「未设置」（不会偷偷回落默认键）', (tester) async {
+      ShortcutController.instance.debugSetBindings({
+        AppShortcutAction.playPause: const [],
+        AppShortcutAction.seekForward: const [
+          KeyBinding(LogicalKeyboardKey.space),
+        ],
+      });
+      await pumpPage(tester);
+
+      expect(find.text('未设置'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shortcut_chip_playPause_0')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('shortcut_chip_seekForward_0')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('改过键的行出现「恢复默认键位」，点击即找回', (tester) async {
+      ShortcutController.instance.debugSetBindings({
+        AppShortcutAction.playPause: const [],
+        AppShortcutAction.seekForward: const [
+          KeyBinding(LogicalKeyboardKey.space),
+        ],
+      });
+      await pumpPage(tester);
+
+      expect(find.text('未设置'), findsOneWidget);
+      // 没改过的行不该有恢复入口，避免满屏图标。
+      expect(
+        find.byKey(const ValueKey('shortcut_reset_seekBackward')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('shortcut_reset_playPause')));
+      await tester.pumpAndSettle();
+
+      final controller = ShortcutController.instance;
+      expect(
+        controller.bindingsOf(AppShortcutAction.playPause),
+        defaultBindingsFor(AppShortcutAction.playPause),
+      );
+      // 空格被要回来，快进让位（一个组合仍只属于一个动作）。
+      expect(controller.bindingsOf(AppShortcutAction.seekForward), isEmpty);
+      expect(find.text('未设置'), findsWidgets);
+    });
+
+    testWidgets('录制到系统保留键时禁用保存并说明原因', (tester) async {
+      await pumpPage(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('shortcut_edit_seekBackward')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(find.textContaining('回车用于打开播放页'), findsOneWidget);
+      final save = tester.widget<FilledButton>(
+        find.byKey(const ValueKey('shortcut_capture_save')),
+      );
+      expect(save.onPressed, isNull);
+      // 键位不受影响
+      expect(
+        ShortcutController.instance.bindingsOf(AppShortcutAction.seekBackward),
+        defaultBindingsFor(AppShortcutAction.seekBackward),
+      );
     });
 
     testWidgets('录制新键位并保存后立即生效', (tester) async {
