@@ -999,8 +999,11 @@ void main() {
     });
   });
 
-  group('底栏全域空白点击进入播放页', () {
-    testWidgets('有歌曲时，点击底栏非交互空白区域触发进入全屏播放页', (tester) async {
+  // issue #30：进播放页的点击此前绑在整条底栏上，播控按钮之间、右侧与
+  // 进度条两侧的空白都会触发展开详情页，切歌/暂停时极容易误触。契约改为
+  // 「只有左侧歌曲信息块可点」，其余空白不响应、也不再显示手型光标。
+  group('进播放页的点击范围仅限左侧信息块（issue #30）', () {
+    testWidgets('点击歌名（左块内）进入播放页', (tester) async {
       int openCalls = 0;
       final player = _FakePlayerController()..currentSong = _song;
       await _pumpBar(
@@ -1009,15 +1012,38 @@ void main() {
         onOpenPlayerPage: () => openCalls++,
       );
 
-      // 点击底栏最左侧空白边距 (x: 4, y: 860)
-      await tester.tapAt(const Offset(4, 860));
-      await tester.pump();
-      expect(openCalls, 1);
-
-      // 点击歌曲标题跑马灯区域也可以进入播放页
       await tester.tap(find.byType(MarqueeText));
       await tester.pump();
-      expect(openCalls, 2);
+      expect(openCalls, 1);
+    });
+
+    testWidgets('点击播控按钮之间的空白不再触发展开', (tester) async {
+      int openCalls = 0;
+      final player = _FakePlayerController()..currentSong = _song;
+      await _pumpBar(
+        tester,
+        player,
+        onOpenPlayerPage: () => openCalls++,
+      );
+
+      // 「上一首」与「播放」之间的 20px 间距：旧实现整栏可点，这里必然误触。
+      final previous = tester.getCenter(find.byTooltip('上一首'));
+      final play = tester.getCenter(find.byTooltip('播放'));
+      await tester.tapAt(Offset((previous.dx + play.dx) / 2, previous.dy));
+      await tester.pump();
+      expect(openCalls, 0);
+
+      // 中间列左右两侧的留白（Expanded 的 padding 区）同样不响应。
+      final barCenterY = tester.getCenter(find.byType(DesktopPlayerBar)).dy;
+      final leftEdge = tester.getTopRight(find.byType(SongInfo)).dx;
+      await tester.tapAt(Offset(leftEdge + 8, barCenterY));
+      await tester.pump();
+      expect(openCalls, 0);
+
+      // 右侧功能区之前的空白。
+      await tester.tapAt(Offset(tester.view.physicalSize.width - 200, barCenterY));
+      await tester.pump();
+      expect(openCalls, 0);
     });
 
     testWidgets('点击具名控制按钮不触发进入全屏播放页', (tester) async {
@@ -1045,7 +1071,7 @@ void main() {
       expect(openCalls, 0);
     });
 
-    testWidgets('无歌曲时，点击空白处不触发进入全屏播放页', (tester) async {
+    testWidgets('无歌曲时，点击左侧信息块也不触发', (tester) async {
       int openCalls = 0;
       final player = _FakePlayerController()..currentSong = null;
       await _pumpBar(
@@ -1054,7 +1080,7 @@ void main() {
         onOpenPlayerPage: () => openCalls++,
       );
 
-      await tester.tapAt(const Offset(4, 860));
+      await tester.tap(find.byType(SongInfo));
       await tester.pump();
       expect(openCalls, 0);
     });
