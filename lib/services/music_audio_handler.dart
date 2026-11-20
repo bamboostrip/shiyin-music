@@ -11,6 +11,7 @@ import 'package:just_audio/just_audio.dart';
 import '../config/app_config.dart';
 import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
+import 'local_artwork_service.dart';
 import 'lrc_formatter.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
@@ -578,6 +579,11 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 认作音频文件的后缀白名单（小写、无点）。
   ///
   /// 只认这些，避免把路径/查询串里的其它点号误当文件后缀（如 `...&v=1.2`）。
+  ///
+  /// 与 [localAudioSupportedExtensions] 的并集对齐：本地扫描得到的格式
+  /// 如果不在这个表里，代理路径就没有后缀、Content-Type 也会被打成
+  /// `audio/mpeg`，后端按扩展名挑 demuxer 时会直接打不开（issue #32 里
+  /// `.aiff` 就踩过这条：能列出、能扫描，就是放不出来）。
   static const Set<String> _audioExtensions = {
     'mp3',
     'flac',
@@ -592,6 +598,14 @@ class MusicAudioHandler extends BaseAudioHandler
     'ape',
     'wma',
     'caf',
+    'aiff',
+    'aif',
+    'aifc',
+    'wv',
+    'tta',
+    'mka',
+    'dsf',
+    'dff',
   };
 
   /// 从远端 URL 的 path 或本地文件路径里取音频后缀（小写、无点）；未知返回 null。
@@ -623,6 +637,12 @@ class MusicAudioHandler extends BaseAudioHandler
       'ogg' || 'oga' || 'opus' => 'audio/ogg',
       'ape' => 'audio/x-ape',
       'wma' => 'audio/x-ms-wma',
+      'aiff' || 'aif' || 'aifc' => 'audio/aiff',
+      'wv' => 'audio/x-wavpack',
+      'tta' => 'audio/x-tta',
+      'mka' => 'audio/x-matroska',
+      'dsf' => 'audio/x-dsf',
+      'dff' => 'audio/x-dff',
       _ => null,
     };
   }
@@ -784,6 +804,22 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   Future<void> _loadViaProxy(String url) async {
+    // content:// 媒体库地址只能由平台播放器直读：ExoPlayer 有
+    // ContentDataSource，本地文件代理只认真实路径（`File('content://…')`
+    // 必然打不开）。Android 10 的分区存储会拒绝按裸路径读其它应用的媒体
+    // 文件，那类机器上这是唯一能播的通道（issue #32）。
+    if (url.startsWith('content://')) {
+      final seq = ++_loadSeq;
+      debugPrint('[AudioHandler] 直读媒体库地址 seq=$seq target=content');
+      try {
+        await _enqueueEngineLoad(seq, url);
+      } on PlayerException catch (e) {
+        debugPrint('[AudioHandler] 引擎加载失败 code=${e.code} '
+            'target=content message=${e.message}');
+        throw Exception('播放失败: ${e.message}');
+      }
+      return;
+    }
     await _ensureProxy();
     final seq = ++_loadSeq;
     final isRemote = url.startsWith('http://') || url.startsWith('https://');
@@ -1012,7 +1048,7 @@ class MusicAudioHandler extends BaseAudioHandler
       ),
       artist: song.artist,
       duration: song.duration,
-      artUri: song.coverUrl == null ? null : Uri.tryParse(song.coverUrl!),
+      artUri: _systemArtUri(song),
       extras: buildLyricMediaExtras(
         song: song,
         lyricText: lyricText,
@@ -1265,11 +1301,22 @@ class MusicAudioHandler extends BaseAudioHandler
       title: song.title,
       artist: song.artist,
       duration: song.duration,
-      artUri: includeArt && song.coverUrl != null
-          ? Uri.tryParse(song.coverUrl!)
-          : null,
+      artUri: includeArt ? _systemArtUri(song) : null,
       extras: {'hash': song.hash, 'songId': song.id},
     );
+  }
+
+  /// 下发给系统媒体会话的封面 Uri（没有则 null）。
+  ///
+  /// `localart://`（本地内嵌封面）只在本进程内有效，系统侧解析不了这种伪
+  /// URL：下发出去只会让锁屏/车机拿一个坏 Uri 去请求，不如留空（本地歌的
+  /// 锁屏封面本来就是空的）。
+  static Uri? _systemArtUri(Song song) {
+    final coverUrl = song.coverUrl;
+    if (coverUrl == null || LocalArtworkService.isArtworkUrl(coverUrl)) {
+      return null;
+    }
+    return Uri.tryParse(coverUrl);
   }
 
   /// 构建通知卡片/系统媒体卡片的按钮序列。

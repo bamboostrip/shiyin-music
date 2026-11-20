@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/disk_cached_image_provider.dart';
+import '../../services/local_artwork_service.dart';
 import '../../services/network_monitor.dart';
 import '../form_factor.dart';
 
@@ -160,36 +161,47 @@ class _ArtworkState extends State<Artwork> {
   @override
   Widget build(BuildContext context) {
     final imageUrl = widget.url;
-    final child = imageUrl == null
-        ? _Fallback(icon: widget.icon)
-        : imageUrl.startsWith('content://')
-            ? _ContentUriImage(
-                uri: imageUrl,
-                size: widget.size,
-                borderRadius: widget.borderRadius,
-                icon: widget.icon,
-                highRes: widget.highRes,
-              )
-            : RetryableNetworkImage(
-                url: imageUrl,
-                // 解码尺寸吸附到固定档位（见 [decodeSizeFor]）：同一封面在不同
-                // 布局尺寸下复用同一条 ImageCache 条目，条目数下降、重复下载变少。
-                cacheWidth: decodeSizeFor(widget.size, highRes: widget.highRes),
-                cacheHeight:
-                    decodeSizeFor(widget.size, highRes: widget.highRes),
-                fit: BoxFit.cover,
-                errorBuilder:
-                    (context, error, stackTrace) => _Fallback(icon: widget.icon),
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) {
-                    return child;
-                  }
-                  return _ShimmerBox(
-                    size: widget.size,
-                    borderRadius: widget.borderRadius,
-                  );
-                },
-              );
+    final Widget child;
+    if (imageUrl == null) {
+      child = _Fallback(icon: widget.icon);
+    } else if (LocalArtworkService.isArtworkUrl(imageUrl)) {
+      // 本地音乐的内嵌封面：不联网，按需向原生/Rust 取字节。
+      child = _LocalArtworkImage(
+        url: imageUrl,
+        size: widget.size,
+        borderRadius: widget.borderRadius,
+        icon: widget.icon,
+        highRes: widget.highRes,
+      );
+    } else if (imageUrl.startsWith('content://')) {
+      child = _ContentUriImage(
+        uri: imageUrl,
+        size: widget.size,
+        borderRadius: widget.borderRadius,
+        icon: widget.icon,
+        highRes: widget.highRes,
+      );
+    } else {
+      child = RetryableNetworkImage(
+        url: imageUrl,
+        // 解码尺寸吸附到固定档位（见 [decodeSizeFor]）：同一封面在不同
+        // 布局尺寸下复用同一条 ImageCache 条目，条目数下降、重复下载变少。
+        cacheWidth: decodeSizeFor(widget.size, highRes: widget.highRes),
+        cacheHeight: decodeSizeFor(widget.size, highRes: widget.highRes),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) =>
+            _Fallback(icon: widget.icon),
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) {
+            return child;
+          }
+          return _ShimmerBox(
+            size: widget.size,
+            borderRadius: widget.borderRadius,
+          );
+        },
+      );
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.borderRadius),
@@ -268,6 +280,94 @@ class _ContentUriImageState extends State<_ContentUriImage> {
       fit: BoxFit.cover,
       cacheWidth: decodeSizeFor(widget.size, highRes: widget.highRes),
       cacheHeight: decodeSizeFor(widget.size, highRes: widget.highRes),
+    );
+  }
+}
+
+/// 加载本地音频文件的内嵌封面（`localart://art/<path>`）。
+///
+/// 与 [_ContentUriImage] 的分工：那个走 Android 的 `content://` 专辑图
+/// （Android 10 起已失效，仅剩历史记录兼容），这个走
+/// [LocalArtworkService]（桌面 Rust / Android MediaMetadataRetriever），
+/// 是本地音乐现在的唯一封面来源。
+///
+/// 首次取字节期间显示 shimmer（进程内 LRU 命中时毫秒级即消失），
+/// 确认无图后落到占位图；本地歌没有内嵌图是常态，shimmer 只闪一次
+/// （负缓存后重进视口直接占位）。
+class _LocalArtworkImage extends StatefulWidget {
+  const _LocalArtworkImage({
+    required this.url,
+    required this.size,
+    required this.borderRadius,
+    required this.icon,
+    required this.highRes,
+  });
+
+  final String url;
+  final double size;
+  final double borderRadius;
+  final IconData icon;
+  final bool highRes;
+
+  @override
+  State<_LocalArtworkImage> createState() => _LocalArtworkImageState();
+}
+
+class _LocalArtworkImageState extends State<_LocalArtworkImage> {
+  Uint8List? _bytes;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_LocalArtworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 列表复用同一个 Element 换歌时必须重取，否则会串封面。
+    if (oldWidget.url != widget.url) {
+      _bytes = null;
+      _loading = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final url = widget.url;
+    final target = LocalArtworkService.targetOf(url);
+    if (target == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final bytes = await LocalArtworkService.load(target);
+    // await 期间可能已换歌：只认发起时那个 url 的结果。
+    if (!mounted || widget.url != url) return;
+    setState(() {
+      _bytes = bytes;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return _ShimmerBox(size: widget.size, borderRadius: widget.borderRadius);
+    }
+    final bytes = _bytes;
+    if (bytes == null) {
+      return _Fallback(icon: widget.icon);
+    }
+    final decodeSize = decodeSizeFor(widget.size, highRes: widget.highRes);
+    return Image.memory(
+      bytes,
+      fit: BoxFit.cover,
+      cacheWidth: decodeSize,
+      cacheHeight: decodeSize,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) =>
+          _Fallback(icon: widget.icon),
     );
   }
 }

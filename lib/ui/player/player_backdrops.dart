@@ -1,9 +1,11 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
 import '../../models/music_models.dart';
+import '../../services/local_artwork_service.dart';
 import '../form_factor.dart';
 import '../widgets/artwork.dart';
 
@@ -128,14 +130,20 @@ class _ArtworkBackgroundState extends State<ArtworkBackground>
                       // 走磁盘缓存链路：重进播放页时背景从本地字节秒出，
                       // 不再等网络往返（重模糊 + 渐变兜底下网络闪烁原本就不明显，
                       // 磁盘命中后这一帧也不再有）。
-                      child: RetryableNetworkImage(
-                        url: coverUrl,
-                        fit: BoxFit.cover,
-                        cacheWidth: 100,
-                        cacheHeight: 100,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const SizedBox.shrink(),
-                      ),
+                      //
+                      // 本地歌的内嵌封面（localart://）不是网络图，走不了
+                      // RetryableNetworkImage/DiskCachedImageProvider，
+                      // 单独取字节后同样铺满+模糊。
+                      child: LocalArtworkService.isArtworkUrl(coverUrl)
+                          ? _LocalCoverBackdrop(url: coverUrl)
+                          : RetryableNetworkImage(
+                              url: coverUrl,
+                              fit: BoxFit.cover,
+                              cacheWidth: 100,
+                              cacheHeight: 100,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const SizedBox.shrink(),
+                            ),
                     ),
                   ),
                 ),
@@ -174,6 +182,62 @@ class FallbackBackground extends StatelessWidget {
           colors: [Color(0xFF153D35), Color(0xFF061219), Color(0xFF2C1320)],
         ),
       ),
+    );
+  }
+}
+
+/// 本地内嵌封面（`localart://`）的全屏背景图。
+///
+/// 只服务播放页的模糊背景：字节量小（解码目标 100px），取不到图就整块
+/// 让位给下面的 [FallbackBackground]，不闪占位色。
+class _LocalCoverBackdrop extends StatefulWidget {
+  const _LocalCoverBackdrop({required this.url});
+
+  final String url;
+
+  @override
+  State<_LocalCoverBackdrop> createState() => _LocalCoverBackdropState();
+}
+
+class _LocalCoverBackdropState extends State<_LocalCoverBackdrop> {
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_LocalCoverBackdrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _bytes = null;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final url = widget.url;
+    final target = LocalArtworkService.targetOf(url);
+    if (target == null) return;
+    final bytes = await LocalArtworkService.load(target);
+    if (!mounted || widget.url != url) return;
+    setState(() => _bytes = bytes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _bytes;
+    if (bytes == null) return const SizedBox.shrink();
+    return Image.memory(
+      bytes,
+      fit: BoxFit.cover,
+      // 背景本来就要被 24px 高斯模糊盖掉，100px 足够。
+      cacheWidth: 100,
+      cacheHeight: 100,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
     );
   }
 }

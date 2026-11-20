@@ -97,9 +97,26 @@ pub fn cancel_loudness_analysis() {
     loudness::cancel_loudness_analysis();
 }
 
-/// 读取本地音频的内嵌歌词标签（桌面端对应 Android 的 getEmbeddedLyrics）。
+/// 读取本地音频的内嵌歌词标签（容器 + ID3v2 USLT/TXXX）。Android 10
+/// 裸路径不可读时的兜底见 [read_local_lyrics_from_bytes]。
 pub fn read_local_lyrics(path: String) -> Result<Option<String>, String> {
     loudness::read_embedded_lyrics(&path).map_err(|e| e.to_string())
+}
+
+/// 读取本地音频的内嵌封面原始字节（issue #32：桌面本地歌此前完全没有封面）。
+///
+/// 无内嵌图返回 `Ok(None)`（封面缺失是常态，不是错误）。
+pub fn read_local_cover(path: String) -> Result<Option<Vec<u8>>, String> {
+    Ok(local_media::read_cover(&path))
+}
+
+/// 从文件头部字节读内嵌歌词（Android 10 分区存储下裸路径不可读，
+/// 由 Kotlin 侧截取头部后走这里；见 issue #32）。
+///
+/// 与 [read_local_lyrics] 的差别：入参是已截断的头部字节，容器探测
+/// 尽力而为，任何「读不了」都返回 `Ok(None)` 而非 Err。
+pub fn read_local_lyrics_from_bytes(data: Vec<u8>) -> Result<Option<String>, String> {
+    local_media::read_lyrics_from_bytes(&data).map_err(|e| e.to_string())
 }
 
 /// 本地音乐扫描流事件。

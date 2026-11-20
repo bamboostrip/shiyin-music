@@ -7,11 +7,25 @@ import '../core/folder_filter.dart';
 import '../models/music_models.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/services/local_media.dart' show LocalSongEntry;
+import '../services/local_artwork_service.dart';
 
 class LocalMusicController extends ChangeNotifier {
-  LocalMusicController() {
+  LocalMusicController({
+    Future<String?> Function(String path)? rustLyricsReader,
+    Future<String?> Function(Uint8List bytes)? rustLyricsBytesReader,
+    Future<Uint8List?> Function(String source)? mediaHeadReader,
+  })  : _rustLyricsReader = rustLyricsReader ?? _defaultRustLyricsReader,
+        _rustLyricsBytesReader =
+            rustLyricsBytesReader ?? _defaultRustLyricsBytesReader,
+        _mediaHeadReader = mediaHeadReader ?? _defaultMediaHeadReader {
     _init();
   }
+
+  /// 三个读取器抽成可注入字段：单测里 Rust 引擎与平台通道都跑不起来，
+  /// 注入假实现才能钉住回退顺序（默认实现见文件底部静态函数）。
+  final Future<String?> Function(String path) _rustLyricsReader;
+  final Future<String?> Function(Uint8List bytes) _rustLyricsBytesReader;
+  final Future<Uint8List?> Function(String source) _mediaHeadReader;
 
   @override
   void dispose() {
@@ -66,6 +80,18 @@ class LocalMusicController extends ChangeNotifier {
   bool get hasPermission => _hasPermission;
   List<Song> get songs => _songs;
   bool get isScanning => _isScanning;
+
+  /// 按裸路径查这首歌在媒体库里的 `content://` 地址。
+  ///
+  /// 用途：升级前落盘的队列/历史条目没有 [Song.localContentUri]（老版本
+  /// 不序列化该字段），Android 10 上裸路径不可读时靠这里从当前库状态兜底
+  /// （issue #32：自动重扫完成后，第二次尝试即可命中）。
+  String? contentUriForPath(String path) {
+    for (final song in _songs) {
+      if (song.id == path) return song.localContentUri;
+    }
+    return null;
+  }
 
   /// 已排除的文件夹列表（规范化后的绝对路径）。
   Set<String> get excludedFolders => Set.unmodifiable(_excludedFolders);
@@ -191,6 +217,13 @@ class LocalMusicController extends ChangeNotifier {
     if (!Platform.isAndroid) return;
     if (!_hasPermission) return;
 
+    // 重入保护：手动扫描进行中时，自动重扫（文件缺失触发）直接跳过——
+    // 并发扫只是重复查询、last-wins，桌面路径同款守卫。
+    if (_isScanning) {
+      debugPrint('[时音][本地音乐] 扫描进行中，跳过本次重扫请求（自动/手动并发去重）');
+      return;
+    }
+
     _isScanning = true;
     notifyListeners();
 
@@ -201,6 +234,7 @@ class LocalMusicController extends ChangeNotifier {
       for (final item in result) {
         if (item is Map) {
           final filePath = item['filePath'] as String? ?? '';
+          final contentUri = item['contentUri'] as String? ?? '';
           final rawTitle = item['title'] as String? ?? '未知歌曲';
           final artist = item['artist'] as String? ?? '未知艺人';
           final durationMs = item['duration'] as int?;
@@ -214,11 +248,19 @@ class LocalMusicController extends ChangeNotifier {
                 rawTitle: rawTitle,
                 artist: artist,
                 hash: filePath,
-                coverUrl: item['albumArtUri'] as String?,
+                // 封面走「文件内嵌图」而不是 MediaStore 的 albumArtUri：
+                // 后者的 provider URI 自 Android 10 起已被移除，取图必失败
+                // （issue #32 的「本地文件加载不出封面」）。
+                // 优先用 content:// 当读取目标：分区存储下裸路径不一定可读
+                // （Android 10 直接拒绝），content URI 在所有版本都能读。
+                coverUrl: LocalArtworkService.artworkUrlFor(
+                  contentUri.isNotEmpty ? contentUri : filePath,
+                ),
                 duration: durationMs != null
                     ? Duration(milliseconds: durationMs)
                     : null,
                 source: SongSource.local,
+                localContentUri: contentUri.isEmpty ? null : contentUri,
               ),
             );
             _recordFolderDisplayName(filePath);
@@ -250,22 +292,30 @@ class LocalMusicController extends ChangeNotifier {
   }
 
   /// 获取本地歌曲的内嵌歌词。
-  Future<String?> getEmbeddedLyrics(String filePath) async {
-    if (isDesktopScanSupported) {
-      try {
-        return await rust.readLocalLyrics(path: filePath);
-      } catch (e) {
-        debugPrint('Error reading embedded lyrics (rust): $e');
-        return null;
-      }
-    }
-    if (!Platform.isAndroid) return null;
+  ///
+  /// 读取顺序（issue #32 的 Android 10 兜底）：
+  /// 1. Rust 按裸路径读（Android 11+ / 桌面正常路径）；
+  /// 2. 路径打不开（Err）且带 [contentUri] 时（Android 10 分区存储）：
+  ///    经通道截取文件头部字节 → Rust 字节解析（ID3v2 驻留文件头，截断数据
+  ///    里完整可用；容器层尽力而为）。
+  /// 「路径解析成功但没有歌词」（Ok(None)）是确定性结论，不再兜底。
+  ///
+  /// 注：`MediaMetadataRetriever` 没有歌词 metadata key（历史上的
+  /// extractMetadata(26) 实为 METADATA_KEY_HAS_IMAGE），移动端内嵌歌词
+  /// 从未生效过——这是统一走 Rust 的原因。
+  Future<String?> getEmbeddedLyrics(String filePath, {String? contentUri}) async {
     try {
-      return await _channel.invokeMethod<String>('getEmbeddedLyrics', {
-        'filePath': filePath,
-      });
+      return await _rustLyricsReader(filePath);
     } catch (e) {
-      debugPrint('Error getting embedded lyrics: $e');
+      debugPrint('按路径读内嵌歌词失败，准备走头部字节兜底: $filePath ($e)');
+    }
+    if (contentUri == null || contentUri.isEmpty) return null;
+    try {
+      final head = await _mediaHeadReader(contentUri);
+      if (head == null || head.isEmpty) return null;
+      return await _rustLyricsBytesReader(head);
+    } catch (e) {
+      debugPrint('头部字节兜底读内嵌歌词失败: $contentUri ($e)');
       return null;
     }
   }
@@ -409,7 +459,9 @@ class LocalMusicController extends ChangeNotifier {
       artist: artist,
       albumName: entry.album.isNotEmpty ? entry.album : null,
       hash: entry.path,
-      coverUrl: null,
+      // 桌面端此前恒为 null（Rust 扫描只读标签不取图），本地歌永远只有
+      // 音符占位。改为按需读内嵌封面（Rust symphonia visuals）。
+      coverUrl: LocalArtworkService.artworkUrlFor(entry.path),
       duration: entry.durationMs > 0
           ? Duration(milliseconds: entry.durationMs.toInt())
           : null,
@@ -424,4 +476,19 @@ class LocalMusicController extends ChangeNotifier {
     final dot = name.lastIndexOf('.');
     return dot > 0 ? name.substring(0, dot) : name;
   }
+
+  /// 默认路径读取器：Rust 按裸路径读内嵌歌词（Err 时 throw，由
+  /// [getEmbeddedLyrics] 捕获后走兜底）。
+  static Future<String?> _defaultRustLyricsReader(String path) =>
+      rust.readLocalLyrics(path: path);
+
+  /// 默认字节读取器：Rust 从头部字节解析内嵌歌词（任何「读不了」
+  /// 都返回 null，不抛错）。
+  static Future<String?> _defaultRustLyricsBytesReader(Uint8List bytes) =>
+      rust.readLocalLyricsFromBytes(data: bytes);
+
+  /// 默认头部截取器：经平台通道读文件头部字节（Android 10 分区存储下
+  /// 裸路径不可读，content:// 只有 ContentResolver 认识）。
+  static Future<Uint8List?> _defaultMediaHeadReader(String source) =>
+      _channel.invokeMethod<Uint8List>('readMediaHead', {'source': source});
 }

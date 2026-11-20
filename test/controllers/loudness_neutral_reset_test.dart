@@ -241,6 +241,10 @@ void main() {
       final handler = _RecordingAudioHandler(fakeAudioPlayer);
       final api = _MockMusicApi();
       final controller = PlayerController(api, handler);
+      // 本地源起播预检的存在性探测注入：testWidgets 跑在 FakeAsync 里，
+      // 真实磁盘 IO 的 Future 永远等不到完成（预检改异步 File.exists 后
+      // 必须注入）。这里两个 hash 用的都是上面同步写出的真实文件。
+      controller.localFileExistsProbe = (_) async => true;
 
       // 构造函数 unawaited 发起 _loudness.init()：轮询直到开关从
       // SharedPreferences 恢复完成，避免 playSong 时缓存查询早于 init。

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart'
     show MediaItem, PlaybackState;
@@ -30,6 +31,8 @@ import '../services/car_media_center_service.dart';
 import '../services/desktop_audio_filters.dart';
 import '../services/desktop_lyrics_service.dart';
 import '../services/loudness_service.dart';
+import '../services/local_audio_formats.dart';
+import '../services/local_artwork_service.dart';
 import '../services/local_lyrics_service.dart';
 import '../services/lrc_formatter.dart';
 import '../services/lyric_cache_service.dart';
@@ -634,6 +637,16 @@ class PlayerController extends _PlayerControllerBase
   }
 }
 
+/// 是否远端音源（http/https）。本地文件虽然也经本机代理加载，但语义上
+/// 仍是「本地」，两条路径的失败判定完全不同。
+///
+/// 库级函数（原 playback 分片内的 mixin 静态成员提升）：mixin 体访问
+/// on 约束类的静态成员必须限定类名，而 playback/settings 两个分片都要
+/// 用它做分流，提升到库级后引用方式不变（与本文件顶部「原类内 static
+/// const 拆分后提升为库级常量」同一处理）。
+bool _isRemoteAudioUrl(String url) =>
+    url.startsWith('http://') || url.startsWith('https://');
+
 /// PlayerController 的可变状态基座：全部字段与状态派生的基础成员集中于此，
 /// 供同库 part 文件中的职责 mixin（on 本类）与 PlayerController 自身直接访问
 /// （同库私有，零可见性改动）。
@@ -844,6 +857,82 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 本轮 streak 内因「确定性无音源」已自动跳过的曲数（与
   /// [_autoSkippedInStreak] 分账，见 [_kMaxNoSourceSkipsPerStreak]）。
   int _autoSkippedNoSourceInStreak = 0;
+
+  /// 本轮失败 streak 内是否已为「本地文件不存在」触发过重扫。
+  ///
+  /// 一次失败往往连跳好几首（整个目录被挪走），逐首重扫会让扫描器被反复
+  /// 抢占；这里只在首首失败时触发一次，成功起播后重新放开。
+  bool _localRescanRequested = false;
+
+  /// 本地文件存在性探测（单测注入点，默认走真实异步 IO）。
+  ///
+  /// 生产实现必须是异步 [File.exists]：桌面 NAS/UNC 失联路径的一次探测
+  /// 可能秒级阻塞，绝不能同步 `existsSync` 压主 isolate。单测跑在
+  /// FakeAsync 里，真实磁盘 IO 的 Future 永远等不到完成（见
+  /// player_local_source_failure_test 既有注释），注入假实现才能确定
+  /// 性驱动各分支——与本类 `bluetoothLyricNow` 同款注入范式。
+  @visibleForTesting
+  Future<bool> Function(String path) localFileExistsProbe =
+      (path) => File(path).exists();
+
+  /// 本地音源确定性失败时触发一次本地库重扫（每次失败 streak 只触发一次）。
+  ///
+  /// 只对「文件不存在」触发：格式不支持与库内容无关，重扫纯属白跑；
+  /// 而文件消失往往意味着整个目录被挪走，重扫能把整片失效条目收敛掉，
+  /// 用户不用手动去设置里点扫描。
+  ///
+  /// 放在基类：除了失败收尾（playback 分片的 _registerPlaybackFailure），
+  /// [_resolveLocalSourceUrl] 的陈旧条目兜底命中也要触发（原 playback
+  /// 分片成员上移，语义不变）。
+  void _scheduleLocalRescanAfterMissing() {
+    if (_localRescanRequested) return;
+    final controller = localMusic;
+    if (controller == null) return;
+    _localRescanRequested = true;
+    _nextLog('本地文件缺失，触发本地库重扫');
+    unawaited(controller.scanLocalMusic());
+  }
+
+  /// 本地音源起播前的确定性检查，返回真正交给引擎的地址。
+  ///
+  /// 抛出的两类异常都由调用方（playSong / _reloadCurrentSongForQuality）
+  /// 的 catch 收口，走「一次即判跳过」：
+  /// - [LocalAudioFormatException]：当前内核没有该后缀的解析器（Android 上的
+  ///   APE/WMA/AIFF 等），交给引擎只会换来一句 `Failed to open`；
+  /// - [LocalAudioMissingException]：裸路径读不到、也没有可回退的媒体库地址。
+  ///
+  /// 注意三点：
+  /// 1. **格式检查排在可读性之前**——格式不支持时文件通常是在的；
+  /// 2. 存在性检查用异步 [File.exists]：桌面 NAS/UNC 失联路径的一次探测
+  ///    可能秒级阻塞，不能压主 isolate（旧实现是 existsSync）；
+  /// 3. 裸路径读不到时的回退顺序：`song.localContentUri` →
+  ///    [LocalMusicController.contentUriForPath]（升级前的陈旧条目）。
+  ///    分区存储下 Android 10 只有 content URI 能读，交给引擎时由
+  ///    `MusicAudioHandler` 直接透传（不进本地文件代理）。
+  Future<String> _resolveLocalSourceUrl(Song song, String path) async {
+    final reason = unsupportedLocalAudioReason(path);
+    if (reason != null) {
+      _nextLog('本地音源格式不支持: ${song.title} → $reason');
+      throw LocalAudioFormatException('《${song.title}》$reason');
+    }
+    if (await localFileExistsProbe(path)) return path;
+    final fromEntry = song.localContentUri;
+    if (fromEntry != null && fromEntry.isNotEmpty) {
+      _nextLog('本地路径不可读，回退条目媒体库地址: ${song.title} → $fromEntry');
+      return fromEntry;
+    }
+    final fromLibrary = localMusic?.contentUriForPath(path);
+    if (fromLibrary != null && fromLibrary.isNotEmpty) {
+      _nextLog('本地路径不可读，回退媒体库地址(库内查找): ${song.title} → $fromLibrary');
+      // 陈旧条目兜底命中说明队列里的裸路径已落后于库状态（升级前落盘的
+      // 条目没有 localContentUri）：顺手触发一次重扫收敛库，后续条目
+      // 重新序列化时就会带上地址（条目自带地址的上一分支则无需重扫）。
+      _scheduleLocalRescanAfterMissing();
+      return fromLibrary;
+    }
+    _nextLog('本地音源文件缺失: ${song.title} → $path');
+    throw LocalAudioMissingException(path);
+  }
 
   /// 无音源跳过这一路自己的墙钟起点：与 [_autoSkipStreakSince] 分开，
   /// 否则一条 streak 被另一类跳过提前起算/超时，误伤另一类的预算。

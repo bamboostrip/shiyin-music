@@ -126,13 +126,13 @@ void main() {
   late _FakeMusicApi api;
   late List<String> embeddedCalls;
   String? embeddedLyrics;
-  Future<String?> Function(String path)? onReadEmbedded;
+  Future<String?> Function(Song song)? onReadEmbedded;
 
-  Future<String?> readEmbedded(String path) async {
-    embeddedCalls.add(path);
+  Future<String?> readEmbedded(Song song) async {
+    embeddedCalls.add(song.id);
     final handler = onReadEmbedded;
     if (handler != null) {
-      return handler(path);
+      return handler(song);
     }
     return embeddedLyrics;
   }
