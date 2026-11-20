@@ -83,11 +83,20 @@ void main() {
       // 预发布。断言改为「重定向 tag = Atom 中不高于它的最新条目」。
       expect(redirectedTag, isNotNull, reason: '重定向应给出 tag');
       final redirectedVersion = stripVersionTagPrefix(redirectedTag!);
-      final newestNotAboveRedirect = entries
+      final notAboveRedirect = entries
           .map((e) => e.$1)
-          .where((t) => compareSemver(stripVersionTagPrefix(t), redirectedVersion) <= 0)
-          .first;
-      expect(redirectedTag, newestNotAboveRedirect,
+          .where(
+            (t) =>
+                compareSemver(stripVersionTagPrefix(t), redirectedVersion) <=
+                0,
+          )
+          .toList();
+      expect(
+        notAboveRedirect,
+        isNotEmpty,
+        reason: 'Atom 窗口内应有 ≤最新正式版的条目（窗口全预发布=窗口过窄，探针失效）',
+      );
+      expect(redirectedTag, notAboveRedirect.first,
           reason: '重定向 tag 应为 Atom 中 ≤它的最新条目（即最新正式版）');
 
       // 直链可用性：Range 探测应 206/200
@@ -177,6 +186,13 @@ void main() {
         stable.any((e) => compareSemver(e.versionName, ceilingVersion) > 0),
         isFalse,
         reason: '天花板过滤后不得有高于最新正式版的条目',
+      );
+      // 软断言：报告滤掉数量。仓库清空预发布后此探针不会空洞通过——
+      // 数字直接暴露在输出里，人工跑探针时一眼可见过滤是否在工作。
+      // ignore: avoid_print
+      print(
+        '[live-probe] Atom ${summaries.length} 条，天花板 $ceilingTag，'
+        '滤掉高于天花板的预发布 ${summaries.length - stable.length} 条',
       );
     }, skip: !_liveEnabled);
   });

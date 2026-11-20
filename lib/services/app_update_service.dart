@@ -338,10 +338,36 @@ class AppUpdateService {
   /// （都在 github.com 域，不占 API 频次）。与 L1 同样做平台相关性选版，
   /// 只是 feed 只有约 10 条、正文需从 HTML 转 Markdown。
   Future<AppVersionInfo?> _fetchViaAtomFeed() async {
+    // 天花板先行（先于取 feed）：/releases/latest 只指向最新正式版（与
+    // L3 同款探测）。若反过来先取 feed 后探天花板，秒级窗口内恰有新正式
+    // 版发布时天花板升高，feed 里的旧预发布变为 ≤ ceiling 被保留——竞态
+    // 把预发布推出去（fail-open）。探完再取 feed 则天然 fail-closed：
+    // 窗口内新发的预发布高于旧天花板被滤掉；新发的正式版会被暂时滤掉
+    // （漏一轮提示、下轮自愈），方向与本服务「宁漏不推错」的原则一致。
+    //
+    // Atom feed 不带 prerelease 标志，纯 tag 语法过滤拦不住 v3.0.22 这类
+    // **纯正式格式 tag** 的预发布——semver 高于最新正式版的条目必为预
+    // 发布（draft 不进 feed），一律丢弃。
+    //
+    // 探测抛错（网络抖动）直接上抛给容灾链降级 L3（它对同一端点重试，
+    // 天然只含正式版）。
+    final ceilingTag = await _probeLatestReleaseTag();
+    if (ceilingTag == null) {
+      // 404：仓库没有任何正式版 Release，feed 里的条目全是预发布。
+      return null;
+    }
+    // 防御：/releases/latest 探测到非正式语法 tag 时无法作天花板，
+    // 抛错降级 L3（由它的「暂无正式发布版本」收口），不沿用语义不明的值。
+    if (!isStableVersionTag(ceilingTag)) {
+      throw StateError('暂无正式发布版本');
+    }
+    final ceilingVersion = stripVersionTagPrefix(ceilingTag);
+
     final xml = await _getText(Uri.parse(AppConfig.githubReleasesAtomUrl));
     final entries = parseEntriesFromAtom(xml);
     if (entries.isEmpty) {
-      // 仓库从未发布过 Release 时 Atom 为空 feed，语义与 L1 空列表一致。
+      // 仓库从未发布过 Release 时 Atom 为空 feed，语义与 L1 空列表一致
+      //（正式版存在而 feed 全空的组合实际不可能出现，防御保留）。
       return null;
     }
     final summaries = [
@@ -351,30 +377,6 @@ class AppUpdateService {
           body: htmlReleaseBodyToMarkdown(unescapeHtml(contentHtml)),
         ),
     ];
-
-    // 天花板：/releases/latest 只指向最新正式版（与 L3 同款探测）。Atom
-    // feed 不带 prerelease 标志，纯 tag 语法过滤拦不住 v3.0.22 这类**纯
-    // 正式格式 tag** 的预发布——semver 高于最新正式版的条目必为预发布
-    // （draft 不进 feed），一律丢弃。
-    String? ceilingTag;
-    try {
-      ceilingTag = await _probeLatestReleaseTag();
-    } catch (_) {
-      // 天花板探不动（网络抖动）：无法在 feed 里区分预发布，抛给容灾链
-      // 降级 L3（它对同一端点重试，天然只含正式版）。fail-closed：宁漏
-      // 一轮提示（下轮自动检查自愈），不把预发布当正式版推出去。
-      rethrow;
-    }
-    if (ceilingTag == null) {
-      // 404：仓库没有任何正式版 Release，Atom 里的条目全是预发布。
-      return null;
-    }
-    // 防御：/releases/latest 探测到非正式语法 tag 时无法作天花板，
-    // 抛错降级 L3（由它的「暂无正式发布版本」收口），不沿用语义不明的值。
-    if (!isStableVersionTag(ceilingTag)) {
-      throw StateError('暂无正式发布版本');
-    }
-    final ceilingVersion = stripVersionTagPrefix(ceilingTag);
     final stableSummaries = dropPrereleasesAboveCeiling(
       summaries,
       ceilingVersion,
