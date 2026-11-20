@@ -81,8 +81,14 @@ class GlobalHotkeyService extends ChangeNotifier {
   /// 应用级单例：main 装配后赋值，设置页从这里读注册失败状态。
   static GlobalHotkeyService? instance;
 
-  static String identifierOf(GlobalShortcutAction action) =>
-      'shiyin_global_${action.name}';
+  /// 动作的注册标识：首个组合用裸名（与既有测试/日志契约一致），后续
+  /// 组合追加 `_索引`。手改配置可能给一个动作多个组合——原生侧
+  /// map.insert 不覆盖，同 identifier 二次注册会让第二个组合成死键且
+  /// 不被注销，唯一标识让每个组合都能独立注册/注销/触发。
+  static String identifierOf(GlobalShortcutAction action, [int index = 0]) =>
+      index == 0
+          ? 'shiyin_global_${action.name}'
+          : 'shiyin_global_${action.name}_$index';
 
   final Map<GlobalShortcutAction, Object> _errors = {};
   bool _started = false;
@@ -143,10 +149,12 @@ class GlobalHotkeyService extends ChangeNotifier {
     await _registrar.unregisterAll();
     if (!_controller.enabled) return;
     for (final action in GlobalShortcutAction.values) {
-      for (final binding in _controller.bindingsOf(action)) {
+      final bindings = _controller.bindingsOf(action);
+      for (var index = 0; index < bindings.length; index++) {
+        final binding = bindings[index];
         try {
           await _registrar.register(
-            identifier: identifierOf(action),
+            identifier: identifierOf(action, index),
             binding: binding,
             onKeyDown: () => _onAction(action),
           );

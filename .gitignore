@@ -31,6 +31,10 @@ migrate_working_dir/
 **/ios/Pods/
 **/ios/.symlinks/
 .dart_tool/
+# vendored 热键插件包的 pubspec.lock 是根 pub get 的副产物，不入库
+# （window_manager 的 lock 是历史遗留且有意入库，故不用全局模式）。
+packages/hotkey_manager_windows/pubspec.lock
+packages/hotkey_manager_linux/pubspec.lock
 .flutter-plugins-dependencies
 .flutter
 .flutter_tool_state

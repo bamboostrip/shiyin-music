@@ -177,6 +177,43 @@ void main() {
       expect(registrar.unregisterAllCalls, 0);
     });
 
+    test('手改配置产生多绑定：每个组合独立 identifier 注册且都能触发动作', () async {
+      // UI 一次只指派一个组合，但手改 prefs/旧版残留可能给一个动作多组合：
+      // 同 identifier 二次注册在原生 map.insert 处不覆盖（第二组合成死键
+      // 且不被注销），必须按索引给唯一 identifier。
+      GlobalShortcutController.instance.debugSetBindings({
+        GlobalShortcutAction.volumeUp: const [
+          KeyBinding(LogicalKeyboardKey.arrowUp, control: true, alt: true),
+          KeyBinding(LogicalKeyboardKey.f8, control: true, alt: true),
+        ],
+      });
+      final registrar = _FakeRegistrar();
+      final calls = <GlobalShortcutAction, int>{};
+      final service = GlobalHotkeyService(
+        controller: GlobalShortcutController.instance,
+        registrar: registrar,
+        onAction: (action) => calls[action] = (calls[action] ?? 0) + 1,
+      );
+
+      await service.sync();
+
+      // 默认 5 个动作 + volumeUp 的第二个组合 = 6 条独立注册。
+      expect(
+        registrar.registered.length,
+        GlobalShortcutAction.values.length + 1,
+      );
+      expect(registrar.registered.containsKey('shiyin_global_volumeUp'), isTrue);
+      expect(
+        registrar.registered.containsKey('shiyin_global_volumeUp_1'),
+        isTrue,
+      );
+
+      // 两个组合都分发到同一动作。
+      registrar.press('shiyin_global_volumeUp');
+      registrar.press('shiyin_global_volumeUp_1');
+      expect(calls[GlobalShortcutAction.volumeUp], 2);
+    });
+
     test('同步失败状态变化时通知监听者（设置页据此刷新标注）', () async {
       var notifications = 0;
       final registrar = _FakeRegistrar(

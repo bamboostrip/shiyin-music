@@ -16,7 +16,8 @@ import '../widgets/toast.dart';
 /// - 播放类动作（7 项）可改，立即生效并写盘（[ShortcutController]）；
 /// - 全局快捷键（5 项，系统级、窗口失焦也响应）经 hotkey_manager 注册，
 ///   默认开启、可整体关闭、可逐项改键（[GlobalShortcutController] +
-///   [GlobalHotkeyService]）；注册失败（组合被其它程序占用）行内标注；
+///   [GlobalHotkeyService]）；注册失败（组合被其它程序占用或该键不被
+///   支持）行内标注；
 /// - 侧栏/搜索/打开播放页等骨架级按键为固定组合，只作展示。
 class KeyboardShortcutsPage extends StatefulWidget {
   const KeyboardShortcutsPage({super.key});

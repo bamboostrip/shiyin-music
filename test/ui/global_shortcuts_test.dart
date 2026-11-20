@@ -217,6 +217,24 @@ void main() {
       expect(controller.enabled, isFalse);
     });
 
+    test('load() 期间监听者抛错：异常不会逃出 load 毒化缓存的 Future', () async {
+      final controller = GlobalShortcutController.instance;
+      void badListener() => throw StateError('listener boom');
+      controller.addListener(badListener);
+
+      // ChangeNotifier.notifyListeners 对每个监听者单独 try/catch（异常
+      // 走 FlutterError），因此 notifyListeners 不会把 _load 变成失败的
+      // Future——load() 的在途缓存也就不会永久缓存异常。本测试钉住这个
+      // 前提：若未来换成会传播异常的自定义分发，这里立即变红。
+      await controller.load();
+      controller.removeListener(badListener);
+
+      // 移除肇事监听者后再 load 一次，读的是新配置而非缓存失败。
+      controller.debugReset();
+      await controller.load();
+      expect(controller.loaded, isTrue);
+    });
+
     test('整串配置是坏 JSON/非对象时回退默认表且开关保持默认', () async {
       for (final raw in ['{oops', '[1,2]', '"配置"', 'null']) {
         SharedPreferences.setMockInitialValues({

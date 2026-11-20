@@ -86,7 +86,10 @@ static FlMethodResponse* hkm_register(_HotkeyManagerLinuxPlugin* self,
     modifiers.push_back(keyModifier);
   }
 
-  const char* keystring =
+  // [SHIYIN PATCH] g_autofree：gtk_accelerator_name 返回 g_malloc 的字符串，
+  // 上游从不释放（每次注册泄漏几十字节）。keybinder_bind 与注销表各自
+  // 拷贝内容，函数返回时释放安全。
+  g_autofree gchar* keystring =
       gtk_accelerator_name(key_code, (GdkModifierType)get_mods(modifiers));
 
   keybinder_init();
