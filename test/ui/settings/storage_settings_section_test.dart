@@ -85,5 +85,37 @@ void main() {
 
     final tile = tester.widget<Switch>(find.byType(Switch));
     expect(tile.value, isTrue);
+
+    // 行内 InkWell 与 Switch 都是可点区域：点开关本体必须只切换一次，
+    // 不能「InkWell 再翻一次」变成原地不动。
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    expect(downloads.setCalls, 2);
+    expect(downloads.saveLyrics, isFalse);
+  });
+
+  testWidgets('桌面最小窗口（360 宽）下不溢出', (tester) async {
+    final downloads = _FakeDownloads();
+    tester.view.physicalSize = const Size(360, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            children: [
+              StorageSettingsSection(
+                downloads: downloads,
+                player: _FakePlayer(),
+                onOpenManager: () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('同时保存 LRC 歌词'), findsOneWidget);
   });
 }

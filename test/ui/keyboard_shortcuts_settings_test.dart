@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -162,6 +164,24 @@ void main() {
       }
     });
 
+    test('手改配置里同一键位重复出现：先到先得，不产生两个动作共用', () async {
+      SharedPreferences.setMockInitialValues({
+        ShortcutController.prefsKey: jsonEncode({
+          'playPause': ['0000:32'],
+          'seekForward': ['0000:32'], // 与 playPause 撞车
+        }),
+      });
+      final controller = ShortcutController.instance;
+      controller.debugReset();
+      await controller.load();
+
+      expect(
+        controller.bindingsOf(AppShortcutAction.playPause),
+        [const KeyBinding(LogicalKeyboardKey.space)],
+      );
+      expect(controller.bindingsOf(AppShortcutAction.seekForward), isEmpty);
+    });
+
     test('恢复默认', () async {
       final controller = ShortcutController.instance;
       await controller.setBinding(
@@ -201,6 +221,34 @@ void main() {
       // 固定快捷键也在清单里（此前只写在更新日志里）。
       expect(find.text('Ctrl + F'), findsOneWidget);
       expect(find.text('Ctrl + 1 ~ 6'), findsOneWidget);
+    });
+
+    testWidgets('「恢复默认」需二次确认，取消不丢配置', (tester) async {
+      ShortcutController.instance.debugSetBindings({
+        AppShortcutAction.playPause: const [
+          KeyBinding(LogicalKeyboardKey.keyK, control: true),
+        ],
+      });
+      await pumpPage(tester);
+
+      await tester.tap(find.byKey(const ValueKey('shortcut_reset_all')));
+      await tester.pumpAndSettle();
+      expect(find.text('恢复默认快捷键？'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('shortcut_reset_cancel')));
+      await tester.pumpAndSettle();
+      expect(
+        ShortcutController.instance.bindingsOf(AppShortcutAction.playPause),
+        [const KeyBinding(LogicalKeyboardKey.keyK, control: true)],
+      );
+
+      await tester.tap(find.byKey(const ValueKey('shortcut_reset_all')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('shortcut_reset_confirm')));
+      await tester.pumpAndSettle();
+      expect(
+        ShortcutController.instance.bindingsOf(AppShortcutAction.playPause),
+        defaultBindingsFor(AppShortcutAction.playPause),
+      );
     });
 
     testWidgets('桌面最小窗口宽（360）下不溢出', (tester) async {

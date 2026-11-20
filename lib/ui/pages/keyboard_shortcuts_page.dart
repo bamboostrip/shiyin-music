@@ -52,6 +52,27 @@ class _KeyboardShortcutsPageState extends State<KeyboardShortcutsPage> {
   }
 
   Future<void> _resetAll() async {
+    // 一键抹掉全部自定义键位且不可撤销，先确认一次。
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('恢复默认快捷键？'),
+        content: const Text('所有自定义键位都会回到默认值，且无法撤销。'),
+        actions: [
+          TextButton(
+            key: const ValueKey('shortcut_reset_cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const ValueKey('shortcut_reset_confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('恢复默认'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     await ShortcutController.instance.resetAll();
     if (!mounted) return;
     Toast.success('已恢复默认快捷键');

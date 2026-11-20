@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -115,7 +116,8 @@ class KeyBinding {
     if (control) 'Ctrl',
     if (shift) 'Shift',
     if (alt) 'Alt',
-    if (meta) 'Win',
+    // macOS 的 Command 键在 Windows 上是 Win 键，展示名跟随平台。
+    if (meta) defaultTargetPlatform == TargetPlatform.macOS ? 'Cmd' : 'Win',
     describeShortcutKey(key),
   ].join(' + ');
 
@@ -289,6 +291,9 @@ class ShortcutController extends ChangeNotifier {
   Map<AppShortcutAction, List<KeyBinding>> _bindings = _defaults();
   bool _loaded = false;
 
+  /// 本地改动代次：用于识别「读取配置期间用户已经改过键」。
+  int _revision = 0;
+
   /// 是否已尝试从磁盘读取（[load] 幂等）。
   bool get loaded => _loaded;
 
@@ -311,11 +316,16 @@ class ShortcutController extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
+    final revisionAtStart = _revision;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(prefsKey);
       final decoded = raw == null ? null : _decode(raw);
-      _bindings = decoded ?? _defaults();
+      // 读盘是异步的：这段窗口里用户若已经在设置页改过键（冷启动首帧后
+      // 就进设置页虽极端，但成本为零），不能拿磁盘旧值把它盖掉。
+      if (_revision == revisionAtStart) {
+        _bindings = decoded ?? _defaults();
+      }
     } catch (error) {
       debugPrint('[时音][shortcuts] 读取快捷键配置失败（回退默认）: $error');
       _bindings = _defaults();
@@ -354,6 +364,7 @@ class ShortcutController extends ChangeNotifier {
 
   /// 全部恢复默认。
   Future<void> resetAll() async {
+    _revision++;
     _bindings = _defaults();
     notifyListeners();
     await _persist();
@@ -361,6 +372,7 @@ class ShortcutController extends ChangeNotifier {
 
   /// 把 [bindings] 指派给 [action]，并把这些组合从其它动作上摘掉。
   void _assign(AppShortcutAction action, List<KeyBinding> bindings) {
+    _revision++;
     for (final other in AppShortcutAction.values) {
       if (other == action) continue;
       final remaining = bindingsOf(
@@ -390,6 +402,7 @@ class ShortcutController extends ChangeNotifier {
   void debugReset() {
     _bindings = _defaults();
     _loaded = false;
+    _revision = 0;
   }
 
   /// 仅供测试：跳过 prefs 直接注入（模拟已加载的配置）。
@@ -414,6 +427,9 @@ class ShortcutController extends ChangeNotifier {
       final json = jsonDecode(raw);
       if (json is! Map) return null;
       final result = <AppShortcutAction, List<KeyBinding>>{};
+      // 一个组合只能属于一个动作：同一键位在多处出现时先到先得，
+      // 后来者丢弃（手改配置/旧版本残留都不该让播放键静默失效）。
+      final claimed = <KeyBinding>{};
       for (final action in AppShortcutAction.values) {
         final encoded = json[action.name];
         // 键缺失（老版本/半截配置）才回默认；**显式的空数组要保留**——
@@ -427,7 +443,7 @@ class ShortcutController extends ChangeNotifier {
         for (final item in encoded) {
           if (item is! String) continue;
           final binding = KeyBinding.tryDecode(item);
-          if (binding != null) parsed.add(binding);
+          if (binding != null && claimed.add(binding)) parsed.add(binding);
         }
         result[action] = parsed;
       }
