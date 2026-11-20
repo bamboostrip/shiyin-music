@@ -48,6 +48,7 @@ class Song {
     this.artists = const [],
     this.isCloudDrive = false,
     this.source = SongSource.kugou,
+    this.localContentUri,
   });
 
   final String id;
@@ -70,6 +71,13 @@ class Song {
 
   /// 歌曲来源平台。
   final SongSource source;
+
+  /// 本地歌在媒体库里的 `content://` 地址（仅 Android 会填）。
+  ///
+  /// 分区存储下裸路径不一定可读：Android 10 直接拒绝按路径读其它应用的
+  /// 媒体文件（11 才恢复），这类机器上只有 MediaStore 的 content URI 能读。
+  /// 播放/封面据此做兜底，见 `PlayerController._resolveLocalSourceUrl`。
+  final String? localContentUri;
 
   factory Song.fromSearch(Map<String, dynamic> json) {
     final songId =
@@ -631,6 +639,7 @@ class Song {
         .toList(),
     if (isCloudDrive) 'isCloudDrive': true,
     if (source != SongSource.kugou) 'source': source.name,
+    if (localContentUri != null) 'localContentUri': localContentUri,
   };
 
   factory Song.fromCache(Map<String, dynamic> json) {
@@ -672,6 +681,7 @@ class Song {
               orElse: () => SongSource.kugou,
             )
           : SongSource.kugou,
+      localContentUri: asString(json['localContentUri']),
     );
   }
 }

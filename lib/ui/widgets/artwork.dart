@@ -335,12 +335,12 @@ class _LocalArtworkImageState extends State<_LocalArtworkImage> {
 
   Future<void> _load() async {
     final url = widget.url;
-    final path = LocalArtworkService.pathOf(url);
-    if (path == null) {
+    final target = LocalArtworkService.targetOf(url);
+    if (target == null) {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    final bytes = await LocalArtworkService.load(path);
+    final bytes = await LocalArtworkService.load(target);
     // await 期间可能已换歌：只认发起时那个 url 的结果。
     if (!mounted || widget.url != url) return;
     setState(() {

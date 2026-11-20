@@ -6,9 +6,9 @@ mixin _PlayerLyrics on _PlayerControllerBase {
   ///
   /// 懒建的原因：`cacheService` / `localMusic` 由 `main.dart` 在 controller
   /// 创建后注入，构造期可能还是 null；首次真正加载本地歌词时注入值已就绪。
-  /// 内嵌歌词由 [LocalMusicController.getEmbeddedLyrics] 读取（Rust
-  /// `readLocalLyrics` / Android MethodChannel），避免引入上游的
-  /// `audio_metadata_reader` 依赖。
+  /// 内嵌歌词由 [LocalMusicController.getEmbeddedLyrics] 读取（各平台统一走
+  /// Rust `readLocalLyrics`，含 ID3v2 的 USLT / `TXXX:lyrics`），避免引入上游
+  /// 的 `audio_metadata_reader` 依赖。
   LocalLyricsService? _localLyricsService;
 
   LocalLyricsService _ensureLocalLyricsService() => _localLyricsService ??=

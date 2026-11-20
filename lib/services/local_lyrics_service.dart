@@ -16,8 +16,9 @@ import 'music_api.dart';
 /// 按本 fork 的架构做了两处适配：
 /// - **内嵌歌词改由 `embeddedLyricsReader` 注入**。上游直接用
 ///   `audio_metadata_reader` 读 ID3/Vorbis/MP4 标签，而本 fork 明确禁止引入该
-///   依赖：内嵌歌词统一走 Rust `readLocalLyrics` / Android MethodChannel
-///   （封装在 `LocalMusicController.getEmbeddedLyrics`，由播放控制器注入）。
+///   依赖：内嵌歌词统一走 Rust `readLocalLyrics`（封装在
+///   `LocalMusicController.getEmbeddedLyrics`，由播放控制器注入）。Android
+///   也必须走这条：`MediaMetadataRetriever` 没有歌词这个 metadata key。
 /// - **缓存 key 用文件绝对路径的 SHA-1 稳定哈希**，不再把可能很长的本地路径
 ///   直接拼进 SharedPreferences 的 key。
 ///

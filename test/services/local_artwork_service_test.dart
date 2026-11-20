@@ -8,15 +8,18 @@ void main() {
   const channel = MethodChannel('shiyin_music/local_music');
   late int calls;
   late Uint8List? reply;
+  late String? lastSource;
 
   setUp(() {
     LocalArtworkService.debugReset();
     calls = 0;
+    lastSource = null;
     reply = Uint8List.fromList(const [1, 2, 3, 4]);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method != 'getEmbeddedCover') return null;
           calls++;
+          lastSource = (call.arguments as Map)['source'] as String?;
           return reply;
         });
   });
@@ -38,8 +41,16 @@ void main() {
         expect(LocalArtworkService.isArtworkUrl(url), isTrue);
         // 路径不能以明文出现在 URL 里：`#`/`%` 会被当成 fragment/转义符。
         expect(url.contains('#'), isFalse);
-        expect(LocalArtworkService.pathOf(url), path);
+        expect(LocalArtworkService.targetOf(url), path);
       }
+    });
+
+    test('content:// 目标同样能原样往返', () {
+      const uri = 'content://media/external/audio/media/42';
+      final url = LocalArtworkService.artworkUrlFor(uri);
+      expect(LocalArtworkService.isArtworkUrl(url), isTrue);
+      expect(url.contains('://media'), isFalse);
+      expect(LocalArtworkService.targetOf(url), uri);
     });
 
     test('非本服务 URL 识别与还原都返回空', () {
@@ -48,8 +59,9 @@ void main() {
         isFalse,
       );
       expect(LocalArtworkService.isArtworkUrl(null), isFalse);
-      expect(LocalArtworkService.pathOf('http://cdn/a.jpg'), isNull);
-      expect(LocalArtworkService.pathOf('localart://art/%zz'), isNull);
+      expect(LocalArtworkService.targetOf('http://cdn/a.jpg'), isNull);
+      expect(LocalArtworkService.targetOf('localart://%zz'), isNull);
+      expect(LocalArtworkService.targetOf('localart://'), isNull);
     });
   });
 
@@ -58,7 +70,6 @@ void main() {
       final first = await LocalArtworkService.load(r'D:\m\a.mp3');
       expect(first, isNotNull);
       expect(calls, 1);
-
       final second = await LocalArtworkService.load(r'D:\m\a.mp3');
       // 必须复用同一实例：Image.memory 以字节对象身份做 ImageCache key。
       expect(identical(first, second), isTrue);
@@ -97,6 +108,13 @@ void main() {
       final stats = LocalArtworkService.debugCacheStats;
       expect(stats.bytes, lessThanOrEqualTo(12 * 1024 * 1024));
       expect(stats.entries, lessThanOrEqualTo(12));
+    });
+
+    test('content:// 目标原样交给原生（Android 分区存储下唯一可读的地址）', () async {
+      const uri = 'content://media/external/audio/media/42';
+      await LocalArtworkService.load(uri);
+      expect(calls, 1);
+      expect(lastSource, uri);
     });
   });
 }

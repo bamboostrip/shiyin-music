@@ -219,9 +219,9 @@ class _LocalCoverBackdropState extends State<_LocalCoverBackdrop> {
 
   Future<void> _load() async {
     final url = widget.url;
-    final path = LocalArtworkService.pathOf(url);
-    if (path == null) return;
-    final bytes = await LocalArtworkService.load(path);
+    final target = LocalArtworkService.targetOf(url);
+    if (target == null) return;
+    final bytes = await LocalArtworkService.load(target);
     if (!mounted || widget.url != url) return;
     setState(() => _bytes = bytes);
   }

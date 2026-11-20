@@ -390,13 +390,19 @@ class MainActivity : AudioServiceActivity() {
                             result.error("no_permission", "READ_MEDIA_AUDIO permission not granted", null)
                             return@setMethodCallHandler
                         }
-                        runCatching {
-                            queryLocalSongs()
-                        }.onSuccess { songs ->
-                            result.success(songs)
-                        }.onFailure { error ->
-                            result.error("query_failed", error.message, null)
-                        }
+                        // MediaStore 查询 + 逐行组装 map，几千首的库要几百毫秒到
+                        // 数秒（车机 CPU 更弱），压主线程会直接 ANR 卡住界面。
+                        // 后台线程查询、主线程回包。
+                        Thread {
+                            val songs = runCatching { queryLocalSongs() }
+                            runOnUiThread {
+                                songs
+                                    .onSuccess { result.success(it) }
+                                    .onFailure { error ->
+                                        result.error("query_failed", error.message, null)
+                                    }
+                            }
+                        }.start()
                     }
                     "getAlbumArt" -> {
                         val albumId = call.argument<Number>("albumId")?.toLong()
@@ -413,35 +419,24 @@ class MainActivity : AudioServiceActivity() {
                         }
                     }
                     "getEmbeddedCover" -> {
-                        val filePath = call.argument<String>("filePath")
-                        if (filePath.isNullOrEmpty()) {
+                        val source = call.argument<String>("source")
+                        if (source.isNullOrEmpty()) {
                             result.success(null)
                             return@setMethodCallHandler
                         }
                         // MediaMetadataRetriever 要读文件并解析整张图，压主线程
                         // 会在列表滚动时逐行掉帧；后台线程解析、主线程回包。
                         Thread {
-                            val bytes = runCatching { getEmbeddedCover(filePath) }
+                            val bytes = runCatching { getEmbeddedCover(source) }
                                 .getOrNull()
                             runOnUiThread {
                                 runCatching { result.success(bytes) }
                             }
                         }.start()
                     }
-                    "getEmbeddedLyrics" -> {
-                        val filePath = call.argument<String>("filePath")
-                        if (filePath.isNullOrEmpty()) {
-                            result.success(null)
-                            return@setMethodCallHandler
-                        }
-                        runCatching {
-                            getEmbeddedLyrics(filePath)
-                        }.onSuccess { lyrics ->
-                            result.success(lyrics)
-                        }.onFailure { error ->
-                            result.error("lyrics_failed", error.message, null)
-                        }
-                    }
+                    // 内嵌歌词不再走这里：MediaMetadataRetriever 没有"歌词"这个
+                    // metadata key（历史上的 extractMetadata(26) 其实是
+                    // METADATA_KEY_HAS_IMAGE），读取统一交给 Rust 引擎。
                     else -> result.notImplemented()
                 }
             }
@@ -1125,7 +1120,7 @@ class MainActivity : AudioServiceActivity() {
 
                     // 不再返回 albumArtUri：`content://media/external/audio/
                     // albumart/<id>` 自 Android 10 起已被移除（取图必失败），
-                    // 封面统一改由 Dart 侧按文件路径向 getEmbeddedCover 取。
+                    // 封面统一由 Dart 侧按下面的 contentUri/路径去取内嵌图。
                     if (filePath.isNotEmpty()) {
                         songs.add(
                             mapOf(
@@ -1135,6 +1130,12 @@ class MainActivity : AudioServiceActivity() {
                                 "album" to album,
                                 "duration" to duration,
                                 "filePath" to filePath,
+                                // 这一首在媒体库里的正式地址。分区存储下裸路径
+                                // 不一定可读（Android 10 直接拒绝读其它应用的
+                                // 媒体文件），播放/封面据此兜底。
+                                "contentUri" to ContentUris
+                                    .withAppendedId(collection, id)
+                                    .toString(),
                             )
                         )
                     }
@@ -1469,14 +1470,22 @@ class MainActivity : AudioServiceActivity() {
     /**
      * 读取音频文件自带封面（ID3v2 APIC / FLAC PICTURE / MP4 covr 等）。
      *
-     * 比 albumId 方案可靠：不依赖 MediaStore 的专辑表，也不受 Android 10
+     * [source] 既可以是文件绝对路径，也可以是媒体库的 `content://` 地址：
+     * 后者不依赖分区存储的裸路径可读性（Android 10 会拒绝按路径读其它应用
+     * 的媒体文件），是更通用的取法。
+     *
+     * 比旧的 albumId 方案可靠：不依赖 MediaStore 的专辑表，也不受 Android 10
      * 起废弃 albumart provider 的影响；与桌面端 Rust `read_local_cover`
      * 语义保持一致（返回原始字节，由 Flutter 按展示尺寸解码）。
      */
-    private fun getEmbeddedCover(filePath: String): ByteArray? {
+    private fun getEmbeddedCover(source: String): ByteArray? {
         val retriever = android.media.MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(filePath)
+            if (source.startsWith("content://")) {
+                retriever.setDataSource(this, Uri.parse(source))
+            } else {
+                retriever.setDataSource(source)
+            }
             retriever.embeddedPicture
         } catch (e: Exception) {
             null
@@ -1485,18 +1494,10 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
-    private fun getEmbeddedLyrics(filePath: String): String? {
-        return try {
-            val retriever = android.media.MediaMetadataRetriever()
-            retriever.setDataSource(filePath)
-            // METADATA_KEY_LYRICS = 26，API 29+ 才有常量名，直接用数字 key 兼容旧版本
-            val lyrics = retriever.extractMetadata(26)
-            retriever.release()
-            lyrics
-        } catch (e: Exception) {
-            null
-        }
-    }
+    // 内嵌歌词的读取已统一交给 Rust 引擎（见 Dart 侧
+    // LocalMusicController.getEmbeddedLyrics）。原来这里的
+    // extractMetadata(26) 取的是 METADATA_KEY_HAS_IMAGE，不是歌词，
+    // 移动端以前"内嵌歌词"实际从未生效。
 
     // singleTop 热启动：Activity 复用，新的 VIEW intent 不再触发
     // configureFlutterEngine，这里把链接转发给 Dart 侧处理。转发失败（引擎

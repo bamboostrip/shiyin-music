@@ -332,6 +332,14 @@ mixin _PlayerEffects on _PlayerControllerBase {
     // 重置 EMA 滤波状态:每首新歌从零开始滤波,记录墙钟起点。
     _emaGainDb = null;
     _emaStartWallTime = DateTime.now();
+    // content:// 只能由平台播放器读（ExoPlayer 的 ContentDataSource），原生
+    // 响度分析器用的是 MediaExtractor.setDataSource(path/url)，解不了这类
+    // URI。这里直接跳过：本方法是 unawaited 的，抛出去会变成未捕获的异步
+    // 异常（issue #32 的 Android 兜底路径会走到这里）。
+    if (url.startsWith('content://')) {
+      LoudnessService.log('controller analyze SKIP content:// 源（响度均衡跳过）');
+      return;
+    }
     LoudnessService.log(
       'controller analyze 开始 serial=$serial hash=${song.hash.length > 8 ? song.hash.substring(0, 8) : song.hash}',
     );

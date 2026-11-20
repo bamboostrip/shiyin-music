@@ -202,6 +202,7 @@ class LocalMusicController extends ChangeNotifier {
       for (final item in result) {
         if (item is Map) {
           final filePath = item['filePath'] as String? ?? '';
+          final contentUri = item['contentUri'] as String? ?? '';
           final rawTitle = item['title'] as String? ?? '未知歌曲';
           final artist = item['artist'] as String? ?? '未知艺人';
           final durationMs = item['duration'] as int?;
@@ -218,11 +219,16 @@ class LocalMusicController extends ChangeNotifier {
                 // 封面走「文件内嵌图」而不是 MediaStore 的 albumArtUri：
                 // 后者的 provider URI 自 Android 10 起已被移除，取图必失败
                 // （issue #32 的「本地文件加载不出封面」）。
-                coverUrl: LocalArtworkService.artworkUrlFor(filePath),
+                // 优先用 content:// 当读取目标：分区存储下裸路径不一定可读
+                // （Android 10 直接拒绝），content URI 在所有版本都能读。
+                coverUrl: LocalArtworkService.artworkUrlFor(
+                  contentUri.isNotEmpty ? contentUri : filePath,
+                ),
                 duration: durationMs != null
                     ? Duration(milliseconds: durationMs)
                     : null,
                 source: SongSource.local,
+                localContentUri: contentUri.isEmpty ? null : contentUri,
               ),
             );
             _recordFolderDisplayName(filePath);
@@ -254,22 +260,20 @@ class LocalMusicController extends ChangeNotifier {
   }
 
   /// 获取本地歌曲的内嵌歌词。
+  ///
+  /// **所有平台统一走 Rust 引擎**（Android 也编了同一份 crate）。Android 侧
+  /// 原来走 `MediaMetadataRetriever.extractMetadata(26)`，但 MMR 里根本没有
+  /// "歌词"这个 metadata key —— 26 实际是 `METADATA_KEY_HAS_IMAGE`（已对
+  /// android-34/35/36 的 android.jar 核对），也就是说**内嵌歌词在移动端从来
+  /// 没读到过**，一直是退回在线匹配（没登录/离线时就是"没有歌词"）。
+  ///
+  /// Rust 侧 `read_local_lyrics` 覆盖容器元数据 + ID3v2（USLT / `TXXX:lyrics`），
+  /// 与桌面完全同一条链路，本地 mp3 的歌词终于能读出来。
   Future<String?> getEmbeddedLyrics(String filePath) async {
-    if (isDesktopScanSupported) {
-      try {
-        return await rust.readLocalLyrics(path: filePath);
-      } catch (e) {
-        debugPrint('Error reading embedded lyrics (rust): $e');
-        return null;
-      }
-    }
-    if (!Platform.isAndroid) return null;
     try {
-      return await _channel.invokeMethod<String>('getEmbeddedLyrics', {
-        'filePath': filePath,
-      });
+      return await rust.readLocalLyrics(path: filePath);
     } catch (e) {
-      debugPrint('Error getting embedded lyrics: $e');
+      debugPrint('Error reading embedded lyrics (rust): $e');
       return null;
     }
   }

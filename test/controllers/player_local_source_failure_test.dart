@@ -238,6 +238,33 @@ void main() {
     await tearDownController(tester);
   });
 
+  testWidgets('裸路径读不到但媒体库有 content:// 地址：回退直读，不再判死', (tester) async {
+    await pumpToastHost(tester);
+    final missing = '${Directory.systemTemp.path}/shiyin_nopath_${DateTime.now().microsecondsSinceEpoch}.mp3';
+    final song = Song(
+      id: missing,
+      title: '媒体库条目',
+      artist: '未知艺人',
+      hash: missing,
+      duration: const Duration(seconds: 30),
+      source: SongSource.local,
+      localContentUri: 'content://media/external/audio/media/42',
+    );
+    controller.queue = [song];
+
+    await controller.playSong(song);
+    await tester.pump();
+
+    // Android 10 的分区存储会拒绝按裸路径读媒体文件，此时必须回退
+    // MediaStore 的 content:// 地址（由引擎直读，不进本地文件代理）。
+    expect(handler.loadedUrls, ['content://media/external/audio/media/42']);
+    expect(controller.errorMessage, isNull);
+    // 该走直读，不该触发"文件缺失"重扫
+    expect(localMusic.scanCalls, 0);
+
+    await tearDownController(tester);
+  });
+
   testWidgets('文件存在且格式支持：照常把文件路径交给引擎', (tester) async {
     await pumpToastHost(tester);
     final file = File(

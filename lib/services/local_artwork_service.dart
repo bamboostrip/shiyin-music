@@ -16,10 +16,14 @@ import 'local_audio_formats.dart';
 ///   FileNotFoundException，表现同样是「本地歌没有封面」。
 ///
 /// 统一方案：把本地歌的 `coverUrl` 表示成进程内的伪 URL
-/// [artworkUrlFor]（`localart://art/<urlEncode(path)>`），由 `Artwork`
-/// 识别后向本服务要字节——桌面走 Rust `readLocalCover`（symphonia 的
-/// `visuals()`，支持 ID3v2 APIC / FLAC PICTURE / MP4 covr），Android 走
-/// MethodChannel 的 `MediaMetadataRetriever.embeddedPicture`。
+/// [artworkUrlFor]（`localart://<urlEncode(目标)>`），由 `Artwork` 识别后
+/// 向本服务要字节——桌面走 Rust `readLocalCover`（symphonia 的 `visuals()`，
+/// 支持 ID3v2 APIC / FLAC PICTURE / MP4 covr），Android 走 MethodChannel 的
+/// `MediaMetadataRetriever.embeddedPicture`。
+///
+/// 「目标」可以是**文件路径**，也可以是 **`content://` 媒体库地址**：分区
+/// 存储下裸路径不一定可读（Android 10 直接拒绝），Android 侧会优先把
+/// content URI 传进来，MediaMetadataRetriever 两种都能吃。
 ///
 /// 缓存策略：[load] 内置按字节预算的 LRU。它不只是省 IO——`Image.memory`
 /// 的 [MemoryImage] 以「字节对象身份」作为 ImageCache 的 key，同一路径每次
@@ -61,70 +65,75 @@ class LocalArtworkService {
   static final LinkedHashSet<String> _noArtwork = LinkedHashSet();
   static const int _noArtworkCap = 4096;
 
-  /// 构造某本地音频文件的封面伪 URL；`Artwork` 据此走本地封面分支。
-  static String artworkUrlFor(String filePath) =>
-      '$scheme://art/${Uri.encodeComponent(filePath)}';
+  /// 构造本地封面的伪 URL；[source] 可以是文件路径或 `content://` 地址。
+  /// `Artwork` 据此走本地封面分支。
+  static String artworkUrlFor(String source) =>
+      '$scheme://${Uri.encodeComponent(source)}';
 
   /// 该 URL 是否为本服务的本地封面伪 URL。
   static bool isArtworkUrl(String? url) =>
       url != null && url.startsWith('$scheme://');
 
-  /// 从伪 URL 还原文件绝对路径；不是本服务的 URL 时返回 null。
-  static String? pathOf(String url) {
-    final prefix = '$scheme://art/';
+  /// 从伪 URL 还原读取目标（文件路径或 content URI）；不是本服务的 URL 时返回 null。
+  static String? targetOf(String url) {
+    final prefix = '$scheme://';
     if (!url.startsWith(prefix)) return null;
     try {
-      return Uri.decodeComponent(url.substring(prefix.length));
+      final target = Uri.decodeComponent(url.substring(prefix.length));
+      return target.isEmpty ? null : target;
     } catch (_) {
       return null;
     }
   }
 
   /// 读取内嵌封面字节；无图/平台不支持/解析失败一律返回 null（不抛）。
-  static Future<Uint8List?> load(String filePath) {
-    final cached = _cache.remove(filePath);
+  static Future<Uint8List?> load(String source) {
+    final cached = _cache.remove(source);
     if (cached != null) {
       // 命中即刷新 LRU 位置（moveToEnd 语义）。
-      _cache[filePath] = cached;
+      _cache[source] = cached;
       return Future<Uint8List?>.value(cached);
     }
-    if (_noArtwork.contains(filePath)) {
+    if (_noArtwork.contains(source)) {
       return Future<Uint8List?>.value(null);
     }
-    final running = _inFlight[filePath];
+    final running = _inFlight[source];
     if (running != null) return running;
-    final future = _read(filePath);
-    _inFlight[filePath] = future;
-    return future.whenComplete(() => _inFlight.remove(filePath));
+    final future = _read(source);
+    _inFlight[source] = future;
+    return future.whenComplete(() => _inFlight.remove(source));
   }
 
-  static Future<Uint8List?> _read(String filePath) async {
-    final bytes = await _readPlatform(filePath);
+  static Future<Uint8List?> _read(String source) async {
+    final bytes = await _readPlatform(source);
     if (bytes == null || bytes.isEmpty) {
-      _rememberMissing(filePath);
+      _rememberMissing(source);
       return null;
     }
-    _remember(filePath, bytes);
+    _remember(source, bytes);
     return bytes;
   }
 
-  static Future<Uint8List?> _readPlatform(String filePath) async {
+  static Future<Uint8List?> _readPlatform(String source) async {
     final engine = currentLocalAudioEngine;
     try {
-      if (engine == LocalAudioEngine.mpv) {
+      // content:// 只有 Android 侧认得（Rust 只能开真实路径）。
+      final isContentUri = source.startsWith('content://');
+      if (engine == LocalAudioEngine.mpv && !isContentUri) {
         // Windows / Linux：Rust symphonia 读容器内嵌图。
-        return await rust.readLocalCover(path: filePath);
+        return await rust.readLocalCover(path: source);
       }
       if (engine == LocalAudioEngine.exoPlayer) {
-        // Android：MediaMetadataRetriever.getEmbeddedPicture 覆盖面最广
-        // （ID3v2 APIC / FLAC PICTURE / MP4 covr 都能取）。
+        // Android：MediaMetadataRetriever.embeddedPicture 覆盖面最广
+        // （ID3v2 APIC / FLAC PICTURE / MP4 covr 都能取），路径与
+        // content:// 都能吃。
         return await _channel.invokeMethod<Uint8List>('getEmbeddedCover', {
-          'filePath': filePath,
+          'source': source,
         });
       }
     } catch (error) {
       // 读图失败绝不外溢：封面缺失只该是占位图，不该影响列表/播放。
-      debugPrint('[时音][artwork] 读取本地封面失败: $filePath ($error)');
+      debugPrint('[时音][artwork] 读取本地封面失败: $source ($error)');
     }
     return null;
   }

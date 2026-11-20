@@ -804,6 +804,22 @@ class MusicAudioHandler extends BaseAudioHandler
   }
 
   Future<void> _loadViaProxy(String url) async {
+    // content:// 媒体库地址只能由平台播放器直读：ExoPlayer 有
+    // ContentDataSource，本地文件代理只认真实路径（`File('content://…')`
+    // 必然打不开）。Android 10 的分区存储会拒绝按裸路径读其它应用的媒体
+    // 文件，那类机器上这是唯一能播的通道（issue #32）。
+    if (url.startsWith('content://')) {
+      final seq = ++_loadSeq;
+      debugPrint('[AudioHandler] 直读媒体库地址 seq=$seq target=content');
+      try {
+        await _enqueueEngineLoad(seq, url);
+      } on PlayerException catch (e) {
+        debugPrint('[AudioHandler] 引擎加载失败 code=${e.code} '
+            'target=content message=${e.message}');
+        throw Exception('播放失败: ${e.message}');
+      }
+      return;
+    }
     await _ensureProxy();
     final seq = ++_loadSeq;
     final isRemote = url.startsWith('http://') || url.startsWith('https://');
