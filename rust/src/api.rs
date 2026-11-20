@@ -109,6 +109,15 @@ pub fn read_local_cover(path: String) -> Result<Option<Vec<u8>>, String> {
     Ok(local_media::read_cover(&path))
 }
 
+/// 从文件头部字节读内嵌歌词（Android 10 分区存储下裸路径不可读，
+/// 由 Kotlin 侧截取头部后走这里；见 issue #32）。
+///
+/// 与 [read_local_lyrics] 的差别：入参是已截断的头部字节，容器探测
+/// 尽力而为，任何「读不了」都返回 `Ok(None)` 而非 Err。
+pub fn read_local_lyrics_from_bytes(data: Vec<u8>) -> Result<Option<String>, String> {
+    local_media::read_lyrics_from_bytes(&data).map_err(|e| e.to_string())
+}
+
 /// 本地音乐扫描流事件。
 pub struct ScanEvent {
     pub done: u32,

@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1991654250;
+  int get rustContentHash => -254402900;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -115,6 +115,8 @@ abstract class RustLibApi extends BaseApi {
   Future<Uint8List?> crateApiReadLocalCover({required String path});
 
   Future<String?> crateApiReadLocalLyrics({required String path});
+
+  Future<String?> crateApiReadLocalLyricsFromBytes({required List<int> data});
 
   Stream<ScanEvent> crateApiScanLocalMedia({required List<String> roots});
 
@@ -518,6 +520,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "read_local_lyrics", argNames: ["path"]);
 
   @override
+  Future<String?> crateApiReadLocalLyricsFromBytes({required List<int> data}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(data, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiReadLocalLyricsFromBytesConstMeta,
+        argValues: [data],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiReadLocalLyricsFromBytesConstMeta =>
+      const TaskConstMeta(
+        debugName: "read_local_lyrics_from_bytes",
+        argNames: ["data"],
+      );
+
+  @override
   Stream<ScanEvent> crateApiScanLocalMedia({required List<String> roots}) {
     final events = RustStreamSink<ScanEvent>();
     unawaited(
@@ -530,7 +563,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 13,
+              funcId: 14,
               port: port_,
             );
           },

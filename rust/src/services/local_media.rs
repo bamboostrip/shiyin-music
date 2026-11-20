@@ -276,14 +276,64 @@ pub fn read_id3v2_tags(path: &str) -> Option<LocalTags> {
     // read_id3v2 从流的当前位置开始读，这里重新打开从 0 开始。
     let file = File::open(path).ok()?;
     let mut mss = MediaSourceStream::new(Box::new(file), Default::default());
+    read_id3v2_from_stream(&mut mss)
+}
+
+/// 从流的当前位置读 ID3v2。调用方负责先行长度上限校验。
+fn read_id3v2_from_stream(
+    mss: &mut MediaSourceStream,
+) -> Option<LocalTags> {
     let mut builder = symphonia::core::meta::MetadataBuilder::new();
-    symphonia_metadata::id3v2::read_id3v2(&mut mss, &mut builder).ok()?;
+    symphonia_metadata::id3v2::read_id3v2(mss, &mut builder).ok()?;
     let tags = tags_from_revision(&builder.metadata());
     if tags.is_empty() {
         None
     } else {
         Some(tags)
     }
+}
+
+/// 从文件头部字节里读内嵌歌词（Android 10 分区存储的 content:// 兜底）。
+///
+/// 数据是截断的头部（调用方截取），容器探测是尽力而为：FLAC/OGG 的标签
+/// 在文件头，通常完整；MP4 的 moov 在尾部，截断后探测失败属预期——
+/// 一律降级为 Ok(None)，绝不能把「读不了」当 Err 上抛（Err 在 Dart 侧
+/// 语义是「文件打不开」，会触发不必要的重试路径）。
+pub fn read_lyrics_from_bytes(data: &[u8]) -> anyhow::Result<Option<String>> {
+    if data.len() < 10 {
+        return Ok(None);
+    }
+    // 1. 容器层（截断流探测失败按没有处理，不冒错）。
+    //    无扩展名可用，让 probe 按魔数嗅探。
+    let cursor = std::io::Cursor::new(data.to_vec());
+    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+    let hint = Hint::new();
+    if let Ok(probed) = symphonia::default::get_probe().format(
+        &hint,
+        mss,
+        &FormatOptions::default(),
+        &Default::default(),
+    ) {
+        let mut format = probed.format;
+        if let Some(revision) = format.metadata().current() {
+            for tag in revision.tags() {
+                if is_lyrics_key(&tag.key)
+                    || matches!(tag.std_key, Some(StandardTagKey::Lyrics))
+                {
+                    if let symphonia::core::meta::Value::String(s) = &tag.value {
+                        if !s.trim().is_empty() {
+                            return Ok(Some(s.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 2. ID3v2 层（mp3 的唯一来源；ID3 在文件头，截断数据里完整可用）。
+    //    16MB 上限由调用方（Kotlin 头部截取）保证，这里不再重复校验。
+    let cursor = std::io::Cursor::new(data.to_vec());
+    let mut mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+    Ok(read_id3v2_from_stream(&mut mss).and_then(|tags| tags.lyrics))
 }
 
 /// ID3v2 标签块的内存上限（16MB）。
@@ -373,4 +423,60 @@ fn container_cover(path: &str) -> Option<Vec<u8>> {
         .iter()
         .find(|visual| !visual.data.is_empty())
         .map(|visual| visual.data.to_vec())
+}
+
+#[cfg(test)]
+mod lyrics_bytes_tests {
+    use super::*;
+
+    /// 手工拼一个最小合法 ID3v2.3 头 + 一个 USLT 帧（英语、无描述、歌词文本）。
+    /// USLT 帧体: encoding(1) + lang(3) + desc(0x00 结尾) + text。
+    fn id3v2_with_uslt(text: &str) -> Vec<u8> {
+        let text_bytes = text.as_bytes();
+        // 帧体 = 1(编码=ISO-8859-1) + 3(eng) + 1(空 desc) + 文本
+        let frame_body_len = 1 + 3 + 1 + text_bytes.len();
+        let mut frame = Vec::new();
+        frame.extend_from_slice(b"USLT");
+        frame.extend_from_slice(&(frame_body_len as u32).to_be_bytes()); // v2.3 是 4 字节普通整数
+        frame.extend_from_slice(&[0, 0]); // flags
+        frame.push(0);
+        frame.extend_from_slice(b"eng");
+        frame.push(0);
+        frame.extend_from_slice(text_bytes);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(b"ID3");
+        out.extend_from_slice(&[3, 0, 0]); // v2.3, flags=0
+        // syncsafe 长度（4×7bit）
+        let len = frame.len();
+        out.push(((len >> 21) & 0x7f) as u8);
+        out.push(((len >> 14) & 0x7f) as u8);
+        out.push(((len >> 7) & 0x7f) as u8);
+        out.push((len & 0x7f) as u8);
+        out.extend_from_slice(&frame);
+        out
+    }
+
+    #[test]
+    fn lyrics_from_bytes_reads_uslt() {
+        let bytes = id3v2_with_uslt("[00:01.00]line");
+        assert_eq!(
+            read_lyrics_from_bytes(&bytes).unwrap().as_deref(),
+            Some("[00:01.00]line")
+        );
+    }
+
+    #[test]
+    fn lyrics_from_bytes_no_tag_is_none_not_err() {
+        assert!(read_lyrics_from_bytes(&[0x00; 4]).unwrap().is_none());
+        assert!(read_lyrics_from_bytes(&[]).unwrap().is_none());
+    }
+
+    #[test]
+    fn lyrics_from_bytes_truncated_container_falls_back_to_id3v2() {
+        // 非 "ID3" 开头且容器探测必然失败的截断流：不能 Err，走 ID3v2 层后按无标签处理。
+        let mut bytes = vec![0xff; 64];
+        bytes[0] = b'x';
+        assert!(read_lyrics_from_bytes(&bytes).unwrap().is_none());
+    }
 }
