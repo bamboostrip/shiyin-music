@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/services/local_artwork_service.dart';
@@ -115,6 +116,52 @@ void main() {
       await LocalArtworkService.load(uri);
       expect(calls, 1);
       expect(lastSource, uri);
+    });
+
+    test('通道报错=瞬时失败：不进负缓存，下次重试能拿到图', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        LocalArtworkService.debugReset();
+        var fail = true;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+          if (call.method != 'getEmbeddedCover') return null;
+          calls++;
+          if (fail) {
+            throw PlatformException(code: 'cover_failed', message: 'io');
+          }
+          return Uint8List.fromList(const [9, 9]);
+        });
+
+        expect(await LocalArtworkService.load('/x/a.mp3'), isNull);
+        expect(await LocalArtworkService.load('/x/a.mp3'), isNull);
+        expect(calls, 2); // 失败不缓存 → 重进视口重试
+
+        fail = false;
+        expect(await LocalArtworkService.load('/x/a.mp3'), const [9, 9]);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    test('通道返回 null=确定无图：照旧进负缓存', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        LocalArtworkService.debugReset();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+          if (call.method != 'getEmbeddedCover') return null;
+          calls++;
+          return null;
+        });
+
+        expect(await LocalArtworkService.load('/y/b.flac'), isNull);
+        expect(await LocalArtworkService.load('/y/b.flac'), isNull);
+        expect(calls, 1); // 确定无图 → 负缓存
+        expect(LocalArtworkService.debugMissingEntries, 1);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
   });
 }

@@ -6,6 +6,13 @@ import 'package:flutter/services.dart';
 import '../src/rust/api.dart' as rust;
 import 'local_audio_formats.dart';
 
+/// 一次读取的三种结果：拿到字节 / 确定没有图（进负缓存）/ 读取失败
+/// （瞬时态，不缓存——外接盘未挂载、通道异常都属此类）。
+enum _ArtworkRead { bytes, none, failed }
+
+/// 读取结果载体：[_ArtworkRead.bytes] 时 [bytes] 非空。
+typedef _ArtworkOutcome = ({_ArtworkRead kind, Uint8List? bytes});
+
 /// 本地音乐封面（音频文件内嵌图片）读取。
 ///
 /// 为什么需要它（issue #32）：
@@ -59,6 +66,9 @@ class LocalArtworkService {
 
   /// 「这个文件确实没有内嵌封面」的负缓存。
   ///
+  /// 只记「确定无图」（解析成功无图）；读取失败（IO/权限/外接盘未挂载）
+  /// 是瞬时态，不进负缓存。
+  ///
   /// 没有负缓存时，无封面的本地歌每次滚动进视口都会重新 probe 一遍容器——
   /// 几百首的库里净是无关的读盘。上限取 4096 条：路径只是短字符串，占用
   /// 可忽略，且按插入顺序淘汰，不会无限增长。
@@ -86,7 +96,8 @@ class LocalArtworkService {
     }
   }
 
-  /// 读取内嵌封面字节；无图/平台不支持/解析失败一律返回 null（不抛）。
+  /// 读取内嵌封面字节；无图/读取失败一律返回 null（不抛）。区别在缓存：
+  /// 无图进负缓存，读取失败是瞬时态不缓存，重进视口会重试。
   static Future<Uint8List?> load(String source) {
     final cached = _cache.remove(source);
     if (cached != null) {
@@ -105,37 +116,49 @@ class LocalArtworkService {
   }
 
   static Future<Uint8List?> _read(String source) async {
-    final bytes = await _readPlatform(source);
-    if (bytes == null || bytes.isEmpty) {
-      _rememberMissing(source);
-      return null;
+    final outcome = await _readPlatform(source);
+    switch (outcome.kind) {
+      case _ArtworkRead.bytes:
+        _remember(source, outcome.bytes!);
+        return outcome.bytes;
+      case _ArtworkRead.none:
+        _rememberMissing(source);
+        return null;
+      case _ArtworkRead.failed:
+        return null; // 瞬时失败：不写任何缓存
     }
-    _remember(source, bytes);
-    return bytes;
   }
 
-  static Future<Uint8List?> _readPlatform(String source) async {
+  static Future<_ArtworkOutcome> _readPlatform(String source) async {
     final engine = currentLocalAudioEngine;
+    // content:// 只有 Android 侧认得（Rust 只能开真实路径）。
+    final isContentUri = source.startsWith('content://');
     try {
-      // content:// 只有 Android 侧认得（Rust 只能开真实路径）。
-      final isContentUri = source.startsWith('content://');
       if (engine == LocalAudioEngine.mpv && !isContentUri) {
         // Windows / Linux：Rust symphonia 读容器内嵌图。
-        return await rust.readLocalCover(path: source);
+        // Err(打不开) → failed（不缓存）；Ok(None) → none（确定无图）。
+        final bytes = await rust.readLocalCover(path: source);
+        return bytes == null || bytes.isEmpty
+            ? (kind: _ArtworkRead.none, bytes: null)
+            : (kind: _ArtworkRead.bytes, bytes: bytes);
       }
       if (engine == LocalAudioEngine.exoPlayer) {
-        // Android：MediaMetadataRetriever.embeddedPicture 覆盖面最广
-        // （ID3v2 APIC / FLAC PICTURE / MP4 covr 都能取），路径与
-        // content:// 都能吃。
-        return await _channel.invokeMethod<Uint8List>('getEmbeddedCover', {
-          'source': source,
-        });
+        // Android：MMR.embeddedPicture；null=确定无图，异常=读取失败。
+        final bytes = await _channel.invokeMethod<Uint8List>(
+          'getEmbeddedCover',
+          {'source': source},
+        );
+        return bytes == null || bytes.isEmpty
+            ? (kind: _ArtworkRead.none, bytes: null)
+            : (kind: _ArtworkRead.bytes, bytes: bytes);
       }
     } catch (error) {
-      // 读图失败绝不外溢：封面缺失只该是占位图，不该影响列表/播放。
-      debugPrint('[时音][artwork] 读取本地封面失败: $source ($error)');
+      // 读取失败不进负缓存：外接盘慢挂载/瞬时 IO 错误后，挂载完成即可恢复。
+      debugPrint('[时音][artwork] 读取本地封面失败(不缓存): $source ($error)');
+      return (kind: _ArtworkRead.failed, bytes: null);
     }
-    return null;
+    // 未知引擎（iOS 等）：按无图处理（无本地音乐能力，进负缓存无害）。
+    return (kind: _ArtworkRead.none, bytes: null);
   }
 
   static void _remember(String filePath, Uint8List bytes) {

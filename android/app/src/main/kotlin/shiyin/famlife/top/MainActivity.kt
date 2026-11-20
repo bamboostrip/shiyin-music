@@ -426,11 +426,16 @@ class MainActivity : AudioServiceActivity() {
                         }
                         // MediaMetadataRetriever 要读文件并解析整张图，压主线程
                         // 会在列表滚动时逐行掉帧；后台线程解析、主线程回包。
+                        // null = 解析成功但确实没有内嵌图（Dart 侧据此进负缓存）；
+                        // 异常 = 读取失败（IO/权限），上抛让 Dart 侧按瞬时失败重试。
                         Thread {
-                            val bytes = runCatching { getEmbeddedCover(source) }
-                                .getOrNull()
+                            val outcome = runCatching { getEmbeddedCover(source) }
                             runOnUiThread {
-                                runCatching { result.success(bytes) }
+                                outcome
+                                    .onSuccess { bytes -> result.success(bytes) }
+                                    .onFailure { error ->
+                                        result.error("cover_failed", error.message, null)
+                                    }
                             }
                         }.start()
                     }
@@ -1493,6 +1498,10 @@ class MainActivity : AudioServiceActivity() {
      * 比旧的 albumId 方案可靠：不依赖 MediaStore 的专辑表，也不受 Android 10
      * 起废弃 albumart provider 的影响；与桌面端 Rust `read_local_cover`
      * 语义保持一致（返回原始字节，由 Flutter 按展示尺寸解码）。
+     *
+     * 返回 null = 解析成功但确实没有内嵌图；读取失败（IO/权限/外接盘未
+     * 挂载）直接抛出，由通道层转成 `cover_failed` error 上抛——两类结果
+     * 在 Dart 侧的缓存语义不同（前者进负缓存，后者是瞬时态不缓存）。
      */
     private fun getEmbeddedCover(source: String): ByteArray? {
         val retriever = android.media.MediaMetadataRetriever()
@@ -1503,8 +1512,6 @@ class MainActivity : AudioServiceActivity() {
                 retriever.setDataSource(source)
             }
             retriever.embeddedPicture
-        } catch (e: Exception) {
-            null
         } finally {
             runCatching { retriever.release() }
         }
