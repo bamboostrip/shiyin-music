@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../controllers/download_controller.dart';
 import '../../controllers/player_controller.dart';
 import 'download_location_settings.dart';
+import 'download_name_template_settings.dart';
 import 'download_quality_settings.dart';
 import 'settings_widgets.dart';
 
@@ -39,6 +40,9 @@ class StorageSettingsSection extends StatelessWidget {
         children.add(
           DownloadQualitySettings(downloads: downloads, player: player),
         );
+        children.add(const SettingsDivider());
+        // 下载文件命名模板：与音质同属「下载产出物」属性，紧跟音质项。
+        children.add(const DownloadNameTemplateSettings());
         // 「同时保存 LRC 歌词」原本藏在缓存管理弹层里，PC 用户按更新日志的
         // 路径（设置 → 存储与下载）找不到入口，误以为该功能没上桌面端
         // （issue #29）。这是下载选项而非缓存清理项，放回本分节后所有平台
