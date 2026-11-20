@@ -669,7 +669,7 @@ pub fn read_embedded_lyrics(path: &str) -> anyhow::Result<Option<String>> {
     if let Some(lyrics) = container {
         return Ok(Some(lyrics));
     }
-    Ok(crate::services::local_media::read_id3v2_tags(path).and_then(|tags| tags.lyrics))
+    Ok(crate::services::local_media::read_id3v2_text_tags(path).and_then(|tags| tags.lyrics))
 }
 
 /// 容器元数据里的歌词。文件打不开返回 Err，容器解析失败按"没有"处理。

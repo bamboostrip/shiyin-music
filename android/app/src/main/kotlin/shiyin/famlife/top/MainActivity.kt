@@ -396,11 +396,14 @@ class MainActivity : AudioServiceActivity() {
                         Thread {
                             val songs = runCatching { queryLocalSongs() }
                             runOnUiThread {
-                                songs
-                                    .onSuccess { result.success(it) }
-                                    .onFailure { error ->
-                                        result.error("query_failed", error.message, null)
-                                    }
+                                // 引擎销毁竞态下回包可能抛（通道已失效），吞掉防崩溃——结果本身已无人在等。
+                                runCatching {
+                                    songs
+                                        .onSuccess { result.success(it) }
+                                        .onFailure { error ->
+                                            result.error("query_failed", error.message, null)
+                                        }
+                                }.onFailure { }
                             }
                         }.start()
                     }
@@ -431,11 +434,14 @@ class MainActivity : AudioServiceActivity() {
                         mediaIoExecutor.execute {
                             val outcome = runCatching { getEmbeddedCover(source) }
                             runOnUiThread {
-                                outcome
-                                    .onSuccess { bytes -> result.success(bytes) }
-                                    .onFailure { error ->
-                                        result.error("cover_failed", error.message, null)
-                                    }
+                                // 引擎销毁竞态下回包可能抛（通道已失效），吞掉防崩溃——结果本身已无人在等。
+                                runCatching {
+                                    outcome
+                                        .onSuccess { bytes -> result.success(bytes) }
+                                        .onFailure { error ->
+                                            result.error("cover_failed", error.message, null)
+                                        }
+                                }.onFailure { }
                             }
                         }
                     }
@@ -449,9 +455,12 @@ class MainActivity : AudioServiceActivity() {
                         mediaIoExecutor.execute {
                             val outcome = runCatching { readMediaHead(source) }
                             runOnUiThread {
-                                outcome
-                                    .onSuccess { result.success(it) }
-                                    .onFailure { error -> result.error("read_failed", error.message, null) }
+                                // 引擎销毁竞态下回包可能抛（通道已失效），吞掉防崩溃——结果本身已无人在等。
+                                runCatching {
+                                    outcome
+                                        .onSuccess { result.success(it) }
+                                        .onFailure { error -> result.error("read_failed", error.message, null) }
+                                }.onFailure { }
                             }
                         }
                     }

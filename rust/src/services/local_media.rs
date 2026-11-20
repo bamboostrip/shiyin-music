@@ -265,6 +265,18 @@ fn tags_from_revision(
 /// 无 ID3v2 标签、文件打不开、标签损坏都返回 None（标签缺失是常态，
 /// 调用方按"没有"处理即可）。
 pub fn read_id3v2_tags(path: &str) -> Option<LocalTags> {
+    read_id3v2_path(path, true)
+}
+
+/// 同 [read_id3v2_tags]，但只取文本标签（扫描 probe / loudness 歌词用）：
+/// 跳过封面字节的 `to_vec()` 拷贝。
+pub(crate) fn read_id3v2_text_tags(path: &str) -> Option<LocalTags> {
+    read_id3v2_path(path, false)
+}
+
+/// 路径版外壳：头 10 字节校验（"ID3" 魔数 + syncsafe 声明长度 ≤16MB）
+/// + 二次打开后走 [read_id3v2_impl]。两个薄包装只差 [include_visuals]。
+fn read_id3v2_path(path: &str, include_visuals: bool) -> Option<LocalTags> {
     let mut file = File::open(path).ok()?;
     // 先看标签头声明的长度再决定要不要解析：ID3v2 允许整块标签驻留内存，
     // 一个损坏/恶意的头就能让解析器按几 GB 去分配。正常歌曲的标签（含
@@ -285,29 +297,7 @@ pub fn read_id3v2_tags(path: &str) -> Option<LocalTags> {
     // read_id3v2 从流的当前位置开始读，这里重新打开从 0 开始。
     let file = File::open(path).ok()?;
     let mut mss = MediaSourceStream::new(Box::new(file), Default::default());
-    read_id3v2_from_stream(&mut mss)
-}
-
-/// 同 [read_id3v2_tags] 的外壳（头 10 字节校验 + 16MB 上限 + 二次打开），
-/// 但只取文本标签（扫描 probe 用）：跳过封面字节的 `to_vec()` 拷贝。
-fn read_id3v2_text_tags(path: &str) -> Option<LocalTags> {
-    let mut file = File::open(path).ok()?;
-    // 上限校验的意义见 [read_id3v2_tags]。
-    let mut header = [0u8; 10];
-    std::io::Read::read_exact(&mut file, &mut header).ok()?;
-    if &header[0..3] != b"ID3" {
-        return None;
-    }
-    let declared = header[6..10]
-        .iter()
-        .fold(0usize, |acc, byte| (acc << 7) | usize::from(byte & 0x7f));
-    if declared > _MAX_ID3V2_TAG_BYTES {
-        return None;
-    }
-
-    let file = File::open(path).ok()?;
-    let mut mss = MediaSourceStream::new(Box::new(file), Default::default());
-    read_id3v2_impl(&mut mss, false)
+    read_id3v2_impl(&mut mss, include_visuals)
 }
 
 /// ID3v2 解析核心。[include_visuals]=false 时跳过封面字节拷贝：
@@ -328,12 +318,6 @@ fn read_id3v2_impl(
     }
 }
 
-/// 含封面的完整流式读取（[read_id3v2_tags] 用，read_cover 经它取图）。
-/// 从流的当前位置读 ID3v2，调用方负责先行长度上限校验。
-fn read_id3v2_from_stream(mss: &mut MediaSourceStream) -> Option<LocalTags> {
-    read_id3v2_impl(mss, true)
-}
-
 /// 只取文本标签（扫描 probe / 字节歌词的 ID3v2 层用）。同样从流的
 /// 当前位置读，调用方负责先行长度上限校验。
 fn read_id3v2_text_from_stream(mss: &mut MediaSourceStream) -> Option<LocalTags> {
@@ -350,8 +334,24 @@ pub fn read_lyrics_from_bytes(data: &[u8]) -> anyhow::Result<Option<String>> {
     if data.len() < 10 {
         return Ok(None);
     }
-    // 1. 容器层（截断流探测失败按没有处理，不冒错）。
-    //    无扩展名可用，让 probe 按魔数嗅探。
+    // 按魔数分流，两条路径各自只做一次 to_vec()：单拷贝已是 'static 约束
+    // 下的最优（MediaSourceStream 内部是 Box<dyn MediaSource>，零拷贝需
+    // 上游支持借用源），不再像旧实现那样两层各拷一份。
+    if data.starts_with(b"ID3") {
+        // 只走 ID3v2 层（mp3 的唯一来源；ID3 在文件头，截断数据里完整可用）。
+        // 容器层对 ID3 开头的文件恒拿不到歌词——symphonia 的 mp3 解复用器
+        // 没有 ID3 解析代码；FLAC/WAV/AIFF 的头 3 字节固定为 fLaC/RIFF/FORM，
+        // MP4 即便头 4 字节 size 巧合 "ID3"，后续 ftyp 也在截断流上必然探测
+        // 失败、moov/ilst 不可达，歌词同样拿不到。跳过容器探测还省掉对截断
+        // mp3 找 frame sync 的 MB 级扫描。
+        // 16MB 上限由调用方（Kotlin 头部截取）保证，这里不再重复校验。
+        let cursor = std::io::Cursor::new(data.to_vec());
+        let mut mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+        return Ok(read_id3v2_text_from_stream(&mut mss).and_then(|tags| tags.lyrics));
+    }
+    // 只走容器层（截断流探测失败按没有处理，不冒错）。
+    // 无扩展名可用，让 probe 按魔数嗅探；ID3v2 层可整体跳过——
+    // read_id3v2 内部首先校验 "ID3" 魔数，非 ID3 开头必然 Err→None。
     let cursor = std::io::Cursor::new(data.to_vec());
     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
     let hint = Hint::new();
@@ -376,11 +376,7 @@ pub fn read_lyrics_from_bytes(data: &[u8]) -> anyhow::Result<Option<String>> {
             }
         }
     }
-    // 2. ID3v2 层（mp3 的唯一来源；ID3 在文件头，截断数据里完整可用）。
-    //    16MB 上限由调用方（Kotlin 头部截取）保证，这里不再重复校验。
-    let cursor = std::io::Cursor::new(data.to_vec());
-    let mut mss = MediaSourceStream::new(Box::new(cursor), Default::default());
-    Ok(read_id3v2_text_from_stream(&mut mss).and_then(|tags| tags.lyrics))
+    Ok(None)
 }
 
 /// ID3v2 标签块的内存上限（16MB）。
@@ -522,10 +518,21 @@ mod lyrics_bytes_tests {
     }
 
     #[test]
-    fn lyrics_from_bytes_truncated_container_falls_back_to_id3v2() {
-        // 非 "ID3" 开头且容器探测必然失败的截断流：不能 Err，走 ID3v2 层后按无标签处理。
+    fn lyrics_from_bytes_truncated_container_is_none() {
+        // 非 "ID3" 开头且容器探测必然失败的截断流：不能 Err，按无标签处理。
         let mut bytes = vec![0xff; 64];
         bytes[0] = b'x';
+        assert!(read_lyrics_from_bytes(&bytes).unwrap().is_none());
+    }
+
+    #[test]
+    fn lyrics_from_bytes_id3_without_uslt_is_none() {
+        // ID3 开头但去掉 USLT 帧（tag size=0 的空标签）：只走 ID3v2 分支，
+        // 解析无歌词 → None 而非 Err。
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"ID3");
+        bytes.extend_from_slice(&[3, 0, 0]); // v2.3, flags=0
+        bytes.extend_from_slice(&[0, 0, 0, 0]); // tag size = 0（无帧）
         assert!(read_lyrics_from_bytes(&bytes).unwrap().is_none());
     }
 }
