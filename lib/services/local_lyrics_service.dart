@@ -19,6 +19,7 @@ import 'music_api.dart';
 ///   依赖：内嵌歌词统一走 Rust `readLocalLyrics`（封装在
 ///   `LocalMusicController.getEmbeddedLyrics`，由播放控制器注入）。Android
 ///   也必须走这条：`MediaMetadataRetriever` 没有歌词这个 metadata key。
+///   入参是 Song：读取器可拿到 `localContentUri` 做 Android 10 兜底。
 /// - **缓存 key 用文件绝对路径的 SHA-1 稳定哈希**，不再把可能很长的本地路径
 ///   直接拼进 SharedPreferences 的 key。
 ///
@@ -35,7 +36,7 @@ class LocalLyricsService {
   LocalLyricsService({
     required MusicApi api,
     CacheService? cache,
-    Future<String?> Function(String path)? embeddedLyricsReader,
+    Future<String?> Function(Song song)? embeddedLyricsReader,
     Duration requestTimeout = _defaultRequestTimeout,
   }) : _api = api,
        _cache = cache,
@@ -48,7 +49,7 @@ class LocalLyricsService {
   /// 读取音频文件内嵌歌词（原样返回：可能带 LRC 时间戳，也可能是不带时间的
   /// 纯文本）。默认实现返回 null，播放器侧应注入
   /// `localMusic.getEmbeddedLyrics`。
-  final Future<String?> Function(String path) _embeddedLyricsReader;
+  final Future<String?> Function(Song song) _embeddedLyricsReader;
 
   /// 搜索 / 拉歌词单请求超时。默认 10s（与上游一致）；允许注入是为了单测
   /// 能用几十毫秒验证超时降级，不必真等 10 秒。
@@ -100,7 +101,7 @@ class LocalLyricsService {
     //    兜底（纯文本没有时间轴，优先尝试在线匹配拿到逐行时间轴）。
     String? plainEmbeddedLyrics;
     try {
-      final embedded = await _embeddedLyricsReader(song.id);
+      final embedded = await _embeddedLyricsReader(song);
       final lines = parseLyrics(embedded);
       if (lines.isNotEmpty) {
         return lines;
@@ -259,7 +260,7 @@ class LocalLyricsService {
     return [LyricLine(time: Duration.zero, text: plainText)];
   }
 
-  static Future<String?> _noEmbeddedLyrics(String path) async => null;
+  static Future<String?> _noEmbeddedLyrics(Song song) async => null;
 }
 
 /// 解码本地 `.lrc` 字节流：UTF-16 BOM（LE/BE）→ UTF-8（严格）→ GBK 兜底。

@@ -434,6 +434,22 @@ class MainActivity : AudioServiceActivity() {
                             }
                         }.start()
                     }
+                    "readMediaHead" -> {
+                        val source = call.argument<String>("source")
+                        if (source.isNullOrEmpty()) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        // 头部截取也压后台：contentResolver 打开可能涉网络盘（云媒体）。
+                        Thread {
+                            val outcome = runCatching { readMediaHead(source) }
+                            runOnUiThread {
+                                outcome
+                                    .onSuccess { result.success(it) }
+                                    .onFailure { error -> result.error("read_failed", error.message, null) }
+                            }
+                        }.start()
+                    }
                     // 内嵌歌词不再走这里：MediaMetadataRetriever 没有"歌词"这个
                     // metadata key（历史上的 extractMetadata(26) 其实是
                     // METADATA_KEY_HAS_IMAGE），读取统一交给 Rust 引擎。
@@ -1491,6 +1507,57 @@ class MainActivity : AudioServiceActivity() {
             null
         } finally {
             runCatching { retriever.release() }
+        }
+    }
+
+    /**
+     * 截取音频文件头部字节，供 Dart 侧交给 Rust 解析 ID3v2/容器标签
+     * （Android 10 分区存储下裸路径不可读、content:// 只有 ContentResolver
+     * 认识，Rust 打不开；issue #32 歌词兜底）。
+     *
+     * 截取量：开头 10 字节若是 ID3v2 头，按其声明长度精确截取（上限 16MB，
+     * 与 Rust 侧上限一致）；否则截 1MB（FLAC/OGG 标签驻留头部，通常远小于此）。
+     * 文件比请求量短则全量返回；空文件返回 null。
+     */
+    private fun readMediaHead(source: String): ByteArray? {
+        val input = if (source.startsWith("content://")) {
+            contentResolver.openInputStream(Uri.parse(source))
+        } else {
+            java.io.FileInputStream(source)
+        } ?: return null
+
+        input.use { stream ->
+            val header = ByteArray(10)
+            var headerLen = 0
+            while (headerLen < header.size) {
+                val n = stream.read(header, headerLen, header.size - headerLen)
+                if (n < 0) break
+                headerLen += n
+            }
+            if (headerLen == 0) return null
+            val want = if (headerLen == 10 && header[0] == 'I'.code.toByte() &&
+                header[1] == 'D'.code.toByte() && header[2] == '3'.code.toByte()
+            ) {
+                // syncsafe 4×7bit，与 Rust 侧同一上限。
+                val declared = ((header[6].toInt() and 0x7f) shl 21) or
+                    ((header[7].toInt() and 0x7f) shl 14) or
+                    ((header[8].toInt() and 0x7f) shl 7) or
+                    (header[9].toInt() and 0x7f)
+                (10L + declared).coerceAtMost(16L * 1024 * 1024)
+            } else {
+                1L * 1024 * 1024
+            }
+            val out = java.io.ByteArrayOutputStream()
+            out.write(header, 0, headerLen)
+            val buf = ByteArray(64 * 1024)
+            var copied = headerLen.toLong()
+            while (copied < want) {
+                val n = stream.read(buf, 0, minOf(buf.size.toLong(), want - copied).toInt())
+                if (n < 0) break
+                out.write(buf, 0, n)
+                copied += n
+            }
+            return out.toByteArray()
         }
     }
 

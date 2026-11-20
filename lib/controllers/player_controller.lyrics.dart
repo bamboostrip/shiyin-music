@@ -15,10 +15,13 @@ mixin _PlayerLyrics on _PlayerControllerBase {
       LocalLyricsService(
         api: _api,
         cache: cacheService,
-        embeddedLyricsReader: (path) async {
+        embeddedLyricsReader: (song) async {
           final reader = localMusic;
           if (reader == null) return null;
-          return reader.getEmbeddedLyrics(path);
+          return reader.getEmbeddedLyrics(
+            song.id,
+            contentUri: song.localContentUri,
+          );
         },
       );
 
