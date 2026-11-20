@@ -291,8 +291,9 @@ class _ContentUriImageState extends State<_ContentUriImage> {
 /// [LocalArtworkService]（桌面 Rust / Android MediaMetadataRetriever），
 /// 是本地音乐现在的唯一封面来源。
 ///
-/// 无图时直接落到占位图，不显示 shimmer：本地歌没有内嵌图是常态，
-/// 每行都闪一下反而更吵。
+/// 首次取字节期间显示 shimmer（进程内 LRU 命中时毫秒级即消失），
+/// 确认无图后落到占位图；本地歌没有内嵌图是常态，shimmer 只闪一次
+/// （负缓存后重进视口直接占位）。
 class _LocalArtworkImage extends StatefulWidget {
   const _LocalArtworkImage({
     required this.url,

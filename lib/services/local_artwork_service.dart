@@ -157,7 +157,7 @@ class LocalArtworkService {
       debugPrint('[时音][artwork] 读取本地封面失败(不缓存): $source ($error)');
       return (kind: _ArtworkRead.failed, bytes: null);
     }
-    // 未知引擎（iOS 等）：按无图处理（无本地音乐能力，进负缓存无害）。
+    // avFoundation 等暂未接读取通道的平台：按无图处理（iOS/macOS 本地音乐扫描尚未支持，进负缓存无害）。
     return (kind: _ArtworkRead.none, bytes: null);
   }
 

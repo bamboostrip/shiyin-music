@@ -428,7 +428,7 @@ class MainActivity : AudioServiceActivity() {
                         // 会在列表滚动时逐行掉帧；后台线程解析、主线程回包。
                         // null = 解析成功但确实没有内嵌图（Dart 侧据此进负缓存）；
                         // 异常 = 读取失败（IO/权限），上抛让 Dart 侧按瞬时失败重试。
-                        Thread {
+                        mediaIoExecutor.execute {
                             val outcome = runCatching { getEmbeddedCover(source) }
                             runOnUiThread {
                                 outcome
@@ -437,7 +437,7 @@ class MainActivity : AudioServiceActivity() {
                                         result.error("cover_failed", error.message, null)
                                     }
                             }
-                        }.start()
+                        }
                     }
                     "readMediaHead" -> {
                         val source = call.argument<String>("source")
@@ -446,14 +446,14 @@ class MainActivity : AudioServiceActivity() {
                             return@setMethodCallHandler
                         }
                         // 头部截取也压后台：contentResolver 打开可能涉网络盘（云媒体）。
-                        Thread {
+                        mediaIoExecutor.execute {
                             val outcome = runCatching { readMediaHead(source) }
                             runOnUiThread {
                                 outcome
                                     .onSuccess { result.success(it) }
                                     .onFailure { error -> result.error("read_failed", error.message, null) }
                             }
-                        }.start()
+                        }
                     }
                     // 内嵌歌词不再走这里：MediaMetadataRetriever 没有"歌词"这个
                     // metadata key（历史上的 extractMetadata(26) 其实是
@@ -1487,6 +1487,10 @@ class MainActivity : AudioServiceActivity() {
             null
         }
     }
+
+    /** 媒体元数据 IO 专用单线程执行器：封面/头部截取都是短任务，
+     *  单线程串行既避免快滚大库时的线程风暴，也不会让长查询插队饿死。 */
+    private val mediaIoExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**
      * 读取音频文件自带封面（ID3v2 APIC / FLAC PICTURE / MP4 covr 等）。

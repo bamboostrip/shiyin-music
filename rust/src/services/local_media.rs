@@ -206,7 +206,14 @@ pub(crate) fn is_lyrics_key(key: &str) -> bool {
 }
 
 /// 容器元数据修订 → [LocalTags]。
-fn tags_from_revision(revision: &symphonia::core::meta::MetadataRevision) -> LocalTags {
+///
+/// [include_visuals]=false 时跳过封面字节拷贝：symphonia 解析时无论如何
+/// 都会把图数据读进 revision（不可省的读盘），但扫描/歌词只要文本标签，
+/// 调用方至少可以免掉每文件一次 MB 级的 `to_vec()` 拷贝。
+fn tags_from_revision(
+    revision: &symphonia::core::meta::MetadataRevision,
+    include_visuals: bool,
+) -> LocalTags {
     let mut tags = LocalTags::default();
     for tag in revision.tags() {
         let symphonia::core::meta::Value::String(value) = &tag.value else {
@@ -236,17 +243,19 @@ fn tags_from_revision(revision: &symphonia::core::meta::MetadataRevision) -> Loc
             }
         }
     }
-    // 一张图就够了：优先 FrontCover（ID3v2 APIC 的照片类型 3）。
-    let front = revision.visuals().iter().find(|visual| {
-        !visual.data.is_empty()
-            && visual.usage == Some(symphonia::core::meta::StandardVisualKey::FrontCover)
-    });
-    let any = revision
-        .visuals()
-        .iter()
-        .find(|visual| !visual.data.is_empty());
-    if let Some(visual) = front.or(any) {
-        tags.cover = Some(visual.data.to_vec());
+    if include_visuals {
+        // 一张图就够了：优先 FrontCover（ID3v2 APIC 的照片类型 3）。
+        let front = revision.visuals().iter().find(|visual| {
+            !visual.data.is_empty()
+                && visual.usage == Some(symphonia::core::meta::StandardVisualKey::FrontCover)
+        });
+        let any = revision
+            .visuals()
+            .iter()
+            .find(|visual| !visual.data.is_empty());
+        if let Some(visual) = front.or(any) {
+            tags.cover = Some(visual.data.to_vec());
+        }
     }
     tags
 }
@@ -279,18 +288,56 @@ pub fn read_id3v2_tags(path: &str) -> Option<LocalTags> {
     read_id3v2_from_stream(&mut mss)
 }
 
-/// 从流的当前位置读 ID3v2。调用方负责先行长度上限校验。
-fn read_id3v2_from_stream(
+/// 同 [read_id3v2_tags] 的外壳（头 10 字节校验 + 16MB 上限 + 二次打开），
+/// 但只取文本标签（扫描 probe 用）：跳过封面字节的 `to_vec()` 拷贝。
+fn read_id3v2_text_tags(path: &str) -> Option<LocalTags> {
+    let mut file = File::open(path).ok()?;
+    // 上限校验的意义见 [read_id3v2_tags]。
+    let mut header = [0u8; 10];
+    std::io::Read::read_exact(&mut file, &mut header).ok()?;
+    if &header[0..3] != b"ID3" {
+        return None;
+    }
+    let declared = header[6..10]
+        .iter()
+        .fold(0usize, |acc, byte| (acc << 7) | usize::from(byte & 0x7f));
+    if declared > _MAX_ID3V2_TAG_BYTES {
+        return None;
+    }
+
+    let file = File::open(path).ok()?;
+    let mut mss = MediaSourceStream::new(Box::new(file), Default::default());
+    read_id3v2_impl(&mut mss, false)
+}
+
+/// ID3v2 解析核心。[include_visuals]=false 时跳过封面字节拷贝：
+/// symphonia 的 id3v2 reader 解析时无论如何都会把 APIC 数据读进 builder
+/// （不可省的读盘），但扫描/歌词只要文本标签，这里至少免掉每文件一次
+/// MB 级的 `to_vec()` 拷贝。
+fn read_id3v2_impl(
     mss: &mut MediaSourceStream,
+    include_visuals: bool,
 ) -> Option<LocalTags> {
     let mut builder = symphonia::core::meta::MetadataBuilder::new();
     symphonia_metadata::id3v2::read_id3v2(mss, &mut builder).ok()?;
-    let tags = tags_from_revision(&builder.metadata());
+    let tags = tags_from_revision(&builder.metadata(), include_visuals);
     if tags.is_empty() {
         None
     } else {
         Some(tags)
     }
+}
+
+/// 含封面的完整流式读取（[read_id3v2_tags] 用，read_cover 经它取图）。
+/// 从流的当前位置读 ID3v2，调用方负责先行长度上限校验。
+fn read_id3v2_from_stream(mss: &mut MediaSourceStream) -> Option<LocalTags> {
+    read_id3v2_impl(mss, true)
+}
+
+/// 只取文本标签（扫描 probe / 字节歌词的 ID3v2 层用）。同样从流的
+/// 当前位置读，调用方负责先行长度上限校验。
+fn read_id3v2_text_from_stream(mss: &mut MediaSourceStream) -> Option<LocalTags> {
+    read_id3v2_impl(mss, false)
 }
 
 /// 从文件头部字节里读内嵌歌词（Android 10 分区存储的 content:// 兜底）。
@@ -333,7 +380,7 @@ pub fn read_lyrics_from_bytes(data: &[u8]) -> anyhow::Result<Option<String>> {
     //    16MB 上限由调用方（Kotlin 头部截取）保证，这里不再重复校验。
     let cursor = std::io::Cursor::new(data.to_vec());
     let mut mss = MediaSourceStream::new(Box::new(cursor), Default::default());
-    Ok(read_id3v2_from_stream(&mut mss).and_then(|tags| tags.lyrics))
+    Ok(read_id3v2_text_from_stream(&mut mss).and_then(|tags| tags.lyrics))
 }
 
 /// ID3v2 标签块的内存上限（16MB）。
@@ -369,12 +416,14 @@ fn probe_entry(path: &Path) -> Option<LocalSongEntry> {
         .unwrap_or(0);
 
     // 标签：容器元数据（FLAC/MP4/OGG 等）+ ID3v2 兜底（mp3 唯一来源）。
+    // 扫描只要文本标签，两层都传 false 免掉封面字节的 `to_vec()` 拷贝
+    // （封面由 UI 按需经 [read_cover] 另取）。
     let mut tags = match format.metadata().current() {
-        Some(revision) => tags_from_revision(revision),
+        Some(revision) => tags_from_revision(revision, false),
         None => LocalTags::default(),
     };
     if tags.title.is_empty() || tags.artist.is_empty() || tags.album.is_empty() {
-        if let Some(id3v2) = read_id3v2_tags(&path.to_string_lossy()) {
+        if let Some(id3v2) = read_id3v2_text_tags(&path.to_string_lossy()) {
             tags.fill_from(id3v2);
         }
     }

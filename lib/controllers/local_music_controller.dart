@@ -217,6 +217,10 @@ class LocalMusicController extends ChangeNotifier {
     if (!Platform.isAndroid) return;
     if (!_hasPermission) return;
 
+    // 重入保护：手动扫描进行中时，自动重扫（文件缺失触发）直接跳过——
+    // 并发扫只是重复查询、last-wins，桌面路径同款守卫。
+    if (_isScanning) return;
+
     _isScanning = true;
     notifyListeners();
 
