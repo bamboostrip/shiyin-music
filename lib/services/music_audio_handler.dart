@@ -1032,12 +1032,7 @@ class MusicAudioHandler extends BaseAudioHandler
       ),
       artist: song.artist,
       duration: song.duration,
-      // `localart://`（本地内嵌封面）只在本进程内有效，系统媒体会话/通知
-      // 解析不了这种伪 URL：下发出去只会让锁屏拿一个坏 Uri 去请求，不如
-      // 直接留空（本地歌的锁屏封面本来就是空的）。
-      artUri: song.coverUrl == null || LocalArtworkService.isArtworkUrl(song.coverUrl)
-          ? null
-          : Uri.tryParse(song.coverUrl!),
+      artUri: _systemArtUri(song),
       extras: buildLyricMediaExtras(
         song: song,
         lyricText: lyricText,
@@ -1290,11 +1285,22 @@ class MusicAudioHandler extends BaseAudioHandler
       title: song.title,
       artist: song.artist,
       duration: song.duration,
-      artUri: includeArt && song.coverUrl != null
-          ? Uri.tryParse(song.coverUrl!)
-          : null,
+      artUri: includeArt ? _systemArtUri(song) : null,
       extras: {'hash': song.hash, 'songId': song.id},
     );
+  }
+
+  /// 下发给系统媒体会话的封面 Uri（没有则 null）。
+  ///
+  /// `localart://`（本地内嵌封面）只在本进程内有效，系统侧解析不了这种伪
+  /// URL：下发出去只会让锁屏/车机拿一个坏 Uri 去请求，不如留空（本地歌的
+  /// 锁屏封面本来就是空的）。
+  static Uri? _systemArtUri(Song song) {
+    final coverUrl = song.coverUrl;
+    if (coverUrl == null || LocalArtworkService.isArtworkUrl(coverUrl)) {
+      return null;
+    }
+    return Uri.tryParse(coverUrl);
   }
 
   /// 构建通知卡片/系统媒体卡片的按钮序列。
