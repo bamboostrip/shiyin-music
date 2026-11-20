@@ -39,6 +39,12 @@ class StorageSettingsSection extends StatelessWidget {
         children.add(
           DownloadQualitySettings(downloads: downloads, player: player),
         );
+        // 「同时保存 LRC 歌词」原本藏在缓存管理弹层里，PC 用户按更新日志的
+        // 路径（设置 → 存储与下载）找不到入口，误以为该功能没上桌面端
+        // （issue #29）。这是下载选项而非缓存清理项，放回本分节后所有平台
+        // 同一个位置，缓存管理弹层不再重复出现。
+        children.add(const SettingsDivider());
+        children.add(_SaveLyricsFileTile(downloads: downloads));
       }
       children.add(const SettingsDivider());
     }
@@ -61,6 +67,34 @@ class StorageSettingsSection extends StatelessWidget {
         SettingsCard(children: children),
         const SizedBox(height: 20),
       ],
+    );
+  }
+}
+
+/// 「同时保存 LRC 歌词」开关。
+///
+/// 状态来自 [DownloadController]（prefs 持久化，桌面端同样生效）：开启后
+/// 每首下载都会在音频旁落一份同名 `.lrc`；标签写不进去时无论开关都会兜底
+/// 落一份。用 [AnimatedBuilder] 跟随控制器，避免把整节改成 StatefulWidget。
+class _SaveLyricsFileTile extends StatelessWidget {
+  const _SaveLyricsFileTile({required this.downloads});
+
+  final DownloadController downloads;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: downloads,
+      builder: (context, _) {
+        return SettingsSwitchTile(
+          icon: Icons.lyrics_outlined,
+          iconColor: const Color(0xFF7E57C2),
+          title: '同时保存 LRC 歌词',
+          subtitle: '下载时额外保留一份同名歌词文件；内嵌失败会自动保存',
+          value: downloads.saveLyricsFile,
+          onChanged: downloads.setSaveLyricsFile,
+        );
+      },
     );
   }
 }

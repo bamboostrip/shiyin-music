@@ -27,6 +27,18 @@ class _FakeDownloads extends ChangeNotifier implements DownloadController {
     notifyListeners();
   }
 
+  // 「存储与下载」分节里的「同时保存 LRC 歌词」开关会读这两项（issue #29）。
+  bool _saveLyricsFile = false;
+
+  @override
+  bool get saveLyricsFile => _saveLyricsFile;
+
+  @override
+  Future<void> setSaveLyricsFile(bool enabled) async {
+    _saveLyricsFile = enabled;
+    notifyListeners();
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

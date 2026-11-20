@@ -424,24 +424,8 @@ class _CacheManagementSheetState extends State<CacheManagementSheet> {
           // 不搬上游入口（fork 桌面设置已有等价项，避免双入口）。
           DownloadDirInfo(downloads: widget.downloads!),
           const SizedBox(height: 10),
-          // 「同时保存 LRC 歌词」（上游 3.3.0 `d688884`）：默认关——歌词会
-          // 内嵌进音频；开启后额外落一份同名 `.lrc`，方便拷到车机/U 盘
-          // 给第三方播放器用。内嵌失败时无论开关都会兜底落一份。
-          SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-            secondary: Icon(
-              Icons.lyrics_outlined,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            title: const Text('同时保存 LRC 歌词'),
-            subtitle: const Text('下载时额外保留一份歌词文件；内嵌失败会自动保存'),
-            value: widget.downloads!.saveLyricsFile,
-            onChanged: (enabled) async {
-              await widget.downloads!.setSaveLyricsFile(enabled);
-              if (mounted) setState(() {});
-            },
-          ),
-          const SizedBox(height: 10),
+          // 「同时保存 LRC 歌词」已移到设置页「存储与下载」分节：下载选项
+          // 放缓存清理弹层里既不合语义，PC 用户也找不到（issue #29）。
           // 旧下载修复（升级前的文件不走新下载的收尾链路：扩展名可能撒谎、
           // 没有内嵌标签）。做成手动入口而不是首启静默迁移：整文件重写很
           // 吃 IO，出问题用户能重试，也能自己决定什么时候跑。
