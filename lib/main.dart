@@ -38,6 +38,7 @@ import 'ui/desktop/desktop_window.dart';
 import 'ui/desktop/lyrics_overlay_window.dart';
 import 'ui/app_theme.dart';
 import 'ui/form_factor.dart';
+import 'ui/keyboard_shortcuts.dart';
 import 'ui/pages/app_shell.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/widgets/background_crop_view.dart';
@@ -116,6 +117,9 @@ Future<void> main(List<String> args) async {
     final themeController = ThemeController();
     await themeController.detectAutomotive(const DeviceInfoService());
     await themeController.load();
+    // 桌面端可改键（设置 → 键盘快捷键，issue #31）：启动即读一次
+    // 持久化配置，坏数据在内部回退默认表，不阻断启动。
+    unawaited(ShortcutController.instance.load());
 
     final channelConfig = resolvePlaybackNotificationChannel(
       isCarMode: themeController.carModeEnabled,

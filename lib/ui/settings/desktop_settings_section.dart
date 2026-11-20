@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/desktop_system_integration.dart';
 import '../desktop/desktop_window.dart';
+import '../pages/keyboard_shortcuts_page.dart';
 import '../widgets/toast.dart';
 import 'settings_widgets.dart';
 
@@ -28,6 +29,18 @@ class DesktopSettingsSection extends StatelessWidget {
             const CloseToTraySwitch(),
             SettingsDivider(),
             const AutoStartSwitch(),
+            SettingsDivider(),
+            SettingsTile(
+              icon: Icons.keyboard_rounded,
+              iconColor: const Color(0xFF5C6BC0),
+              title: '键盘快捷键',
+              subtitle: '查看与修改播放快捷键',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const KeyboardShortcutsPage(),
+                ),
+              ),
+            ),
             SettingsDivider(),
             SettingsTile(
               icon: Icons.crop_square_rounded,

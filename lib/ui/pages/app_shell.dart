@@ -777,7 +777,8 @@ class _RelativeTextScaler extends TextScaler {
 ///
 /// - 移动/车机端（历史行为保持）：空格播放/暂停，←/→ 切歌，↑/↓ 音量。
 /// - 桌面端：空格播放/暂停（焦点在可滚动区域时退让给滚动翻页），
-///   ←/→ 快退/快进 ±5 秒，Ctrl+←/→ 切歌，↑/↓ 音量。
+///   ←/→ 快退/快进 ±5 秒，Ctrl+←/→ 切歌，↑/↓ 音量。键位取自
+///   [ShortcutController]（设置页「键盘快捷键」可改，改完立即重建本表）。
 ///   按键表映射见 keyboard_shortcuts.dart。
 class AppShortcutScope extends StatelessWidget {
   const AppShortcutScope({
@@ -801,7 +802,9 @@ class AppShortcutScope extends StatelessWidget {
         };
     return {
       for (final action in AppShortcutAction.values)
-        for (final activator in appShortcutActivators(action, desktop: desktop))
+        for (final activator in (desktop
+            ? ShortcutController.instance.activatorsOf(action)
+            : appShortcutActivators(action, desktop: false)))
           activator: bindingsFor(action),
     };
   }
@@ -809,78 +812,82 @@ class AppShortcutScope extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final desktop = isDesktopFormFactor;
-    return Shortcuts(
-      shortcuts: _buildShortcutTable(desktop: desktop),
-      child: Actions(
-        actions: {
-          _PlayPauseIntent: GuardedCallbackAction<_PlayPauseIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (_) {
-              if (desktop && isFocusInsideScrollableRegion()) {
-                // 空格退让：焦点在普通可滚动区域内 → 向下翻一页。
-                scrollFocusedRegionByPage(forward: true);
-              } else {
-                player.togglePlay();
-              }
-              return null;
-            },
-          ),
-          _NextIntent: GuardedCallbackAction<_NextIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (_) {
-              unawaited(player.next());
-              return null;
-            },
-          ),
-          _PreviousIntent: GuardedCallbackAction<_PreviousIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (_) {
-              unawaited(player.previous());
-              return null;
-            },
-          ),
-          _SeekIntent: GuardedCallbackAction<_SeekIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (intent) {
-              final target = computeSeekTarget(
-                position: player.position,
-                duration: player.duration,
-                forward: !intent.backward,
-              );
-              if (target != null) {
-                // seek 非 idle 下引擎异常会抛错，快捷键无 context 可提示，
-                // 仅日志吞掉，避免未处理异步异常上报
-                unawaited(
-                  player.seek(target).catchError((Object error) {
-                    debugPrint('[时音][shortcut] seek 失败已忽略: $error');
-                  }),
+    return AnimatedBuilder(
+      animation: ShortcutController.instance,
+      // 改键后立即重建按键表（issue #31）：设置页保存即 notify。
+      builder: (context, _) => Shortcuts(
+        shortcuts: _buildShortcutTable(desktop: desktop),
+        child: Actions(
+          actions: {
+            _PlayPauseIntent: GuardedCallbackAction<_PlayPauseIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (_) {
+                if (desktop && isFocusInsideScrollableRegion()) {
+                  // 空格退让：焦点在普通可滚动区域内 → 向下翻一页。
+                  scrollFocusedRegionByPage(forward: true);
+                } else {
+                  player.togglePlay();
+                }
+                return null;
+              },
+            ),
+            _NextIntent: GuardedCallbackAction<_NextIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (_) {
+                unawaited(player.next());
+                return null;
+              },
+            ),
+            _PreviousIntent: GuardedCallbackAction<_PreviousIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (_) {
+                unawaited(player.previous());
+                return null;
+              },
+            ),
+            _SeekIntent: GuardedCallbackAction<_SeekIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (intent) {
+                final target = computeSeekTarget(
+                  position: player.position,
+                  duration: player.duration,
+                  forward: !intent.backward,
                 );
-              }
-              return null;
-            },
-          ),
-          _VolumeUpIntent: GuardedCallbackAction<_VolumeUpIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (_) {
-              player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
-              return null;
-            },
-          ),
-          _VolumeDownIntent: GuardedCallbackAction<_VolumeDownIntent>(
-            desktop: desktop,
-            guard: (_) => isFocusInsideInteractiveControl(),
-            onInvoke: (_) {
-              player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
-              return null;
-            },
-          ),
-        },
-        child: Focus(autofocus: true, child: child),
+                if (target != null) {
+                  // seek 非 idle 下引擎异常会抛错，快捷键无 context 可提示，
+                  // 仅日志吞掉，避免未处理异步异常上报
+                  unawaited(
+                    player.seek(target).catchError((Object error) {
+                      debugPrint('[时音][shortcut] seek 失败已忽略: $error');
+                    }),
+                  );
+                }
+                return null;
+              },
+            ),
+            _VolumeUpIntent: GuardedCallbackAction<_VolumeUpIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (_) {
+                player.setVolume((player.volume + 0.05).clamp(0.0, 1.0));
+                return null;
+              },
+            ),
+            _VolumeDownIntent: GuardedCallbackAction<_VolumeDownIntent>(
+              desktop: desktop,
+              guard: (_) => isFocusInsideInteractiveControl(),
+              onInvoke: (_) {
+                player.setVolume((player.volume - 0.05).clamp(0.0, 1.0));
+                return null;
+              },
+            ),
+          },
+          child: Focus(autofocus: true, child: child),
+        ),
       ),
     );
   }
