@@ -484,6 +484,10 @@ class _FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool lyricPageSkipButtonsEnabled = false;
 
+  /// 歌词动效样式（issue #26）：播放设置分节只读，测试默认标准样式。
+  @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
   /// 切歌键瓦片点击写回的入参记录（断言 UI → controller 接线）。
   final List<bool> lyricPageSkipWrites = [];
 

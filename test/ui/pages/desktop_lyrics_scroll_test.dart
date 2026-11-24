@@ -23,6 +23,10 @@ class _FakePlayerController extends ChangeNotifier
   @override
   Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
 
+  /// 歌词动效样式（issue #26）：播放页只读，测试默认标准样式。
+  @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
   /// PlayerPage 的 KEEP_SCREEN_ON 门控会读写这两个成员。
   @override
   bool keepScreenOnEnabled = true;

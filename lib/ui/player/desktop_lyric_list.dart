@@ -9,6 +9,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import 'lyric_display_mode.dart';
 import 'lyric_karaoke_text.dart';
+import 'lyric_line_motion.dart';
 
 /// 桌面端歌词列表（PC 软件逻辑，对齐 QQ 音乐/网易云 PC）。
 ///
@@ -29,6 +30,7 @@ class DesktopLyricList extends StatefulWidget {
     required this.activeIndex,
     required this.displayMode,
     required this.lyricScale,
+    this.motionStyle = LyricMotionStyle.standard,
     this.onSecondaryTapLine,
   });
 
@@ -38,6 +40,9 @@ class DesktopLyricList extends StatefulWidget {
   final int activeIndex;
   final LyricDisplayMode displayMode;
   final double lyricScale;
+
+  /// 歌词动效样式（issue #26）。默认标准样式，渲染路径与改造前一致。
+  final LyricMotionStyle motionStyle;
 
   /// 右键歌词行（PC 端在指针处弹出「歌词进度」锚定面板）。
   final ValueChanged<Offset>? onSecondaryTapLine;
@@ -493,58 +498,69 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                         cursor: SystemMouseCursors.click,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 9),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 当前播放行且有逐字时间戳：逐字卡拉OK扫色
-                              //（painter 缓存排版，每帧只重绘这一行）。
-                              if (isPlaying && line.words.isNotEmpty)
-                                LyricText(
-                                  line: line,
-                                  active: true,
-                                  position: _smoothPosition,
-                                  styleOverride: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium!
-                                      .copyWith(
-                                        color: textColor,
-                                        fontSize: fontSize,
-                                        height: 1.3,
-                                        fontWeight: fontWeight,
-                                      ),
-                                )
-                              else
-                                AnimatedDefaultTextStyle(
-                                  duration: const Duration(milliseconds: 180),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium!
-                                      .copyWith(
-                                        color: textColor,
-                                        fontSize: fontSize,
-                                        height: 1.3,
-                                        fontWeight: fontWeight,
-                                      ),
-                                  child: Text(line.text),
-                                ),
-                              if (secondary != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  secondary,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: Colors.white.withValues(
-                                          alpha: isPlaying
-                                              ? .75
-                                              : (isFocused ? .6 : .28),
+                          child: LyricLineMotion(
+                            style: widget.motionStyle,
+                            active: isPlaying,
+                            // 手动滚动时的准星行保持清晰，其余行按与当前
+                            // 播放行的距离决定模糊强度。
+                            distance: isFocused
+                                ? 0
+                                : (index - _activeLyricIndex).abs(),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 当前播放行且有逐字时间戳：逐字卡拉OK扫色
+                                //（painter 缓存排版，每帧只重绘这一行）。
+                                if (isPlaying && line.words.isNotEmpty)
+                                  LyricText(
+                                    line: line,
+                                    active: true,
+                                    position: _smoothPosition,
+                                    styleOverride: Theme.of(context)
+                                        .textTheme
+                                        .headlineMedium!
+                                        .copyWith(
+                                          color: textColor,
+                                          fontSize: fontSize,
+                                          height: 1.3,
+                                          fontWeight: fontWeight,
                                         ),
-                                        fontSize: 15.0 * widget.lyricScale,
-                                        height: 1.3,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                ),
+                                  )
+                                else
+                                  AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 180),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineMedium!
+                                        .copyWith(
+                                          color: textColor,
+                                          fontSize: fontSize,
+                                          height: 1.3,
+                                          fontWeight: fontWeight,
+                                        ),
+                                    child: Text(line.text),
+                                  ),
+                                if (secondary != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    secondary,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: Colors.white.withValues(
+                                            alpha: isPlaying
+                                                ? .75
+                                                : (isFocused ? .6 : .28),
+                                          ),
+                                          fontSize: 15.0 * widget.lyricScale,
+                                          height: 1.3,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
                       ),

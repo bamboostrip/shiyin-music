@@ -260,6 +260,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
             showRomanization: _showRomanization,
           ),
           lyricScale: _lyricScale,
+          motionStyle: widget.player.lyricMotionStyle,
           onSecondaryTapLine: (position) => unawaited(
             showLyricOffsetMenu(
               context,
@@ -285,6 +286,7 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
               showTranslation: _showTranslation,
               showRomanization: _showRomanization,
               lyricScale: _lyricScale,
+              motionStyle: widget.player.lyricMotionStyle,
               isPageVisible: widget.isPageVisible,
               onLongPressLine: openLyricOffsetSheet,
             ),
@@ -320,6 +322,7 @@ class LyricViewport extends StatelessWidget {
     required this.displayMode,
     required this.isPageVisible,
     required this.lyricScale,
+    this.motionStyle = LyricMotionStyle.standard,
   });
 
   final PlayerController player;
@@ -330,6 +333,7 @@ class LyricViewport extends StatelessWidget {
   final LyricDisplayMode displayMode;
   final bool isPageVisible;
   final double lyricScale;
+  final LyricMotionStyle motionStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -341,6 +345,7 @@ class LyricViewport extends StatelessWidget {
         activeIndex: activeIndex,
         displayMode: displayMode,
         lyricScale: lyricScale,
+        motionStyle: motionStyle,
       );
     }
     return MobileLyricList(
@@ -351,6 +356,7 @@ class LyricViewport extends StatelessWidget {
       showTranslation: displayMode == LyricDisplayMode.lyricsWithTranslation,
       showRomanization: displayMode == LyricDisplayMode.lyricsWithRomanization,
       lyricScale: lyricScale,
+      motionStyle: motionStyle,
       isPageVisible: isPageVisible,
     );
   }

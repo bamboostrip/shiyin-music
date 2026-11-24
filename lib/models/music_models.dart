@@ -3,6 +3,7 @@
 export 'cloud_drive.dart';
 export 'comment.dart';
 export 'fm.dart';
+export 'lyric_motion_style.dart';
 export 'model_parsing.dart';
 export 'netease_external.dart';
 export 'playlist.dart';

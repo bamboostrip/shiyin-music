@@ -201,6 +201,9 @@ const _lyricOffsetsSettingKey = 'settings.lyric_offset_per_song';
 const _keepScreenOnSettingKey = 'settings.keep_screen_on';
 // 歌词页切歌键（issue #3）：默认关 = QQ 音乐原版底栏，用户可在 设置-播放 打开。
 const _lyricPageSkipButtonsSettingKey = 'settings.lyric_page_skip_buttons';
+// 播放页歌词动效样式（issue #26）：默认 standard（现有样式，性能最好）；
+// lively = Apple Music 风（当前句弹性放大 + 上下行模糊渐隐）。
+const _lyricMotionStyleSettingKey = 'settings.lyric_motion_style';
 // 搜索点歌替换播放队列（issue #6-3）：默认关 = 只把该曲插入当前队列播放
 // （不摧毁正在听的歌单）；打开 = 用搜索结果整体替换队列（旧行为）。
 const _searchPlayReplaceQueueSettingKey = 'settings.search_play_replace_queue';
@@ -970,6 +973,14 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   /// 横屏；桌面/车机分栏布局自带完整控制区），设置入口在 设置-播放
   /// （仅手机/平板形态展示，PC 与车机隐藏）。
   bool lyricPageSkipButtonsEnabled = false;
+
+  /// 播放页歌词动效样式（issue #26）。
+  ///
+  /// 默认 [LyricMotionStyle.standard]（现有样式，性能最好）；
+  /// [LyricMotionStyle.lively] = Apple Music 风，当前句弹性放大、上下行
+  /// 轻微模糊渐隐。移动端歌词页与 PC 播放页共用；桌面歌词悬浮窗与车机
+  /// flutter_lyric 视图暂不跟进。
+  LyricMotionStyle lyricMotionStyle = LyricMotionStyle.standard;
 
   /// 搜索点歌时是否用搜索结果替换整个播放队列（issue #6-3）。
   ///

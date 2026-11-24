@@ -5,6 +5,7 @@ import '../../controllers/player_controller.dart';
 import '../../services/music_api.dart';
 import '../settings/playback_settings_section.dart';
 import '../widgets/audio_quality_sheet.dart';
+import '../widgets/lyric_motion_style_sheet.dart';
 
 /// 「播放设置」二级页。
 ///
@@ -38,6 +39,15 @@ class PlaybackSettingsPage extends StatelessWidget {
     await player.setAudioQuality(quality);
   }
 
+  Future<void> _selectLyricMotionStyle(BuildContext context) async {
+    final style = await showLyricMotionStyleSheet(
+      context: context,
+      selected: player.lyricMotionStyle,
+    );
+    if (style == null) return;
+    await player.setLyricMotionStyle(style);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -55,6 +65,8 @@ class PlaybackSettingsPage extends StatelessWidget {
                 showLyricPageSkipButtons: showLyricPageSkipButtons,
                 onSelectDefaultAudioQuality: () =>
                     _selectDefaultAudioQuality(context),
+                onSelectLyricMotionStyle: () =>
+                    _selectLyricMotionStyle(context),
               ),
             ],
           );

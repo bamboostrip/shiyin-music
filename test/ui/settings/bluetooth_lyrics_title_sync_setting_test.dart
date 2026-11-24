@@ -82,6 +82,9 @@ class _FakePlayerController extends Fake implements PlayerController {
   bool get lyricPageSkipButtonsEnabled => false;
 
   @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
+  @override
   AudioQuality get audioQuality => AudioQuality.standard;
 }
 

@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import 'lyric_line_motion.dart';
 import 'lyric_seek_pointer_button.dart';
 import 'lyric_views.dart';
 
@@ -27,6 +28,7 @@ class MobileLyricList extends StatefulWidget {
     required this.showRomanization,
     required this.lyricScale,
     required this.isPageVisible,
+    this.motionStyle = LyricMotionStyle.standard,
     this.onLongPressLine,
   });
 
@@ -38,6 +40,9 @@ class MobileLyricList extends StatefulWidget {
   final bool showRomanization;
   final double lyricScale;
   final bool isPageVisible;
+
+  /// 歌词动效样式（issue #26）。默认标准样式，渲染路径与改造前一致。
+  final LyricMotionStyle motionStyle;
 
   /// 长按歌词行（打开「调整歌词进度」弹层；与详情弹层入口同一个）。
   final VoidCallback? onLongPressLine;
@@ -557,35 +562,44 @@ class _MobileLyricListState extends State<MobileLyricList>
                       onLongPress: widget.onLongPressLine,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8.5),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            mainWidget,
-                            if (showTrans) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                line.translation!,
-                                style: TextStyle(
-                                  color: transColor,
-                                  fontSize: 14.5 * widget.lyricScale,
-                                  height: 1.26,
-                                  fontWeight: FontWeight.w600,
+                        child: LyricLineMotion(
+                          style: widget.motionStyle,
+                          active: isPlaying,
+                          // 手动滚动时的准星行保持清晰，便于找句；其余行按
+                          // 与当前播放行的距离决定模糊强度。
+                          distance: isFocused
+                              ? 0
+                              : (index - _activeLyricIndex).abs(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              mainWidget,
+                              if (showTrans) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  line.translation!,
+                                  style: TextStyle(
+                                    color: transColor,
+                                    fontSize: 14.5 * widget.lyricScale,
+                                    height: 1.26,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                            ],
-                            if (showRom) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                line.romanization!,
-                                style: TextStyle(
-                                  color: romColor,
-                                  fontSize: 13.5 * widget.lyricScale,
-                                  height: 1.24,
-                                  fontWeight: FontWeight.w500,
+                              ],
+                              if (showRom) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  line.romanization!,
+                                  style: TextStyle(
+                                    color: romColor,
+                                    fontSize: 13.5 * widget.lyricScale,
+                                    height: 1.24,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     );

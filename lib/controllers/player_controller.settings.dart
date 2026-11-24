@@ -41,6 +41,17 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 设置播放页歌词动效样式（issue #26）。
+  ///
+  /// 移动端歌词页与 PC 播放页共用一份设置；同值幂等，不重复落盘/通知。
+  Future<void> setLyricMotionStyle(LyricMotionStyle style) async {
+    if (lyricMotionStyle == style) return;
+    lyricMotionStyle = style;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lyricMotionStyleSettingKey, style.storageValue);
+    notifyListeners();
+  }
+
   /// 开关「搜索点歌替换播放队列」（issue #6-3：默认关 = 插入当前队列）。
   Future<void> setSearchPlayReplaceQueue(bool enabled) async {
     if (searchPlayReplaceQueue == enabled) return;
@@ -466,6 +477,9 @@ mixin _PlayerSettings on _PlayerControllerBase {
     lyricPageSkipButtonsEnabled =
         prefs.getBool(_lyricPageSkipButtonsSettingKey) ??
         lyricPageSkipButtonsEnabled;
+    lyricMotionStyle = LyricMotionStyle.fromStorageValue(
+      prefs.getString(_lyricMotionStyleSettingKey),
+    );
     searchPlayReplaceQueue =
         prefs.getBool(_searchPlayReplaceQueueSettingKey) ??
         searchPlayReplaceQueue;

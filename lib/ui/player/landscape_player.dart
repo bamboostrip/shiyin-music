@@ -971,6 +971,7 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
             showRomanization: widget.showRomanization,
           ),
           lyricScale: widget.compact ? 0.85 : 1.0,
+          motionStyle: player.lyricMotionStyle,
           onSecondaryTapLine: widget.onOpenLyricOffset,
         ),
       );

@@ -68,6 +68,9 @@ class _FakePlayerController extends Fake implements PlayerController {
 
   @override
   bool get showUnavailableSongs => false;
+
+  @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
 }
 
 class _FakeAuthController extends Fake implements AuthController {}

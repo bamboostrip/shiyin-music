@@ -79,6 +79,10 @@ class _FakePlayerController extends ChangeNotifier
   @override
   bool lyricPageSkipButtonsEnabled = false;
 
+  /// 歌词动效样式（issue #26）：播放页只读，测试默认标准样式。
+  @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
   @override
   bool isPreparing = false;
 

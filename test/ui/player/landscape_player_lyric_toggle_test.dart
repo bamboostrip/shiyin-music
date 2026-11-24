@@ -31,6 +31,10 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
   Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
 
+  /// 歌词动效样式（issue #26）：播放页只读，测试默认标准样式。
+  @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
   @override
   Song? currentSong = _song;
 

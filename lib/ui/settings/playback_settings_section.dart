@@ -31,6 +31,7 @@ class PlaybackSettingsSection extends StatelessWidget {
     required this.auth,
     required this.player,
     required this.onSelectDefaultAudioQuality,
+    this.onSelectLyricMotionStyle,
     required this.showLyricPageSkipButtons,
   });
 
@@ -38,6 +39,11 @@ class PlaybackSettingsSection extends StatelessWidget {
   final AuthController auth;
   final PlayerController player;
   final VoidCallback onSelectDefaultAudioQuality;
+
+  /// 打开「歌词动效」选择弹层（移动端歌词页与 PC 播放页共用）。
+  ///
+  /// 可选：仅测试里直接构造本分节时允许缺省（该行不可点）。
+  final VoidCallback? onSelectLyricMotionStyle;
 
   /// 是否展示「歌词页切歌键」开关：仅手机/平板形态需要（移动端歌词页
   /// 底栏才有切歌键）；PC 与车机隐藏，避免「看得到但无效」。
@@ -234,8 +240,20 @@ class PlaybackSettingsSection extends StatelessWidget {
     }
 
     // ---- 歌词与设备 ----
-    final lyricTiles = <Widget>[];
+    // 歌词动效不依赖桌面歌词开关，移动端/PC 播放页都有，恒显示。
+    final lyricTiles = <Widget>[
+      SettingsTile(
+        icon: Icons.animation_rounded,
+        iconColor: const Color(0xFF00897B),
+        title: '歌词动效',
+        subtitle:
+            '${player.lyricMotionStyle.label} · '
+            '${player.lyricMotionStyle.description}',
+        onTap: onSelectLyricMotionStyle,
+      ),
+    ];
     if (player.isDesktopLyricsSupported) {
+      if (lyricTiles.isNotEmpty) lyricTiles.add(const SettingsDivider());
       lyricTiles.add(
         SettingsSwitchTile(
           icon: Icons.lyrics_rounded,
