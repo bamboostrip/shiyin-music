@@ -73,6 +73,13 @@ class DesktopLyricsSettings {
   static const int defaultPlayedTextColor = 0xFFFFD700;
   static const int defaultUnplayedTextColor = 0xFF00BFFF;
 
+  /// 桌面歌词是否在当前句下方显示翻译（issue #36）。默认关闭：存量用户
+  /// 升级后悬浮窗观感不变，需要的人到桌面歌词设置里打开。
+  ///
+  /// 目前仅移动端原生悬浮窗生效（设置页开关也只在移动端提供）；PC 悬浮
+  /// 窗子窗尚未渲染翻译，桌面端不提供开关、该值也不参与排版。
+  static const bool defaultShowTranslation = false;
+
   /// 移动端外观默认值（Android 原生悬浮窗）：双行显示 + 背景透明度 50%。
   /// 其余外观（配色/字号/对齐/文字透明度）与桌面默认一致。
   static const double defaultMobileOpacity = 0.5;
@@ -94,12 +101,13 @@ class DesktopLyricsSettings {
     this.textOpacity = defaultTextOpacity,
     this.playedTextColor = defaultPlayedTextColor,
     int? unplayedTextColor,
+    this.showTranslation = defaultShowTranslation,
   }) : unplayedTextColor =
            unplayedTextColor ?? textColor ?? defaultUnplayedTextColor;
 
-  /// 外观恢复出厂默认（配色/字号/行数/对齐/透明度），设置页「恢复默认」
-  /// 按钮使用。锁定与触摸穿透是行为状态，不在此重置——正在使用的
-  /// 悬浮窗不应因恢复外观而突然解锁或改变穿透。
+  /// 外观恢复出厂默认（配色/字号/行数/翻译/对齐/透明度），设置页
+  /// 「恢复默认」按钮使用。锁定与触摸穿透是行为状态，不在此重置——正在
+  /// 使用的悬浮窗不应因恢复外观而突然解锁或改变穿透。
   ///
   /// 桌面默认见 [defaultOpacity]/[defaultSingleLine]；移动端默认见
   /// [defaultMobileOpacity]/[defaultMobileSingleLine]（双行 + 50% 背景）。
@@ -112,6 +120,7 @@ class DesktopLyricsSettings {
     textOpacity: defaultTextOpacity,
     playedTextColor: defaultPlayedTextColor,
     unplayedTextColor: defaultUnplayedTextColor,
+    showTranslation: defaultShowTranslation,
   );
 
   /// 移动端外观恢复出厂默认：与 [withDefaultAppearance] 相同的字段集合，
@@ -126,6 +135,7 @@ class DesktopLyricsSettings {
     textOpacity: defaultTextOpacity,
     playedTextColor: defaultPlayedTextColor,
     unplayedTextColor: defaultUnplayedTextColor,
+    showTranslation: defaultShowTranslation,
   );
 
   /// 按平台取外观默认：[isDesktop] 为 true 用桌面默认，否则用移动端默认。
@@ -157,6 +167,10 @@ class DesktopLyricsSettings {
   final int playedTextColor;
   final int unplayedTextColor;
 
+  /// 当前句下方是否显示歌词翻译（仅移动端原生悬浮窗生效，见
+  /// [defaultShowTranslation]）。
+  final bool showTranslation;
+
   /// 向下兼容别名，映射至 [unplayedTextColor]
   int get textColor => unplayedTextColor;
 
@@ -172,6 +186,7 @@ class DesktopLyricsSettings {
     double? textOpacity,
     int? playedTextColor,
     int? unplayedTextColor,
+    bool? showTranslation,
   }) {
     return DesktopLyricsSettings(
       opacity: opacity ?? this.opacity,
@@ -185,6 +200,7 @@ class DesktopLyricsSettings {
       playedTextColor: playedTextColor ?? this.playedTextColor,
       unplayedTextColor:
           unplayedTextColor ?? textColor ?? this.unplayedTextColor,
+      showTranslation: showTranslation ?? this.showTranslation,
     );
   }
 
@@ -200,6 +216,7 @@ class DesktopLyricsSettings {
     'textOpacity': textOpacity,
     'playedTextColor': playedTextColor,
     'unplayedTextColor': unplayedTextColor,
+    'showTranslation': showTranslation,
   };
 
   @override
@@ -214,7 +231,8 @@ class DesktopLyricsSettings {
       other.alignment == alignment &&
       other.textOpacity == textOpacity &&
       other.playedTextColor == playedTextColor &&
-      other.unplayedTextColor == unplayedTextColor;
+      other.unplayedTextColor == unplayedTextColor &&
+      other.showTranslation == showTranslation;
 
   @override
   int get hashCode => Object.hash(
@@ -228,6 +246,7 @@ class DesktopLyricsSettings {
     textOpacity,
     playedTextColor,
     unplayedTextColor,
+    showTranslation,
   );
 
   factory DesktopLyricsSettings.fromMap(Map<String, dynamic> map) {
@@ -247,6 +266,9 @@ class DesktopLyricsSettings {
           (map['unplayedTextColor'] as num?)?.toInt() ??
           (map['textColor'] as num?)?.toInt() ??
           defaultUnplayedTextColor,
+      // 旧版持久化没有该键：按默认关闭解析，存量用户升级后观感不变。
+      showTranslation:
+          map['showTranslation'] as bool? ?? defaultShowTranslation,
     );
   }
 }
@@ -336,6 +358,14 @@ class DesktopLyricsService {
   String _cachedCurrent = '';
   String _cachedNext = '';
   bool _cachedActiveOnBottom = false;
+
+  /// 主窗侧翻译缓存（随 [cacheLyrics] / [updateLyrics] 一起刷新，issue #36）：
+  /// 当前句的翻译原文（没有翻译即空串）与「这首歌是否带翻译」。Android
+  /// 原生悬浮窗据此在当前句下方显示一行翻译：只要歌带翻译就常驻占位
+  /// （没翻译的句子留白），悬浮窗高度不会逐句抖动。仅 Android 原生悬浮窗
+  /// 消费；PC 子窗桥接不透传这两个字段。
+  String _cachedCurrentTranslation = '';
+  bool _cachedHasTranslation = false;
 
   /// 桌面形态的悬浮窗桥接（进程级单例；Android 分支不使用）。
   /// Windows/Linux 共用（实现基于 desktop_multi_window + window_manager，
@@ -492,6 +522,8 @@ class DesktopLyricsService {
         'current': _cachedCurrent,
         'next': _cachedNext,
         'activeOnBottom': _cachedActiveOnBottom,
+        'currentTranslation': _cachedCurrentTranslation,
+        'hasTranslation': _cachedHasTranslation,
         'lyricPayload': true,
       });
       return true;
@@ -506,14 +538,20 @@ class DesktopLyricsService {
   ///
   /// 悬浮窗因 App 在前台被原生隐藏期间仍要跟随播放推进缓存：回桌面重建时
   /// 拿到的才是当前句，而不是切前台那一刻的旧句。
+  ///
+  /// [currentTranslation] / [hasTranslation] 见 [_cachedCurrentTranslation]。
   void cacheLyrics({
     required String current,
     required String next,
     required bool activeOnBottom,
+    String currentTranslation = '',
+    bool hasTranslation = false,
   }) {
     _cachedCurrent = current;
     _cachedNext = next;
     _cachedActiveOnBottom = activeOnBottom;
+    _cachedCurrentTranslation = currentTranslation;
+    _cachedHasTranslation = hasTranslation;
   }
 
   /// 把当前歌词写进原生缓存，只缓存、绝不建窗。
@@ -525,14 +563,24 @@ class DesktopLyricsService {
     required String current,
     required String next,
     required bool activeOnBottom,
+    String currentTranslation = '',
+    bool hasTranslation = false,
   }) async {
-    cacheLyrics(current: current, next: next, activeOnBottom: activeOnBottom);
+    cacheLyrics(
+      current: current,
+      next: next,
+      activeOnBottom: activeOnBottom,
+      currentTranslation: currentTranslation,
+      hasTranslation: hasTranslation,
+    );
     if (!isSupportedPlatform || _isDesktopBridge) return;
     try {
       await _channel.invokeMethod<void>('cacheLyrics', {
         'current': current,
         'next': next,
         'activeOnBottom': activeOnBottom,
+        'currentTranslation': currentTranslation,
+        'hasTranslation': hasTranslation,
       });
     } on MissingPluginException {
       // ignore
@@ -569,13 +617,23 @@ class DesktopLyricsService {
     }
   }
 
+  /// 推送当前句/下一句。Android 另带 [currentTranslation] / [hasTranslation]
+  /// （见 [_cachedCurrentTranslation]）；PC 子窗暂不渲染翻译，只收 current/next。
   Future<void> updateLyrics({
     required String current,
     required String next,
     required bool activeOnBottom,
+    String currentTranslation = '',
+    bool hasTranslation = false,
   }) async {
     // 无论平台是否支持、窗口是否可见，主窗侧缓存都要跟上（见字段注释）。
-    cacheLyrics(current: current, next: next, activeOnBottom: activeOnBottom);
+    cacheLyrics(
+      current: current,
+      next: next,
+      activeOnBottom: activeOnBottom,
+      currentTranslation: currentTranslation,
+      hasTranslation: hasTranslation,
+    );
     if (!isSupportedPlatform) return;
     if (_isDesktopBridge) {
       await _windowsBridge?.updateLyrics(
@@ -590,6 +648,8 @@ class DesktopLyricsService {
         'current': current,
         'next': next,
         'activeOnBottom': activeOnBottom,
+        'currentTranslation': currentTranslation,
+        'hasTranslation': hasTranslation,
       });
     } on MissingPluginException {
       // ignore

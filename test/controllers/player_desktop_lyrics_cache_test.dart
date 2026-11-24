@@ -227,6 +227,95 @@ void main() {
     expect(lastCall('show').arguments['lyricPayload'], true);
   });
 
+  test('带翻译的歌：换句推送携带当前句翻译与「本歌带翻译」（issue #36）', () async {
+    controller.lyrics = const [
+      LyricLine(time: Duration.zero, text: '第一句', translation: '译一'),
+      LyricLine(time: Duration(seconds: 5), text: '第二句'),
+      LyricLine(time: Duration(seconds: 10), text: '第三句', translation: '译三'),
+    ];
+
+    // App 切后台：show 请求携带当前句的翻译。
+    controller.setAppForeground(false);
+    await settle();
+    final show = lastCall('show').arguments;
+    expect(show['current'], '第一句');
+    expect(show['currentTranslation'], '译一');
+    expect(show['hasTranslation'], isTrue);
+
+    // 后台换句：上屏推送同样带翻译。
+    calls.clear();
+    fakeAudioPlayer.emitPosition(const Duration(seconds: 12));
+    await settle();
+    final update = lastCall('updateLyrics').arguments;
+    expect(update['current'], '第三句');
+    expect(update['currentTranslation'], '译三');
+    expect(update['hasTranslation'], isTrue);
+
+    // 这一句没有翻译：译文为空，但「本歌带翻译」保留（原生留白占位，
+    // 悬浮窗高度不随逐句切换抖动）。
+    fakeAudioPlayer.emitPosition(const Duration(seconds: 6));
+    await settle();
+    final untranslated = lastCall('updateLyrics').arguments;
+    expect(untranslated['current'], '第二句');
+    expect(untranslated['currentTranslation'], '');
+    expect(untranslated['hasTranslation'], isTrue);
+  });
+
+  test('隐藏期间换句：翻译随歌词一起写进缓存，回桌面的 show 带上当前句翻译', () async {
+    controller.lyrics = const [
+      LyricLine(time: Duration.zero, text: '第一句'),
+      LyricLine(time: Duration(seconds: 5), text: '第二句', translation: '译二'),
+      LyricLine(time: Duration(seconds: 10), text: '第三句', translation: '译三'),
+    ];
+
+    controller.setAppForeground(false);
+    await settle();
+    expect(lastCall('show').arguments['hasTranslation'], isTrue);
+    expect(lastCall('show').arguments['currentTranslation'], '');
+
+    // 回到 App（悬浮窗隐藏），播放推进到第三句：只写缓存，缓存里带着翻译。
+    controller.setAppForeground(true);
+    await settle();
+    calls.clear();
+    fakeAudioPlayer.emitPosition(const Duration(seconds: 12));
+    await settle();
+    expect(calls.map((c) => c.method).toList(), ['cacheLyrics']);
+    final cached = lastCall('cacheLyrics').arguments;
+    expect(cached['current'], '第三句');
+    expect(cached['currentTranslation'], '译三');
+    expect(cached['hasTranslation'], isTrue);
+
+    // 回桌面：show 自带第三句的翻译。
+    controller.setAppForeground(false);
+    await settle();
+    final show = lastCall('show').arguments;
+    expect(show['current'], '第三句');
+    expect(show['currentTranslation'], '译三');
+    expect(show['hasTranslation'], isTrue);
+  });
+
+  test('无翻译的歌：翻译字段按空下发，空串翻译不算「本歌带翻译」', () async {
+    // 第二句带一个空串翻译：与歌词页「译」的可用判定同口径，不算带翻译。
+    controller.lyrics = const [
+      LyricLine(time: Duration.zero, text: '第一句'),
+      LyricLine(time: Duration(seconds: 5), text: '第二句', translation: ''),
+    ];
+
+    controller.setAppForeground(false);
+    await settle();
+    final show = lastCall('show').arguments;
+    expect(show['currentTranslation'], '');
+    expect(show['hasTranslation'], isFalse);
+
+    calls.clear();
+    fakeAudioPlayer.emitPosition(const Duration(seconds: 6));
+    await settle();
+    final update = lastCall('updateLyrics').arguments;
+    expect(update['current'], '第二句');
+    expect(update['currentTranslation'], '');
+    expect(update['hasTranslation'], isFalse);
+  });
+
   test('前台切到无歌词的歌：隐藏期也要把原生缓存清空（否则回桌面画上一首的句子）', () async {
     // 先让悬浮窗在后台展示过一次，原生侧有上一首的歌词缓存。
     controller.setAppForeground(false);

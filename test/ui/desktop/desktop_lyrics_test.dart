@@ -87,6 +87,12 @@ void main() {
       expect(settings.alignment, DesktopLyricsAlignment.split);
       expect(settings.textOpacity, 1.0);
       expect(settings.backgroundColor, 0xFF1A1A2E);
+      // 显示翻译默认关闭（issue #36）：存量用户升级后悬浮窗观感不变。
+      expect(settings.showTranslation, isFalse);
+      expect(
+        DesktopLyricsSettings.platformDefault(isDesktop: false).showTranslation,
+        isFalse,
+      );
     });
 
     test('移动端默认左对齐：split 在原生悬浮窗归一化为 left', () {
@@ -127,6 +133,7 @@ void main() {
         textOpacity: 0.85,
         playedTextColor: 0xFFFF0000,
         unplayedTextColor: 0xFF00FF00,
+        showTranslation: true,
       );
 
       final map = original.toMap();
@@ -136,6 +143,7 @@ void main() {
       expect(map['playedTextColor'], 0xFFFF0000);
       expect(map['unplayedTextColor'], 0xFF00FF00);
       expect(map['textColor'], 0xFF00FF00);
+      expect(map['showTranslation'], isTrue);
 
       final restored = DesktopLyricsSettings.fromMap(map);
 
@@ -150,6 +158,7 @@ void main() {
       expect(restored.playedTextColor, original.playedTextColor);
       expect(restored.unplayedTextColor, original.unplayedTextColor);
       expect(restored.textColor, original.unplayedTextColor);
+      expect(restored.showTranslation, isTrue);
       expect(restored, original);
     });
 
@@ -172,6 +181,8 @@ void main() {
         expect(legacy.textOpacity, 1.0);
         expect(legacy.playedTextColor, 0xFFFFD700);
         expect(legacy.unplayedTextColor, 0xFF00BFFF);
+        // 旧持久化没有 showTranslation 键：按默认关闭解析（issue #36）。
+        expect(legacy.showTranslation, isFalse);
 
         // 旧配置仅含 textColor：unplayedTextColor 自动回退并同步 textColor
         final legacyTextColor = DesktopLyricsSettings.fromMap(const {
@@ -222,6 +233,7 @@ void main() {
         base.copyWith(textColor: 0xFF778899).unplayedTextColor,
         0xFF778899,
       );
+      expect(base.copyWith(showTranslation: true).showTranslation, isTrue);
 
       // 相等性对比
       final modifiedSingleLine = base.copyWith(singleLine: true);
@@ -245,6 +257,22 @@ void main() {
       );
       expect(modifiedUnplayedColor, isNot(base));
       expect(modifiedUnplayedColor.hashCode, isNot(base.hashCode));
+
+      // 显示翻译参与相等性：仅翻转它就是一份新设置（设置页据此刷新预览）。
+      final modifiedShowTranslation = base.copyWith(showTranslation: true);
+      expect(modifiedShowTranslation, isNot(base));
+      expect(modifiedShowTranslation.hashCode, isNot(base.hashCode));
+
+      // 「恢复默认外观」把显示翻译一并还原（与显示行数同属外观）。
+      expect(modifiedShowTranslation.showTranslation, isTrue);
+      expect(
+        modifiedShowTranslation.withDefaultMobileAppearance().showTranslation,
+        isFalse,
+      );
+      expect(
+        modifiedShowTranslation.withDefaultAppearance().showTranslation,
+        isFalse,
+      );
 
       const locked = DesktopLyricsSettings(locked: true);
       expect(const DesktopLyricsSettings(locked: true), locked);
@@ -428,8 +456,73 @@ void main() {
         'current': '第三句',
         'next': '第四句',
         'activeOnBottom': true,
+        // 未传翻译时按「无翻译」下发：原生不会沿用上一首的翻译行。
+        'currentTranslation': '',
+        'hasTranslation': false,
         'lyricPayload': true,
       });
+    });
+
+    test('show 请求自带当前句翻译与「本歌带翻译」（回桌面重建即带翻译行）', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      await service.updateLyrics(
+        current: 'の道を進めば坂も山も',
+        next: '続く',
+        activeOnBottom: false,
+        currentTranslation: '沿着这条道路前进 坡道与群山绵延不绝',
+        hasTranslation: true,
+      );
+      // 切前台隐藏期间换到一句没有翻译的歌词：只更新主窗侧缓存。
+      service.cacheLyrics(
+        current: '間奏',
+        next: '続く',
+        activeOnBottom: true,
+        currentTranslation: '',
+        hasTranslation: true,
+      );
+      await service.show(title: '芽吹きの唄', artist: '大原ゆい子');
+
+      expect(calls.first.arguments['currentTranslation'], '沿着这条道路前进 坡道与群山绵延不绝');
+      expect(calls.first.arguments['hasTranslation'], isTrue);
+      // 翻译缓存跟随换句（空串 = 这句没有翻译），本歌带翻译的标记保留。
+      expect(calls.last.arguments['currentTranslation'], '');
+      expect(calls.last.arguments['hasTranslation'], isTrue);
+    });
+
+    test('切到无翻译的歌：翻译缓存清空，不残留上一首的标记', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      await service.updateLyrics(
+        current: '第一句',
+        next: '第二句',
+        activeOnBottom: false,
+        currentTranslation: '翻译',
+        hasTranslation: true,
+      );
+      // 新歌推送不带翻译参数（缺省）：主窗侧缓存必须回落到无翻译。
+      service.cacheLyrics(current: '新歌', next: '', activeOnBottom: false);
+      await service.show(title: '新歌', artist: '歌手');
+
+      expect(calls.last.arguments['currentTranslation'], '');
+      expect(calls.last.arguments['hasTranslation'], isFalse);
+    });
+
+    test('updateSettings 把 showTranslation 同名透传给原生悬浮窗', () async {
+      final calls = mockChannel();
+      final service = DesktopLyricsService();
+
+      await service.updateSettings(
+        const DesktopLyricsSettings(showTranslation: true),
+      );
+
+      expect(calls.single.method, 'updateSettings');
+      // 键名与原生 LyricsOverlayService.EXTRA_SHOW_TRANSLATION 一致。
+      expect(calls.single.arguments['showTranslation'], isTrue);
+      await service.updateSettings(const DesktopLyricsSettings());
+      expect(calls.last.arguments['showTranslation'], isFalse);
     });
 
     test('无歌词时 show 仍标记 lyricPayload，避免原生回退到上一首的缓存', () async {
@@ -463,6 +556,8 @@ void main() {
         'current': '第三句',
         'next': '第四句',
         'activeOnBottom': true,
+        'currentTranslation': '',
+        'hasTranslation': false,
       });
       expect(calls.last.arguments['current'], '第三句');
     });

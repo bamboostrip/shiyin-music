@@ -357,6 +357,10 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     // 逐字进度交给"正在唱的那一行"，另一行换成下一句 —— 正在唱的那句
     // 文字始终不移动（历史实现里它每句都要从下行跳到上行）。
     final activeOnBottom = clamped.isOdd;
+    // 翻译（issue #36）：只送当前句的翻译原文与「本歌是否带翻译」，显示与否
+    // 由原生按桌面歌词设置裁决——设置开关走 updateSettings，不必重推歌词。
+    final currentTranslation = lyrics[clamped].translation ?? '';
+    final hasTranslation = _lyricsHaveTranslation;
     if (!_shouldShowDesktopLyrics) {
       // App 在前台：悬浮窗被原生隐藏（移动端产品行为），但内容缓存必须继续
       // 跟随播放。回桌面时原生用这份缓存即刻重建 —— 伴奏（间奏）期间没有
@@ -372,6 +376,8 @@ mixin _PlayerDesktop on _PlayerControllerBase {
             current: current,
             next: next,
             activeOnBottom: activeOnBottom,
+            currentTranslation: currentTranslation,
+            hasTranslation: hasTranslation,
           ),
         );
       } else {
@@ -379,6 +385,8 @@ mixin _PlayerDesktop on _PlayerControllerBase {
           current: current,
           next: next,
           activeOnBottom: activeOnBottom,
+          currentTranslation: currentTranslation,
+          hasTranslation: hasTranslation,
         );
       }
       return;
@@ -387,8 +395,15 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       current: current,
       next: next,
       activeOnBottom: activeOnBottom,
+      currentTranslation: currentTranslation,
+      hasTranslation: hasTranslation,
     );
   }
+
+  /// 这首歌是否带翻译（任意一句翻译非空，与歌词页「译」的可用判定同口径）。
+  /// 移动端桌面歌词据此决定翻译行是否占位。
+  bool get _lyricsHaveTranslation =>
+      lyrics.any((line) => line.translation?.isNotEmpty == true);
 
   void _syncDesktopPlayState() {
     if (!_shouldShowDesktopLyrics) return;
