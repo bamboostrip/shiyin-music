@@ -5,10 +5,13 @@ import '../adaptive_layout.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
 import '../../controllers/local_music_controller.dart';
+import '../../models/music_models.dart';
+import '../form_factor.dart';
 import '../widgets/toast.dart';
 import '../widgets/app_search_field.dart';
 import '../widgets/app_song_row.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/song_action_sheets.dart';
 import '../player/song_tap_handler.dart';
 
 class LocalSongsPage extends StatefulWidget {
@@ -539,30 +542,12 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
                           itemCount: filteredSongs.length,
                           separatorBuilder: (_, _) =>
                               const SizedBox(height: 2),
-                          itemBuilder: (context, index) {
-                            final song = filteredSongs[index];
-                            // 行视觉与歌单/搜索/歌手页统一见 AppSongRow。
-                            // 本页歌全部来自本机文件，不显示「已下载」角标。
-                            return AppSongRow(
-                              song: song,
-                              player: widget.player,
-                              showDownloadedBadge: false,
-                              onTap: () {
-                                if (openPlayerIfSameSong(
-                                  context,
-                                  player: widget.player,
-                                  auth: widget.auth,
-                                  song: song,
-                                )) {
-                                  return;
-                                }
-                                widget.player.playSong(
-                                  song,
-                                  queue: filteredSongs,
-                                );
-                              },
-                            );
-                          },
+                          itemBuilder: (context, index) => LocalSongRow(
+                            song: filteredSongs[index],
+                            queue: filteredSongs,
+                            player: widget.player,
+                            auth: widget.auth,
+                          ),
                         ),
                 ),
               ],
@@ -622,6 +607,79 @@ class _LocalSongsPageState extends State<LocalSongsPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 本地歌曲行：点行播放；长按（触屏）/右键（桌面）弹操作菜单。
+///
+/// 从 [LocalSongsPage] 的 itemBuilder 抽成独立 widget：页面在桌面平台必须
+/// 先有扫描根才渲染列表，widget 测试没法直接铺出歌曲；「长按 → 菜单 →
+/// 下一首播放」这条链路放在这里才能被钉住。
+class LocalSongRow extends StatelessWidget {
+  const LocalSongRow({
+    super.key,
+    required this.song,
+    required this.queue,
+    required this.player,
+    required this.auth,
+  });
+
+  final Song song;
+
+  /// 点行播放时接管的整份列表（与页面当前展示的筛选结果一致）。
+  final List<Song> queue;
+  final PlayerController player;
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    // 行视觉与歌单/搜索/歌手页统一见 AppSongRow。
+    // 本页歌全部来自本机文件，不显示「已下载」角标。
+    return AppSongRow(
+      song: song,
+      player: player,
+      showDownloadedBadge: false,
+      onTap: () {
+        if (openPlayerIfSameSong(
+          context,
+          player: player,
+          auth: auth,
+          song: song,
+        )) {
+          return;
+        }
+        player.playSong(song, queue: queue);
+      },
+      onLongPress: () => _showActions(context),
+      // 桌面形态的「长按」是右键：菜单锚定到指针位置（与桌面歌曲行一致）。
+      onSecondaryTapDown: isDesktopFormFactor
+          ? (position) => _showActions(context, anchor: position)
+          : null,
+    );
+  }
+
+  /// 本地歌曲的操作菜单。
+  ///
+  /// 本地文件不是在线曲库条目（hash 即文件路径）：加不进云端歌单，也没有
+  /// 可跳转的歌手页；有意义的只有排进播放队列——issue #34「长按本地文件
+  /// 可以添加进播放列表」。文案沿用全应用统一的「下一首播放」。
+  void _showActions(BuildContext context, {Offset? anchor}) {
+    showSongActionSheet(
+      context: context,
+      song: song,
+      anchor: anchor,
+      actions: [
+        SongSheetAction(
+          icon: Icons.queue_music_rounded,
+          title: '下一首播放',
+          onTap: () => addSongToQueueWithFeedback(
+            context: context,
+            player: player,
+            song: song,
+          ),
+        ),
+      ],
     );
   }
 }
