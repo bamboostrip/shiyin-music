@@ -27,6 +27,37 @@ void main() {
       );
     });
 
+    test('带空格连接符：两侧各一个空格的 ` - `（issue #34）', () {
+      final service = DownloadService();
+      expect(
+        service.fileNameFor(song, AudioQuality.lossless,
+            template: DownloadNameTemplate.artistTitleSpaced),
+        '周杰伦 - 晴天.flac',
+      );
+      expect(
+        service.fileNameFor(song, AudioQuality.standard,
+            template: DownloadNameTemplate.titleArtistSpaced),
+        '晴天 - 周杰伦.mp3',
+      );
+    });
+
+    test('带空格连接符同样作用于清洗后的段，结果首尾不留空格', () {
+      final service = DownloadService();
+      const song = Song(
+        id: 'h',
+        title: ' Tra?g|edy ',
+        artist: 'AC/DC',
+        hash: 'h',
+      );
+      final name = service.fileNameFor(
+        song,
+        AudioQuality.standard,
+        template: DownloadNameTemplate.artistTitleSpaced,
+      );
+      expect(name, 'AC_DC - Tra_g_edy.mp3');
+      expect(name, isNot(endsWith(' .mp3')));
+    });
+
     test('模板作用于各自清洗后的段', () {
       final service = DownloadService();
       const dirty =
@@ -55,6 +86,10 @@ void main() {
           DownloadNameTemplate.titleArtist);
       expect(DownloadService.nameTemplateFromStored('artist-title'),
           DownloadNameTemplate.artistTitle);
+      expect(DownloadService.nameTemplateFromStored('artist-title-spaced'),
+          DownloadNameTemplate.artistTitleSpaced);
+      expect(DownloadService.nameTemplateFromStored('title-artist-spaced'),
+          DownloadNameTemplate.titleArtistSpaced);
       expect(DownloadService.nameTemplateFromStored(null),
           DownloadNameTemplate.artistTitle);
       expect(DownloadService.nameTemplateFromStored('garbage'),
@@ -102,6 +137,24 @@ void main() {
         await service.fileNameForTask(
             song, AudioQuality.lossless, DownloadTaskKind.download),
         '晴天-周杰伦.flac',
+      );
+    });
+
+    test('带空格模板只作用于 download，playCache 仍是无空格默认命名', () async {
+      SharedPreferences.setMockInitialValues({
+        DownloadService.downloadNameTemplateKey: 'title-artist-spaced',
+      });
+      final service = DownloadService();
+      expect(
+        await service.fileNameForTask(
+            song, AudioQuality.standard, DownloadTaskKind.download),
+        '晴天 - 周杰伦.mp3',
+      );
+      // 播放缓存按路径匹配索引，文件名必须稳定：不能跟着用户模板走。
+      expect(
+        await service.fileNameForTask(
+            song, AudioQuality.standard, DownloadTaskKind.playCache),
+        '周杰伦-晴天.mp3',
       );
     });
   });

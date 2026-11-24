@@ -20,15 +20,34 @@ import 'image_disk_cache.dart';
 /// 下载任务类型。
 enum DownloadTaskKind { download, playCache }
 
-/// 下载文件命名模板：`{歌手}-{歌名}`（默认，历史行为）或 `{歌名}-{歌手}`。
+/// 下载文件命名模板：`{歌手}-{歌名}`（默认，历史行为）或 `{歌名}-{歌手}`，
+/// 连接符可选 `-` 或两侧各带一个空格的 ` - `（issue #34：不少用户的曲库按
+/// `歌手 - 歌名` 命名，下载文件与之对齐）。
 ///
 /// 只作用于**新下载**；播放缓存恒用默认模板——内部缓存按 codec 探测的
 /// 路径匹配索引，模板混入只会制造索引失配，且缓存文件名用户不可见。
 enum DownloadNameTemplate {
-  artistTitle('artist-title', '歌手-歌名', '周杰伦-晴天.mp3'),
-  titleArtist('title-artist', '歌名-歌手', '晴天-周杰伦.mp3');
+  artistTitle('artist-title', '歌手-歌名', '-', '周杰伦-晴天.mp3'),
+  titleArtist('title-artist', '歌名-歌手', '-', '晴天-周杰伦.mp3'),
+  artistTitleSpaced(
+    'artist-title-spaced',
+    '歌手 - 歌名',
+    ' - ',
+    '周杰伦 - 晴天.mp3',
+  ),
+  titleArtistSpaced(
+    'title-artist-spaced',
+    '歌名 - 歌手',
+    ' - ',
+    '晴天 - 周杰伦.mp3',
+  );
 
-  const DownloadNameTemplate(this.storedValue, this.label, this.example);
+  const DownloadNameTemplate(
+    this.storedValue,
+    this.label,
+    this.separator,
+    this.example,
+  );
 
   /// prefs 存储值（settings.download_name_template）。
   final String storedValue;
@@ -36,7 +55,10 @@ enum DownloadNameTemplate {
   /// 设置项展示名。
   final String label;
 
-  /// 示例文件名（真实感展示，帮用户理解两种顺序的差别）。
+  /// 歌手与歌名之间的连接符；两段各自清洗后已无首尾空白，直接拼接。
+  final String separator;
+
+  /// 示例文件名（真实感展示，帮用户理解各模板的差别）。
   final String example;
 }
 
@@ -537,7 +559,7 @@ class DownloadService {
   /// 120 码点（中文约 120 字）对单曲名足够宽裕。
   static const int _kMaxNameComponentLength = 120;
 
-  /// 文件命名：模板决定 `{歌手}-{歌名}` 或 `{歌名}-{歌手}`；`{ext}` 按音质。
+  /// 文件命名：模板决定歌手/歌名的先后与连接符；`{ext}` 按音质。
   String fileNameFor(
     Song song,
     AudioQuality quality, {
@@ -548,8 +570,12 @@ class DownloadService {
     final safeTitle = _sanitizeFileName(song.title);
     final name = (safeArtist.isNotEmpty && safeTitle.isNotEmpty)
         ? switch (template) {
-            DownloadNameTemplate.artistTitle => '$safeArtist-$safeTitle',
-            DownloadNameTemplate.titleArtist => '$safeTitle-$safeArtist',
+            DownloadNameTemplate.artistTitle ||
+            DownloadNameTemplate.artistTitleSpaced =>
+              '$safeArtist${template.separator}$safeTitle',
+            DownloadNameTemplate.titleArtist ||
+            DownloadNameTemplate.titleArtistSpaced =>
+              '$safeTitle${template.separator}$safeArtist',
           }
         : song.hash.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
     return '$name.$ext';

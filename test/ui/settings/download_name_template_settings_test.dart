@@ -50,4 +50,46 @@ void main() {
     );
     expect(find.textContaining('歌名-歌手（示例'), findsOneWidget);
   });
+
+  testWidgets('选择带空格的「歌名 - 歌手」写入 prefs 并更新副标题', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: DownloadNameTemplateSettings())),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('下载文件名'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(
+        RadioListTile<DownloadNameTemplate>,
+        '歌名 - 歌手',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(DownloadService.downloadNameTemplateKey),
+      'title-artist-spaced',
+    );
+    expect(find.textContaining('歌名 - 歌手（示例'), findsOneWidget);
+  });
+
+  testWidgets('弹窗列出全部模板，且「仅对新下载生效」只提示一次', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: DownloadNameTemplateSettings())),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('下载文件名'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byType(RadioListTile<DownloadNameTemplate>),
+      findsNWidgets(DownloadNameTemplate.values.length),
+    );
+    expect(find.textContaining('仅对新下载生效'), findsOneWidget);
+  });
 }
