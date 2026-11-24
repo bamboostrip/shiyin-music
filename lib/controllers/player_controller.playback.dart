@@ -1104,8 +1104,13 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       if (audioPlayer.processingState == ProcessingState.idle) {
         final song = currentSong;
         if (song != null) {
+          // 恢复进度优先于内存里的 position：冷启动后 position 可能已被
+          // 引擎的空载回调抹成 0（见 [_shouldAdoptEnginePosition]），而
+          // [_resumePosition] 是恢复时单独留存的真相。手机没有开机自播，
+          // 用户就是靠这一条从上次听到的位置续上。
           final initPos =
               _pendingIdlePosition ??
+              _resumePosition ??
               (position > Duration.zero ? position : null);
           _pendingIdlePosition = null;
           await playSong(

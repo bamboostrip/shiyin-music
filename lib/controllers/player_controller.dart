@@ -387,7 +387,7 @@ class PlayerController extends _PlayerControllerBase
         // 防止进度条与歌词闪回 0 秒
         return;
       }
-      if (!_isSeeking) {
+      if (!_isSeeking && _shouldAdoptEnginePosition()) {
         _setPositionBase(value, playing: isPlaying);
       }
       _maybeCompleteFromPosition(value);
@@ -477,7 +477,9 @@ class PlayerController extends _PlayerControllerBase
           value.processingState == ProcessingState.buffering;
       // 与 positionStream 同理：指定起播偏移量的加载过程中，引擎 position 归 0，
       // 此时不能用引擎位置重建平滑基线，否则歌词与进度条先闪回开头再跳回目标。
-      if (!_isSeeking && _pendingInitialPosition == null) {
+      if (!_isSeeking &&
+          _pendingInitialPosition == null &&
+          _shouldAdoptEnginePosition()) {
         _setPositionBase(audioPlayer.position, playing: isPlaying);
       }
       _syncListeningTimeTracker();
@@ -1146,10 +1148,36 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   ///
   /// 恢复时音源还没加载，此刻 seek 无效；由 [resumePlayback] 在第一次
   /// `playSong` 时作为 `initialPosition` 带进去，用过即清。
+  ///
+  /// **同时它也是「恢复位置的内存真相」**：冷启动后引擎无音源（idle），
+  /// 任何一次空载回调上报的 position 都是 0，一旦采信就会把恢复出来的
+  /// 位置冲掉——界面立刻变 00:00，用户点播放也从头开始。见
+  /// [_shouldAdoptEnginePosition]。
   Duration? _resumePosition;
 
-  /// 是否有待应用的恢复进度（UI 可据此提示「已从 xx:xx 继续」）。
+  /// 是否有待应用的恢复进度（即「恢复出来的位置还没交给引擎」）。
+  ///
+  /// 现状：**只有回归用例在读**（上游 `c113193` 引入后同样没有任何 UI 调用方）。
+  /// 它描述的是恢复链的内部时刻，不是产品状态；若将来要做「上次听到 03:12」
+  /// 这类提示，直接接这个 getter 即可，无需再推算。
   bool get hasPendingResumePosition => _resumePosition != null;
+
+  /// 引擎上报的位置此刻能否采信为 UI 基准。
+  ///
+  /// 冷启动恢复带出的是一段**还没交给引擎**的进度（[_resumePosition]）：
+  /// 此时引擎 idle、position 恒 0。音频服务绑定、通知栏媒体键、后台服务
+  /// 重建等任何一次空载状态/位置回调，都会走 positionStream/playerStateStream
+  /// 监听里的 `_setPositionBase(audioPlayer.position)`，把恢复位置抹成 0。
+  ///
+  /// 车机之所以「看起来正常」：开机自播走 [resumePlayback]，恢复位置从
+  /// [_resumePosition] 直接进引擎，不经过内存里的 position；手机没有自播、
+  /// 由用户点播放（[togglePlay] 的 idle 分支）时才暴露成「从头播」。
+  ///
+  /// 所以：还有待恢复进度且引擎根本没装载音源时，不接受引擎上报。
+  bool _shouldAdoptEnginePosition() {
+    if (_resumePosition == null) return true;
+    return audioPlayer.processingState != ProcessingState.idle;
+  }
 
   /// 引擎里**当前实际持有**的那首歌的 hash（`loadSong` 成功后才更新）。
   ///
@@ -1385,6 +1413,12 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
     }
     final ms = audioPlayer.position.inMilliseconds;
     if (ms < 0) return;
+    // 引擎里已经没有任何音源（用户 stop / 前台服务被系统回收）时 position 恒为
+    // 0，而 [_positionOwnerHash] 还留着上一轮的值：这一刻写盘只会把磁盘上真正的
+    // 位置抹成 0，下次启动就「从头开始」——这是「手机重进 App 位置丢了」除了
+    // [_shouldAdoptEnginePosition] 之外的第二条路径。与上游
+    // `resolvePositionRecord`「音源未加载 → 不改写磁盘」同义。
+    if (ms == 0 && audioPlayer.processingState == ProcessingState.idle) return;
     final payload = jsonEncode({'hash': song.hash, 'ms': ms});
     try {
       final prefs = await SharedPreferences.getInstance();

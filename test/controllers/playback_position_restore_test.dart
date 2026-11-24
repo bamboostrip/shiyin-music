@@ -70,8 +70,11 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   @override
   Duration? get duration => const Duration(seconds: 200);
 
+  /// 引擎当前的处理态：冷启动恢复后无音源时应为 idle。
+  ProcessingState state = ProcessingState.ready;
+
   @override
-  ProcessingState get processingState => ProcessingState.ready;
+  ProcessingState get processingState => state;
 
   @override
   int? get androidAudioSessionId => null;
@@ -85,6 +88,13 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   void emitPosition(Duration value) {
     currentPosition = value;
     _positionController.add(value);
+  }
+
+  /// 模拟引擎状态上报（冷启动无音源时是 `playing=false/processing=idle`）。
+  void emitState({required bool playing, required ProcessingState processing}) {
+    state = processing;
+    this.playing = playing;
+    _playerStateController.add(PlayerState(playing, processing));
   }
 
   void disposeStreams() {
@@ -404,6 +414,38 @@ void main() {
       expect(record['ms'], 90000, reason: '原记录必须原样保留');
     });
 
+    test('引擎被 stop 成 idle（音源已释放）后 flush：不得用 0 抹掉磁盘进度', () async {
+      final song = _song(1);
+      seedSnapshot(song); // 磁盘上已有 90s
+      final controller = buildController();
+      await settle();
+
+      controller.queue = [song];
+      await controller.playSong(song); // 归属建立，_positionOwnerHash = hash
+      await settle();
+      fakeAudioPlayer.emitPosition(const Duration(seconds: 42));
+      await settle();
+
+      // 系统 stop / 前台服务被回收：引擎释放音源，position 归 0。
+      fakeAudioPlayer.currentPosition = Duration.zero;
+      fakeAudioPlayer.emitState(
+        playing: false,
+        processing: ProcessingState.idle,
+      );
+      await settle();
+      await controller.flushPlaybackState();
+      await settle();
+
+      final prefs = await SharedPreferences.getInstance();
+      final record =
+          jsonDecode(prefs.getString(_positionKey)!) as Map<String, dynamic>;
+      expect(
+        record['ms'],
+        isNot(0),
+        reason: '空载引擎的 0 不是用户听到的位置，不能覆盖磁盘上的记录',
+      );
+    });
+
     test('切音质重载被状态机拦下：已归属/已定位的进度仍要落盘', () async {
       final song = _song(1);
       final controller = buildController();
@@ -440,6 +482,62 @@ void main() {
         greaterThan(40000),
         reason: '重载被拦下时 isPreparing 仍为 true，必须显式豁免才能落盘',
       );
+    });
+  });
+
+  // 回归：手机没有「开机自播」时，用户是点播放按钮续播的。
+  // 冷启动恢复后引擎无音源（idle），音频服务绑定/通知栏媒体键/后台服务重建
+  // 都会让引擎上报一次 `position=0` 的空载状态；旧实现把它当成真实位置写进
+  // 内存基准，界面立刻变 00:00，点播放也从 0 起播——车机走 resumePlayback
+  // 不经过内存 position，所以只有手机暴露（issue #38）。
+  group('手机冷启动：引擎空载回调不得冲掉恢复位置', () {
+    test('空载状态回调后位置仍是上次的位置', () async {
+      final song = _song(1);
+      seedSnapshot(song);
+      fakeAudioPlayer.state = ProcessingState.idle;
+      final controller = buildController();
+      await settle();
+      expect(controller.position, const Duration(seconds: 90));
+
+      fakeAudioPlayer.currentPosition = Duration.zero;
+      fakeAudioPlayer.emitState(
+        playing: false,
+        processing: ProcessingState.idle,
+      );
+      await settle();
+
+      expect(
+        controller.position,
+        const Duration(seconds: 90),
+        reason: '引擎 idle 上报的 0 不是真实进度，界面必须保持「上次听到 01:30」',
+      );
+    });
+
+    test('手动点播放从恢复位置续（不依赖内存里的 position）', () async {
+      final song = _song(1);
+      seedSnapshot(song);
+      fakeAudioPlayer.state = ProcessingState.idle;
+      final controller = buildController();
+      await settle();
+
+      // 内存基准被抹掉也不影响续播：_resumePosition 才是恢复的真相。
+      fakeAudioPlayer.currentPosition = Duration.zero;
+      fakeAudioPlayer.emitState(
+        playing: false,
+        processing: ProcessingState.idle,
+      );
+      await settle();
+
+      await controller.togglePlay();
+      await settle();
+
+      expect(
+        handler.seeks,
+        contains(const Duration(seconds: 90)),
+        reason: '手机手动播放必须从上次位置续，而不是从 0 起播',
+      );
+      expect(controller.isPlaying, isTrue);
+      expect(controller.hasPendingResumePosition, isFalse);
     });
   });
 }
