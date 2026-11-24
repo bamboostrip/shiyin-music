@@ -55,6 +55,19 @@ class _MobileLyricListState extends State<MobileLyricList>
     with SingleTickerProviderStateMixin {
   static const _resumeDelay = Duration(milliseconds: 3500);
 
+  /// 焦点线与滚动动画随样式切换（上游景深沿用上游的 0.43 焦点线、
+  /// 480ms 的 `(0.16,1,0.3,1)` 缓动；其余样式保持现行为）。
+  double get _focusFraction =>
+      widget.motionStyle == LyricMotionStyle.upstream ? 0.43 : 0.38;
+
+  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.upstream
+      ? const Duration(milliseconds: 480)
+      : const Duration(milliseconds: 280);
+
+  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.upstream
+      ? const Cubic(0.16, 1.0, 0.3, 1.0)
+      : Curves.easeOutCubic;
+
   late final ScrollController _scrollController;
   final _rowKeys = <int, GlobalKey>{};
   Timer? _resumeTimer;
@@ -262,7 +275,8 @@ class _MobileLyricListState extends State<MobileLyricList>
     return 0;
   }
 
-  /// 把目标行居中对齐到 38% 焦点线（按行中心而非行顶，长句换行时视觉更准）。
+  /// 把目标行居中对齐到焦点线（默认 38%，上游景深样式 43%；按行中心而非
+  /// 行顶，长句换行时视觉更准）。
   void _alignRowToFocus(RenderBox rowBox, {required bool animate}) {
     final viewportBox = context.findRenderObject() as RenderBox?;
     if (viewportBox == null || !viewportBox.hasSize) return;
@@ -270,7 +284,7 @@ class _MobileLyricListState extends State<MobileLyricList>
       rowBox.size.center(Offset.zero),
       ancestor: viewportBox,
     );
-    final targetY = viewportBox.size.height * 0.38;
+    final targetY = viewportBox.size.height * _focusFraction;
     final position = _scrollController.position;
     final target =
         (position.pixels + rowCenter.dy - targetY).clamp(
@@ -281,8 +295,8 @@ class _MobileLyricListState extends State<MobileLyricList>
     if (animate) {
       position.animateTo(
         target,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
+        duration: _scrollDuration,
+        curve: _scrollCurve,
       );
     } else {
       position.jumpTo(target);
@@ -333,7 +347,7 @@ class _MobileLyricListState extends State<MobileLyricList>
 
   void _updateFocusedIndex(double viewportHeight) {
     if (widget.lyrics.isEmpty) return;
-    final targetY = viewportHeight * 0.38;
+    final targetY = viewportHeight * _focusFraction;
     int bestIndex = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
     double minDiff = double.infinity;
 
@@ -436,7 +450,7 @@ class _MobileLyricListState extends State<MobileLyricList>
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewportHeight = constraints.maxHeight;
-        final targetY = viewportHeight * 0.38;
+        final targetY = viewportHeight * _focusFraction;
         final defaultIdx = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
         final currentFocusIdx = _focusedIndex ?? defaultIdx;
         final focusedLine =

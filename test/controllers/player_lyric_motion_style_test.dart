@@ -1,6 +1,6 @@
 // 歌词动效样式设置（issue #26）的持久化链路：
 //   1. 默认标准样式：无持久化值时保持现有渲染路径；
-//   2. 启动恢复：prefs 为 lively 时 _restoreSettings 后为 lively，
+//   2. 启动恢复：prefs 为 lively/upstream 时 _restoreSettings 后对应恢复，
 //      未知/损坏值回退标准样式；
 //   3. 落盘 + 通知：set 后写 prefs 并 notifyListeners，同值幂等。
 import 'dart:async';
@@ -132,6 +132,10 @@ void main() {
         LyricMotionStyle.lively,
       );
       expect(
+        LyricMotionStyle.fromStorageValue('upstream'),
+        LyricMotionStyle.upstream,
+      );
+      expect(
         LyricMotionStyle.fromStorageValue('standard'),
         LyricMotionStyle.standard,
       );
@@ -196,6 +200,16 @@ void main() {
       await settle();
 
       expect(controller.lyricMotionStyle, LyricMotionStyle.lively);
+    });
+
+    test('启动恢复：prefs 为 upstream 时恢复为上游景深样式', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        _motionStylePrefsKey: 'upstream',
+      });
+      final controller = buildController();
+      await settle();
+
+      expect(controller.lyricMotionStyle, LyricMotionStyle.upstream);
     });
 
     test('损坏的持久化值回退标准样式，不中断其余设置恢复', () async {

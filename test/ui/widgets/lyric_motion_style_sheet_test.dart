@@ -35,6 +35,7 @@ void main() {
 
     expect(find.text('标准'), findsOneWidget);
     expect(find.text('灵动'), findsOneWidget);
+    expect(find.text('上游景深'), findsOneWidget);
 
     await tester.tap(find.text('灵动'));
     await tester.pumpAndSettle();

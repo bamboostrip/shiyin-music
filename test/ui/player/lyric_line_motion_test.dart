@@ -68,7 +68,10 @@ void main() {
 
     expect(_inside(tester, ImageFiltered), findsOneWidget);
     expect(_inside(tester, Transform), findsNothing);
-    expect(LyricLineMotion.blurSigmaFor(1), greaterThan(0));
+    expect(
+      LyricLineMotion.blurSigmaFor(LyricMotionStyle.lively, 1),
+      greaterThan(0),
+    );
   });
 
   testWidgets('灵动样式：超出模糊距离的行不再开图层（低端机保护）', (tester) async {
@@ -86,6 +89,65 @@ void main() {
 
     expect(_inside(tester, ImageFiltered), findsNothing);
     expect(_inside(tester, Transform), findsNothing);
+  });
+
+  group('上游景深样式', () {
+    test('模糊强度按上游参数逐行递增并封顶 3.0', () {
+      expect(LyricLineMotion.blurSigmaFor(LyricMotionStyle.upstream, 0), 0);
+      expect(
+        LyricLineMotion.blurSigmaFor(LyricMotionStyle.upstream, 1),
+        closeTo(0.7, 0.0001),
+      );
+      expect(
+        LyricLineMotion.blurSigmaFor(LyricMotionStyle.upstream, 4),
+        closeTo(2.8, 0.0001),
+      );
+      expect(
+        LyricLineMotion.blurSigmaFor(LyricMotionStyle.upstream, 5),
+        closeTo(3.0, 0.0001),
+      );
+      expect(
+        LyricLineMotion.blurSigmaFor(LyricMotionStyle.upstream, 20),
+        closeTo(3.0, 0.0001),
+        reason: '上游只封顶 sigma，不按行数截断',
+      );
+    });
+
+    testWidgets('当前行不做弹性放大，远处行仍模糊（不做 ±3 截断）', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          const LyricLineMotion(
+            style: LyricMotionStyle.upstream,
+            active: true,
+            distance: 0,
+            child: Text('上游当前行'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(_inside(tester, Transform), findsNothing, reason: '上游没有弹性缩放');
+      expect(_inside(tester, ImageFiltered), findsNothing, reason: '当前行必须清晰');
+
+      await tester.pumpWidget(
+        _wrap(
+          const LyricLineMotion(
+            style: LyricMotionStyle.upstream,
+            active: false,
+            distance: 5,
+            child: Text('远处行'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        _inside(tester, ImageFiltered),
+        findsOneWidget,
+        reason: '上游景深对 ±3 行之外的行仍保留模糊',
+      );
+      expect(_inside(tester, Transform), findsNothing);
+    });
   });
 
   testWidgets('灵动样式：当前行失活后收回缩放并渐出模糊', (tester) async {

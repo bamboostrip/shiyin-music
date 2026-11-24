@@ -1,9 +1,13 @@
 /// 播放页歌词动效样式（issue #26）。
 ///
-/// 歌词动效很主观：默认保留现有「稳」的样式（逐字扫色 + 当前句放大加粗，
-/// 性能最好）；另给一套 Apple Music 那一类的样式——当前句弹性放大、
-/// 上下行轻微模糊并渐隐。样式只影响播放页歌词列表（移动端 + PC），
-/// 桌面歌词悬浮窗与车机 flutter_lyric 视图暂不跟进。
+/// 歌词动效很主观，固定一种样式无法兼顾所有人，因此做成可选预设：
+/// - [standard]：现有「稳」的样式（逐字扫色 + 当前句放大加粗，性能最好）；
+/// - [lively]：Apple Music 风（当前句弹性放大 + 上下行轻微模糊渐隐）；
+/// - [upstream]：上游同款景深模糊（非当前行按距离逐行加重高斯模糊，
+///   无弹性缩放，焦点线与滚动动画也沿用上游参数）。
+///
+/// 样式只影响播放页歌词列表（移动端 + PC）；桌面歌词悬浮窗与车机
+/// flutter_lyric 视图暂不跟进（见设置弹层的说明文案）。
 enum LyricMotionStyle {
   /// 现有默认样式（性能最好）。
   standard(
@@ -17,6 +21,13 @@ enum LyricMotionStyle {
     storageValue: 'lively',
     label: '灵动',
     description: '当前句弹性放大，上下行轻微模糊渐隐（Apple Music 风）',
+  ),
+
+  /// 上游同款：非当前行按距离逐行加重高斯模糊。
+  upstream(
+    storageValue: 'upstream',
+    label: '上游景深',
+    description: '非当前行随距离逐行加重模糊，无弹性放大（较吃性能）',
   );
 
   const LyricMotionStyle({

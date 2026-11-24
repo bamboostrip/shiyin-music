@@ -480,6 +480,37 @@ void main() {
     );
   });
 
+  testWidgets('上游景深样式：当前行对齐上游的 43% 焦点线', (tester) async {
+    final lyrics = _generateLyrics(20);
+    final player = _FakePlayerController();
+    player.lyrics = lyrics;
+    player.activeLyricIndex = 5;
+
+    await tester.pumpWidget(
+      _wrap(
+        MobileLyricList(
+          key: _listKey,
+          player: player,
+          songHash: 'hash1',
+          lyrics: lyrics,
+          activeIndex: 5,
+          showTranslation: false,
+          showRomanization: false,
+          lyricScale: 1.0,
+          isPageVisible: true,
+          motionStyle: LyricMotionStyle.upstream,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      _lineCenterDy(tester, _listKey, 'Lyric line number 5'),
+      closeTo(640 * 0.43, 30),
+      reason: '上游景深样式沿用上游 0.43 焦点线，而不是默认 0.38',
+    );
+  });
+
   testWidgets('歌词动效样式（issue #26）：灵动给非当前行加图层，标准样式零额外图层', (
     tester,
   ) async {
@@ -522,6 +553,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(insideMotion(ImageFiltered), findsNothing);
+    expect(insideMotion(Transform), findsNothing);
+
+    // 上游景深：非当前行按距离模糊（不做 ±3 截断），且没有弹性缩放。
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.upstream)));
+    await tester.pumpAndSettle();
+
+    expect(insideMotion(ImageFiltered), findsWidgets);
     expect(insideMotion(Transform), findsNothing);
   });
 }

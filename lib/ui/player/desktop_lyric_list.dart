@@ -56,6 +56,19 @@ class _DesktopLyricListState extends State<DesktopLyricList>
   // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3.5s 恢复自动跟随。
   static const _resumeDelay = Duration(milliseconds: 3500);
 
+  /// 焦点线与滚动动画随样式切换（上游景深沿用上游的 0.43 焦点线、
+  /// 480ms 的 `(0.16,1,0.3,1)` 缓动；其余样式保持现行为）。
+  double get _focusFraction =>
+      widget.motionStyle == LyricMotionStyle.upstream ? 0.43 : 0.38;
+
+  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.upstream
+      ? const Duration(milliseconds: 480)
+      : const Duration(milliseconds: 280);
+
+  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.upstream
+      ? const Cubic(0.16, 1.0, 0.3, 1.0)
+      : Curves.easeOutCubic;
+
   late final ScrollController _scrollController;
   final _rowKeys = <int, GlobalKey>{};
   Timer? _resumeTimer;
@@ -247,8 +260,9 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     return 0;
   }
 
-  /// 把目标行对齐到 38% 焦点线。与旧 `Scrollable.ensureVisible(alignment: 0.38)`
-  /// 保持同一行顶对齐公式（行顶 = 0.38×(视口高−行高)），不改变既有几何行为；
+  /// 把目标行对齐到焦点线（默认 38%，上游景深样式 43%）。与旧
+  /// `Scrollable.ensureVisible(alignment: 0.38)` 保持同一行顶对齐公式
+  /// （行顶 = 焦点比例×(视口高−行高)），不改变既有几何行为；
   /// 移动端另有按行中心对齐的变体。
   void _alignRowToFocus(RenderBox rowBox, {required bool animate}) {
     final viewportBox = context.findRenderObject() as RenderBox?;
@@ -259,14 +273,14 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     final target =
         (position.pixels +
                 rowTop -
-                0.38 * (viewportHeight - rowBox.size.height))
+                _focusFraction * (viewportHeight - rowBox.size.height))
             .clamp(position.minScrollExtent, position.maxScrollExtent);
     if ((target - position.pixels).abs() < 0.5) return;
     if (animate) {
       position.animateTo(
         target,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
+        duration: _scrollDuration,
+        curve: _scrollCurve,
       );
     } else {
       position.jumpTo(target);
@@ -316,7 +330,7 @@ class _DesktopLyricListState extends State<DesktopLyricList>
 
   void _updateFocusedIndex(double viewportHeight) {
     if (widget.lyrics.isEmpty) return;
-    final targetY = viewportHeight * 0.38;
+    final targetY = viewportHeight * _focusFraction;
     int bestIndex = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
     double minDiff = double.infinity;
 
@@ -421,7 +435,7 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewportHeight = constraints.maxHeight;
-        final targetY = viewportHeight * 0.38;
+        final targetY = viewportHeight * _focusFraction;
         final defaultIdx = _activeLyricIndex.clamp(0, widget.lyrics.length - 1);
         final currentFocusIdx = _focusedIndex ?? defaultIdx;
         final focusedLine =

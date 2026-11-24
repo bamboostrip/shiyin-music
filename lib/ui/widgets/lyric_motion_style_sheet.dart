@@ -22,7 +22,8 @@ Future<LyricMotionStyle?> showLyricMotionStyleSheet({
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 400),
-            child: Padding(
+            // 三个选项在矮窗口下可能超出对话框高度：整体可滚动。
+            child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -66,11 +67,13 @@ Future<LyricMotionStyle?> showLyricMotionStyleSheet({
   return showModalBottomSheet<LyricMotionStyle>(
     context: context,
     showDragHandle: true,
+    // 三个选项在矮屏/横屏下会超过默认半屏高度，允许更高并整体可滚动。
+    isScrollControlled: true,
     backgroundColor: Theme.of(context).colorScheme.surface,
     builder: (sheetContext) {
       final colorScheme = Theme.of(sheetContext).colorScheme;
       return SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -147,5 +150,6 @@ IconData _iconForStyle(LyricMotionStyle style) {
   return switch (style) {
     LyricMotionStyle.standard => Icons.text_fields_rounded,
     LyricMotionStyle.lively => Icons.auto_awesome_rounded,
+    LyricMotionStyle.upstream => Icons.blur_on_rounded,
   };
 }

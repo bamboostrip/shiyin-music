@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,12 @@ import '../../models/lyric_motion_style.dart';
 ///   （以及当前行进出模糊带）时是渐变而不是瞬间跳变，否则播放推进到边界
 ///   那一句时会看到远处某行「突然变清晰」；
 /// - 视线聚焦行（用户手动滚动时的准星行）传入 [distance] = 0 即可保持清晰。
+///
+/// 上游景深样式：
+/// - 直接复刻上游 `BlurredLyricView` 的参数：sigma = min(3.0, 0.7 × 行距)，
+///   不做 ±3 行截断（越远越模糊，封顶 3.0）；
+/// - 没有弹性放大（上游只靠 active/inactive 字号与高亮区分），其余按行距
+///   模糊的过渡仍走同一套隐式动画，避免切换当前行时硬跳。
 class LyricLineMotion extends StatelessWidget {
   const LyricLineMotion({
     super.key,
@@ -39,33 +46,50 @@ class LyricLineMotion extends StatelessWidget {
   /// 缩放锚点：左中对齐，放大时文字不会左右横移。
   final Alignment alignment;
 
-  /// 最多模糊到距当前行 3 行：更远的行已经淡到看不清，不值得再开图层。
+  /// 灵动样式最多模糊到距当前行 3 行：更远的行已经淡到看不清，不值得再开图层。
   static const int maxBlurDistance = 3;
 
-  /// 当前行放大 4.5%：叠加字号 20→26 的既有变化后，视觉上明显大于标准样式。
+  /// 灵动样式当前行放大 4.5%：叠加字号 20→26 的既有变化后，视觉上明显大于标准样式。
   static const double activeScaleDelta = 0.045;
 
   /// 模糊强度切换的隐式动画时长：与失活缩放同档，短到不拖沓。
   static const Duration blurTransitionDuration = Duration(milliseconds: 240);
 
-  /// 模糊带内的统一强度。
+  /// 灵动样式模糊带内的统一强度。
   ///
   /// 不随行距递增：行距每推进一行，那一行的 sigma 变化都会触发隐式动画，
   /// 递增会让每句都有 6 行一起重建图层；恒定则每句只动跨过边界的那 1~2 行。
   static const double blurSigma = 1.4;
 
-  /// 距离 → 模糊强度。0 表示清晰（当前行、准星行或超出模糊带）。
-  static double blurSigmaFor(int distance) {
-    if (distance <= 0 || distance > maxBlurDistance) return 0;
-    return blurSigma;
+  /// 上游景深样式参数（对齐上游 `player_page.dart` 的 `_lyricBlurSigma/_lyricBlurStep`）。
+  static const double upstreamMaxBlurSigma = 3.0;
+  static const double upstreamBlurStep = 0.7;
+
+  /// 距离 → 模糊强度。0 表示清晰（当前行/准星行，或该样式不模糊）。
+  static double blurSigmaFor(LyricMotionStyle style, int distance) {
+    if (distance <= 0) return 0;
+    return switch (style) {
+      LyricMotionStyle.standard => 0,
+      LyricMotionStyle.lively => distance > maxBlurDistance
+          ? 0
+          : blurSigma,
+      LyricMotionStyle.upstream => math
+          .min(upstreamMaxBlurSigma, upstreamBlurStep * distance)
+          .toDouble(),
+    };
+  }
+
+  /// 该样式是否给当前行做弹性放大（上游没有缩放，只靠字号/高亮区分）。
+  static bool scalesActiveLine(LyricMotionStyle style) {
+    return style == LyricMotionStyle.lively;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (style != LyricMotionStyle.lively) return child;
+    if (style == LyricMotionStyle.standard) return child;
 
-    final baseBlur = blurSigmaFor(distance);
-    // 外层动画只负责模糊目标值：跨过 maxBlurDistance / 进出当前行时，
+    final baseBlur = blurSigmaFor(style, distance);
+    // 外层动画只负责模糊目标值：跨过灵动模糊上限 / 进出当前行时，
     // sigma 从旧值渐变到新值，而不是在重建这一帧直接跳变。
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: baseBlur),
@@ -80,6 +104,7 @@ class LyricLineMotion extends StatelessWidget {
             child: result,
           );
         }
+        if (!scalesActiveLine(style)) return result;
         return _ActiveScale(
           active: active,
           alignment: alignment,
