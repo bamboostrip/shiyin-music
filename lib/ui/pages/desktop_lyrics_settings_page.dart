@@ -126,6 +126,20 @@ class _DesktopLyricsSettingsPageState
                 return s.copyWith(singleLine: v, alignment: alignment);
               }),
             ),
+            // 显示翻译（issue #36）：仅移动端原生悬浮窗支持——PC 悬浮窗子窗
+            // 尚未渲染翻译，桌面端不提供开关。
+            if (!isDesktopFormFactor) ...[
+              _SettingsDivider(),
+              _SwitchTile(
+                key: const Key('switch_show_translation'),
+                icon: Icons.translate_rounded,
+                iconColor: colorScheme.primary,
+                title: '显示翻译',
+                subtitle: '在当前句下方显示歌词翻译（歌曲需带有翻译）',
+                value: _settings.showTranslation,
+                onChanged: (v) => _update((s) => s.copyWith(showTranslation: v)),
+              ),
+            ],
             _SettingsDivider(),
             // 对齐方式：桌面与移动端原生悬浮窗均已支持。桌面双行多一个
             // 「左右分离」；移动端只有当前句/下一句统一的左/中/右三档。
@@ -352,7 +366,8 @@ class _DesktopLyricsSettingsPageState
                       '另一行换成下一句；对齐可选两行同侧（居中/左/右）或左右分离（上行居左、下行居右）。'
                       '调乱了可点右上角「恢复默认」一键还原外观。'
                   : '歌词悬浮窗支持拖动与右下角手柄缩放。单行只显示当前句，'
-                      '双行会同时显示下一句；对齐方式可选居中/左/右，'
+                      '双行会同时显示下一句；开启「显示翻译」后，当前句下方会多一行歌词翻译；'
+                      '对齐方式可选居中/左/右，'
                       '长句超出窗口时自动跑马灯滚动。'
                       '锁定后无法拖动，点击悬浮窗锁图标可解锁。'
                       '调乱了可点右上角「恢复默认」一键还原外观。',
@@ -587,6 +602,7 @@ class _SliderTile extends StatelessWidget {
 
 class _SwitchTile extends StatelessWidget {
   const _SwitchTile({
+    super.key,
     required this.icon,
     required this.iconColor,
     required this.title,
@@ -998,9 +1014,37 @@ class _LyricsPreviewCard extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final availableWidth = constraints.maxWidth;
+            // 显示翻译（issue #36）：当前句正下方多一行更小的译文，与移动端
+            // 原生悬浮窗的排布一致（译文贴当前句，下一句排在其后）。PC 悬浮
+            // 窗不渲染翻译，预览同样不画——预览必须与真实悬浮窗一致。
+            final showTranslation =
+                settings.showTranslation && !isDesktopFormFactor;
+
+            Widget previewTranslation({
+              required double width,
+              required Alignment align,
+              required TextAlign textAlign,
+            }) {
+              return Align(
+                alignment: align,
+                child: LyricsKaraokeLine(
+                  text: 'Listen to what I want to hear',
+                  // 译文 = 主字号 × 0.62，与原生悬浮窗 TRANSLATION_SIZE_RATIO 一致。
+                  fontSize: settings.fontSize * 0.62,
+                  playedColor: playedColor,
+                  unplayedColor: unplayedColor.withValues(alpha: 0.65),
+                  progress: 0.0,
+                  availableWidth: width,
+                  alignment: textAlign,
+                  textOpacity: settings.textOpacity * 0.65,
+                  fontWeight: FontWeight.bold,
+                ),
+              );
+            }
+
             final Widget body;
             if (settings.singleLine) {
-              body = Align(
+              final currentLine = Align(
                 alignment: lineAlignment,
                 child: LyricsKaraokeLine(
                   text: '时音 听我想听',
@@ -1014,6 +1058,21 @@ class _LyricsPreviewCard extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                 ),
               );
+              body = !showTranslation
+                  ? currentLine
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        currentLine,
+                        const SizedBox(height: 2),
+                        previewTranslation(
+                          width: availableWidth,
+                          align: lineAlignment,
+                          textAlign: textAlign,
+                        ),
+                      ],
+                    );
             } else {
               final dualLineWidth = availableWidth - 40.0;
               final effectiveDualWidth =
@@ -1058,6 +1117,15 @@ class _LyricsPreviewCard extends StatelessWidget {
                     align: isSplit ? Alignment.centerLeft : lineAlignment,
                     align2: isSplit ? TextAlign.left : textAlign,
                   ),
+                  // 译文跟随当前句的锚点（左右分离时贴左）。
+                  if (showTranslation) ...[
+                    const SizedBox(height: 2),
+                    previewTranslation(
+                      width: effectiveDualWidth,
+                      align: isSplit ? Alignment.centerLeft : lineAlignment,
+                      textAlign: isSplit ? TextAlign.left : textAlign,
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   previewLine(
                     text: '让音乐更自由',

@@ -582,5 +582,88 @@ void main() {
         expect(alignmentSelector.selected, {DesktopLyricsAlignment.left});
       },
     );
+
+    testWidgets(
+      'mobile: 「显示翻译」开关落盘 showTranslation，预览在当前句下方插入译文（issue #36）',
+      (tester) async {
+        debugDesktopFormFactorOverride = false;
+        addTearDown(() {
+          debugDesktopFormFactorOverride = null;
+        });
+        await pumpSettingsPage(tester);
+
+        Finder translationSwitch() => find.descendant(
+          of: find.byKey(const Key('switch_show_translation')),
+          matching: find.byType(Switch),
+        );
+        List<String> previewTexts() => tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .map((line) => line.text)
+            .toList();
+
+        expect(find.text('显示翻译'), findsOneWidget);
+        expect(find.text('Listen to what I want to hear'), findsNothing);
+        // 默认关闭：双行预览只有当前句 + 下一句，存量用户观感不变。
+        expect(previewTexts(), ['时音 听我想听', '让音乐更自由']);
+
+        // 打开开关：设置落盘，预览在当前句与下一句之间插入译文。
+        await tester.tap(translationSwitch());
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.showTranslation, isTrue);
+        expect(player.updatedSettingsList.last.showTranslation, isTrue);
+        expect(previewTexts(), [
+          '时音 听我想听',
+          'Listen to what I want to hear',
+          '让音乐更自由',
+        ]);
+
+        // 单行模式同样在当前句下方带译文。
+        await tester.tap(find.text('单行显示'));
+        await tester.pumpAndSettle();
+        expect(previewTexts(), ['时音 听我想听', 'Listen to what I want to hear']);
+
+        // 关闭开关：译文从预览消失。
+        await tester.tap(translationSwitch());
+        await tester.pumpAndSettle();
+        expect(player.desktopLyricsSettings.showTranslation, isFalse);
+        expect(previewTexts(), ['时音 听我想听']);
+      },
+    );
+
+    testWidgets('mobile: 「恢复默认」把显示翻译一并还原（与显示行数同属外观）', (
+      tester,
+    ) async {
+      debugDesktopFormFactorOverride = false;
+      addTearDown(() {
+        debugDesktopFormFactorOverride = null;
+      });
+      await player.updateDesktopLyricsSettings(
+        player.desktopLyricsSettings.copyWith(showTranslation: true),
+      );
+      await pumpSettingsPage(tester);
+
+      await tester.tap(find.text('恢复默认'));
+      // 等 Toast 完整走完显示/定时/退出，避免测试结束时 Timer 未决。
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+
+      expect(player.updatedSettingsList.last.showTranslation, isFalse);
+    });
+
+    testWidgets(
+      'desktop: 不提供「显示翻译」开关，残留的 true 也不让预览画译文（PC 悬浮窗不渲染翻译）',
+      (tester) async {
+        await player.updateDesktopLyricsSettings(
+          player.desktopLyricsSettings.copyWith(showTranslation: true),
+        );
+        await pumpSettingsPage(tester);
+
+        expect(find.text('显示翻译'), findsNothing);
+        expect(find.byKey(const Key('switch_show_translation')), findsNothing);
+        expect(find.text('Listen to what I want to hear'), findsNothing);
+        expect(find.byType(LyricsKaraokeLine), findsNWidgets(2));
+      },
+    );
   });
 }
