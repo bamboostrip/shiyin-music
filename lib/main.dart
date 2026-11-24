@@ -182,6 +182,13 @@ Future<void> main(List<String> args) async {
         androidNotificationChannelId: channelConfig.channelId,
         androidNotificationChannelName: channelConfig.channelName,
         androidStopForegroundOnPause: false,
+        // 系统媒体会话封面在原生侧的解码尺寸上限（结果约 512~1023px 见方）。
+        // 不设时 audio_service 把封面原图整张解码成位图：在线封面多是 480px
+        // 档不受影响，但本地内嵌封面（issue #34 起也下发给系统）常见
+        // 1500~3000px 的扫描件，整张解码是 9~36MB/张，车机 256MB 堆上遇到
+        // 超大图会直接 OOM。
+        artDownscaleWidth: 512,
+        artDownscaleHeight: 512,
       ),
     );
 

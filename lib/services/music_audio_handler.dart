@@ -13,6 +13,7 @@ import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
 import 'local_artwork_service.dart';
 import 'lrc_formatter.dart';
+import 'system_media_art.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
 
@@ -173,6 +174,14 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 当前投递给系统媒体会话的歌曲：歌词元数据（LyricInfo/extras）重建
   /// MediaItem 时以它为基准，由 [loadSong]/[setSongQueue] 更新。
   Song? _currentSong;
+
+  /// 系统媒体会话侧的本地封面（issue #34）：本地歌的 `localart://` 伪 URL
+  /// 系统解析不了，先无图下发、落盘后带 `file://` URI 重发，时序见
+  /// [SystemMediaArtResolver]。就绪回调直接重发当前 MediaItem。
+  late final SystemMediaArtResolver _systemMediaArt = SystemMediaArtResolver(
+    resolve: LocalArtworkService.systemArtUriFor,
+    onReady: _pushCurrentMediaItem,
+  );
 
   /// 手环/AVRCP 歌词标题同步：开启时 MediaItem.title = 当前歌词行，供只能
   /// 读 AVRCP 标题的手环、手表与车机仪表盘显示歌词（上游 3.3.0 #134）。
@@ -358,6 +367,8 @@ class MusicAudioHandler extends BaseAudioHandler
     if (!sameAsLoaded) {
       _resetLyricSnapshot();
     }
+    // 同曲重载（切音质/失败重试）时解析器认得这个目标，不会重复落盘。
+    _systemMediaArt.ensure(song);
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
     final items = _buildSystemQueue(queueSongs, _queueIndex);
 
@@ -909,6 +920,7 @@ class MusicAudioHandler extends BaseAudioHandler
         _pushCurrentMediaItem();
       } else {
         _resetLyricSnapshot();
+        _systemMediaArt.ensure(currentSong);
         mediaItem.add(_mediaItemFor(currentSong, includeArt: true));
       }
     }
@@ -937,6 +949,7 @@ class MusicAudioHandler extends BaseAudioHandler
       positionMs: _lastPositionMs,
       durationMs: _lastDurationMs,
       playing: _lastPlaying,
+      artUri: _systemMediaArt.artUriFor(song.coverUrl),
     );
     mediaItem.add(item);
     _logPublishedLyricMeta(song, item.extras ?? const <String, dynamic>{});
@@ -1037,6 +1050,7 @@ class MusicAudioHandler extends BaseAudioHandler
     int? positionMs,
     int? durationMs,
     bool? playing,
+    Uri? artUri,
   }) {
     return MediaItem(
       id: song.hash.isEmpty ? song.id : song.hash,
@@ -1048,7 +1062,9 @@ class MusicAudioHandler extends BaseAudioHandler
       ),
       artist: song.artist,
       duration: song.duration,
-      artUri: _systemArtUri(song),
+      // [artUri] 由持有者按解析状态给出；未传（纯函数单测/无解析器）时
+      // 退回「本地伪 URL 不下发」的保守规则。
+      artUri: artUri ?? systemArtUriFallback(song),
       extras: buildLyricMediaExtras(
         song: song,
         lyricText: lyricText,
@@ -1301,17 +1317,19 @@ class MusicAudioHandler extends BaseAudioHandler
       title: song.title,
       artist: song.artist,
       duration: song.duration,
-      artUri: includeArt ? _systemArtUri(song) : null,
+      // 队列里的当前曲随解析状态带封面（可能尚未落盘 = null）；其余条目
+      // 一律不带，降低 MediaItem 堆积。
+      artUri: includeArt ? _systemMediaArt.artUriFor(song.coverUrl) : null,
       extras: {'hash': song.hash, 'songId': song.id},
     );
   }
 
-  /// 下发给系统媒体会话的封面 Uri（没有则 null）。
-  ///
-  /// `localart://`（本地内嵌封面）只在本进程内有效，系统侧解析不了这种伪
-  /// URL：下发出去只会让锁屏/车机拿一个坏 Uri 去请求，不如留空（本地歌的
-  /// 锁屏封面本来就是空的）。
-  static Uri? _systemArtUri(Song song) {
+  /// 没有解析器可用时的封面规则（纯函数）：在线封面原样下发；本地内嵌封面
+  /// 的 `localart://` 只在本进程内有效，系统侧解析不了，下发出去只会让
+  /// 锁屏/车机拿一个坏 Uri 去请求，不如留空。正常播放路径不走这里——
+  /// [SystemMediaArtResolver] 会先把封面落盘再给出 `file://` URI。
+  @visibleForTesting
+  static Uri? systemArtUriFallback(Song song) {
     final coverUrl = song.coverUrl;
     if (coverUrl == null || LocalArtworkService.isArtworkUrl(coverUrl)) {
       return null;

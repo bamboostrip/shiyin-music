@@ -11,6 +11,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/models/music_models.dart';
+import 'package:shiyin_music/services/local_artwork_service.dart';
 import 'package:shiyin_music/services/music_audio_handler.dart';
 
 Song _song({
@@ -273,6 +274,43 @@ void main() {
       );
       expect(item.artUri, isNull);
       expect(item.title, '第一句');
+    });
+
+    test('本地内嵌封面：未给出落盘 URI 时伪 URL 不下发', () {
+      // `localart://` 只在本进程内有效，系统媒体会话解析不了。
+      final song = _song(
+        coverUrl: LocalArtworkService.artworkUrlFor('/m/a.flac'),
+      );
+      final item = MusicAudioHandler.buildLyricMediaItem(
+        song: song,
+        lyricText: '第一句',
+      );
+
+      expect(item.artUri, isNull);
+      expect(MusicAudioHandler.systemArtUriFallback(song), isNull);
+      // 在线封面走同一条兜底规则时原样透传。
+      expect(
+        MusicAudioHandler.systemArtUriFallback(
+          _song(coverUrl: 'https://example.com/c.jpg'),
+        ),
+        Uri.parse('https://example.com/c.jpg'),
+      );
+    });
+
+    test('本地封面落盘后：显式传入的 file URI 原样下发（issue #34）', () {
+      final song = _song(
+        coverUrl: LocalArtworkService.artworkUrlFor('/m/a.flac'),
+      );
+      final fileUri = Uri.file('/cache/a.jpg');
+
+      final item = MusicAudioHandler.buildLyricMediaItem(
+        song: song,
+        lyricText: '第一句',
+        artUri: fileUri,
+      );
+
+      expect(item.artUri, fileUri);
+      expect(item.title, '晴天');
     });
   });
 }
