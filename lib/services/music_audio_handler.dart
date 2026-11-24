@@ -1319,14 +1319,26 @@ class MusicAudioHandler extends BaseAudioHandler
     return Uri.tryParse(coverUrl);
   }
 
+  /// Android 12 及以下通知「紧凑视图」（收起态）显示的三个按钮在
+  /// [controls] 里的下标：上一首/播放/下一首。
+  ///
+  /// 补丁版 audio_service 的通知 action 列表与 [controls] 同序，自定义按钮
+  /// 排在两侧时标准三键不再是 0/1/2——索引指错会让收起态显示成
+  /// 「收藏/上一首/播放」。索引越界则整张通知出问题，所以只取实际存在的
+  /// 标准键（自定义按钮在中间被隐藏时不足三个）。Android 13+ 系统忽略该参数。
+  @visibleForTesting
+  static List<int> legacyCompactActionIndices(List<MediaControl> controls) => [
+        for (var i = 0; i < controls.length; i++)
+          if (controls[i].action != MediaAction.custom) i,
+      ];
+
   /// 构建通知卡片/系统媒体卡片的按钮序列。
   ///
   /// Android 13+：系统卡片从 PlaybackState 渲染，自定义动作用 4、5 槽，
-  /// 红心与词按钮在标准三键之外正常显示。
-  /// Android 8–12：audio_service 原生侧会把自定义按钮从通知的 action
-  /// 列表里过滤掉（只写入 PlaybackState，不进通知），因此这两个按钮在
-  /// 旧系统的通知里不显示，通知本身不受影响（要在旧系统显示需原生侧
-  /// 自定义通知构建，暂不做）。
+  /// 在标准三键之外正常显示。
+  /// Android 12 及以下：本地补丁版 audio_service 会把自定义按钮一并做进通知
+  /// （上游只写 PlaybackState、不进通知），通知 action 列表与本列表同序，
+  /// 所以这里返回的下标同时是通知里的下标（见 [legacyCompactActionIndices]）。
   @visibleForTesting
   static List<MediaControl> buildNotificationControls({
     required bool playing,
@@ -1399,11 +1411,11 @@ class MusicAudioHandler extends BaseAudioHandler
         MediaAction.seekBackward,
         MediaAction.seekForward,
       },
-      // 紧凑视图（Android 8–12 收起的通知）索引指向通知内的 action，
-      // 而 audio_service 会把自定义按钮过滤出通知（通知里永远只有
-      // 上一首/播放/下一首 = 0/1/2），必须恒定取 [0,1,2]；Android 13+
-      // 忽略该参数。
-      androidCompactActionIndices: const [0, 1, 2],
+      // 紧凑视图（Android 12 及以下收起的通知）索引指向通知内的 action。
+      // 补丁版 audio_service 的通知含自定义按钮且与 controls 同序，所以
+      // 按标准键的实际位置取（见 [legacyCompactActionIndices]）；Android
+      // 13+ 忽略该参数。
+      androidCompactActionIndices: legacyCompactActionIndices(controls),
       processingState: const {
         ProcessingState.idle: AudioProcessingState.idle,
         ProcessingState.loading: AudioProcessingState.loading,

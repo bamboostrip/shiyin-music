@@ -108,4 +108,36 @@ void main() {
       );
     });
   });
+
+  group('legacyCompactActionIndices（Android 12 及以下收起态）', () {
+    List<MediaControl> build(NotificationActionBridge actions) =>
+        MusicAudioHandler.buildNotificationControls(
+          playing: true,
+          customButtonsEnabled: true,
+          actions: actions,
+        );
+
+    test('两侧都有自定义按钮时标准三键在 1/2/3', () {
+      final controls = build(
+        bridge(canLike: true, liked: true, lyricsEnabled: true),
+      );
+      expect(MusicAudioHandler.legacyCompactActionIndices(controls), [1, 2, 3]);
+    });
+
+    test('没有自定义按钮时是 0/1/2（不能越界）', () {
+      final controls = MusicAudioHandler.buildNotificationControls(
+        playing: true,
+        customButtonsEnabled: true,
+      );
+      expect(MusicAudioHandler.legacyCompactActionIndices(controls), [0, 1, 2]);
+    });
+
+    test('左侧按钮被隐藏时标准三键前移到 0/1/2', () {
+      final controls = build(
+        bridge(canLike: false, liked: false, lyricsEnabled: true),
+      );
+      expect(controls.length, 4);
+      expect(MusicAudioHandler.legacyCompactActionIndices(controls), [0, 1, 2]);
+    });
+  });
 }
