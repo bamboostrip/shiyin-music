@@ -65,7 +65,9 @@ class _FakeAudioPlayer extends Fake implements AudioPlayer {
   bool get playing => false;
 
   @override
-  ProcessingState get processingState => ProcessingState.idle;
+  // 模拟「音源已装载」的播放中引擎：idle 会让控制器把 position 回调当成
+  // 空载 0 丢弃（issue #38 的 _shouldAdoptEnginePosition）。
+  ProcessingState get processingState => ProcessingState.ready;
 
   @override
   int? get androidAudioSessionId => null;

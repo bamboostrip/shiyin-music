@@ -540,4 +540,57 @@ void main() {
       expect(controller.hasPendingResumePosition, isFalse);
     });
   });
+
+  // 同一类「引擎 idle 上报 0」还会发生在本轮播放中：系统回收前台服务 /
+  // 主动 stop 后，引擎不持有音源；此时 `_resumePosition` 早已消费，
+  // 只有内存 position 记着用户听到哪里（issue #38 复查补充）。
+  group('前台服务被回收：本轮已听位置不得被 idle 的 0 冲掉', () {
+    Future<PlayerController> playTo42Seconds() async {
+      final song = _song(1);
+      final controller = buildController();
+      await settle();
+      controller.queue = [song];
+      await controller.playSong(song);
+      await settle();
+      fakeAudioPlayer.emitPosition(const Duration(seconds: 42));
+      await settle();
+      expect(controller.position, const Duration(seconds: 42));
+      return controller;
+    }
+
+    Future<void> reclaimService() async {
+      fakeAudioPlayer.currentPosition = Duration.zero;
+      fakeAudioPlayer.emitState(
+        playing: false,
+        processing: ProcessingState.idle,
+      );
+      await settle();
+    }
+
+    test('idle 状态回调后位置仍是本轮已听位置', () async {
+      final controller = await playTo42Seconds();
+
+      await reclaimService();
+
+      expect(
+        controller.position,
+        const Duration(seconds: 42),
+        reason: '音源被释放后的 0 不是用户位置，界面不能跳回 00:00',
+      );
+    });
+
+    test('服务回收后点播放从本轮位置续，而不是从头播', () async {
+      final controller = await playTo42Seconds();
+
+      await reclaimService();
+      await controller.togglePlay();
+      await settle();
+
+      expect(
+        handler.seeks,
+        contains(const Duration(seconds: 42)),
+        reason: '服务回收不应让手动播放退回 0 秒',
+      );
+    });
+  });
 }

@@ -1164,19 +1164,26 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
 
   /// 引擎上报的位置此刻能否采信为 UI 基准。
   ///
-  /// 冷启动恢复带出的是一段**还没交给引擎**的进度（[_resumePosition]）：
-  /// 此时引擎 idle、position 恒 0。音频服务绑定、通知栏媒体键、后台服务
-  /// 重建等任何一次空载状态/位置回调，都会走 positionStream/playerStateStream
-  /// 监听里的 `_setPositionBase(audioPlayer.position)`，把恢复位置抹成 0。
+  /// 引擎 idle 意味着**根本没有装载音源**，此时上报的 position 恒为 0，
+  /// 它不是用户听到的位置。两类场景都会踩到：
+  /// - 冷启动恢复：恢复进度还在 [_resumePosition]，尚未交给引擎；
+  /// - 系统回收前台服务 / 主动 stop：本轮听到的位置还在内存 [position] 里。
+  ///
+  /// 音频服务绑定、通知栏媒体键、后台服务重建等任何一次空载回调，都会走
+  /// positionStream/playerStateStream 监听里的 `_setPositionBase(...)`；
+  /// 一旦采信这个 0，界面立刻变 00:00，用户点播放也从 0 起播（见
+  /// [togglePlay] 的 idle 分支）。
   ///
   /// 车机之所以「看起来正常」：开机自播走 [resumePlayback]，恢复位置从
   /// [_resumePosition] 直接进引擎，不经过内存里的 position；手机没有自播、
-  /// 由用户点播放（[togglePlay] 的 idle 分支）时才暴露成「从头播」。
+  /// 由用户点播放时才暴露成「从头播」。
   ///
-  /// 所以：还有待恢复进度且引擎根本没装载音源时，不接受引擎上报。
+  /// 所以：引擎 idle 且内存里还有非零基准（待恢复进度或本轮位置）时，
+  /// 不接受引擎上报。
   bool _shouldAdoptEnginePosition() {
-    if (_resumePosition == null) return true;
-    return audioPlayer.processingState != ProcessingState.idle;
+    if (audioPlayer.processingState != ProcessingState.idle) return true;
+    if (_resumePosition != null) return false;
+    return position <= Duration.zero;
   }
 
   /// 引擎里**当前实际持有**的那首歌的 hash（`loadSong` 成功后才更新）。
