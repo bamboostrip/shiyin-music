@@ -1,7 +1,17 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/services/local_artwork_service.dart';
+
+/// [root] 下的全部文件（递归）。
+List<File> _filesIn(Directory root) => root
+    .listSync(recursive: true)
+    .whereType<File>()
+    .toList();
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -162,6 +172,146 @@ void main() {
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
+    });
+  });
+
+  group('系统媒体会话封面落盘（issue #34）', () {
+    late Directory root;
+    final jpeg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3]);
+    final png = Uint8List.fromList(
+      [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9],
+    );
+
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('shiyin_localart_test');
+      LocalArtworkService.debugSystemArtRootOverride = () async => root;
+      // 走 Android 分支（通道取图），不碰 Rust 引擎。
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    });
+
+    tearDown(() {
+      LocalArtworkService.debugSystemArtRootOverride = null;
+      debugDefaultTargetPlatformOverride = null;
+      root.deleteSync(recursive: true);
+    });
+
+    test('内嵌图原样落盘为 file URI，扩展名按魔数识别', () async {
+      reply = jpeg;
+      final uri = await LocalArtworkService.systemArtUriFor('/m/a.mp3');
+
+      expect(uri, isNotNull);
+      expect(uri!.scheme, 'file');
+      final file = File(uri.toFilePath());
+      expect(file.path, startsWith(root.path));
+      expect(file.parent.path, endsWith('localart'));
+      expect(file.path, endsWith('.jpg'));
+      expect(await file.readAsBytes(), jpeg);
+    });
+
+    test('文件名是读取目标的 sha1：同一目标稳定复用，不同目标互不覆盖', () async {
+      reply = jpeg;
+      final a = await LocalArtworkService.systemArtUriFor('/m/a.mp3');
+      final b = await LocalArtworkService.systemArtUriFor('/m/b.mp3');
+      final again = await LocalArtworkService.systemArtUriFor('/m/a.mp3');
+      // Android 10 上同一首歌可能按 content:// 读，是另一份独立文件。
+      final byContentUri = await LocalArtworkService.systemArtUriFor(
+        'content://media/external/audio/media/7',
+      );
+
+      expect(again, a);
+      expect(b, isNot(a));
+      expect(byContentUri, isNot(a));
+      expect(
+        Uri.parse(a.toString()).pathSegments.last,
+        '${sha1.convert(utf8.encode('/m/a.mp3'))}.jpg',
+      );
+    });
+
+    test('再次取用不再解析音频，也不重复写盘、不留 .tmp 残片', () async {
+      reply = png;
+      final first = await LocalArtworkService.systemArtUriFor('/m/b.flac');
+      final second = await LocalArtworkService.systemArtUriFor('/m/b.flac');
+
+      expect(second, first);
+      expect(first.toString(), endsWith('.png'));
+      expect(calls, 1);
+      final files = _filesIn(root);
+      expect(files, hasLength(1));
+      expect(files.single.path, isNot(endsWith('.tmp')));
+    });
+
+    test('确定无图 / 通道报错 / 取不到缓存目录都返回 null 且不落盘', () async {
+      reply = null;
+      expect(await LocalArtworkService.systemArtUriFor('/m/none.mp3'), isNull);
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method != 'getEmbeddedCover') return null;
+        throw PlatformException(code: 'cover_failed', message: 'io');
+      });
+      expect(await LocalArtworkService.systemArtUriFor('/m/broken.mp3'), isNull);
+
+      // 读图正常但拿不到缓存目录（path_provider 通道不可用）：同样不外抛。
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method != 'getEmbeddedCover') return null;
+        return jpeg;
+      });
+      LocalArtworkService.debugSystemArtRootOverride =
+          () async => throw StateError('no path_provider channel');
+      await expectLater(
+        LocalArtworkService.systemArtUriFor('/m/a.mp3'),
+        completion(isNull),
+      );
+
+      expect(_filesIn(root), isEmpty);
+    });
+
+    test('超过上限时淘汰最久未用的，刚写的那张一定保留', () async {
+      final dir = Directory(
+        '${root.path}/${LocalArtworkService.systemArtDirName}',
+      )..createSync(recursive: true);
+      final base = DateTime(2026, 1, 1);
+      for (var i = 0; i < 64; i++) {
+        final file = File('${dir.path}/old_$i.jpg')..writeAsBytesSync([i]);
+        file.setLastModifiedSync(base.add(Duration(minutes: i)));
+      }
+
+      reply = jpeg;
+      final written = (await LocalArtworkService.systemArtUriFor('/m/new.mp3'))!;
+
+      // 函数返回时淘汰已收尾：文件数回到上限。
+      final names =
+          _filesIn(root).map((file) => file.uri.pathSegments.last).toList();
+      expect(names, hasLength(64));
+      expect(names, isNot(contains('old_0.jpg')), reason: '最旧的先淘汰');
+      expect(names, containsAll(['old_1.jpg', 'old_63.jpg']));
+      expect(names, contains(written.pathSegments.last));
+    });
+  });
+
+  group('imageExtensionForBytes 按魔数识别', () {
+    test('jpg/png/webp/gif/bmp，其余与过短输入返回 null', () {
+      String? ext(List<int> bytes) =>
+          LocalArtworkService.imageExtensionForBytes(bytes);
+
+      expect(ext([0xFF, 0xD8, 0xFF, 0xE0]), 'jpg');
+      expect(ext([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), 'png');
+      // RIFF....WEBP：RIFF 容器里第 8~11 字节才是格式标识。
+      expect(
+        ext([0x52, 0x49, 0x46, 0x46, 0x10, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
+        'webp',
+      );
+      // RIFF 但不是 WEBP（如 WAV）不能认成图片。
+      expect(
+        ext([0x52, 0x49, 0x46, 0x46, 0x10, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]),
+        isNull,
+      );
+      expect(ext([0x47, 0x49, 0x46, 0x38, 0x39]), 'gif');
+      expect(ext([0x42, 0x4D, 1, 2]), 'bmp');
+      expect(ext([0, 1, 2, 3, 4, 5]), isNull);
+      expect(ext([0xFF]), isNull);
+      expect(ext(const []), isNull);
     });
   });
 }

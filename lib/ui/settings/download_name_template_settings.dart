@@ -37,7 +37,7 @@ class _DownloadNameTemplateSettingsState
     setState(() => _template = template);
   }
 
-  /// 瓦片副标题：模板名 + 示例文件名，一眼看懂两种顺序的差别。
+  /// 瓦片副标题：模板名 + 示例文件名，一眼看懂各模板的差别。
   String get _subtitle => '${_template.label}（示例：${_template.example}）';
 
   Future<void> _selectTemplate() async {
@@ -47,27 +47,37 @@ class _DownloadNameTemplateSettingsState
       builder: (dialogContext) => AlertDialog(
         title: const Text('下载文件名'),
         content: SingleChildScrollView(
-          child: RadioGroup<DownloadNameTemplate>(
-            groupValue: _template,
-            onChanged: (value) {
-              if (value == null) return;
-              Navigator.of(dialogContext).pop(value);
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final template in DownloadNameTemplate.values)
-                  RadioListTile<DownloadNameTemplate>(
-                    value: template,
-                    title: Text(template.label),
-                    subtitle: Text(
-                      '示例：${template.example}'
-                      '${template == DownloadNameTemplate.artistTitle ? '（默认）' : ''}；'
-                      '仅对新下载生效，已下载文件不改名',
-                    ),
-                  ),
-              ],
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              RadioGroup<DownloadNameTemplate>(
+                groupValue: _template,
+                onChanged: (value) {
+                  if (value == null) return;
+                  Navigator.of(dialogContext).pop(value);
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final template in DownloadNameTemplate.values)
+                      RadioListTile<DownloadNameTemplate>(
+                        value: template,
+                        title: Text(template.label),
+                        subtitle: Text(
+                          '示例：${template.example}'
+                          '${template == DownloadNameTemplate.artistTitle ? '（默认）' : ''}',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // 生效范围对四个模板都一样：列在选项外提示一次，不在每条里重复。
+              const Padding(
+                padding: EdgeInsets.fromLTRB(24, 4, 24, 0),
+                child: Text('仅对新下载生效，已下载文件不改名'),
+              ),
+            ],
           ),
         ),
         actions: [

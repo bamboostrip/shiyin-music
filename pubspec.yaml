@@ -142,6 +142,20 @@ dependency_overrides:
     path: packages/hotkey_manager_windows
   hotkey_manager_linux:
     path: packages/hotkey_manager_linux
+  # 本地 vendored 副本（packages/audio_service），勿直接换回 pub.dev 版本，一处补丁——
+  # Android 12 及以下把自定义按钮也做进媒体通知（源码内各改动点均有
+  # `LOCAL PATCH (shiyin)` 标记：AudioService.java 的 setState/buildNotification
+  # 及其新增方法，MediaButtonReceiver.java 的点按转发）。
+  # 上游只把自定义动作写进 PlaybackState，Android 13+ 的系统媒体卡片才认；旧系统
+  # 的通知是 app 自己那张，自定义按钮（红心/桌面歌词/播放模式）永远不显示。
+  # 补丁后旧系统通知的 action 列表 = Dart 下发的 controls 原序，紧凑视图索引的语义
+  # 随之变成「controls 里的下标」——MusicAudioHandler 下发的
+  # androidCompactActionIndices 必须按标准三键的实际位置算（见其
+  # legacyCompactActionIndices），不能写死 [0,1,2]。Android 13+ 只走标准键，
+  # 行为与上游一致（补丁分支在该版本取不到值）。
+  # 升级 audio_service 时必须把这处补丁重新移植。
+  audio_service:
+    path: packages/audio_service
 
 flutter:
   uses-material-design: true

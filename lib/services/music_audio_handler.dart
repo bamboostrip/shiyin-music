@@ -13,6 +13,8 @@ import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
 import 'local_artwork_service.dart';
 import 'lrc_formatter.dart';
+import 'notification_button_slots.dart';
+import 'system_media_art.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
 
@@ -70,13 +72,37 @@ class _ProxyRoute {
   );
 }
 
-/// 通知卡片自定义按钮（收藏红心 / 桌面歌词开关）的状态查询与动作回调。
+/// 「播放模式」通知按钮的当前模式（issue #34）。
+///
+/// 三个值与 PlayerController 的 PlaybackMode 一一对应，但图标与文案放在这
+/// 里：handler 不必认识 PlayerController 的枚举（接线处做一次映射即可）。
+enum NotificationPlayMode {
+  playlistLoop(
+    'drawable/ic_notification_repeat',
+    '播放模式：歌单循环，点按切换',
+  ),
+  shuffle('drawable/ic_notification_shuffle', '播放模式：随机播放，点按切换'),
+  singleLoop(
+    'drawable/ic_notification_repeat_one',
+    '播放模式：单曲循环，点按切换',
+  );
+
+  const NotificationPlayMode(this.androidIcon, this.label);
+
+  /// 通知图标资源名；循环与单曲循环靠角标「1」区分，随机是交叉箭头。
+  final String androidIcon;
+
+  /// 无障碍文案（系统媒体卡片只显示图标，文案给读屏与 Android Auto 用）。
+  final String label;
+}
+
+/// 通知卡片自定义按钮（收藏红心 / 桌面歌词 / 播放模式）的状态查询与动作回调。
 ///
 /// AudioHandler 在 main() 里创建时 AuthController/PlayerController 还不存在，
 /// 与 [MusicAudioHandler.attachTransportControls] 同构：由 main.dart 在控制器
 /// 就绪后注入闭包，晚绑定。Android 13+ 系统媒体卡片的标准槽位只有
 /// 上一首/播放/下一首 3 个，自定义动作用剩余的 4、5 槽，因此最多两个
-/// 自定义按钮，正是红心 + 桌面歌词。
+/// 自定义按钮——左右各一，各放什么由 [NotificationButtonSlots] 决定。
 class NotificationActionBridge {
   NotificationActionBridge({
     required this.canToggleLike,
@@ -84,7 +110,17 @@ class NotificationActionBridge {
     required this.onToggleLike,
     required this.desktopLyricsEnabled,
     required this.onToggleDesktopLyrics,
+    required this.playbackMode,
+    required this.onCyclePlaybackMode,
+    required this.leftAction,
+    required this.rightAction,
   });
+
+  /// 左侧槽位（标准三键之前）放什么按钮；每次构建按钮时查询。
+  final NotificationSlotAction Function() leftAction;
+
+  /// 右侧槽位（标准三键之后）放什么按钮。
+  final NotificationSlotAction Function() rightAction;
 
   /// 当前是否可收藏（已登录且有在播歌曲）；false 时通知卡片隐藏红心。
   final bool Function() canToggleLike;
@@ -100,6 +136,12 @@ class NotificationActionBridge {
 
   /// 通知卡片桌面歌词按钮被点击。
   final Future<void> Function() onToggleDesktopLyrics;
+
+  /// 当前播放模式（决定「播放模式」按钮的图标）。
+  final NotificationPlayMode Function() playbackMode;
+
+  /// 通知卡片「播放模式」按钮被点击（与应用内模式按钮同义：循环切换）。
+  final Future<void> Function() onCyclePlaybackMode;
 }
 
 class MusicAudioHandler extends BaseAudioHandler
@@ -134,6 +176,7 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 通知卡片自定义动作名（[customAction] 的 name 参数）。
   static const toggleLikeActionName = 'shiyin.toggle_like';
   static const toggleDesktopLyricsActionName = 'shiyin.toggle_desktop_lyrics';
+  static const cyclePlaybackModeActionName = 'shiyin.cycle_playback_mode';
 
   /// 打断与断连策略**归 PlayerController 独占**（见
   /// `player_controller.desktop.dart` 的 `_setupAudioSessionListeners`）。
@@ -173,6 +216,14 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 当前投递给系统媒体会话的歌曲：歌词元数据（LyricInfo/extras）重建
   /// MediaItem 时以它为基准，由 [loadSong]/[setSongQueue] 更新。
   Song? _currentSong;
+
+  /// 系统媒体会话侧的本地封面（issue #34）：本地歌的 `localart://` 伪 URL
+  /// 系统解析不了，先无图下发、落盘后带 `file://` URI 重发，时序见
+  /// [SystemMediaArtResolver]。就绪回调直接重发当前 MediaItem。
+  late final SystemMediaArtResolver _systemMediaArt = SystemMediaArtResolver(
+    resolve: LocalArtworkService.systemArtUriFor,
+    onReady: _pushCurrentMediaItem,
+  );
 
   /// 手环/AVRCP 歌词标题同步：开启时 MediaItem.title = 当前歌词行，供只能
   /// 读 AVRCP 标题的手环、手表与车机仪表盘显示歌词（上游 3.3.0 #134）。
@@ -288,6 +339,7 @@ class MusicAudioHandler extends BaseAudioHandler
     final bridge = _notificationActions;
     if (bridge == null) return 'bridge=null';
     String canLike = 'unknown', liked = 'unknown', lyrics = 'unknown';
+    String mode = 'unknown', left = 'unknown', right = 'unknown';
     try {
       canLike = '${bridge.canToggleLike()}';
     } catch (e) {
@@ -303,7 +355,19 @@ class MusicAudioHandler extends BaseAudioHandler
     } catch (e) {
       lyrics = 'error:$e';
     }
-    return 'canLike=$canLike liked=$liked lyricsOn=$lyrics';
+    try {
+      mode = bridge.playbackMode().name;
+    } catch (e) {
+      mode = 'error:$e';
+    }
+    try {
+      left = bridge.leftAction().name;
+      right = bridge.rightAction().name;
+    } catch (e) {
+      left = right = 'error:$e';
+    }
+    return 'canLike=$canLike liked=$liked lyricsOn=$lyrics '
+        'mode=$mode slots=$left/$right';
   }
 
   @override
@@ -327,6 +391,12 @@ class MusicAudioHandler extends BaseAudioHandler
           await bridge.onToggleDesktopLyrics();
         } catch (e) {
           debugPrint('[SYNOTIF][ERROR] customAction 桌面歌词执行失败: $e');
+        }
+      case cyclePlaybackModeActionName:
+        try {
+          await bridge.onCyclePlaybackMode();
+        } catch (e) {
+          debugPrint('[SYNOTIF][ERROR] customAction 播放模式执行失败: $e');
         }
       default:
         debugPrint('[SYNOTIF] 未知 customAction：$name');
@@ -358,6 +428,8 @@ class MusicAudioHandler extends BaseAudioHandler
     if (!sameAsLoaded) {
       _resetLyricSnapshot();
     }
+    // 同曲重载（切音质/失败重试）时解析器认得这个目标，不会重复落盘。
+    _systemMediaArt.ensure(song);
     _queueIndex = queueIndex < 0 ? 0 : queueIndex;
     final items = _buildSystemQueue(queueSongs, _queueIndex);
 
@@ -909,6 +981,7 @@ class MusicAudioHandler extends BaseAudioHandler
         _pushCurrentMediaItem();
       } else {
         _resetLyricSnapshot();
+        _systemMediaArt.ensure(currentSong);
         mediaItem.add(_mediaItemFor(currentSong, includeArt: true));
       }
     }
@@ -937,6 +1010,7 @@ class MusicAudioHandler extends BaseAudioHandler
       positionMs: _lastPositionMs,
       durationMs: _lastDurationMs,
       playing: _lastPlaying,
+      artUri: _systemMediaArt.artUriFor(song.coverUrl),
     );
     mediaItem.add(item);
     _logPublishedLyricMeta(song, item.extras ?? const <String, dynamic>{});
@@ -1037,6 +1111,7 @@ class MusicAudioHandler extends BaseAudioHandler
     int? positionMs,
     int? durationMs,
     bool? playing,
+    Uri? artUri,
   }) {
     return MediaItem(
       id: song.hash.isEmpty ? song.id : song.hash,
@@ -1048,7 +1123,9 @@ class MusicAudioHandler extends BaseAudioHandler
       ),
       artist: song.artist,
       duration: song.duration,
-      artUri: _systemArtUri(song),
+      // [artUri] 由持有者按解析状态给出；未传（纯函数单测/无解析器）时
+      // 退回「本地伪 URL 不下发」的保守规则。
+      artUri: artUri ?? systemArtUriFallback(song),
       extras: buildLyricMediaExtras(
         song: song,
         lyricText: lyricText,
@@ -1301,17 +1378,19 @@ class MusicAudioHandler extends BaseAudioHandler
       title: song.title,
       artist: song.artist,
       duration: song.duration,
-      artUri: includeArt ? _systemArtUri(song) : null,
+      // 队列里的当前曲随解析状态带封面（可能尚未落盘 = null）；其余条目
+      // 一律不带，降低 MediaItem 堆积。
+      artUri: includeArt ? _systemMediaArt.artUriFor(song.coverUrl) : null,
       extras: {'hash': song.hash, 'songId': song.id},
     );
   }
 
-  /// 下发给系统媒体会话的封面 Uri（没有则 null）。
-  ///
-  /// `localart://`（本地内嵌封面）只在本进程内有效，系统侧解析不了这种伪
-  /// URL：下发出去只会让锁屏/车机拿一个坏 Uri 去请求，不如留空（本地歌的
-  /// 锁屏封面本来就是空的）。
-  static Uri? _systemArtUri(Song song) {
+  /// 没有解析器可用时的封面规则（纯函数）：在线封面原样下发；本地内嵌封面
+  /// 的 `localart://` 只在本进程内有效，系统侧解析不了，下发出去只会让
+  /// 锁屏/车机拿一个坏 Uri 去请求，不如留空。正常播放路径不走这里——
+  /// [SystemMediaArtResolver] 会先把封面落盘再给出 `file://` URI。
+  @visibleForTesting
+  static Uri? systemArtUriFallback(Song song) {
     final coverUrl = song.coverUrl;
     if (coverUrl == null || LocalArtworkService.isArtworkUrl(coverUrl)) {
       return null;
@@ -1319,14 +1398,30 @@ class MusicAudioHandler extends BaseAudioHandler
     return Uri.tryParse(coverUrl);
   }
 
+  /// Android 12 及以下通知「紧凑视图」（收起态）显示的三个按钮在
+  /// [controls] 里的下标：上一首/播放/下一首。
+  ///
+  /// 补丁版 audio_service 的通知 action 列表与 [controls] 同序，自定义按钮
+  /// 排在两侧时标准三键不再是 0/1/2——索引指错会让收起态显示成
+  /// 「收藏/上一首/播放」。索引越界则整张通知出问题，所以只取实际存在的
+  /// 标准键（自定义按钮在中间被隐藏时不足三个）。Android 13+ 系统忽略该参数。
+  @visibleForTesting
+  static List<int> legacyCompactActionIndices(List<MediaControl> controls) => [
+        for (var i = 0; i < controls.length; i++)
+          if (controls[i].action != MediaAction.custom) i,
+      ];
+
   /// 构建通知卡片/系统媒体卡片的按钮序列。
   ///
+  /// 顺序固定为 `[左槽位?] 上一首 播放/暂停 下一首 [右槽位?]`，两个槽位各放
+  /// 什么由桥接给出（见 [NotificationButtonSlots]）。同一种按钮只出现一次：
+  /// 两侧撞车（旧数据/并发写入）时以左侧为准。
+  ///
   /// Android 13+：系统卡片从 PlaybackState 渲染，自定义动作用 4、5 槽，
-  /// 红心与词按钮在标准三键之外正常显示。
-  /// Android 8–12：audio_service 原生侧会把自定义按钮从通知的 action
-  /// 列表里过滤掉（只写入 PlaybackState，不进通知），因此这两个按钮在
-  /// 旧系统的通知里不显示，通知本身不受影响（要在旧系统显示需原生侧
-  /// 自定义通知构建，暂不做）。
+  /// 在标准三键之外正常显示。
+  /// Android 12 及以下：本地补丁版 audio_service 会把自定义按钮一并做进通知
+  /// （上游只写 PlaybackState、不进通知），通知 action 列表与本列表同序，
+  /// 所以这里返回的下标同时是通知里的下标（见 [legacyCompactActionIndices]）。
   @visibleForTesting
   static List<MediaControl> buildNotificationControls({
     required bool playing,
@@ -1334,31 +1429,61 @@ class MusicAudioHandler extends BaseAudioHandler
     NotificationActionBridge? actions,
   }) {
     final controls = <MediaControl>[];
-    if (customButtonsEnabled && actions != null && actions.canToggleLike()) {
-      final liked = actions.isCurrentSongLiked();
-      controls.add(MediaControl.custom(
-        androidIcon: liked
-            ? 'drawable/ic_notification_heart_filled'
-            : 'drawable/ic_notification_heart_outline',
-        label: liked ? '取消收藏' : '收藏',
-        name: toggleLikeActionName,
-      ));
+    var used = NotificationSlotAction.none;
+    if (customButtonsEnabled && actions != null) {
+      used = _addSlotControl(controls, actions.leftAction(), actions);
     }
     controls
       ..add(MediaControl.skipToPrevious)
       ..add(playing ? MediaControl.pause : MediaControl.play)
       ..add(MediaControl.skipToNext);
     if (customButtonsEnabled && actions != null) {
-      final lyricsOn = actions.desktopLyricsEnabled();
-      controls.add(MediaControl.custom(
-        androidIcon: lyricsOn
-            ? 'drawable/ic_notification_lyrics_on'
-            : 'drawable/ic_notification_lyrics_off',
-        label: lyricsOn ? '关闭桌面歌词' : '桌面歌词',
-        name: toggleDesktopLyricsActionName,
-      ));
+      final right = actions.rightAction();
+      if (right != used) _addSlotControl(controls, right, actions);
     }
     return controls;
+  }
+
+  /// 把一个槽位按钮追加进 [controls]；返回它实际占用的种类。
+  ///
+  /// 收藏在不可收藏时（未登录/非酷狗源/没有在播的歌）不显示并回报
+  /// `none`——此时另一侧若也配了收藏，同样不会出现。
+  static NotificationSlotAction _addSlotControl(
+    List<MediaControl> controls,
+    NotificationSlotAction action,
+    NotificationActionBridge actions,
+  ) {
+    switch (action) {
+      case NotificationSlotAction.like:
+        if (!actions.canToggleLike()) return NotificationSlotAction.none;
+        final liked = actions.isCurrentSongLiked();
+        controls.add(MediaControl.custom(
+          androidIcon: liked
+              ? 'drawable/ic_notification_heart_filled'
+              : 'drawable/ic_notification_heart_outline',
+          label: liked ? '取消收藏' : '收藏',
+          name: toggleLikeActionName,
+        ));
+      case NotificationSlotAction.desktopLyrics:
+        final lyricsOn = actions.desktopLyricsEnabled();
+        controls.add(MediaControl.custom(
+          androidIcon: lyricsOn
+              ? 'drawable/ic_notification_lyrics_on'
+              : 'drawable/ic_notification_lyrics_off',
+          label: lyricsOn ? '关闭桌面歌词' : '桌面歌词',
+          name: toggleDesktopLyricsActionName,
+        ));
+      case NotificationSlotAction.playbackMode:
+        final mode = actions.playbackMode();
+        controls.add(MediaControl.custom(
+          androidIcon: mode.androidIcon,
+          label: mode.label,
+          name: cyclePlaybackModeActionName,
+        ));
+      case NotificationSlotAction.none:
+        break;
+    }
+    return action;
   }
 
   /// 上一次落日志的按钮组合签名：播放事件流高频，仅在组合变化时打一行。
@@ -1399,11 +1524,11 @@ class MusicAudioHandler extends BaseAudioHandler
         MediaAction.seekBackward,
         MediaAction.seekForward,
       },
-      // 紧凑视图（Android 8–12 收起的通知）索引指向通知内的 action，
-      // 而 audio_service 会把自定义按钮过滤出通知（通知里永远只有
-      // 上一首/播放/下一首 = 0/1/2），必须恒定取 [0,1,2]；Android 13+
-      // 忽略该参数。
-      androidCompactActionIndices: const [0, 1, 2],
+      // 紧凑视图（Android 12 及以下收起的通知）索引指向通知内的 action。
+      // 补丁版 audio_service 的通知含自定义按钮且与 controls 同序，所以
+      // 按标准键的实际位置取（见 [legacyCompactActionIndices]）；Android
+      // 13+ 忽略该参数。
+      androidCompactActionIndices: legacyCompactActionIndices(controls),
       processingState: const {
         ProcessingState.idle: AudioProcessingState.idle,
         ProcessingState.loading: AudioProcessingState.loading,

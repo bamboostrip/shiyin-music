@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/download_controller.dart';
@@ -167,6 +168,87 @@ void main() {
 
       expect(rowTapCount, 0, reason: '角标自身的点击不应冒泡成整行播放');
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('AppSongRow 长按与右键回调', () {
+    AppSongRow buildRow({
+      required _FakePlayerController player,
+      VoidCallback? onTap,
+      VoidCallback? onLongPress,
+      ValueChanged<Offset>? onSecondaryTapDown,
+    }) {
+      return AppSongRow(
+        song: _song,
+        player: player,
+        onTap: onTap ?? () {},
+        showDownloadedBadge: false,
+        onLongPress: onLongPress,
+        onSecondaryTapDown: onSecondaryTapDown,
+      );
+    }
+
+    testWidgets('长按只触发 onLongPress，不触发行的点击', (tester) async {
+      var taps = 0;
+      var longPresses = 0;
+      await tester.pumpWidget(
+        wrap(
+          buildRow(
+            player: _FakePlayerController(),
+            onTap: () => taps++,
+            onLongPress: () => longPresses++,
+          ),
+        ),
+      );
+
+      await tester.longPress(find.text('海阔天空'));
+      await tester.pumpAndSettle();
+
+      expect(longPresses, 1);
+      expect(taps, 0, reason: '长按弹菜单的同时不能把歌点了播放');
+    });
+
+    testWidgets('普通点击仍走 onTap，不触发长按回调', (tester) async {
+      var taps = 0;
+      var longPresses = 0;
+      await tester.pumpWidget(
+        wrap(
+          buildRow(
+            player: _FakePlayerController(),
+            onTap: () => taps++,
+            onLongPress: () => longPresses++,
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('海阔天空'));
+      await tester.pumpAndSettle();
+
+      expect(taps, 1);
+      expect(longPresses, 0);
+    });
+
+    testWidgets('右键按下把全局坐标交给 onSecondaryTapDown', (tester) async {
+      Offset? received;
+      await tester.pumpWidget(
+        wrap(
+          buildRow(
+            player: _FakePlayerController(),
+            onSecondaryTapDown: (position) => received = position,
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('海阔天空')),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await gesture.up();
+      await tester.pump();
+
+      expect(received, isNotNull);
+      expect(received, tester.getCenter(find.text('海阔天空')));
     });
   });
 }

@@ -35,6 +35,7 @@ migrate_working_dir/
 # （window_manager 的 lock 是历史遗留且有意入库，故不用全局模式）。
 packages/hotkey_manager_windows/pubspec.lock
 packages/hotkey_manager_linux/pubspec.lock
+packages/audio_service/pubspec.lock
 .flutter-plugins-dependencies
 .flutter
 .flutter_tool_state

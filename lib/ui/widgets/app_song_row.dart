@@ -25,11 +25,19 @@ class AppSongRow extends StatefulWidget {
     this.excludeSemantics = false,
     this.showDownloadedBadge = true,
     this.unavailable = false,
+    this.onLongPress,
+    this.onSecondaryTapDown,
   });
 
   final Song song;
   final PlayerController player;
   final VoidCallback onTap;
+
+  /// 长按回调（触屏「更多操作」入口）；为 null 时长按无响应。
+  final VoidCallback? onLongPress;
+
+  /// 桌面端右键按下回调，参数为全局坐标（供桌面锚定菜单定位）。
+  final ValueChanged<Offset>? onSecondaryTapDown;
 
   /// 副标题文案；为 null 时用歌手名。
   final String? subtitle;
@@ -107,6 +115,11 @@ class _AppSongRowState extends State<AppSongRow> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: widget.onTap,
+                onLongPress: widget.onLongPress,
+                onSecondaryTapDown: widget.onSecondaryTapDown == null
+                    ? null
+                    // 对外只暴露全局坐标：调用方（桌面锚定菜单）不需要手势细节。
+                    : (details) => widget.onSecondaryTapDown!(details.globalPosition),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
                   padding:

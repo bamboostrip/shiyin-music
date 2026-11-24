@@ -5,6 +5,10 @@
      getIdentifier 返回 0，PlaybackStateCompat.CustomAction.Builder 抛
      "You must specify an icon resource id"，整个 setState 中断，
      播放通知从此不再出现（2026-09-17 线上回归的根因）。
-     keep.xml 本身会被裁剪器移除，但其 tools:keep 指令会被执行。 -->
+     keep.xml 本身会被裁剪器移除，但其 tools:keep 指令会被执行。
+
+     用通配而非逐个登记（issue #34）：新增「播放模式」图标时漏登记，debug
+     编译、analyze、单测全部发现不了，只有 release 包里点了该按钮才炸。
+     通知图标统一以 ic_notification_ 开头即自动保活。 -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/ic_notification_heart_filled,@drawable/ic_notification_heart_outline,@drawable/ic_notification_lyrics_on,@drawable/ic_notification_lyrics_off" />
+    tools:keep="@drawable/ic_notification_*" />

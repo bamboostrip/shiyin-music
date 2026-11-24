@@ -31,6 +31,7 @@ import 'services/lyric_cache_service.dart';
 import 'services/music_audio_handler.dart';
 import 'services/music_api.dart';
 import 'services/network_monitor.dart';
+import 'services/notification_button_slots.dart';
 import 'models/music_models.dart';
 import 'ui/adaptive_layout.dart';
 import 'ui/car_display_viewport.dart';
@@ -182,6 +183,13 @@ Future<void> main(List<String> args) async {
         androidNotificationChannelId: channelConfig.channelId,
         androidNotificationChannelName: channelConfig.channelName,
         androidStopForegroundOnPause: false,
+        // 系统媒体会话封面在原生侧的解码尺寸上限（结果约 512~1023px 见方）。
+        // 不设时 audio_service 把封面原图整张解码成位图：在线封面多是 480px
+        // 档不受影响，但本地内嵌封面（issue #34 起也下发给系统）常见
+        // 1500~3000px 的扫描件，整张解码是 9~36MB/张，车机 256MB 堆上遇到
+        // 超大图会直接 OOM。
+        artDownscaleWidth: 512,
+        artDownscaleHeight: 512,
       ),
     );
 
@@ -261,6 +269,19 @@ void _runStartupFailureApp(Object error) {
   DesktopWindow.revealAfterFirstFrame();
 }
 
+/// PlaybackMode → 通知按钮的图标语义。
+///
+/// 接线处做一次映射：MusicAudioHandler 只认 [NotificationPlayMode]，不必
+/// import PlayerController（控制器反过来依赖 handler，双向 import 只会让
+/// 依赖图打结）。
+extension on PlaybackMode {
+  NotificationPlayMode get forNotification => switch (this) {
+        PlaybackMode.playlistLoop => NotificationPlayMode.playlistLoop,
+        PlaybackMode.shuffle => NotificationPlayMode.shuffle,
+        PlaybackMode.singleLoop => NotificationPlayMode.singleLoop,
+      };
+}
+
 class ShiyinApp extends StatefulWidget {
   const ShiyinApp({
     super.key,
@@ -305,6 +326,18 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
   /// 切歌当刻即刷新，不等下一个播放事件；桌面歌词开关是全局态不受切歌影响。
   String? _lastNotifiedSongHash;
 
+  /// 上一次广播到通知卡片的播放模式：「播放模式」按钮的图标跟随它，应用内
+  /// 切模式（或通知栏点按）后当刻换图标。
+  PlaybackMode? _lastNotifiedPlaybackMode;
+
+  /// 通知栏左右槽位的配置变化（设置页写入）→ 立刻按新配置重发按钮。
+  void _onNotificationSlotsChanged() {
+    final slots = NotificationButtonSlots.current.value;
+    debugPrint('[SYNOTIF] 通知栏按钮槽位变化，重广播播放状态：'
+        'left=${slots.left.name} right=${slots.right.name}');
+    widget.audioHandler.refreshPlaybackControls();
+  }
+
   /// 收藏/登录态变化（含收藏失败回滚）→ 刷新通知卡片红心图标。
   /// AuthController 通知频率低，无需按值去重。
   void _refreshNotificationButtons() {
@@ -316,19 +349,23 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     widget.audioHandler.refreshPlaybackControls();
   }
 
-  /// 播放器状态变化 → 桌面歌词翻转或切歌时刷新通知卡片按钮图标。
+  /// 播放器状态变化 → 桌面歌词翻转、切歌或播放模式变化时刷新通知卡片按钮图标。
   /// 红心跟随当前歌曲的收藏态：已红心的歌切出来当刻就是实心，不会一直空心。
   void _onPlayerChangedForNotificationButtons() {
     final enabled = _player.desktopLyricsEnabled;
     final songHash = _player.currentSong?.hash;
+    final mode = _player.playbackMode;
     final lyricsFlipped = enabled != _lastNotifiedDesktopLyricsEnabled;
     final songChanged = songHash != _lastNotifiedSongHash;
-    if (!lyricsFlipped && !songChanged) return;
+    final modeChanged = mode != _lastNotifiedPlaybackMode;
+    if (!lyricsFlipped && !songChanged && !modeChanged) return;
     _lastNotifiedDesktopLyricsEnabled = enabled;
     _lastNotifiedSongHash = songHash;
+    _lastNotifiedPlaybackMode = mode;
     final song = _player.currentSong;
     debugPrint('[SYNOTIF] 通知按钮刷新：lyricsFlipped=$lyricsFlipped '
-        'songChanged=$songChanged song=${song?.title} '
+        'songChanged=$songChanged modeChanged=$modeChanged mode=${mode.name} '
+        'song=${song?.title} '
         'isLiked=${song != null && _auth.isLiked(song)} lyricsOn=$enabled');
     widget.audioHandler.refreshPlaybackControls();
   }
@@ -398,12 +435,24 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
         },
         desktopLyricsEnabled: () => _player.desktopLyricsEnabled,
         onToggleDesktopLyrics: _player.toggleDesktopLyricsFromNotification,
+        // 左右槽位各放什么由设置决定（issue #34）；每次构建按钮时现读，
+        // 设置页改完经 [_onNotificationSlotsChanged] 立即重发。
+        leftAction: () => NotificationButtonSlots.current.value.left,
+        rightAction: () => NotificationButtonSlots.current.value.right,
+        playbackMode: () => _player.playbackMode.forNotification,
+        // 与应用内模式按钮同义：歌单循环 → 随机 → 单曲 → 歌单循环。
+        onCyclePlaybackMode: () async => _player.cyclePlaybackMode(),
       ),
     );
     _lastNotifiedDesktopLyricsEnabled = _player.desktopLyricsEnabled;
     _lastNotifiedSongHash = _player.currentSong?.hash;
+    _lastNotifiedPlaybackMode = _player.playbackMode;
     _auth.addListener(_refreshNotificationButtons);
     _player.addListener(_onPlayerChangedForNotificationButtons);
+    NotificationButtonSlots.current.addListener(_onNotificationSlotsChanged);
+    // 读回上次的槽位配置：与通知按钮的冷启动恢复同在首播之前完成即可；
+    // 尚未投递媒体时 refreshPlaybackControls 自己会跳过，不会凭空贴通知。
+    unawaited(NotificationButtonSlots.load());
     debugPrint('[SYNOTIF] 通知按钮桥接已注入：auth.isLoggedIn='
         '${_auth.isLoggedIn} currentSong=${_player.currentSong?.title} '
         'desktopLyricsEnabled=${_player.desktopLyricsEnabled}');
@@ -541,6 +590,9 @@ class _ShiyinAppState extends State<ShiyinApp> with WidgetsBindingObserver {
     _deepLink?.dispose();
     _auth.removeListener(_refreshNotificationButtons);
     _player.removeListener(_onPlayerChangedForNotificationButtons);
+    NotificationButtonSlots.current.removeListener(
+      _onNotificationSlotsChanged,
+    );
     _theme.removeListener(_syncWindowEraseBackground);
     WidgetsBinding.instance.removeObserver(this);
     unawaited(NetworkMonitor.instance.stop());
