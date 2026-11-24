@@ -161,6 +161,9 @@ dependencies {
     implementation("com.github.HChenX:SuperLyricApi:3.4") {
         isChanging = true
     }
+    // JVM 单测（纯逻辑，不依赖 Android 运行时）：
+    // ./gradlew :app:testSkiaDebugUnitTest
+    testImplementation("junit:junit:4.13.2")
 }
 
 flutter {
