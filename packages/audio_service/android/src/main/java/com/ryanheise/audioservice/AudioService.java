@@ -25,6 +25,7 @@ import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.LruCache;
+import android.util.Log;
 import android.util.Size;
 import android.view.KeyEvent;
 
@@ -65,6 +66,10 @@ public class AudioService extends MediaBrowserServiceCompat {
     // 用 keycode（三位数以内）作请求码、内容意图用 1000，这里另起一段，三者
     // 互不重叠（同类型 PendingIntent 靠请求码区分身份，撞了会互相覆盖）。
     private static final int REQUEST_CUSTOM_ACTION_BASE = 2000;
+    // LOCAL PATCH (shiyin): 自定义按钮广播的进程内令牌。MediaButtonReceiver
+    // 是 exported=true（系统媒体键需要），显式广播可被任意 App 构造；用只存在
+    // 于本进程的随机串做鉴权，外部 App 拿不到令牌就无法伪造按钮点击。
+    static final String CUSTOM_ACTION_TOKEN = java.util.UUID.randomUUID().toString();
     public static final String NOTIFICATION_CLICK_ACTION = "com.ryanheise.audioservice.NOTIFICATION_CLICK";
     public static final String CUSTOM_ACTION_STOP = "com.ryanheise.audioservice.action.STOP";
     public static final String CUSTOM_ACTION_FAST_FORWARD = "com.ryanheise.audioservice.action.FAST_FORWARD";
@@ -494,6 +499,7 @@ public class AudioService extends MediaBrowserServiceCompat {
         Intent intent = new Intent(this, MediaButtonReceiver.class);
         intent.setAction(MediaButtonReceiver.ACTION_NOTIFICATION_CUSTOM_ACTION);
         intent.putExtra(MediaButtonReceiver.EXTRA_CUSTOM_ACTION, action);
+        intent.putExtra(MediaButtonReceiver.EXTRA_CUSTOM_ACTION_TOKEN, CUSTOM_ACTION_TOKEN);
         Bundle extras = mapToBundle(control.customAction.extras);
         if (extras != null) {
             intent.putExtra(MediaButtonReceiver.EXTRA_CUSTOM_ACTION_EXTRAS, extras);
@@ -514,7 +520,13 @@ public class AudioService extends MediaBrowserServiceCompat {
     // onReceive 与会话回调都在主线程，不存在跨线程问题。
     void handleCustomActionNotification(String action, Bundle extras) {
         if (action == null || mediaSessionCallback == null) return;
-        mediaSessionCallback.onCustomAction(action, extras);
+        try {
+            mediaSessionCallback.onCustomAction(action, extras);
+        } catch (Exception e) {
+            // 自定义按钮的 extras 来自广播，属于外部输入；bundleToMap/回调
+            // 抛异常不能穿透到 onReceive 把主线程打崩。
+            Log.w("AudioService", "通知栏自定义按钮执行失败: " + action, e);
+        }
     }
 
     PendingIntent buildMediaButtonPendingIntent(long action) {

@@ -2,7 +2,7 @@ name: audio_service
 description: Flutter plugin to play audio in the background while the screen is off.
 # +shiyin 后缀 = 本地 fork（补丁清单见主工程 pubspec.yaml 的依赖注释，
 # 源码内各补丁点均有 `LOCAL PATCH (shiyin)` 标记），升级上游时勿直接覆盖本目录。
-version: 0.18.19+shiyin.1
+version: 0.18.19+shiyin.2
 repository: https://github.com/ryanheise/audio_service/tree/minor/audio_service
 issue_tracker: https://github.com/ryanheise/audio_service/issues
 topics:

@@ -177,4 +177,44 @@ void main() {
     await _flush();
     expect(resolver.artUriFor(song.coverUrl), Uri.file('/cache/a.jpg'));
   });
+
+  test('切到在线歌会清掉本地目标：切回同一首本地歌必须重新解析', () async {
+    var resolves = 0;
+    final resolver = SystemMediaArtResolver(
+      resolve: (_) async {
+        resolves++;
+        return Uri.file('/cache/a.jpg');
+      },
+      onReady: () {},
+    );
+    final local = _localSong('/m/a.flac');
+
+    resolver.ensure(local);
+    await _flush();
+    expect(resolves, 1);
+
+    // 在线歌没有 localart 目标；如果这里不把 _target 清空，切回本地歌时
+    // 会误以为封面仍在缓存里，系统清掉 cache 文件后永远不补图。
+    resolver.ensure(_onlineSong);
+    expect(resolver.artUriFor(local.coverUrl), isNull);
+
+    resolver.ensure(local);
+    await _flush();
+    expect(resolves, 2);
+    expect(resolver.artUriFor(local.coverUrl), Uri.file('/cache/a.jpg'));
+  });
+
+  test('onReady 抛错被吞掉，不产生未处理异步异常', () async {
+    final errors = <Object>[];
+    await runZonedGuarded(() async {
+      final resolver = SystemMediaArtResolver(
+        resolve: (_) async => Uri.file('/cache/a.jpg'),
+        onReady: () => throw StateError('handler disposed'),
+      );
+      resolver.ensure(_localSong('/m/a.flac'));
+      await _flush();
+    }, (error, stack) => errors.add(error));
+
+    expect(errors, isEmpty);
+  });
 }

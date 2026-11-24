@@ -1406,10 +1406,25 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 「收藏/上一首/播放」。索引越界则整张通知出问题，所以只取实际存在的
   /// 标准键（自定义按钮在中间被隐藏时不足三个）。Android 13+ 系统忽略该参数。
   @visibleForTesting
-  static List<int> legacyCompactActionIndices(List<MediaControl> controls) => [
-        for (var i = 0; i < controls.length; i++)
-          if (controls[i].action != MediaAction.custom) i,
-      ];
+  static List<int> legacyCompactActionIndices(List<MediaControl> controls) {
+    // 只认收起态真正要显示的三键（上一首 / 播放暂停 / 下一首）。不能简单
+    // 取「所有非 custom 下标」：以后 buildNotificationControls 若增加
+    // seek/stop 等标准键，会把它们也算进来；AudioServicePlugin 只截前 3 个，
+    // 收起态就会显示成上一首/播放/快进之类的错误组合。
+    final indices = <int>[];
+    for (var i = 0; i < controls.length; i++) {
+      switch (controls[i].action) {
+        case MediaAction.skipToPrevious:
+        case MediaAction.play:
+        case MediaAction.pause:
+        case MediaAction.skipToNext:
+          indices.add(i);
+        default:
+          break;
+      }
+    }
+    return indices.length > 3 ? indices.sublist(0, 3) : indices;
+  }
 
   /// 构建通知卡片/系统媒体卡片的按钮序列。
   ///

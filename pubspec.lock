@@ -31,7 +31,7 @@ packages:
       path: "packages/audio_service"
       relative: true
     source: path
-    version: "0.18.19+shiyin.1"
+    version: "0.18.19+shiyin.2"
   audio_service_mpris:
     dependency: "direct main"
     description:

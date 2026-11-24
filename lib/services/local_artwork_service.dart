@@ -59,6 +59,16 @@ class LocalArtworkService {
   /// 读取目标哈希而来，被淘汰的歌再次播放时重新落盘即可。
   static const int _systemArtFileCap = 64;
 
+  /// 落盘封面总字节上限（32MB）。
+  ///
+  /// 只按文件数限制挡不住“几张超大扫描件”的情况：64 张 × 几 MB 仍是几百
+  /// MB 的缓存。文件数与字节数任一超限都按最久未用淘汰；刚写的那张豁免。
+  static const int _systemArtByteCap = 32 * 1024 * 1024;
+
+  /// 测试注入：落盘封面总字节上限（默认 [_systemArtByteCap]）。
+  @visibleForTesting
+  static int? debugSystemArtByteCapOverride;
+
   /// 测试注入：落盘目录的父目录（默认取应用缓存目录，依赖 path_provider
   /// 平台通道，单测里没有）。
   @visibleForTesting
@@ -261,7 +271,7 @@ class LocalArtworkService {
     return null;
   }
 
-  /// 落盘封面淘汰到 [_systemArtFileCap] 以内（按最近修改时间，越旧越先删），
+  /// 落盘封面淘汰到文件数与总字节上限以内（按最近修改时间，越旧越先删），
   /// 顺带清掉进程被杀留下的 `.tmp` 残片。只是缓存，任何失败都只记日志。
   ///
   /// [keep] 是刚写的那张：修改时间粒度粗的文件系统上它可能与旧文件同刻，
@@ -271,26 +281,36 @@ class LocalArtworkService {
     required File keep,
   }) async {
     try {
-      final files = <File>[];
-      await for (final entity in dir.list(followLinks: false)) {
-        if (entity is File) files.add(entity);
-      }
-      final excess = files.length - _systemArtFileCap;
-      if (excess <= 0) return;
+      final byteCap = debugSystemArtByteCapOverride ?? _systemArtByteCap;
       final keptPath = keep.path;
-      final stamped = <({File file, DateTime modified})>[];
-      for (final file in files) {
-        if (file.path == keptPath) continue;
+      var fileCount = 0;
+      var totalBytes = 0;
+      final candidates = <({File file, DateTime modified, int size})>[];
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        fileCount++;
         try {
-          stamped.add((file: file, modified: await file.lastModified()));
+          final stat = await entity.stat();
+          totalBytes += stat.size;
+          // 刚写的那张豁免，但它的字节数仍计入总量。
+          if (entity.path == keptPath) continue;
+          candidates.add((
+            file: entity,
+            modified: stat.modified,
+            size: stat.size,
+          ));
         } catch (_) {
           // stat 不到的文件不动它（多半已被系统清掉）。
         }
       }
-      stamped.sort((a, b) => a.modified.compareTo(b.modified));
-      for (final entry in stamped.take(excess)) {
+      if (fileCount <= _systemArtFileCap && totalBytes <= byteCap) return;
+      candidates.sort((a, b) => a.modified.compareTo(b.modified));
+      for (final entry in candidates) {
+        if (fileCount <= _systemArtFileCap && totalBytes <= byteCap) break;
         try {
           await entry.file.delete();
+          fileCount--;
+          totalBytes -= entry.size;
         } catch (_) {}
       }
     } catch (error) {

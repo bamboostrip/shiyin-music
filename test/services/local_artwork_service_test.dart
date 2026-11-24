@@ -185,12 +185,14 @@ void main() {
     setUp(() {
       root = Directory.systemTemp.createTempSync('shiyin_localart_test');
       LocalArtworkService.debugSystemArtRootOverride = () async => root;
+      LocalArtworkService.debugSystemArtByteCapOverride = null;
       // 走 Android 分支（通道取图），不碰 Rust 引擎。
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
     });
 
     tearDown(() {
       LocalArtworkService.debugSystemArtRootOverride = null;
+      LocalArtworkService.debugSystemArtByteCapOverride = null;
       debugDefaultTargetPlatformOverride = null;
       root.deleteSync(recursive: true);
     });
@@ -286,6 +288,31 @@ void main() {
       expect(names, hasLength(64));
       expect(names, isNot(contains('old_0.jpg')), reason: '最旧的先淘汰');
       expect(names, containsAll(['old_1.jpg', 'old_63.jpg']));
+      expect(names, contains(written.pathSegments.last));
+    });
+
+    test('超过字节上限时同样按最久未用淘汰，刚写的那张一定保留', () async {
+      LocalArtworkService.debugSystemArtByteCapOverride = 1000;
+      final dir = Directory(
+        '${root.path}/${LocalArtworkService.systemArtDirName}',
+      )..createSync(recursive: true);
+      final base = DateTime(2026, 1, 1);
+      for (var i = 0; i < 3; i++) {
+        final file = File('${dir.path}/old_$i.jpg')
+          ..writeAsBytesSync(List<int>.filled(600, i));
+        file.setLastModifiedSync(base.add(Duration(minutes: i)));
+      }
+
+      reply = jpeg;
+      final written = (await LocalArtworkService.systemArtUriFor('/m/new.mp3'))!;
+
+      final names =
+          _filesIn(root).map((file) => file.uri.pathSegments.last).toList();
+      // 3 × 600B + 新图 7B > 1000B：淘汰最旧的两张，保留最新旧图 + 新图。
+      expect(names, hasLength(2));
+      expect(names, isNot(contains('old_0.jpg')));
+      expect(names, isNot(contains('old_1.jpg')));
+      expect(names, contains('old_2.jpg'));
       expect(names, contains(written.pathSegments.last));
     });
   });

@@ -280,6 +280,22 @@ void main() {
       expect(controls.length, 4);
       expect(MusicAudioHandler.legacyCompactActionIndices(controls), [0, 1, 2]);
     });
+
+    test('未来增加 seek/stop 等标准键时仍只取上一首/播放暂停/下一首', () {
+      final controls = <MediaControl>[
+        MediaControl.custom(
+          androidIcon: 'drawable/ic_notification_heart_filled',
+          label: '收藏',
+          name: 'shiyin.toggle_like',
+        ),
+        MediaControl.skipToPrevious,
+        MediaControl.pause,
+        MediaControl.skipToNext,
+        MediaControl.fastForward,
+        MediaControl.stop,
+      ];
+      expect(MusicAudioHandler.legacyCompactActionIndices(controls), [1, 2, 3]);
+    });
   });
 
   group('refreshPlaybackControls 冷启动门控', () {

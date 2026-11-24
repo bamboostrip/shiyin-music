@@ -1032,7 +1032,10 @@ class _LyricsPreviewCard extends StatelessWidget {
                   // 译文 = 主字号 × 0.62，与原生悬浮窗 TRANSLATION_SIZE_RATIO 一致。
                   fontSize: settings.fontSize * 0.62,
                   playedColor: playedColor,
-                  unplayedColor: unplayedColor.withValues(alpha: 0.65),
+                  // 原生用 withOpacity(unplayedColor, textOpacity * 0.65)：压暗
+                  // 只乘一次。这里把 alpha 交给 textOpacity，颜色本身保持原样，
+                  // 否则会和 textOpacity 再乘一次，预览明显比真实悬浮窗暗。
+                  unplayedColor: unplayedColor,
                   progress: 0.0,
                   availableWidth: width,
                   alignment: textAlign,
@@ -1092,10 +1095,10 @@ class _LyricsPreviewCard extends StatelessWidget {
                   child: LyricsKaraokeLine(
                     text: text,
                     fontSize: dualFontSize,
+                    // 非活动行的压暗由 textOpacity 承担一次；颜色保持原样，
+                    // 与原生 withOpacity(unplayedColor, textOpacity * 0.65) 同构。
                     playedColor: playedColor,
-                    unplayedColor: active
-                        ? unplayedColor
-                        : unplayedColor.withValues(alpha: 0.65),
+                    unplayedColor: unplayedColor,
                     progress: active ? 0.45 : 0.0,
                     availableWidth: effectiveDualWidth,
                     alignment: align2,

@@ -616,6 +616,16 @@ void main() {
           'Listen to what I want to hear',
           '让音乐更自由',
         ]);
+        // 预览压暗只能乘一次：颜色 alpha 保持原样，压暗由 textOpacity 承担，
+        // 与原生 withOpacity(unplayedColor, textOpacity * 0.65) 同构。
+        final translation = tester
+            .widgetList<LyricsKaraokeLine>(find.byType(LyricsKaraokeLine))
+            .firstWhere((line) => line.text == 'Listen to what I want to hear');
+        expect(translation.unplayedColor.a, 1.0);
+        expect(
+          translation.textOpacity,
+          closeTo(player.desktopLyricsSettings.textOpacity * 0.65, 0.0001),
+        );
 
         // 单行模式同样在当前句下方带译文。
         await tester.tap(find.text('单行显示'));

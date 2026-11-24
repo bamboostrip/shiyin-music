@@ -56,7 +56,15 @@ class SystemMediaArtResolver {
     final coverUrl = song.coverUrl;
     final target =
         coverUrl == null ? null : LocalArtworkService.targetOf(coverUrl);
-    if (target == null || target == _target) return;
+    // 在线歌/无封面歌没有可落盘目标：必须清掉上一首的本地目标。否则之后
+    // 再切回同一首本地歌时 target == _target 会提前返回，若期间系统清掉了
+    // 缓存文件，_uri 就永远指向一个不存在的文件，再也不会重新落盘。
+    if (target == null) {
+      _target = null;
+      _uri = null;
+      return;
+    }
+    if (target == _target) return;
     _target = target;
     _uri = null;
     unawaited(() async {
@@ -77,7 +85,13 @@ class SystemMediaArtResolver {
         return;
       }
       _uri = uri;
-      onReady();
+      // onReady 会重发 MediaItem，属于无人等待的异步链：handler 关闭/热重启
+      // 等竞态下它可能抛异常，不能让它变成未处理异步异常。
+      try {
+        onReady();
+      } catch (error, stack) {
+        debugPrint('[AudioHandler] 系统封面就绪回调失败(忽略): $error\n$stack');
+      }
     }());
   }
 }
