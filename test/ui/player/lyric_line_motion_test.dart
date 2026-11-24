@@ -108,4 +108,67 @@ void main() {
     expect(_inside(tester, Transform), findsNothing, reason: '失活后缩放必须回到 1');
     expect(_inside(tester, ImageFiltered), findsOneWidget, reason: '失活后按行距模糊');
   });
+
+  testWidgets('灵动样式：当前行激活过程中在放大（动画在跑，不是瞬间到位）', (tester) async {
+    Widget build({required bool active}) => _wrap(
+      LyricLineMotion(
+        style: LyricMotionStyle.lively,
+        active: active,
+        distance: 0,
+        child: const Text('弹性放大'),
+      ),
+    );
+
+    await tester.pumpWidget(build(active: false));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(build(active: true));
+    // 420ms 的 easeOutBack：300ms 处应已越过终点（过冲 = 回弹）。
+    await tester.pump(const Duration(milliseconds: 300));
+    final midScale = tester
+        .widget<Transform>(_inside(tester, Transform))
+        .transform
+        .getMaxScaleOnAxis();
+    expect(
+      midScale,
+      greaterThan(1 + LyricLineMotion.activeScaleDelta + 0.001),
+      reason: 'easeOutBack 的过冲必须真实发生，否则只是普通线性放大',
+    );
+
+    await tester.pumpAndSettle();
+    final settledScale = tester
+        .widget<Transform>(_inside(tester, Transform))
+        .transform
+        .getMaxScaleOnAxis();
+    expect(
+      settledScale,
+      closeTo(1 + LyricLineMotion.activeScaleDelta, 0.001),
+    );
+  });
+
+  testWidgets('灵动样式：模糊跨越距离上限时渐变收尾，不会瞬间变清晰', (tester) async {
+    Widget build(int distance) => _wrap(
+      LyricLineMotion(
+        style: LyricMotionStyle.lively,
+        active: false,
+        distance: distance,
+        child: const Text('边界行'),
+      ),
+    );
+
+    await tester.pumpWidget(build(LyricLineMotion.maxBlurDistance));
+    await tester.pumpAndSettle();
+    expect(_inside(tester, ImageFiltered), findsOneWidget);
+
+    await tester.pumpWidget(build(LyricLineMotion.maxBlurDistance + 1));
+    // 目标 sigma 变 0 的第一帧仍在过渡中：图层还应存在，而不是当场消失。
+    expect(
+      _inside(tester, ImageFiltered),
+      findsOneWidget,
+      reason: '跨过上限应渐变，不能瞬间跳变',
+    );
+
+    await tester.pumpAndSettle();
+    expect(_inside(tester, ImageFiltered), findsNothing);
+  });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
+import 'package:shiyin_music/ui/player/lyric_line_motion.dart';
 import 'package:shiyin_music/ui/player/mobile_lyric_list.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
@@ -477,5 +478,50 @@ void main() {
         );
       },
     );
+  });
+
+  testWidgets('歌词动效样式（issue #26）：灵动给非当前行加图层，标准样式零额外图层', (
+    tester,
+  ) async {
+    final player = _FakePlayerController();
+    player.lyrics = testLyrics;
+
+    MobileLyricList build(LyricMotionStyle style) => MobileLyricList(
+      player: player,
+      songHash: 'hash1',
+      lyrics: testLyrics,
+      activeIndex: 1,
+      showTranslation: true,
+      showRomanization: false,
+      lyricScale: 1.0,
+      isPageVisible: true,
+      motionStyle: style,
+    );
+
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.lively)));
+    await tester.pumpAndSettle();
+
+    Finder insideMotion(Type type) => find.descendant(
+      of: find.byType(LyricLineMotion),
+      matching: find.byType(type),
+    );
+
+    expect(
+      insideMotion(ImageFiltered),
+      findsWidgets,
+      reason: '灵动样式：当前行以外的邻近行应被模糊',
+    );
+    expect(
+      insideMotion(Transform),
+      findsWidgets,
+      reason: '灵动样式：当前行应弹性放大',
+    );
+
+    // 切回标准样式：同一套歌词不应再有任何模糊/缩放图层。
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.standard)));
+    await tester.pumpAndSettle();
+
+    expect(insideMotion(ImageFiltered), findsNothing);
+    expect(insideMotion(Transform), findsNothing);
   });
 }

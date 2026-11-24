@@ -45,7 +45,7 @@ Future<LyricMotionStyle?> showLyricMotionStyleSheet({
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '播放页歌词的切换动效；桌面歌词悬浮窗暂不跟随',
+                    '播放页歌词的切换动效；桌面歌词悬浮窗与车机分栏歌词暂不跟随',
                     style: Theme.of(dialogContext).textTheme.bodyMedium
                         ?.copyWith(color: colorScheme.onSurfaceVariant),
                   ),
@@ -84,7 +84,7 @@ Future<LyricMotionStyle?> showLyricMotionStyleSheet({
               ),
               const SizedBox(height: 4),
               Text(
-                '播放页歌词的切换动效；桌面歌词悬浮窗暂不跟随',
+                '播放页歌词的切换动效；桌面歌词悬浮窗与车机分栏歌词暂不跟随',
                 style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),

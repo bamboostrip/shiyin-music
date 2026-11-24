@@ -14,6 +14,10 @@ import '../../models/lyric_motion_style.dart';
 /// - 非当前行按与当前行的距离贴一层轻微高斯模糊（[blurSigmaFor]）；超出
 ///   [maxBlurDistance] 的行不再模糊，只靠原有透明度渐隐——每行一个
 ///   saveLayer，模糊行必须限量，否则低端机滚动时会掉帧；
+/// - 模糊带内强度恒定（不做「越远越模糊」）：行距每推进一行都会重建图层，
+///   恒强可让每句只动边界那 1~2 行；强度本身也做隐式动画，行距跨过上限
+///   （以及当前行进出模糊带）时是渐变而不是瞬间跳变，否则播放推进到边界
+///   那一句时会看到远处某行「突然变清晰」；
 /// - 视线聚焦行（用户手动滚动时的准星行）传入 [distance] = 0 即可保持清晰。
 class LyricLineMotion extends StatelessWidget {
   const LyricLineMotion({
@@ -41,51 +45,80 @@ class LyricLineMotion extends StatelessWidget {
   /// 当前行放大 4.5%：叠加字号 20→26 的既有变化后，视觉上明显大于标准样式。
   static const double activeScaleDelta = 0.045;
 
-  /// 距离 → 模糊强度。0 表示清晰（当前行或手动滚动时的准星行）。
+  /// 模糊强度切换的隐式动画时长：与失活缩放同档，短到不拖沓。
+  static const Duration blurTransitionDuration = Duration(milliseconds: 240);
+
+  /// 模糊带内的统一强度。
+  ///
+  /// 不随行距递增：行距每推进一行，那一行的 sigma 变化都会触发隐式动画，
+  /// 递增会让每句都有 6 行一起重建图层；恒定则每句只动跨过边界的那 1~2 行。
+  static const double blurSigma = 1.4;
+
+  /// 距离 → 模糊强度。0 表示清晰（当前行、准星行或超出模糊带）。
   static double blurSigmaFor(int distance) {
-    return switch (distance) {
-      <= 0 => 0,
-      1 => 1.15,
-      2 => 1.45,
-      _ => 1.7,
-    };
+    if (distance <= 0 || distance > maxBlurDistance) return 0;
+    return blurSigma;
   }
 
   @override
   Widget build(BuildContext context) {
     if (style != LyricMotionStyle.lively) return child;
 
-    final target = active ? 1.0 : 0.0;
-    final baseBlur = distance > maxBlurDistance ? 0.0 : blurSigmaFor(distance);
+    final baseBlur = blurSigmaFor(distance);
+    // 外层动画只负责模糊目标值：跨过 maxBlurDistance / 进出当前行时，
+    // sigma 从旧值渐变到新值，而不是在重建这一帧直接跳变。
     return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0, end: target),
+      tween: Tween<double>(end: baseBlur),
+      duration: blurTransitionDuration,
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, blur, child) {
+        var result = child!;
+        if (blur > 0.01) {
+          result = ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+            child: result,
+          );
+        }
+        return _ActiveScale(
+          active: active,
+          alignment: alignment,
+          child: result,
+        );
+      },
+    );
+  }
+}
+
+/// 当前行弹性缩放（独立一层隐式动画，避免与模糊强度互相干扰）。
+class _ActiveScale extends StatelessWidget {
+  const _ActiveScale({
+    required this.active,
+    required this.alignment,
+    required this.child,
+  });
+
+  final bool active;
+  final Alignment alignment;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: active ? 1.0 : 0.0),
       duration: active
           ? const Duration(milliseconds: 420)
           : const Duration(milliseconds: 240),
       curve: active ? Curves.easeOutBack : Curves.easeOutCubic,
       child: child,
       builder: (context, t, child) {
-        var result = child!;
-        if (baseBlur > 0) {
-          // 进入当前行时（distance 变 0）直接清晰；退出当前行时
-          // （t 1→0）模糊从 0 平滑加重。
-          final sigma = baseBlur * (1 - t.clamp(0.0, 1.0));
-          if (sigma > 0.01) {
-            result = ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-              child: result,
-            );
-          }
-        }
-        final scale = 1 + activeScaleDelta * t;
-        if (scale > 1.001) {
-          result = Transform.scale(
-            scale: scale,
-            alignment: alignment,
-            child: result,
-          );
-        }
-        return result;
+        final scale = 1 + LyricLineMotion.activeScaleDelta * t;
+        if (scale <= 1.001) return child!;
+        return Transform.scale(
+          scale: scale,
+          alignment: alignment,
+          child: child,
+        );
       },
     );
   }
