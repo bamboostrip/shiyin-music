@@ -12,6 +12,9 @@ class MusicApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 必须先于任何播放器实例：播放器建连时读进程全局 ProxySelector，
+        // 装晚了那一次连接仍会走系统代理（WiFi 配了代理时歌曲放不出来）。
+        LoopbackProxyBypass.install()
         setupNotificationChannels()
         registerCarMediaBroadcastReceiver()
     }
