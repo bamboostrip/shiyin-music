@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/player_controller.dart';
+import '../../controllers/theme_controller.dart';
 import '../../services/music_api.dart';
 import '../form_factor.dart';
 import '../pages/audio_interruption_settings_page.dart';
@@ -12,6 +13,7 @@ import '../pages/playback_history_page.dart';
 import '../pages/playback_stats_page.dart';
 import '../widgets/audio_effects_sheet.dart';
 import '../widgets/toast.dart';
+import 'notification_buttons_settings.dart';
 import 'settings_widgets.dart';
 
 /// 设置页「播放」二级页的内容分节。
@@ -48,6 +50,15 @@ class PlaybackSettingsSection extends StatelessWidget {
     if (player.autoPauseOnDeviceDisconnect) parts.add('断开即停');
     return parts.isEmpty ? '未开启' : parts.join(' · ');
   }
+
+  /// 当前环境是否会往通知栏注入自定义按钮。与 MusicAudioHandler 的判定同
+  /// 口径（Android + 非车机）；按 `defaultTargetPlatform` 判断而非 `Platform`
+  /// 是为了让 widget 测试能在桌面宿主上覆盖到这条分支。
+  bool get _hasNotificationButtons =>
+      !isDesktopFormFactor &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      !ThemeController.instance.carModeEnabled &&
+      !ThemeController.instance.isAutomotiveDevice;
 
   @override
   Widget build(BuildContext context) {
@@ -213,6 +224,13 @@ class PlaybackSettingsSection extends StatelessWidget {
           onChanged: player.setAddListeningTimeEnabled,
         ),
       );
+      // 通知栏按钮：只有 Android 且非车机才有自定义按钮（车机通知渠道
+      // 静默、自定义按钮整体不注入，见 main.dart 的 MusicAudioHandler
+      // 构造），其余平台隐藏以免「看得到但无效」。
+      if (_hasNotificationButtons) {
+        backgroundTiles.add(const SettingsDivider());
+        backgroundTiles.add(const NotificationButtonsSettings());
+      }
     }
 
     // ---- 歌词与设备 ----

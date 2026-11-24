@@ -13,6 +13,7 @@ import '../controllers/player_logic.dart';
 import '../models/music_models.dart';
 import 'local_artwork_service.dart';
 import 'lrc_formatter.dart';
+import 'notification_button_slots.dart';
 import 'system_media_art.dart';
 
 const _kgUserAgent = AppConfig.kugouUserAgent;
@@ -71,13 +72,37 @@ class _ProxyRoute {
   );
 }
 
-/// 通知卡片自定义按钮（收藏红心 / 桌面歌词开关）的状态查询与动作回调。
+/// 「播放模式」通知按钮的当前模式（issue #34）。
+///
+/// 三个值与 PlayerController 的 PlaybackMode 一一对应，但图标与文案放在这
+/// 里：handler 不必认识 PlayerController 的枚举（接线处做一次映射即可）。
+enum NotificationPlayMode {
+  playlistLoop(
+    'drawable/ic_notification_repeat',
+    '播放模式：歌单循环，点按切换',
+  ),
+  shuffle('drawable/ic_notification_shuffle', '播放模式：随机播放，点按切换'),
+  singleLoop(
+    'drawable/ic_notification_repeat_one',
+    '播放模式：单曲循环，点按切换',
+  );
+
+  const NotificationPlayMode(this.androidIcon, this.label);
+
+  /// 通知图标资源名；循环与单曲循环靠角标「1」区分，随机是交叉箭头。
+  final String androidIcon;
+
+  /// 无障碍文案（系统媒体卡片只显示图标，文案给读屏与 Android Auto 用）。
+  final String label;
+}
+
+/// 通知卡片自定义按钮（收藏红心 / 桌面歌词 / 播放模式）的状态查询与动作回调。
 ///
 /// AudioHandler 在 main() 里创建时 AuthController/PlayerController 还不存在，
 /// 与 [MusicAudioHandler.attachTransportControls] 同构：由 main.dart 在控制器
 /// 就绪后注入闭包，晚绑定。Android 13+ 系统媒体卡片的标准槽位只有
 /// 上一首/播放/下一首 3 个，自定义动作用剩余的 4、5 槽，因此最多两个
-/// 自定义按钮，正是红心 + 桌面歌词。
+/// 自定义按钮——左右各一，各放什么由 [NotificationButtonSlots] 决定。
 class NotificationActionBridge {
   NotificationActionBridge({
     required this.canToggleLike,
@@ -85,7 +110,17 @@ class NotificationActionBridge {
     required this.onToggleLike,
     required this.desktopLyricsEnabled,
     required this.onToggleDesktopLyrics,
+    required this.playbackMode,
+    required this.onCyclePlaybackMode,
+    required this.leftAction,
+    required this.rightAction,
   });
+
+  /// 左侧槽位（标准三键之前）放什么按钮；每次构建按钮时查询。
+  final NotificationSlotAction Function() leftAction;
+
+  /// 右侧槽位（标准三键之后）放什么按钮。
+  final NotificationSlotAction Function() rightAction;
 
   /// 当前是否可收藏（已登录且有在播歌曲）；false 时通知卡片隐藏红心。
   final bool Function() canToggleLike;
@@ -101,6 +136,12 @@ class NotificationActionBridge {
 
   /// 通知卡片桌面歌词按钮被点击。
   final Future<void> Function() onToggleDesktopLyrics;
+
+  /// 当前播放模式（决定「播放模式」按钮的图标）。
+  final NotificationPlayMode Function() playbackMode;
+
+  /// 通知卡片「播放模式」按钮被点击（与应用内模式按钮同义：循环切换）。
+  final Future<void> Function() onCyclePlaybackMode;
 }
 
 class MusicAudioHandler extends BaseAudioHandler
@@ -135,6 +176,7 @@ class MusicAudioHandler extends BaseAudioHandler
   /// 通知卡片自定义动作名（[customAction] 的 name 参数）。
   static const toggleLikeActionName = 'shiyin.toggle_like';
   static const toggleDesktopLyricsActionName = 'shiyin.toggle_desktop_lyrics';
+  static const cyclePlaybackModeActionName = 'shiyin.cycle_playback_mode';
 
   /// 打断与断连策略**归 PlayerController 独占**（见
   /// `player_controller.desktop.dart` 的 `_setupAudioSessionListeners`）。
@@ -297,6 +339,7 @@ class MusicAudioHandler extends BaseAudioHandler
     final bridge = _notificationActions;
     if (bridge == null) return 'bridge=null';
     String canLike = 'unknown', liked = 'unknown', lyrics = 'unknown';
+    String mode = 'unknown', left = 'unknown', right = 'unknown';
     try {
       canLike = '${bridge.canToggleLike()}';
     } catch (e) {
@@ -312,7 +355,19 @@ class MusicAudioHandler extends BaseAudioHandler
     } catch (e) {
       lyrics = 'error:$e';
     }
-    return 'canLike=$canLike liked=$liked lyricsOn=$lyrics';
+    try {
+      mode = bridge.playbackMode().name;
+    } catch (e) {
+      mode = 'error:$e';
+    }
+    try {
+      left = bridge.leftAction().name;
+      right = bridge.rightAction().name;
+    } catch (e) {
+      left = right = 'error:$e';
+    }
+    return 'canLike=$canLike liked=$liked lyricsOn=$lyrics '
+        'mode=$mode slots=$left/$right';
   }
 
   @override
@@ -336,6 +391,12 @@ class MusicAudioHandler extends BaseAudioHandler
           await bridge.onToggleDesktopLyrics();
         } catch (e) {
           debugPrint('[SYNOTIF][ERROR] customAction 桌面歌词执行失败: $e');
+        }
+      case cyclePlaybackModeActionName:
+        try {
+          await bridge.onCyclePlaybackMode();
+        } catch (e) {
+          debugPrint('[SYNOTIF][ERROR] customAction 播放模式执行失败: $e');
         }
       default:
         debugPrint('[SYNOTIF] 未知 customAction：$name');
@@ -1352,6 +1413,10 @@ class MusicAudioHandler extends BaseAudioHandler
 
   /// 构建通知卡片/系统媒体卡片的按钮序列。
   ///
+  /// 顺序固定为 `[左槽位?] 上一首 播放/暂停 下一首 [右槽位?]`，两个槽位各放
+  /// 什么由桥接给出（见 [NotificationButtonSlots]）。同一种按钮只出现一次：
+  /// 两侧撞车（旧数据/并发写入）时以左侧为准。
+  ///
   /// Android 13+：系统卡片从 PlaybackState 渲染，自定义动作用 4、5 槽，
   /// 在标准三键之外正常显示。
   /// Android 12 及以下：本地补丁版 audio_service 会把自定义按钮一并做进通知
@@ -1364,31 +1429,61 @@ class MusicAudioHandler extends BaseAudioHandler
     NotificationActionBridge? actions,
   }) {
     final controls = <MediaControl>[];
-    if (customButtonsEnabled && actions != null && actions.canToggleLike()) {
-      final liked = actions.isCurrentSongLiked();
-      controls.add(MediaControl.custom(
-        androidIcon: liked
-            ? 'drawable/ic_notification_heart_filled'
-            : 'drawable/ic_notification_heart_outline',
-        label: liked ? '取消收藏' : '收藏',
-        name: toggleLikeActionName,
-      ));
+    var used = NotificationSlotAction.none;
+    if (customButtonsEnabled && actions != null) {
+      used = _addSlotControl(controls, actions.leftAction(), actions);
     }
     controls
       ..add(MediaControl.skipToPrevious)
       ..add(playing ? MediaControl.pause : MediaControl.play)
       ..add(MediaControl.skipToNext);
     if (customButtonsEnabled && actions != null) {
-      final lyricsOn = actions.desktopLyricsEnabled();
-      controls.add(MediaControl.custom(
-        androidIcon: lyricsOn
-            ? 'drawable/ic_notification_lyrics_on'
-            : 'drawable/ic_notification_lyrics_off',
-        label: lyricsOn ? '关闭桌面歌词' : '桌面歌词',
-        name: toggleDesktopLyricsActionName,
-      ));
+      final right = actions.rightAction();
+      if (right != used) _addSlotControl(controls, right, actions);
     }
     return controls;
+  }
+
+  /// 把一个槽位按钮追加进 [controls]；返回它实际占用的种类。
+  ///
+  /// 收藏在不可收藏时（未登录/非酷狗源/没有在播的歌）不显示并回报
+  /// `none`——此时另一侧若也配了收藏，同样不会出现。
+  static NotificationSlotAction _addSlotControl(
+    List<MediaControl> controls,
+    NotificationSlotAction action,
+    NotificationActionBridge actions,
+  ) {
+    switch (action) {
+      case NotificationSlotAction.like:
+        if (!actions.canToggleLike()) return NotificationSlotAction.none;
+        final liked = actions.isCurrentSongLiked();
+        controls.add(MediaControl.custom(
+          androidIcon: liked
+              ? 'drawable/ic_notification_heart_filled'
+              : 'drawable/ic_notification_heart_outline',
+          label: liked ? '取消收藏' : '收藏',
+          name: toggleLikeActionName,
+        ));
+      case NotificationSlotAction.desktopLyrics:
+        final lyricsOn = actions.desktopLyricsEnabled();
+        controls.add(MediaControl.custom(
+          androidIcon: lyricsOn
+              ? 'drawable/ic_notification_lyrics_on'
+              : 'drawable/ic_notification_lyrics_off',
+          label: lyricsOn ? '关闭桌面歌词' : '桌面歌词',
+          name: toggleDesktopLyricsActionName,
+        ));
+      case NotificationSlotAction.playbackMode:
+        final mode = actions.playbackMode();
+        controls.add(MediaControl.custom(
+          androidIcon: mode.androidIcon,
+          label: mode.label,
+          name: cyclePlaybackModeActionName,
+        ));
+      case NotificationSlotAction.none:
+        break;
+    }
+    return action;
   }
 
   /// 上一次落日志的按钮组合签名：播放事件流高频，仅在组合变化时打一行。
