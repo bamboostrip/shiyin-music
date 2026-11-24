@@ -67,6 +67,11 @@ class LyricsOverlayService : Service() {
         const val EXTRA_PLAYED_TEXT_COLOR = "playedTextColor"
         const val EXTRA_TEXT_OPACITY = "textOpacity"
         const val EXTRA_SINGLE_LINE = "singleLine"
+        // 当前句翻译（issue #36）：随歌词推送下发翻译原文与「本歌是否带翻译」，
+        // 显示与否由设置 EXTRA_SHOW_TRANSLATION（与 Flutter 侧 toMap 同名）裁决。
+        const val EXTRA_CURRENT_TRANSLATION = "current_translation"
+        const val EXTRA_HAS_TRANSLATION = "has_translation"
+        const val EXTRA_SHOW_TRANSLATION = "showTranslation"
         /** 对齐方式：left / center / right（原生悬浮窗无左右分离语义）。 */
         const val EXTRA_ALIGNMENT = "alignment"
         const val EXTRA_IS_FOREGROUND = "is_foreground"
@@ -112,6 +117,7 @@ class LyricsOverlayService : Service() {
         private const val KEY_TEXT_OPACITY = "text_opacity"
         private const val KEY_SINGLE_LINE = "single_line"
         private const val KEY_ALIGNMENT = "alignment"
+        private const val KEY_SHOW_TRANSLATION = "show_translation"
 
         // 悬浮窗默认宽度：取屏幕宽度的一定比例并设上限，宽度不随歌词文本长短变化。
         // 上限 320dp 沿用原布局 maxWidth 的意图（车机横屏、手机竖屏都保持紧凑），
@@ -127,8 +133,12 @@ class LyricsOverlayService : Service() {
         private const val NEXT_LYRIC_SIZE_RATIO = 0.85f
 
         // 下一句颜色 = 未播放色 * 文字透明度 * 该压暗系数，与 PC 双行
-        // 非活动行（0.65）保持一致。
+        // 非活动行（0.65）保持一致。翻译行沿用同一系数。
         private const val NEXT_LYRIC_DIM_RATIO = 0.65f
+
+        // 翻译行字号 = 主字号 * 该比例（issue #36）：与歌词页「主行 26 / 翻译
+        // 14.5」的相对大小一致，明显小于下一句，读作当前句的附注。
+        private const val TRANSLATION_SIZE_RATIO = 0.62f
 
         /**
          * 进程内悬浮窗**真实展示态**（供 isVisible 查询；跨实例可见）。
@@ -147,6 +157,7 @@ class LyricsOverlayService : Service() {
     private var overlayView: View? = null
     private var karaokeView: KaraokeTextView? = null
     private var tvNextLyric: TextView? = null
+    private var tvTranslation: TextView? = null
     private var btnClose: ImageView? = null
     private var btnLock: ImageView? = null
     private var btnResize: ImageView? = null
@@ -175,6 +186,9 @@ class LyricsOverlayService : Service() {
     private var textOpacity: Float = 1f
     // 单行模式只显示当前句，下一句隐藏；移动端默认双行（false），与 Flutter 侧一致。
     private var isSingleLine: Boolean = false
+    // 当前句下方显示翻译（issue #36）：默认关闭，与 Flutter 侧
+    // DesktopLyricsSettings.defaultShowTranslation 一致。
+    private var isShowTranslation: Boolean = false
     // 对齐方式：left / center / right。原生悬浮窗没有 PC 的「左右分离」，
     // 收到历史默认 split 时归一化为 left（与旧版恒左对齐的渲染一致）。
     private var alignment: String = ALIGN_LEFT
@@ -198,6 +212,10 @@ class LyricsOverlayService : Service() {
     private var overlayWanted: Boolean = false
     private var lastCurrent: String? = null
     private var lastNext: String? = null
+    // 当前句翻译缓存（issue #36）。lastHasTranslation = 本歌是否带翻译：
+    // 为真时翻译行常驻占位，没翻译的句子留白而不是收起。
+    private var lastTranslation: String? = null
+    private var lastHasTranslation: Boolean = false
 
     // 前台返回重建用的播放快照：不重建逐字高亮会闪回 0%（正在伴奏时当前句
     // 其实已整句唱完，进度必须恢复成 100%）。
@@ -216,6 +234,8 @@ class LyricsOverlayService : Service() {
     private fun clearCachedLyrics() {
         lastCurrent = null
         lastNext = null
+        lastTranslation = null
+        lastHasTranslation = false
         lastProgress = 0f
         lastLineDurationMs = 0
         lastPlaying = false
@@ -312,6 +332,9 @@ class LyricsOverlayService : Service() {
             ACTION_UPDATE_LYRICS -> {
                 val current = intent.getStringExtra(EXTRA_CURRENT_LYRIC) ?: ""
                 val next = intent.getStringExtra(EXTRA_NEXT_LYRIC) ?: ""
+                val translation = intent.getStringExtra(EXTRA_CURRENT_TRANSLATION) ?: ""
+                val hasTranslation =
+                    intent.getBooleanExtra(EXTRA_HAS_TRANSLATION, false)
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
                 val artist = intent.getStringExtra(EXTRA_ARTIST) ?: ""
                 // MainActivity 的 show 请求固定携带 TITLE extra（可能为空串），
@@ -342,7 +365,7 @@ class LyricsOverlayService : Service() {
                 ) {
                     // keep cached text; visibility already ensured above.
                 } else {
-                    updateLyrics(current, next)
+                    updateLyrics(current, next, translation, hasTranslation)
                 }
             }
             ACTION_UPDATE_PLAY_STATE -> {
@@ -356,6 +379,8 @@ class LyricsOverlayService : Service() {
                 updateLyrics(
                     intent.getStringExtra(EXTRA_CURRENT_LYRIC) ?: "",
                     intent.getStringExtra(EXTRA_NEXT_LYRIC) ?: "",
+                    intent.getStringExtra(EXTRA_CURRENT_TRANSLATION) ?: "",
+                    intent.getBooleanExtra(EXTRA_HAS_TRANSLATION, false),
                 )
             }
             ACTION_HIDE -> {
@@ -393,6 +418,8 @@ class LyricsOverlayService : Service() {
                 textOpacity = intent.getFloatExtra(EXTRA_TEXT_OPACITY, textOpacity)
                     .coerceIn(0f, 1f)
                 isSingleLine = intent.getBooleanExtra(EXTRA_SINGLE_LINE, isSingleLine)
+                isShowTranslation =
+                    intent.getBooleanExtra(EXTRA_SHOW_TRANSLATION, isShowTranslation)
                 alignment = normalizeAlignment(
                     intent.getStringExtra(EXTRA_ALIGNMENT) ?: alignment
                 )
@@ -489,14 +516,17 @@ class LyricsOverlayService : Service() {
         overlayView = inflater.inflate(R.layout.overlay_lyrics, null)
 
         karaokeView = overlayView?.findViewById(R.id.tv_current_lyric)
+        tvTranslation = overlayView?.findViewById(R.id.tv_translation)
         tvNextLyric = overlayView?.findViewById(R.id.tv_next_lyric)
         btnClose = overlayView?.findViewById(R.id.btn_close)
         btnLock = overlayView?.findViewById(R.id.btn_lock)
         btnResize = overlayView?.findViewById(R.id.btn_resize)
 
         // 下一句歌词用原生 TextView 跑马灯（ellipsize=marquee）。悬浮窗
-        // 无焦点窗口，需手动选中才能触发长行滚动。
+        // 无焦点窗口，需手动选中才能触发长行滚动。翻译行同理（显隐另由
+        // applyTranslationRow 按设置裁决）。
         tvNextLyric?.isSelected = true
+        tvTranslation?.isSelected = true
 
         btnClose?.setOnClickListener {
             // 用户主动关闭：等同显式关闭，清除标记与缓存，回桌面不复活。
@@ -666,7 +696,17 @@ class LyricsOverlayService : Service() {
         }
     }
 
-    private fun updateLyrics(current: String, next: String) {
+    /**
+     * 刷新歌词缓存并上屏。[translation]/[hasTranslation] 缺省沿用缓存值：
+     * 回桌面自愈重建等“只记得当前句/下一句”的调用点不会把翻译冲掉。
+     * 翻译变化不计入换句（[textChanged] 只看歌词），不会重置逐字进度。
+     */
+    private fun updateLyrics(
+        current: String,
+        next: String,
+        translation: String = lastTranslation.orEmpty(),
+        hasTranslation: Boolean = lastHasTranslation,
+    ) {
         // 缓存最近一次歌词：供回桌面自愈重建；show 请求的空歌词不经此处
         // （调用方已做缓存保持判断），不会冲掉缓存。
         // 同句重复推送（回桌面自愈 + show 各来一次）不得重置逐字进度：伴奏期
@@ -674,6 +714,8 @@ class LyricsOverlayService : Service() {
         val textChanged = current != lastCurrent || next != lastNext
         lastCurrent = current
         lastNext = next
+        lastTranslation = translation
+        lastHasTranslation = hasTranslation
         if (textChanged) {
             stopKaraokeTicker()
         }
@@ -688,6 +730,25 @@ class LyricsOverlayService : Service() {
             // 单行模式只显示当前句，下一句恒隐藏；双行下沿用“无下一句则隐藏”。
             tvNextLyric?.visibility =
                 if (next.isEmpty() || isSingleLine) View.GONE else View.VISIBLE
+            applyTranslationRow()
+        }
+    }
+
+    /**
+     * 翻译行（issue #36）：设置开启且本歌带翻译时常驻在当前句下方。没翻译
+     * 的句子留白（INVISIBLE）而不是收起——否则逐句切换时悬浮窗高度会跟着抖。
+     */
+    private fun applyTranslationRow() {
+        val tv = tvTranslation ?: return
+        val show = isShowTranslation && lastHasTranslation
+        val translation = if (show) lastTranslation.orEmpty() else ""
+        // 与下一句同一套跑马灯前提：先选中再设文本。
+        tv.isSelected = show
+        tv.text = translation
+        tv.visibility = when {
+            !show -> View.GONE
+            translation.isEmpty() -> View.INVISIBLE
+            else -> View.VISIBLE
         }
     }
 
@@ -787,11 +848,12 @@ class LyricsOverlayService : Service() {
 
             // 下一句与原句同一锚点：TextView 占满容器宽度后按 gravity 对齐，
             // 长行超出时仍由 marquee 从起点滚动。
-            tvNextLyric?.gravity = when (alignment) {
+            val horizontalGravity = when (alignment) {
                 ALIGN_CENTER -> Gravity.CENTER_HORIZONTAL
                 ALIGN_RIGHT -> Gravity.END
                 else -> Gravity.START
             }
+            tvNextLyric?.gravity = horizontalGravity
 
             // 下一句取未播放色再压暗（PC 双行非活动行 0.65 系数），字号跟随主行缩放。
             tvNextLyric?.setTextColor(
@@ -800,6 +862,16 @@ class LyricsOverlayService : Service() {
             tvNextLyric?.setTextSize(
                 TypedValue.COMPLEX_UNIT_SP, fontSizeSp * NEXT_LYRIC_SIZE_RATIO
             )
+            // 翻译行（issue #36）：与下一句同一锚点、同一压暗，字号更小一档。
+            tvTranslation?.gravity = horizontalGravity
+            tvTranslation?.setTextColor(
+                withOpacity(unplayedColor, textOpacity * NEXT_LYRIC_DIM_RATIO)
+            )
+            tvTranslation?.setTextSize(
+                TypedValue.COMPLEX_UNIT_SP, fontSizeSp * TRANSLATION_SIZE_RATIO
+            )
+            // 开关变化只走设置推送（歌词不变）：这里必须重算翻译行显隐。
+            applyTranslationRow()
             // 单行/双行切换时下一句显隐跟随（文本不变，仅行数设置变化时）。
             val nextText = tvNextLyric?.text?.toString().orEmpty()
             tvNextLyric?.visibility =
@@ -864,6 +936,7 @@ class LyricsOverlayService : Service() {
         textColor = unplayedColor
         textOpacity = prefs.getFloat(KEY_TEXT_OPACITY, 1f).coerceIn(0f, 1f)
         isSingleLine = prefs.getBoolean(KEY_SINGLE_LINE, false)
+        isShowTranslation = prefs.getBoolean(KEY_SHOW_TRANSLATION, false)
         alignment = normalizeAlignment(prefs.getString(KEY_ALIGNMENT, ALIGN_LEFT))
         backgroundColor = prefs.getInt(KEY_BACKGROUND_COLOR, Color.parseColor("#1A1A2E"))
         fontSizeSp = prefs.getFloat(KEY_FONT_SIZE, DEFAULT_FONT_SIZE_SP)
@@ -880,6 +953,7 @@ class LyricsOverlayService : Service() {
             .putInt(KEY_PLAYED_TEXT_COLOR, playedColor)
             .putFloat(KEY_TEXT_OPACITY, textOpacity)
             .putBoolean(KEY_SINGLE_LINE, isSingleLine)
+            .putBoolean(KEY_SHOW_TRANSLATION, isShowTranslation)
             .putString(KEY_ALIGNMENT, alignment)
             .putInt(KEY_BACKGROUND_COLOR, backgroundColor)
             .putFloat(KEY_FONT_SIZE, fontSizeSp)
@@ -897,6 +971,7 @@ class LyricsOverlayService : Service() {
         } catch (_: Exception) {}
         overlayView = null
         karaokeView = null
+        tvTranslation = null
         tvNextLyric = null
         btnClose = null
         btnLock = null

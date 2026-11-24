@@ -33,6 +33,22 @@
                 android:layout_height="wrap_content"
                 android:maxLines="1" />
 
+            <!-- 当前句翻译（桌面歌词设置「显示翻译」，issue #36）：紧贴当前句下方，
+                 颜色/字号/对齐由 LyricsOverlayService.applySettings 跟随下一句的规则；
+                 默认收起，本歌带翻译时常驻占位 -->
+            <TextView
+                android:id="@+id/tv_translation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text=""
+                android:textColor="#99FFFFFF"
+                android:textSize="13.6sp"
+                android:singleLine="true"
+                android:ellipsize="marquee"
+                android:marqueeRepeatLimit="marquee_forever"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/tv_next_lyric"
                 android:layout_width="match_parent"

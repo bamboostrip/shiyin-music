@@ -514,6 +514,14 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
                             putExtra(
+                                LyricsOverlayService.EXTRA_CURRENT_TRANSLATION,
+                                call.argument<String>("currentTranslation") ?: ""
+                            )
+                            putExtra(
+                                LyricsOverlayService.EXTRA_HAS_TRANSLATION,
+                                call.argument<Boolean>("hasTranslation") ?: false
+                            )
+                            putExtra(
                                 LyricsOverlayService.EXTRA_LYRIC_PAYLOAD,
                                 hasLyricPayload
                             )
@@ -539,6 +547,14 @@ class MainActivity : AudioServiceActivity() {
                             action = LyricsOverlayService.ACTION_UPDATE_LYRICS
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
+                            putExtra(
+                                LyricsOverlayService.EXTRA_CURRENT_TRANSLATION,
+                                call.argument<String>("currentTranslation") ?: ""
+                            )
+                            putExtra(
+                                LyricsOverlayService.EXTRA_HAS_TRANSLATION,
+                                call.argument<Boolean>("hasTranslation") ?: false
+                            )
                         }
                         startLyricsService(intent)
                         result.success(null)
@@ -552,6 +568,14 @@ class MainActivity : AudioServiceActivity() {
                             action = LyricsOverlayService.ACTION_CACHE_LYRICS
                             putExtra(LyricsOverlayService.EXTRA_CURRENT_LYRIC, current)
                             putExtra(LyricsOverlayService.EXTRA_NEXT_LYRIC, next)
+                            putExtra(
+                                LyricsOverlayService.EXTRA_CURRENT_TRANSLATION,
+                                call.argument<String>("currentTranslation") ?: ""
+                            )
+                            putExtra(
+                                LyricsOverlayService.EXTRA_HAS_TRANSLATION,
+                                call.argument<Boolean>("hasTranslation") ?: false
+                            )
                         }
                         startLyricsService(intent)
                         result.success(null)
@@ -608,6 +632,8 @@ class MainActivity : AudioServiceActivity() {
                         val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                         val textOpacity = call.argument<Double>("textOpacity")?.toFloat() ?: 1f
                         val singleLine = call.argument<Boolean>("singleLine") ?: false
+                        // 当前句下方显示翻译（issue #36）：缺键按默认关闭。
+                        val showTranslation = call.argument<Boolean>("showTranslation") ?: false
                         // 对齐：left/center/right；旧版 Flutter 未发该键时按历史
                         // 左对齐兜底（收到 split 时服务侧同样归一化为 left）。
                         val alignment = call.argument<String>("alignment") ?: "left"
@@ -621,6 +647,7 @@ class MainActivity : AudioServiceActivity() {
                             putExtra(LyricsOverlayService.EXTRA_PLAYED_TEXT_COLOR, playedColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_TEXT_OPACITY, textOpacity)
                             putExtra(LyricsOverlayService.EXTRA_SINGLE_LINE, singleLine)
+                            putExtra(LyricsOverlayService.EXTRA_SHOW_TRANSLATION, showTranslation)
                             putExtra(LyricsOverlayService.EXTRA_ALIGNMENT, alignment)
                             putExtra(LyricsOverlayService.EXTRA_BACKGROUND_COLOR, backgroundColorLong.toInt())
                             putExtra(LyricsOverlayService.EXTRA_FONT_SIZE, fontSize)
