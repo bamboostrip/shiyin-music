@@ -597,9 +597,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // overscan 视口缓冲行数：pad 端 15、手机端 10。在 build 中根据最短边更新
   int _overscan = 10;
 
-  /// 模糊渐隐系数（1.0=正常模糊，0.0=无模糊）。
-  /// 用户滚动时淡出到0，松手等待期间保持0，回弹开始后淡入到1。
+  /// 模糊保留系数（1.0 = 全模糊；0.0 = 无模糊）。
+  ///
+  /// 手动滚动 / 松手等待回弹期间降到 [_kBrowseBlurFade]，让正在浏览的歌词
+  /// 基本清晰可读，只留一点景深；回弹或点歌词跳播后快速淡回 1.0。
+  /// 完全不淡出会让滚动时整页重模糊、根本看不清；完全淡到 0 又会造成
+  /// 「模糊突然消失、几秒后才回来」的突兀感。
   double _blurFade = 1.0;
+
+  /// 手动滚动期间保留的模糊比例：文字基本清晰，只留一层很淡的景深。
+  static const double _kBrowseBlurFade = 0.12;
 
   /// 清晰层（主行 + 翻译副行）使用的模糊淡出系数。
   ///
@@ -2226,6 +2233,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 都会以 120Hz 重启一帧，破坏"锁 60fps"）；解锁/关闭 eco → Ticker 满帧。
     // 任意时刻至多一个驱动源，由本方法集中保证。
     if (oldWidget.isPlaying != widget.isPlaying && widget.isPlaying) {
+      // 从暂停恢复播放：结束用户浏览/等待回弹，立即跟随播放行。
+      // 否则模糊与滚动要等 5s 倒计时结束才恢复。
+      _scrollController.resumeFollowNow();
       _syncEcoDriver();
     }
     // v3 优化：切歌（lines 引用变化）时重启驱动，重新推进新行的 renderer
@@ -2257,6 +2267,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _prewarmTarget = -1;
       // 切歌后首次定位直接瞬移到新歌当前行（避免从旧歌曲的长距离滚动）
       _scrollController.resetInitialJump();
+      // 切歌即恢复跟随：上一首的浏览/等待回弹态不能带进新歌。
+      _scrollController.resumeFollowNow();
       _lastReportedHolding = null;
       _lastReportedFocusLine = -1;
       // 切歌诊断日志：定位"切歌后省电模式失效须重新开关"问题用（低频事件）
@@ -3426,16 +3438,20 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _lastFramePosY = posYNow;
     _lastFrameTargetY = targetYNow;
 
-    // 10. 模糊渐隐动画：保持常显，不再因手动滚动/等待回弹淡出。
+    // 10. 模糊渐隐动画：滚动/等待回弹时降到「可读的淡模糊」，回弹后恢复。
     //
-    // 旧实现：isUserScrolling/isWaitingForAutoReturn 时把 _blurFade 淡到 0，
-    // 回弹倒计时结束后才淡回 1——用户观感是「滚一下模糊整片消失，点一句
-    // 开始播放后要过几秒才重新出现」。这里保留向 1.0 的兜底收敛，滚动期间
-    // 模糊始终可见；点击跳播时由 scrollController.resumeFollowNow() 立即
-    // 退出浏览态，模糊层下一帧就按新播放行重算。
-    _blurFade += (1.0 - _blurFade) * (1 - math.exp(-12.0 * dt));
-    if ((_blurFade - 1.0).abs() < 0.01) {
-      _blurFade = 1.0;
+    // 旧实现淡到 0：模糊整片消失，松手后还要等 5s 回弹倒计时结束才回来，
+    // 观感突兀。完全保留 1.0 又会让滚动浏览的歌词被重模糊盖住、无法阅读。
+    // 这里取中间值：浏览期间保留 12% 景深，文字基本清晰；回弹/点歌词跳播
+    // 后快速淡回 1.0。
+    final bool browsing =
+        _scrollController.isUserScrolling ||
+        _scrollController.isWaitingForAutoReturn;
+    final double blurFadeTarget = browsing ? _kBrowseBlurFade : 1.0;
+    _blurFade +=
+        (blurFadeTarget - _blurFade) * (1 - math.exp(-12.0 * dt));
+    if ((_blurFade - blurFadeTarget).abs() < 0.005) {
+      _blurFade = blurFadeTarget;
     }
 
     // 10.5 入场模糊淡出：用触发时设定的时长线性推进（正常切行 =

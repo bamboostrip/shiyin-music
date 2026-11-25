@@ -11,7 +11,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('手动滚动期间模糊保持可见，不再整片淡出', (tester) async {
+  testWidgets('手动滚动时模糊降到可读的低值，回弹/点播后恢复', (tester) async {
     final lines = List<LyricLine>.generate(
       30,
       (i) => LyricLine(
@@ -42,21 +42,33 @@ void main() {
     final dynamic state = tester.state(find.byType(AppleLyricsView));
     expect(state.blurFadeForTest, 1.0);
 
-    // 手动向上滚动：旧实现会把 _blurFade 淡到 0，这里应始终为 1。
+    // 手动向上滚动：模糊应降到很低的保留值，而不是全模糊或完全消失。
     await tester.drag(find.byType(AppleLyricsView), const Offset(0, -200));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final browsingFade = state.blurFadeForTest as double;
     expect(
-      state.blurFadeForTest,
-      closeTo(1.0, 0.001),
-      reason: '拖动期间模糊不能消失',
+      browsingFade,
+      lessThan(0.3),
+      reason: '滚动浏览时不能保持全模糊，否则歌词看不清',
+    );
+    expect(
+      browsingFade,
+      greaterThan(0.05),
+      reason: '也不能完全消失，否则又会突兀',
     );
 
-    // 松手后处于等待回弹态，模糊同样要保持可见。
-    await tester.pump(const Duration(milliseconds: 300));
+    // 松手后等待回弹期间保持低模糊（用户正在阅读）。
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(state.blurFadeForTest, closeTo(browsingFade, 0.02));
+
+    // 点歌词跳播会调用 resumeFollowNow：退出浏览态，模糊快速恢复。
+    state.scrollControllerForTest.resumeFollowNow();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(
       state.blurFadeForTest,
-      closeTo(1.0, 0.001),
-      reason: '等待回弹期间模糊不能消失',
+      greaterThan(0.9),
+      reason: '跳播后应立即恢复跟随与模糊',
     );
 
     // 卸载，收掉 ticker/timer。
