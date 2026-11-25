@@ -182,6 +182,13 @@ class _MobileLyricListState extends State<MobileLyricList>
       oldWidget.player.removeListener(_onPlayerNotified);
       widget.player.addListener(_onPlayerNotified);
     }
+    if (oldWidget.motionStyle != widget.motionStyle) {
+      // 焦点线比例/滚动参数随样式变化：补一次定位，避免当前行停在旧焦点线
+      //（38%↔43%）上直到下一次切句。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_userHolding) _scrollToActive(animate: false);
+      });
+    }
     if (oldWidget.songHash != widget.songHash) {
       _rowKeys.clear();
       _resumeTimer?.cancel();

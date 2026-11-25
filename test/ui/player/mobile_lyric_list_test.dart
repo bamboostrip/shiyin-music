@@ -511,6 +511,46 @@ void main() {
     );
   });
 
+  testWidgets('切换歌词动效样式后当前行重新对齐新焦点线', (tester) async {
+    final lyrics = _generateLyrics(20);
+    final player = _FakePlayerController();
+    player.lyrics = lyrics;
+    player.activeLyricIndex = 5;
+
+    MobileLyricList build(LyricMotionStyle style) => MobileLyricList(
+      key: _listKey,
+      player: player,
+      songHash: 'hash1',
+      lyrics: lyrics,
+      activeIndex: 5,
+      showTranslation: false,
+      showRomanization: false,
+      lyricScale: 1.0,
+      isPageVisible: true,
+      motionStyle: style,
+    );
+
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.standard)));
+    await tester.pumpAndSettle();
+    final viewportHeight = tester
+        .getSize(find.byKey(_listKey))
+        .height;
+    expect(
+      _lineCenterDy(tester, _listKey, 'Lyric line number 5'),
+      closeTo(viewportHeight * 0.38, 8),
+    );
+
+    // 切到上游景深：焦点线从 38% 变 43%，列表应立即补一次定位，
+    // 而不是让当前行停在旧位置直到下一次切句。
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.upstream)));
+    await tester.pumpAndSettle();
+
+    expect(
+      _lineCenterDy(tester, _listKey, 'Lyric line number 5'),
+      closeTo(viewportHeight * 0.43, 8),
+    );
+  });
+
   testWidgets('歌词动效样式（issue #26）：灵动给非当前行加图层，标准样式零额外图层', (
     tester,
   ) async {

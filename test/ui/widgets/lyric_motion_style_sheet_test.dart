@@ -43,8 +43,40 @@ void main() {
     expect(result, LyricMotionStyle.lively);
   });
 
-  testWidgets('选中项显示勾选标记', (tester) async {
+  testWidgets('桌面形态用对话框，展示三项并可选上游景深', (tester) async {
+    debugDesktopFormFactorOverride = true;
+    LyricMotionStyle? result;
     await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showLyricMotionStyleSheet(
+                  context: context,
+                  selected: LyricMotionStyle.standard,
+                );
+              },
+              child: const Text('打开'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('歌词动效'), findsOneWidget);
+    expect(find.text('上游景深'), findsOneWidget);
+
+    await tester.tap(find.text('上游景深'));
+    await tester.pumpAndSettle();
+
+    expect(result, LyricMotionStyle.upstream);
+  });
+
+  testWidgets('选中项显示勾选标记', (tester) async {    await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: Builder(

@@ -24,8 +24,9 @@ import '../../models/lyric_motion_style.dart';
 /// 上游景深样式：
 /// - 直接复刻上游 `BlurredLyricView` 的参数：sigma = min(3.0, 0.7 × 行距)，
 ///   不做 ±3 行截断（越远越模糊，封顶 3.0）；
-/// - 没有弹性放大（上游只靠 active/inactive 字号与高亮区分），其余按行距
-///   模糊的过渡仍走同一套隐式动画，避免切换当前行时硬跳。
+/// - 没有弹性放大（上游只靠 active/inactive 字号与高亮区分）；
+/// - 与上游一致，行距变化时 sigma 直接切换、不做过渡动画：上游是按行即时
+///   换 sigma，且过渡会让每句最多 8 行同时重建 240ms 的模糊图层。
 class LyricLineMotion extends StatelessWidget {
   const LyricLineMotion({
     super.key,
@@ -52,7 +53,7 @@ class LyricLineMotion extends StatelessWidget {
   /// 灵动样式当前行放大 4.5%：叠加字号 20→26 的既有变化后，视觉上明显大于标准样式。
   static const double activeScaleDelta = 0.045;
 
-  /// 模糊强度切换的隐式动画时长：与失活缩放同档，短到不拖沓。
+  /// 灵动样式模糊强度切换的隐式动画时长：与失活缩放同档，短到不拖沓。
   static const Duration blurTransitionDuration = Duration(milliseconds: 240);
 
   /// 灵动样式模糊带内的统一强度。
@@ -89,7 +90,18 @@ class LyricLineMotion extends StatelessWidget {
     if (style == LyricMotionStyle.standard) return child;
 
     final baseBlur = blurSigmaFor(style, distance);
-    // 外层动画只负责模糊目标值：跨过灵动模糊上限 / 进出当前行时，
+    if (style == LyricMotionStyle.upstream) {
+      // 与上游一致：按行即时切换 sigma，不做过渡动画（上游 BlurredLyricView
+      // 也是每行直接算 min(3.0, 0.7×距离)）。这样每句只重建一次图层，避免
+      // 距离变化的 8 行一起跑 240ms 的模糊动画。
+      if (baseBlur <= 0.01) return child;
+      return ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(sigmaX: baseBlur, sigmaY: baseBlur),
+        child: child,
+      );
+    }
+
+    // 灵动样式：外层动画只负责模糊目标值，跨过模糊上限 / 进出当前行时
     // sigma 从旧值渐变到新值，而不是在重建这一帧直接跳变。
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: baseBlur),
