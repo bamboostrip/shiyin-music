@@ -314,6 +314,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   @visibleForTesting
   Map<int, int> get blurLevelsForTest => _cachedBlurLevels;
 
+  /// 模糊层总淡入淡出进度（1 = 完全不透明）。手动滚动期间应保持 1。
+  @visibleForTesting
+  double get blurFadeForTest => _blurFade;
+
   @visibleForTesting
   int get earlySwitchTargetForTest => _earlySwitchTarget;
 
@@ -3422,18 +3426,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _lastFramePosY = posYNow;
     _lastFrameTargetY = targetYNow;
 
-    // 10. 模糊渐隐动画：滚动/等待时淡出到0，回弹开始后淡入到1
-    final bool shouldBlurFadeOut =
-        _scrollController.isUserScrolling ||
-        _scrollController.isWaitingForAutoReturn;
-    final double blurFadeTarget = shouldBlurFadeOut ? 0.0 : 1.0;
-    // 修复：淡入速度 4.0 → 12.0，约 150ms 完成（原 700-1000ms）。
-    // 配合修改 1，模糊图在新当前行周围快速淡入出现。
-    final double blurFadeSpeed = shouldBlurFadeOut ? 15.0 : 12.0;
-    _blurFade +=
-        (blurFadeTarget - _blurFade) * (1 - math.exp(-blurFadeSpeed * dt));
-    if ((_blurFade - blurFadeTarget).abs() < 0.01) {
-      _blurFade = blurFadeTarget;
+    // 10. 模糊渐隐动画：保持常显，不再因手动滚动/等待回弹淡出。
+    //
+    // 旧实现：isUserScrolling/isWaitingForAutoReturn 时把 _blurFade 淡到 0，
+    // 回弹倒计时结束后才淡回 1——用户观感是「滚一下模糊整片消失，点一句
+    // 开始播放后要过几秒才重新出现」。这里保留向 1.0 的兜底收敛，滚动期间
+    // 模糊始终可见；点击跳播时由 scrollController.resumeFollowNow() 立即
+    // 退出浏览态，模糊层下一帧就按新播放行重算。
+    _blurFade += (1.0 - _blurFade) * (1 - math.exp(-12.0 * dt));
+    if ((_blurFade - 1.0).abs() < 0.01) {
+      _blurFade = 1.0;
     }
 
     // 10.5 入场模糊淡出：用触发时设定的时长线性推进（正常切行 =
@@ -3486,7 +3488,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final bool animConverged =
         _scrollController.isConverged &&
         _arePerLineScalesConverged() &&
-        (_blurFade - blurFadeTarget).abs() < 0.001 &&
+        (_blurFade - 1.0).abs() < 0.001 &&
         _blurLevelFade >= 0.999 &&
         _entryBlurProgress >= 0.999 &&
         (_interludeExpandProgress - interludeTarget).abs() < 0.001 &&
@@ -3815,6 +3817,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
     if (index >= 0 && index < widget.lines.length) {
       AppHaptics.tick(HapticCategory.gesture);
+      // 点歌词跳播 = 浏览结束：立即退出等待回弹态，模糊层下一帧按新的
+      // 播放行重算，不再等 5s 倒计时。
+      _scrollController.resumeFollowNow();
       widget.onSeek?.call(widget.lines[index].startTime);
     }
   }
@@ -3844,6 +3849,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       index = (_lineTops.length - 1).clamp(0, widget.lines.length - 1);
     }
     if (index >= 0 && index < widget.lines.length) {
+      _scrollController.resumeFollowNow();
       widget.onSeek?.call(widget.lines[index].startTime);
     }
   }

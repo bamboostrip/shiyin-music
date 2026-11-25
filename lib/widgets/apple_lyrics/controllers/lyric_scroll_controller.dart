@@ -268,8 +268,7 @@ class LyricScrollController {
   /// - velocity 单位：px/s（来自 DragEndDetails.velocity.pixelsPerSecond.dy）
   /// - 惯性距离 = velocity * 0.3s，clamp 到 [-300, 300] px
   /// - 用 spring 的 velocity 注入 + target 偏移实现衰减
-  void onUserScrollEnd({double velocity = 0}) {
-    _isUserScrolling = false;
+  void onUserScrollEnd({double velocity = 0}) {    _isUserScrolling = false;
 
     // 注入惯性：松手时根据速度让歌词继续滑动一段距离
     // 距离 = velocity * 0.3s，clamp 到 ±300px（AMLL 标准 200-400px）
@@ -288,6 +287,18 @@ class LyricScrollController {
     if (!_autoReturned) {
       _autoReturnRemainingMs = LyricLayout.autoReturnMs.toDouble();
     }
+  }
+
+  /// 立即结束「用户浏览」状态，恢复跟随播放行（不等 5s 自动回弹）。
+  ///
+  /// 点击歌词跳播时调用：seek 后播放行已经变化，但滚动控制器仍处于
+  /// 浏览/等待回弹态时，[setCurrentLine] 不会更新滚动目标，模糊层也会
+  /// 一直跳过重算——用户看到的就是「点一下开始播了，模糊过几秒才回来」。
+  /// 这里只清状态；下一帧 [setCurrentLine] 会把弹簧目标重新指到新的播放行。
+  void resumeFollowNow() {
+    _isUserScrolling = false;
+    _autoReturnRemainingMs = 0;
+    _autoReturned = true;
   }
 
   /// 推进动画，返回是否需要重绘
