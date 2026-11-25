@@ -9,6 +9,7 @@ import 'package:shiyin_music/ui/player/lyric_bottom_bar.dart';
 import 'package:shiyin_music/ui/player/lyric_views.dart';
 import 'package:shiyin_music/ui/player/mobile_lyric_list.dart';
 import 'package:shiyin_music/ui/player/player_comment_button.dart';
+import 'package:shiyin_music/ui/player/apple_lyrics_adapter.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
   @override
@@ -216,6 +217,42 @@ void main() {
 
       // Translation should now be hidden
       expect(find.text('你好世界'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'LyricPlayerPage 灵动样式改用 Apple 歌词组件，标准样式仍用 MobileLyricList',
+    (tester) async {
+      final player = _FakePlayerController();
+      player.lyrics = testLyrics;
+      player.lyricMotionStyle = LyricMotionStyle.lively;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 380,
+              height: 700,
+              child: LyricPlayerPage(
+                player: player,
+                song: testSong,
+                isPageVisible: true,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.byType(ShiyinAppleLyrics), findsOneWidget);
+      expect(find.byType(MobileLyricList), findsNothing);
+      expect(find.byType(LyricBottomBar), findsOneWidget);
+
+      // 卸载，收掉 Apple 歌词内部的 ticker/timer。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     },
   );
 

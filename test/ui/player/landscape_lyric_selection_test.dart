@@ -28,6 +28,9 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
   Future<bool> startPersonalFm({List<Song>? initialSongs}) async => false;
 
   @override
+  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+
+  @override
   Song? currentSong = _song;
 
   @override

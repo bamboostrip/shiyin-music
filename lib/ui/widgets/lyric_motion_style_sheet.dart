@@ -150,6 +150,6 @@ IconData _iconForStyle(LyricMotionStyle style) {
   return switch (style) {
     LyricMotionStyle.standard => Icons.text_fields_rounded,
     LyricMotionStyle.lively => Icons.auto_awesome_rounded,
-    LyricMotionStyle.upstream => Icons.blur_on_rounded,
+    LyricMotionStyle.depth => Icons.blur_on_rounded,
   };
 }

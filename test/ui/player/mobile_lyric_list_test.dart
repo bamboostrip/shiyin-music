@@ -480,7 +480,7 @@ void main() {
     );
   });
 
-  testWidgets('上游景深样式：当前行对齐上游的 43% 焦点线', (tester) async {
+  testWidgets('景深样式：当前行对齐 43% 焦点线', (tester) async {
     final lyrics = _generateLyrics(20);
     final player = _FakePlayerController();
     player.lyrics = lyrics;
@@ -498,7 +498,7 @@ void main() {
           showRomanization: false,
           lyricScale: 1.0,
           isPageVisible: true,
-          motionStyle: LyricMotionStyle.upstream,
+          motionStyle: LyricMotionStyle.depth,
         ),
       ),
     );
@@ -507,7 +507,7 @@ void main() {
     expect(
       _lineCenterDy(tester, _listKey, 'Lyric line number 5'),
       closeTo(640 * 0.43, 30),
-      reason: '上游景深样式沿用上游 0.43 焦点线，而不是默认 0.38',
+      reason: '景深样式沿用参考实现的 0.43 焦点线，而不是默认 0.38',
     );
   });
 
@@ -540,9 +540,9 @@ void main() {
       closeTo(viewportHeight * 0.38, 8),
     );
 
-    // 切到上游景深：焦点线从 38% 变 43%，列表应立即补一次定位，
+    // 切到景深：焦点线从 38% 变 43%，列表应立即补一次定位，
     // 而不是让当前行停在旧位置直到下一次切句。
-    await tester.pumpWidget(_wrap(build(LyricMotionStyle.upstream)));
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.depth)));
     await tester.pumpAndSettle();
 
     expect(
@@ -551,7 +551,7 @@ void main() {
     );
   });
 
-  testWidgets('歌词动效样式（issue #26）：灵动给非当前行加图层，标准样式零额外图层', (
+  testWidgets('歌词动效样式：景深给非当前行加图层，标准/灵动零额外图层', (
     tester,
   ) async {
     final player = _FakePlayerController();
@@ -569,37 +569,30 @@ void main() {
       motionStyle: style,
     );
 
-    await tester.pumpWidget(_wrap(build(LyricMotionStyle.lively)));
-    await tester.pumpAndSettle();
-
     Finder insideMotion(Type type) => find.descendant(
       of: find.byType(LyricLineMotion),
       matching: find.byType(type),
     );
 
-    expect(
-      insideMotion(ImageFiltered),
-      findsWidgets,
-      reason: '灵动样式：当前行以外的邻近行应被模糊',
-    );
-    expect(
-      insideMotion(Transform),
-      findsWidgets,
-      reason: '灵动样式：当前行应弹性放大',
-    );
+    // 景深：非当前行按距离模糊（不做 ±3 截断），且没有弹性缩放。
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.depth)));
+    await tester.pumpAndSettle();
 
-    // 切回标准样式：同一套歌词不应再有任何模糊/缩放图层。
+    expect(insideMotion(ImageFiltered), findsWidgets);
+    expect(insideMotion(Transform), findsNothing);
+
+    // 标准样式：同一套歌词不应再有任何模糊/缩放图层。
     await tester.pumpWidget(_wrap(build(LyricMotionStyle.standard)));
     await tester.pumpAndSettle();
 
     expect(insideMotion(ImageFiltered), findsNothing);
     expect(insideMotion(Transform), findsNothing);
 
-    // 上游景深：非当前行按距离模糊（不做 ±3 截断），且没有弹性缩放。
-    await tester.pumpWidget(_wrap(build(LyricMotionStyle.upstream)));
+    // 灵动：由整页 Apple 歌词组件接管，行级列表不应再自建图层。
+    await tester.pumpWidget(_wrap(build(LyricMotionStyle.lively)));
     await tester.pumpAndSettle();
 
-    expect(insideMotion(ImageFiltered), findsWidgets);
+    expect(insideMotion(ImageFiltered), findsNothing);
     expect(insideMotion(Transform), findsNothing);
   });
 }

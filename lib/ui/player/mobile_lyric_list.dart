@@ -41,7 +41,7 @@ class MobileLyricList extends StatefulWidget {
   final double lyricScale;
   final bool isPageVisible;
 
-  /// 歌词动效样式（issue #26）。默认标准样式，渲染路径与改造前一致。
+  /// 歌词动效样式（issue #26）。列表只消费标准/景深；灵动由页面层替换为整页 Apple 歌词组件。
   final LyricMotionStyle motionStyle;
 
   /// 长按歌词行（打开「调整歌词进度」弹层；与详情弹层入口同一个）。
@@ -55,16 +55,16 @@ class _MobileLyricListState extends State<MobileLyricList>
     with SingleTickerProviderStateMixin {
   static const _resumeDelay = Duration(milliseconds: 3500);
 
-  /// 焦点线与滚动动画随样式切换（上游景深沿用上游的 0.43 焦点线、
+  /// 焦点线与滚动动画随样式切换（景深沿用参考实现的 0.43 焦点线、
   /// 480ms 的 `(0.16,1,0.3,1)` 缓动；其余样式保持现行为）。
   double get _focusFraction =>
-      widget.motionStyle == LyricMotionStyle.upstream ? 0.43 : 0.38;
+      widget.motionStyle == LyricMotionStyle.depth ? 0.43 : 0.38;
 
-  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.upstream
+  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.depth
       ? const Duration(milliseconds: 480)
       : const Duration(milliseconds: 280);
 
-  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.upstream
+  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.depth
       ? const Cubic(0.16, 1.0, 0.3, 1.0)
       : Curves.easeOutCubic;
 
@@ -282,7 +282,7 @@ class _MobileLyricListState extends State<MobileLyricList>
     return 0;
   }
 
-  /// 把目标行居中对齐到焦点线（默认 38%，上游景深样式 43%；按行中心而非
+  /// 把目标行居中对齐到焦点线（默认 38%，景深样式 43%；按行中心而非
   /// 行顶，长句换行时视觉更准）。
   void _alignRowToFocus(RenderBox rowBox, {required bool animate}) {
     final viewportBox = context.findRenderObject() as RenderBox?;
@@ -585,7 +585,6 @@ class _MobileLyricListState extends State<MobileLyricList>
                         padding: const EdgeInsets.symmetric(vertical: 8.5),
                         child: LyricLineMotion(
                           style: widget.motionStyle,
-                          active: isPlaying,
                           // 手动滚动时的准星行保持清晰，便于找句；其余行按
                           // 与当前播放行的距离决定模糊强度。
                           distance: isFocused

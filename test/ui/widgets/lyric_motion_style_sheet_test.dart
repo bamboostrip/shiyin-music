@@ -35,7 +35,7 @@ void main() {
 
     expect(find.text('标准'), findsOneWidget);
     expect(find.text('灵动'), findsOneWidget);
-    expect(find.text('上游景深'), findsOneWidget);
+    expect(find.text('景深'), findsOneWidget);
 
     await tester.tap(find.text('灵动'));
     await tester.pumpAndSettle();
@@ -43,7 +43,7 @@ void main() {
     expect(result, LyricMotionStyle.lively);
   });
 
-  testWidgets('桌面形态用对话框，展示三项并可选上游景深', (tester) async {
+  testWidgets('桌面形态用对话框，展示三项并可选景深', (tester) async {
     debugDesktopFormFactorOverride = true;
     LyricMotionStyle? result;
     await tester.pumpWidget(
@@ -68,12 +68,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('歌词动效'), findsOneWidget);
-    expect(find.text('上游景深'), findsOneWidget);
+    expect(find.text('景深'), findsOneWidget);
 
-    await tester.tap(find.text('上游景深'));
+    await tester.tap(find.text('景深'));
     await tester.pumpAndSettle();
 
-    expect(result, LyricMotionStyle.upstream);
+    expect(result, LyricMotionStyle.depth);
   });
 
   testWidgets('选中项显示勾选标记', (tester) async {    await tester.pumpWidget(

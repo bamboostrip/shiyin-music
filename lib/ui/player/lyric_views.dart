@@ -8,6 +8,7 @@ import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
 import '../form_factor.dart';
 import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
+import 'apple_lyrics_adapter.dart';
 import 'desktop_lyric_list.dart';
 import 'lyric_bottom_bar.dart';
 import 'lyric_display_mode.dart';
@@ -250,25 +251,36 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
     if (isDesktopFormFactor) {
       return ExcludeSemantics(
         excluding: isDesktopPlatform,
-        child: DesktopLyricList(
-          player: widget.player,
-          songHash: widget.song.hash,
-          lyrics: lyrics,
-          activeIndex: widget.player.activeLyricIndex,
-          displayMode: lyricDisplayModeOf(
-            showTranslation: _showTranslation,
-            showRomanization: _showRomanization,
-          ),
-          lyricScale: _lyricScale,
-          motionStyle: widget.player.lyricMotionStyle,
-          onSecondaryTapLine: (position) => unawaited(
-            showLyricOffsetMenu(
-              context,
-              player: widget.player,
-              anchor: position,
-            ),
-          ),
-        ),
+        child: widget.player.lyricMotionStyle == LyricMotionStyle.lively
+            ? ShiyinAppleLyrics(
+                player: widget.player,
+                songHash: widget.song.hash,
+                lyrics: lyrics,
+                showTranslation: _showTranslation,
+                showRomanization: _showRomanization,
+                lyricScale: _lyricScale,
+                isPageVisible: widget.isPageVisible,
+                onLongPressLine: openLyricOffsetSheet,
+              )
+            : DesktopLyricList(
+                player: widget.player,
+                songHash: widget.song.hash,
+                lyrics: lyrics,
+                activeIndex: widget.player.activeLyricIndex,
+                displayMode: lyricDisplayModeOf(
+                  showTranslation: _showTranslation,
+                  showRomanization: _showRomanization,
+                ),
+                lyricScale: _lyricScale,
+                motionStyle: widget.player.lyricMotionStyle,
+                onSecondaryTapLine: (position) => unawaited(
+                  showLyricOffsetMenu(
+                    context,
+                    player: widget.player,
+                    anchor: position,
+                  ),
+                ),
+              ),
       );
     }
 
@@ -278,18 +290,31 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
         Expanded(
           child: ExcludeSemantics(
             excluding: isDesktopPlatform,
-            child: MobileLyricList(
-              player: widget.player,
-              songHash: widget.song.hash,
-              lyrics: lyrics,
-              activeIndex: widget.player.activeLyricIndex,
-              showTranslation: _showTranslation,
-              showRomanization: _showRomanization,
-              lyricScale: _lyricScale,
-              motionStyle: widget.player.lyricMotionStyle,
-              isPageVisible: widget.isPageVisible,
-              onLongPressLine: openLyricOffsetSheet,
-            ),
+            // 灵动样式用整页 Apple Music 动效（移植自 md3Music/PGDNF 分支）；
+            // 标准/景深仍是行级 MobileLyricList。
+            child: widget.player.lyricMotionStyle == LyricMotionStyle.lively
+                ? ShiyinAppleLyrics(
+                    player: widget.player,
+                    songHash: widget.song.hash,
+                    lyrics: lyrics,
+                    showTranslation: _showTranslation,
+                    showRomanization: _showRomanization,
+                    lyricScale: _lyricScale,
+                    isPageVisible: widget.isPageVisible,
+                    onLongPressLine: openLyricOffsetSheet,
+                  )
+                : MobileLyricList(
+                    player: widget.player,
+                    songHash: widget.song.hash,
+                    lyrics: lyrics,
+                    activeIndex: widget.player.activeLyricIndex,
+                    showTranslation: _showTranslation,
+                    showRomanization: _showRomanization,
+                    lyricScale: _lyricScale,
+                    motionStyle: widget.player.lyricMotionStyle,
+                    isPageVisible: widget.isPageVisible,
+                    onLongPressLine: openLyricOffsetSheet,
+                  ),
           ),
         ),
         LyricBottomBar(

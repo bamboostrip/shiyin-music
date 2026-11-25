@@ -132,8 +132,8 @@ void main() {
         LyricMotionStyle.lively,
       );
       expect(
-        LyricMotionStyle.fromStorageValue('upstream'),
-        LyricMotionStyle.upstream,
+        LyricMotionStyle.fromStorageValue('depth'),
+        LyricMotionStyle.depth,
       );
       expect(
         LyricMotionStyle.fromStorageValue('standard'),
@@ -202,14 +202,14 @@ void main() {
       expect(controller.lyricMotionStyle, LyricMotionStyle.lively);
     });
 
-    test('启动恢复：prefs 为 upstream 时恢复为上游景深样式', () async {
+    test('启动恢复：prefs 为 depth 时恢复为景深样式', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{
-        _motionStylePrefsKey: 'upstream',
+        _motionStylePrefsKey: 'depth',
       });
       final controller = buildController();
       await settle();
 
-      expect(controller.lyricMotionStyle, LyricMotionStyle.upstream);
+      expect(controller.lyricMotionStyle, LyricMotionStyle.depth);
     });
 
     test('损坏的持久化值回退标准样式，不中断其余设置恢复', () async {

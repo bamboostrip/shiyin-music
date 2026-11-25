@@ -41,7 +41,7 @@ class DesktopLyricList extends StatefulWidget {
   final LyricDisplayMode displayMode;
   final double lyricScale;
 
-  /// 歌词动效样式（issue #26）。默认标准样式，渲染路径与改造前一致。
+  /// 歌词动效样式（issue #26）。列表只消费标准/景深；灵动由页面层替换为整页 Apple 歌词组件。
   final LyricMotionStyle motionStyle;
 
   /// 右键歌词行（PC 端在指针处弹出「歌词进度」锚定面板）。
@@ -56,16 +56,16 @@ class _DesktopLyricListState extends State<DesktopLyricList>
   // 主流 PC 播放器（QQ 音乐/网易云）用户干预后约 3.5s 恢复自动跟随。
   static const _resumeDelay = Duration(milliseconds: 3500);
 
-  /// 焦点线与滚动动画随样式切换（上游景深沿用上游的 0.43 焦点线、
+  /// 焦点线与滚动动画随样式切换（景深沿用参考实现的 0.43 焦点线、
   /// 480ms 的 `(0.16,1,0.3,1)` 缓动；其余样式保持现行为）。
   double get _focusFraction =>
-      widget.motionStyle == LyricMotionStyle.upstream ? 0.43 : 0.38;
+      widget.motionStyle == LyricMotionStyle.depth ? 0.43 : 0.38;
 
-  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.upstream
+  Duration get _scrollDuration => widget.motionStyle == LyricMotionStyle.depth
       ? const Duration(milliseconds: 480)
       : const Duration(milliseconds: 280);
 
-  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.upstream
+  Curve get _scrollCurve => widget.motionStyle == LyricMotionStyle.depth
       ? const Cubic(0.16, 1.0, 0.3, 1.0)
       : Curves.easeOutCubic;
 
@@ -267,7 +267,7 @@ class _DesktopLyricListState extends State<DesktopLyricList>
     return 0;
   }
 
-  /// 把目标行对齐到焦点线（默认 38%，上游景深样式 43%）。与旧
+  /// 把目标行对齐到焦点线（默认 38%，景深样式 43%）。与旧
   /// `Scrollable.ensureVisible(alignment: 0.38)` 保持同一行顶对齐公式
   /// （行顶 = 焦点比例×(视口高−行高)），不改变既有几何行为；
   /// 移动端另有按行中心对齐的变体。
@@ -521,7 +521,6 @@ class _DesktopLyricListState extends State<DesktopLyricList>
                           padding: const EdgeInsets.symmetric(vertical: 9),
                           child: LyricLineMotion(
                             style: widget.motionStyle,
-                            active: isPlaying,
                             // 手动滚动时的准星行保持清晰，其余行按与当前
                             // 播放行的距离决定模糊强度。
                             distance: isFocused

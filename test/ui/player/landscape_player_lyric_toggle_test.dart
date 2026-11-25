@@ -7,6 +7,7 @@ import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/controllers/theme_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
 import 'package:shiyin_music/ui/form_factor.dart';
+import 'package:shiyin_music/ui/player/apple_lyrics_adapter.dart';
 import 'package:shiyin_music/ui/player/landscape_player.dart';
 import 'package:shiyin_music/ui/player/lyric_views.dart';
 
@@ -33,7 +34,7 @@ class _FakePlayerController extends ChangeNotifier implements PlayerController {
 
   /// 歌词动效样式（issue #26）：播放页只读，测试默认标准样式。
   @override
-  LyricMotionStyle get lyricMotionStyle => LyricMotionStyle.standard;
+  LyricMotionStyle lyricMotionStyle = LyricMotionStyle.standard;
 
   @override
   Song? currentSong = _song;
@@ -228,6 +229,18 @@ void main() {
       expect(find.byTooltip('翻译 (已关闭)'), findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool(kLyricShowTranslationPrefKey), isFalse);
+    });
+
+    testWidgets('车机/横屏：灵动样式改用 Apple 歌词组件', (tester) async {
+      player.lyricMotionStyle = LyricMotionStyle.lively;
+      await pumpContent(tester, desktop: false);
+      await tester.pump();
+
+      expect(find.byType(ShiyinAppleLyrics), findsOneWidget);
+
+      // 卸载，收掉 Apple 歌词内部的 ticker/timer。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     });
   });
 }

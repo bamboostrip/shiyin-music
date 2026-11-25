@@ -22,6 +22,7 @@ import '../widgets/playback_speed_sheet.dart';
 import '../widgets/sleep_timer_sheet.dart';
 import '../widgets/song_action_sheets.dart';
 import '../widgets/toast.dart';
+import 'apple_lyrics_adapter.dart';
 import 'desktop_lyric_list.dart';
 import 'lyric_display_mode.dart';
 import 'lyric_offset_sheet.dart';
@@ -912,8 +913,21 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
     return true;
   }
 
+  /// 长按歌词：以面板中心为锚点打开「歌词进度」菜单（车机无鼠标右键语义）。
+  void _openOffsetAtCenter() {
+    final box = context.findRenderObject() as RenderBox?;
+    final anchor = (box == null || !box.hasSize)
+        ? Offset.zero
+        : box.localToGlobal(box.size.center(Offset.zero));
+    widget.onOpenLyricOffset?.call(anchor);
+  }
+
   void _syncTicker() {
+    // 灵动样式由 ShiyinAppleLyrics 自己驱动帧，flutter_lyric 的 ticker 不必空转。
+    final useAppleLyrics =
+        widget.player.lyricMotionStyle == LyricMotionStyle.lively;
     final shouldTick =
+        !useAppleLyrics &&
         widget.player.isPlaying &&
         _loadedLyrics.isNotEmpty &&
         !widget.player.isScrubbing &&
@@ -954,6 +968,27 @@ class _LandscapeLyricPanelState extends State<LandscapeLyricPanel> {
             color: Colors.white.withValues(alpha: .82),
             fontWeight: FontWeight.w900,
           ),
+        ),
+      );
+    }
+
+    // 灵动样式走整页 Apple 歌词（手机、车机与 PC 分栏一致）；标准/景深
+    // 仍用原歌词列表：PC 的 DesktopLyricList（鼠标滚轮/右键）或车机的
+    // flutter_lyric LyricView（准星胶囊由 _buildSelectionCrosshair 负责）。
+    if (player.lyricMotionStyle == LyricMotionStyle.lively) {
+      return ExcludeSemantics(
+        excluding: isDesktopPlatform,
+        child: ShiyinAppleLyrics(
+          player: player,
+          songHash: widget.songHash,
+          lyrics: lyrics,
+          showTranslation: widget.showTranslation,
+          showRomanization: widget.showRomanization,
+          lyricScale: widget.compact ? 0.85 : 1.0,
+          isPageVisible: true,
+          onLongPressLine: widget.onOpenLyricOffset == null
+              ? null
+              : _openOffsetAtCenter,
         ),
       );
     }
