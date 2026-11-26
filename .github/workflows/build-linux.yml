@@ -55,7 +55,7 @@ jobs:
       # pkg-config，缺失时 cargo 报 failed to run custom build command）
       # + hotkey_manager_linux 全局热键插件的硬依赖（libkeybinder-3.0-dev，
       # 缺失时其 CMake 同样 FATAL_ERROR）。
-      # patchelf：便携包需把上述运行库随包携带并修正插件 RUNPATH（见
+      # patchelf：便携包需把上述运行库随包携带并修正包内库 RUNPATH（见
       # scripts/bundle_linux_runtime.sh），否则 Arch/Fedora 等发行版解压后
       # 直接运行会报 "error while loading shared libraries" 退出。
       # media_kit 的 libmpv 是运行期 dlopen 依赖，构建期不需要。

@@ -50,14 +50,32 @@ for soname in "${RUNTIME_LIBS[@]}"; do
   cp -aL "$src" "$BUNDLE_DIR/lib/$soname"
 done
 
-# 插件与刚拷入的库 RUNPATH 指向构建机路径；统一改为 $ORIGIN（都在 lib/ 内）。
-for f in "$BUNDLE_DIR"/lib/*.so; do
+# 插件与刚拷入的库 RUNPATH 指向构建机路径（或干脆没有）；统一改为 $ORIGIN。
+# 通配必须写 *.so* 而不是 *.so：刚收拢的 soname 都带版本号（libayatana-indicator3.so.7
+# 等），而它们自己也有兄弟依赖——libayatana-appindicator3.so.1 → libayatana-indicator3.so.7
+# / libdbusmenu-gtk3.so.4 → libdbusmenu-glib.so.4 → libayatana-ido3-0.4.so.0。这些库
+# 出厂不带 RUNPATH，漏改时在 Arch 上依旧 "error while loading shared libraries" 退出。
+for f in "$BUNDLE_DIR"/lib/*.so*; do
   "$PATCHELF" --set-rpath '$ORIGIN' "$f"
+done
+
+# 断言覆盖完整：lib/ 内每个库的 RUNPATH 都必须是 $ORIGIN。新增插件库若带来新的
+# 未覆盖文件，这里直接失败，避免构建机（dev 包齐全）静默通过、用户机才炸。
+for f in "$BUNDLE_DIR"/lib/*.so*; do
+  case "$("$PATCHELF" --print-rpath "$f")" in
+    *'$ORIGIN'*) ;;
+    *)
+      echo "RUNPATH 未修正: $f" >&2
+      exit 1
+      ;;
+  esac
 done
 
 # 校验：包内所有 ELF 不得有未解析动态依赖。ldd 需带 bundle/lib，否则刚收拢
 # 进来的兄弟库会被误报；libjvm.so 是 libdartjni.so 运行期 dlopen 的可选依赖，
 # 由用户机器的 JRE 提供，不属于打包缺失。
+# 注意：LD_LIBRARY_PATH 会把"靠 $ORIGIN 能否找到"这件事一起兜住，所以本步只能
+# 发现缺库，不能发现 RUNPATH 漏改——后者由上面的断言负责。
 missing="$(LD_LIBRARY_PATH="$BUNDLE_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   find "$BUNDLE_DIR" -maxdepth 2 -type f \( -name '*.so*' -o -name 'ShiYinMusic' \) \
     -exec ldd {} \; 2>/dev/null | grep 'not found' | grep -v 'libjvm.so' || true)"

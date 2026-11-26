@@ -372,9 +372,10 @@ Windows：
   libmpv.so.1 顺序探测，两个 soname 均可用）。
   AppIndicator/keybinder 运行库（`libayatana-*`、`libdbusmenu-*`、`libnotify`、
   `libkeybinder-3.0`）由 `scripts/bundle_linux_runtime.sh` 随便携包携带并
-  把插件 RUNPATH 改为 `$ORIGIN`，因此 Arch/CachyOS/Fedora 等发行版解压后
-  直接 `./ShiYinMusic` 即可启动，无需安装 AUR 包；这类库在 Arch 上默认缺失
-  曾导致主程序加载阶段报 "error while loading shared libraries" 退出。
+  把 `lib/` 内所有库（含随包收拢的版本化 soname）RUNPATH 改为 `$ORIGIN`，
+  因此 Arch/CachyOS/Fedora 等发行版解压后直接 `./ShiYinMusic` 即可启动，无需
+  安装 AUR 包；这类库在 Arch 上默认缺失曾导致主程序加载阶段报
+  "error while loading shared libraries" 退出。
   仍需系统提供 GTK 3 / ALSA / libmpv，包名见包内 README-LINUX.txt。
 - **实现要点**：`linux/CMakeLists.txt` 的 `rust_engine_build` 目标在构建期
   `cargo build` 并把 `libkugou_engine.so` 安装进 `bundle/lib`（frb 经
