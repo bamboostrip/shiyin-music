@@ -1,5 +1,8 @@
 #include "my_application.h"
 
+#include <limits.h>
+#include <unistd.h>
+
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -27,10 +30,30 @@ static void register_subwindow_plugins(FlPluginRegistry* registry) {
   window_manager_plugin_register_with_registrar(registrar);
 }
 
+// Resolve the icon directory relative to the running executable instead of
+// using APP_ICON_DIR baked in at compile time. That define expands to the
+// absolute build-machine bundle path (e.g. /home/runner/work/.../bundle/data/app_icon),
+// which does not exist on user machines, so icons always fail to load from a
+// downloaded portable/deb bundle. Both layouts put icons at
+// <exe-dir>/data/app_icon (portable root and /opt/shiyin-music for deb).
+static gchar* runtime_icon_dir() {
+  char exe_path[PATH_MAX + 1];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+  if (len > 0) {
+    exe_path[len] = '\0';
+    gchar* dir = g_path_get_dirname(exe_path);
+    gchar* icon_dir = g_build_filename(dir, "data", "app_icon", nullptr);
+    g_free(dir);
+    return icon_dir;
+  }
+  // Fallback for systems without /proc/self/exe (should not happen on Linux).
+  return g_strdup(APP_ICON_DIR);
+}
+
 // Loads the application window icon from the installed PNG resources. Returns
 // nullptr if the file cannot be read; callers should fall back gracefully.
-static GdkPixbuf* load_app_icon(int size) {
-  gchar* path = g_strdup_printf("%s/app_icon_%d.png", APP_ICON_DIR, size);
+static GdkPixbuf* load_app_icon(const gchar* icon_dir, int size) {
+  gchar* path = g_strdup_printf("%s/app_icon_%d.png", icon_dir, size);
   GError* error = nullptr;
   GdkPixbuf* pixbuf = gdk_pixbuf_new_from_file(path, &error);
   if (error) {
@@ -43,10 +66,11 @@ static GdkPixbuf* load_app_icon(int size) {
 
 // Sets the window icon from the largest available bundled PNG.
 static void set_window_icon(GtkWindow* window) {
+  g_autofree gchar* icon_dir = runtime_icon_dir();
   const int kSizes[] = {256, 128, 64, 32, 16};
   GdkPixbuf* pixbuf = nullptr;
   for (size_t i = 0; i < G_N_ELEMENTS(kSizes) && pixbuf == nullptr; i++) {
-    pixbuf = load_app_icon(kSizes[i]);
+    pixbuf = load_app_icon(icon_dir, kSizes[i]);
   }
   if (pixbuf) {
     gtk_window_set_icon(window, pixbuf);
