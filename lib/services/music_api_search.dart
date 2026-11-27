@@ -58,18 +58,6 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
     return result;
   }
 
-  static bool _isPlayableSearchSong(Map<String, dynamic> json) {
-    final transParam = asMap(json['trans_param']);
-    if (transParam.isNotEmpty) {
-      final cid = asInt(transParam['cid']);
-      final failProcess = asInt(json['FailProcess']);
-      if (cid != null && cid <= 0 && failProcess != null && failProcess == 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   Future<List<Song>> searchSongs(
     String keywords, {
     int page = 1,
@@ -89,9 +77,13 @@ mixin _MusicApiSearch on _MusicApiBase, _MusicApiArtist {
       final json = asMap(raw);
       songs = asList(json['songs'] ?? json['song'] ?? json['lists']);
     }
+    // 不要按 trans_param.cid / FailProcess 预过滤「死链」（issue #40）：
+    // 酷狗 v3 complexsearch 里 cid=-1 && FailProcess==0 对应的是免费/UGC 内容，
+    // 大量有完整音源（FileHash/HQ/SQ/Res）和专辑封面的歌曲会被这样误杀。
+    // 真正播不了的歌由播放链路的失败提示兜底，不在搜索阶段凭字段猜测剔除。
+    // 这里只过滤连 hash 都没有、根本无法起播的条目。
     return songs
         .whereType<Map<String, dynamic>>()
-        .where(_isPlayableSearchSong)
         .map(Song.fromSearch)
         .where((song) => song.hash.isNotEmpty)
         .toList();
